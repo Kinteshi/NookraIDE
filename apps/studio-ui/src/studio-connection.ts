@@ -51,6 +51,7 @@ type PendingRequest = {
 export class StudioConnection {
   private socket: WebSocket | null = null;
   private ready = false;
+  private generation = 0;
   private requestId = 0;
   private readonly pending = new Map<number, PendingRequest>();
   private readonly listeners = new Set<Listener>();
@@ -64,11 +65,18 @@ export class StudioConnection {
     return this.ready && this.socket?.readyState === WebSocket.OPEN;
   }
 
+  getGeneration(): number {
+    return this.generation;
+  }
+
   connect(url: string, token: string): Promise<Welcome> {
-    if (this.socket && this.socket.readyState < WebSocket.CLOSING) {
-      this.socket.close();
+    const previousSocket = this.socket;
+    if (previousSocket && previousSocket.readyState < WebSocket.CLOSING) {
+      previousSocket.close();
+      for (const listener of this.listeners) listener({ Disconnected: {} });
     }
     this.ready = false;
+    this.generation += 1;
     const socket = new WebSocket(url);
     socket.binaryType = "arraybuffer";
     this.socket = socket;
@@ -90,6 +98,7 @@ export class StudioConnection {
       };
 
       socket.onopen = () => {
+        if (this.socket !== socket) return;
         socket.send(
           encode({
             System: {
@@ -103,6 +112,7 @@ export class StudioConnection {
         );
       };
       socket.onmessage = (event: MessageEvent<ArrayBuffer>) => {
+        if (this.socket !== socket) return;
         try {
           if (!(event.data instanceof ArrayBuffer)) {
             throw new Error("Daemon sent a non-binary websocket frame.");
@@ -155,15 +165,17 @@ export class StudioConnection {
   }
 
   close(): void {
+    const socket = this.socket;
     this.ready = false;
-    this.socket?.close();
     this.socket = null;
+    socket?.close();
     const error = new Error("Websocket connection closed.");
     for (const [, request] of this.pending) {
       window.clearTimeout(request.timer);
       request.reject(error);
     }
     this.pending.clear();
+    for (const listener of this.listeners) listener({ Disconnected: {} });
   }
 
   send(packet: unknown): void {
@@ -211,6 +223,13 @@ export class StudioConnection {
 
   sendPty(sessionId: string, data: unknown): void {
     this.send({ Pty: { session_id: sessionId, data } });
+  }
+
+  sendLsp(serverId: string, jsonRpc: string, generation = this.generation): void {
+    if (generation !== this.generation) {
+      throw new Error("LSP client belongs to an inactive daemon connection.");
+    }
+    this.send({ Lsp: { server_id: serverId, json_rpc: jsonRpc } });
   }
 
   private dispatch(packet: Packet): void {

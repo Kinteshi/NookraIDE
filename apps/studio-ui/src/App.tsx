@@ -24,10 +24,17 @@ import {
   type EditorDocument,
   type WorkspaceEntry,
 } from "./studio-store";
+import { serverForLanguage } from "./lsp-routing";
 import { useAdaptiveLayout } from "./use-adaptive-layout";
 
+type MonacoApi = typeof import("monaco-editor");
 type View = "files" | "editor" | "terminal" | "preview";
 type Overlay = "quick-open" | "command-palette" | null;
+type PreviewPort = {
+  port: number;
+  protocol: "Tcp" | "Tcp6";
+  processName: string | null;
+};
 
 const DEFAULT_SOCKET_URL = "ws://127.0.0.1:19860/ws";
 const NAV_ITEMS: Array<{ id: View; label: string; icon: string }> = [
@@ -99,6 +106,7 @@ function App() {
   const [error, setError] = useState("");
   const [latency, setLatency] = useState<number | null>(null);
   const [vmSample, setVmSample] = useState("");
+  const [previewPorts, setPreviewPorts] = useState<PreviewPort[]>([]);
   const [mobileView, setMobileView] = useState<View>("files");
   const [bottomOpen, setBottomOpen] = useState(true);
   const [bottomHeight, setBottomHeight] = useState(280);
@@ -308,9 +316,33 @@ function App() {
         setConnected(false);
         setConnectionStatus("Disconnected");
         setWelcome(null);
+        setPreviewPorts([]);
         return;
       }
       const system = packetVariant(packet, "System");
+      if (system?.[0] === "PortOpened") {
+        const { port, protocol, process_name } = system[1];
+        if (
+          typeof port === "number" &&
+          (protocol === "Tcp" || protocol === "Tcp6") &&
+          (typeof process_name === "string" || process_name === null)
+        ) {
+          setPreviewPorts((current) => [
+            ...current.filter((item) => item.port !== port || item.protocol !== protocol),
+            { port, protocol, processName: process_name },
+          ]);
+        }
+        return;
+      }
+      if (system?.[0] === "PortClosed") {
+        const { port, protocol } = system[1];
+        if (typeof port === "number" && (protocol === "Tcp" || protocol === "Tcp6")) {
+          setPreviewPorts((current) =>
+            current.filter((item) => item.port !== port || item.protocol !== protocol),
+          );
+        }
+        return;
+      }
       if (system?.[0] === "Pong") {
         const timestamp = system[1].timestamp;
         if (typeof timestamp === "number") {
@@ -635,6 +667,9 @@ function App() {
                 <MonacoPane
                   document={activeDocument}
                   compact={compact}
+                  connection={connection}
+                  workspaceRoot={workspaceRoot}
+                  onError={setError}
                   onChange={(value) => updateDocument(activeDocument.path, value)}
                   onMount={(instance) => { activeEditor.current = instance; }}
                 />
@@ -645,6 +680,9 @@ function App() {
                 <MonacoPane
                   document={splitDocument}
                   compact={compact}
+                  connection={connection}
+                  workspaceRoot={workspaceRoot}
+                  onError={setError}
                   onChange={(value) => updateDocument(splitDocument.path, value)}
                   onMount={(instance) => { activeEditor.current = instance; }}
                 />
@@ -673,7 +711,7 @@ function App() {
         </section>
 
         <section className="preview-stage">
-          <PreviewPanel />
+          <PreviewPanel ports={previewPorts} />
         </section>
       </div>
 
@@ -915,22 +953,59 @@ function FileTree({
 function MonacoPane({
   document,
   compact,
+  connection,
+  workspaceRoot,
+  onError,
   onChange,
   onMount,
 }: {
   document: EditorDocument;
   compact: boolean;
+  connection: StudioConnection;
+  workspaceRoot: string;
+  onError: (message: string) => void;
   onChange: (value: string) => void;
-  onMount: (instance: MonacoEditor.IStandaloneCodeEditor) => void;
+  onMount: (instance: MonacoEditor.IStandaloneCodeEditor, monaco: MonacoApi) => void;
 }) {
   const editorRef = useRef<MonacoEditor.IStandaloneCodeEditor | null>(null);
+  const monacoRef = useRef<MonacoApi | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const [editorReady, setEditorReady] = useState(false);
   useEffect(() => {
     if (!containerRef.current) return;
     const observer = new ResizeObserver(() => editorRef.current?.layout());
     observer.observe(containerRef.current);
     return () => observer.disconnect();
   }, []);
+  useEffect(() => {
+    let disposed = false;
+    let release: (() => void) | undefined;
+    const model = editorRef.current?.getModel();
+    const monaco = monacoRef.current;
+    if (!model || !monaco || !workspaceRoot || !serverForLanguage(document.language)) return;
+    void import("./lsp-client")
+      .then(({ openLspDocument }) =>
+        openLspDocument(
+          connection,
+          workspaceRoot,
+          document.language,
+          model,
+          monaco,
+          onError,
+        ),
+      )
+      .then((dispose) => {
+        if (disposed) dispose();
+        else release = dispose;
+      })
+      .catch((cause: unknown) => {
+        onError(cause instanceof Error ? cause.message : String(cause));
+      });
+    return () => {
+      disposed = true;
+      release?.();
+    };
+  }, [connection, document.language, document.path, editorReady, onError, workspaceRoot]);
 
   return (
     <div className="monaco-pane" ref={containerRef}>
@@ -939,9 +1014,11 @@ function MonacoPane({
         language={document.language}
         value={document.value}
         onChange={(value) => onChange(value ?? "")}
-        onMount={(instance) => {
+        onMount={(instance, monaco) => {
           editorRef.current = instance;
-          onMount(instance);
+          monacoRef.current = monaco;
+          setEditorReady(true);
+          onMount(instance, monaco);
           instance.layout();
         }}
         options={{
@@ -971,13 +1048,24 @@ function EmptyEditor({ connected }: { connected: boolean }) {
   );
 }
 
-function PreviewPanel() {
+function PreviewPanel({ ports }: { ports: PreviewPort[] }) {
   return (
     <div className="preview-placeholder">
       <div className="preview-icon">◇</div>
       <h2>Preview &amp; Git</h2>
-      <p>Preview and Git backends are scheduled for later phases. This surface is reserved in the workbench.</p>
-      <span className="coming-soon">Preview services and Git controls are not part of Phase 3.</span>
+      {ports.length > 0 ? (
+        <ul className="preview-ports" aria-label="Detected guest ports">
+          {ports.map(({ port, protocol, processName }) => (
+            <li key={`${protocol}:${port}`}>
+              <span>{processName ? `${processName} · ` : ""}{protocol === "Tcp6" ? "TCP6" : "TCP"} {port}</span>
+              <a href={`http://127.0.0.1:${port}`} target="_blank" rel="noreferrer">Open</a>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p>No guest web ports detected. Preview and Git controls remain reserved for later phases.</p>
+      )}
+      <span className="coming-soon">Git controls are not part of the current phase.</span>
     </div>
   );
 }

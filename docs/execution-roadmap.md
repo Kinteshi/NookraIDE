@@ -99,17 +99,29 @@ Open **Claude Code** in `~/AVFStudio` and send one prompt at a time. Only move t
 > 6. Keep LSP server integration for Phase 4 and Android/Tauri packaging for Phase 5. Preview/Git navigation may be present, but do not imply backend features that have not been implemented.
 > 7. Validate mobile and expanded viewport behavior and ensure `pnpm --filter @avf-studio/studio-ui build` has no TypeScript errors.
 
-### Prompt 4 — Phase 4: Async LSP Bridge in Rust
+### Prompt 4 — Phase 4: LSP Bridge and Guest Port Detection
 
 **Paste into Claude Code:**
 
 > Implement Phase 4 of @SPEC.md: the `LspRouter` in `crates/avf-daemon/src/lsp.rs` and the port scanner in `src/ports.rs`.
 >
-> 1. Create `lsp.rs` using `tokio::process::Command` to start LSP servers on demand (e.g. `basedpyright-langserver --stdio`, `rust-analyzer`, `vtsls --stdio`) with `Stdio::piped()`.
-> 2. Implement async framing and unframing (`tokio::io::AsyncBufReadExt` and `AsyncReadExt::read_exact`) of the `Content-Length: <bytes>\r\n\r\n` header on `ChildStdin` and `ChildStdout`, forwarding only the clean JSON-RPC string via `MultiplexedPacket::Lsp` on the WebSocket.
-> 3. Implement graceful hibernation: if the WebSocket drops, keep LSP processes alive in memory for fast reconnection.
-> 4. Create `src/ports.rs` that reads `/proc/net/tcp` every 2 seconds asynchronously to detect ports entering LISTEN state (`0A`) and emits `SystemMessage::PortOpened`.
-> 5. Validate with `cargo check` and write an async unit test (`#[tokio::test]`) for the LSP `Content-Length` parser.
+> 1. Start language servers on demand from a fixed server-ID allowlist; never accept an executable command from the client. Implement bounded `Content-Length` framing/unframing and forward JSON-RPC over the existing multiplexed WebSocket.
+> 2. Keep server processes for up to 30 minutes after disconnect, replay bounded recent output on reconnect, and ensure each authenticated client attaches/detaches cleanly.
+> 3. Scan `/proc/net/tcp` and `/proc/net/tcp6` every two seconds for listeners and emit port open/close events.
+> 4. Connect Monaco completion, hover, and diagnostics to the LSP transport; sync document open/change/close and reopen active documents after reconnect.
+> 5. Validate parser limits, UTF-8 byte lengths, server routing/hibernation, port snapshots/change events, Rust tests and strict Clippy. Run the UI typecheck and production build.
+
+### Prompt 5 — Phase 5: Tauri Android Packaging and Guest Bootstrap
+
+**Paste into Claude Code:**
+
+> Implement Phase 5 of @SPEC.md without changing the existing daemon protocol or UI workflows.
+>
+> 1. Add the Tauri v2 app host and Android build scripts/configuration to `apps/studio-ui/src-tauri`. Keep the Vite UI usable in the browser and desktop Tauri host.
+> 2. Ensure the generated Android `MainActivity` sets `android:resizeableActivity="true"` and keep this customization reproducible if the Tauri Android project is regenerated.
+> 3. Add an idempotent `scripts/bootstrap-avf.sh` that installs the daemon as a user service, creates or preserves a 256-bit token at `~/.config/avf-studio/token` with mode `0600`, and configures an existing absolute workspace root.
+> 4. Document the Android toolchain, build/init commands, guest installation, service status, port forwarding, and token handling in `docs/android-deployment.md`.
+> 5. Run all available frontend/Rust checks. If JDK/Android SDK/NDK tooling is not installed, report that Android generation/build still needs verification on a provisioned machine.
 
 ## Step 4: Testing on the PC and Compiling for ARM64 (Android AVF)
 

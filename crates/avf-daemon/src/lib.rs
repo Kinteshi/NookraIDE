@@ -1,3 +1,5 @@
+mod lsp;
+mod ports;
 mod pty;
 mod vfs;
 
@@ -16,10 +18,12 @@ use axum::{
     Json, Router,
 };
 use futures_util::{SinkExt, StreamExt};
+use lsp::LspRouter;
 use notify::{
     event::{ModifyKind, RenameMode},
     Event, EventKind, RecursiveMode, Watcher,
 };
+use ports::PortScanner;
 use pty::{PtyEvent, PtyManager};
 use serde::Serialize;
 use std::{
@@ -55,6 +59,7 @@ pub struct AppConfig {
     pub token: String,
     pub allowed_origins: HashSet<String>,
     pub workspace_roots: Vec<PathBuf>,
+    pub lsp_hibernation_secs: u64,
 }
 
 impl AppConfig {
@@ -101,12 +106,18 @@ impl AppConfig {
         if allowed_origins.is_empty() {
             return Err("AVF_ALLOWED_ORIGINS cannot be empty".into());
         }
+        let lsp_hibernation_secs = match env::var("AVF_LSP_HIBERNATION_SECS") {
+            Ok(value) => value.parse::<u64>()?,
+            Err(env::VarError::NotPresent) => 30 * 60,
+            Err(error) => return Err(Box::new(error)),
+        };
 
         Ok(Self {
             bind_addr,
             token,
             allowed_origins,
             workspace_roots: roots,
+            lsp_hibernation_secs,
         })
     }
 }
@@ -156,6 +167,8 @@ struct AppState {
     config: Arc<AppConfig>,
     vfs: Vfs,
     pty: PtyManager,
+    lsp: LspRouter,
+    ports: PortScanner,
     telemetry: Arc<Telemetry>,
 }
 
@@ -196,10 +209,14 @@ pub async fn serve(config: AppConfig) -> io::Result<()> {
 
 fn app(config: AppConfig) -> io::Result<Router> {
     let vfs = Vfs::new(&config.workspace_roots)?;
+    let ports = PortScanner::default();
+    ports.start();
     let state = AppState {
+        lsp: LspRouter::new(Duration::from_secs(config.lsp_hibernation_secs)),
         config: Arc::new(config),
         vfs,
         pty: PtyManager::default(),
+        ports,
         telemetry: Arc::new(Telemetry::default()),
     };
     Ok(Router::new()
@@ -337,8 +354,18 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
             }
         }
     });
+    let mut port_events = state.ports.subscribe();
+    let mut lsp_forwarders = HashMap::new();
     let mut watches = HashMap::<String, WatchHandle>::new();
     let mut pty_forwarders = HashMap::new();
+    for event in state.ports.current().await {
+        if send_outbound(&outbound, MultiplexedPacket::System(event))
+            .await
+            .is_err()
+        {
+            break;
+        }
+    }
     loop {
         tokio::select! {
             result = &mut writer => {
@@ -374,6 +401,7 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                             &outbound,
                             &mut watches,
                             &mut pty_forwarders,
+                            &mut lsp_forwarders,
                         )
                         .await
                         .is_err()
@@ -397,12 +425,29 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                     Message::Close(_) => break,
                 }
             }
+            event = port_events.recv() => {
+                match event {
+                    Ok(event) => {
+                        if send_outbound(&outbound, MultiplexedPacket::System(event)).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                        warn!(skipped, "websocket missed guest port events");
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
+            }
         }
     }
     drop(watches);
     for (session_id, (subscriber_id, task)) in pty_forwarders.drain() {
         task.abort();
         state.pty.detach(session_id, subscriber_id).await;
+    }
+    for (server_id, (generation, task)) in lsp_forwarders.drain() {
+        task.abort();
+        state.lsp.detach(&server_id, generation).await;
     }
     drop(outbound);
     if let Err(error) = timeout(Duration::from_secs(1), &mut writer).await {
@@ -421,6 +466,7 @@ async fn process_packet(
     outbound: &mpsc::Sender<OutboundFrame>,
     watches: &mut HashMap<String, WatchHandle>,
     pty_forwarders: &mut HashMap<uuid::Uuid, (u64, tokio::task::JoinHandle<()>)>,
+    lsp_forwarders: &mut HashMap<String, (u64, tokio::task::JoinHandle<()>)>,
 ) -> Result<(), ()> {
     match packet {
         MultiplexedPacket::System(SystemMessage::Ping { timestamp }) => {
@@ -561,12 +607,108 @@ async fn process_packet(
                 .await
             }
         },
+        MultiplexedPacket::Lsp {
+            server_id,
+            json_rpc,
+        } => {
+            if !lsp_forwarders.contains_key(&server_id) {
+                let attachment = match state.lsp.attach(&server_id).await {
+                    Ok(attachment) => attachment,
+                    Err(message) => {
+                        if let Some(json_rpc) = lsp_error_response(&json_rpc, &message) {
+                            send_outbound(
+                                outbound,
+                                MultiplexedPacket::Lsp {
+                                    server_id,
+                                    json_rpc,
+                                },
+                            )
+                            .await?;
+                        } else {
+                            send_protocol_error_outbound(outbound, &message).await?;
+                        }
+                        return Ok(());
+                    }
+                };
+                for history in attachment.history {
+                    send_outbound(
+                        outbound,
+                        MultiplexedPacket::Lsp {
+                            server_id: server_id.clone(),
+                            json_rpc: history,
+                        },
+                    )
+                    .await?;
+                }
+                let mut receiver = attachment.receiver;
+                let output_server_id = server_id.clone();
+                let outbound = outbound.clone();
+                let task = tokio::spawn(async move {
+                    loop {
+                        match receiver.recv().await {
+                            Ok(json_rpc) => {
+                                if send_outbound(
+                                    &outbound,
+                                    MultiplexedPacket::Lsp {
+                                        server_id: output_server_id.clone(),
+                                        json_rpc,
+                                    },
+                                )
+                                .await
+                                .is_err()
+                                {
+                                    break;
+                                }
+                            }
+                            Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                                warn!(server = %output_server_id, skipped, "websocket missed language server messages");
+                            }
+                            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                        }
+                    }
+                });
+                lsp_forwarders.insert(server_id.clone(), (attachment.generation, task));
+            }
+            match state.lsp.send(&server_id, json_rpc.clone()).await {
+                Ok(()) => Ok(()),
+                Err(message) => {
+                    if let Some(json_rpc) = lsp_error_response(&json_rpc, &message) {
+                        send_outbound(
+                            outbound,
+                            MultiplexedPacket::Lsp {
+                                server_id,
+                                json_rpc,
+                            },
+                        )
+                        .await
+                    } else {
+                        send_protocol_error_outbound(outbound, &message).await
+                    }
+                }
+            }
+        }
         _ => {
             warn!("client sent a packet type not supported by the daemon");
             let _ = send_protocol_error_outbound(outbound, "packet type is not supported").await;
             Err(())
         }
     }
+}
+
+fn lsp_error_response(request: &str, message: &str) -> Option<String> {
+    let request: serde_json::Value = serde_json::from_str(request).ok()?;
+    let id = request.as_object()?.get("id")?.clone();
+    Some(
+        serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "error": {
+                "code": -32002,
+                "message": message,
+            },
+        })
+        .to_string(),
+    )
 }
 
 async fn send_pty_payload(
@@ -998,6 +1140,21 @@ mod tests {
         assert!(!is_ignored(Path::new("/project/src/main.rs")));
     }
 
+    #[test]
+    fn lsp_errors_reply_to_json_rpc_requests() {
+        let request = r#"{"jsonrpc":"2.0","id":7,"method":"initialize","params":{}}"#;
+        let response = lsp_error_response(request, "server is unavailable").unwrap();
+        let response: serde_json::Value = serde_json::from_str(&response).unwrap();
+        assert_eq!(response["id"], 7);
+        assert_eq!(response["error"]["code"], -32002);
+        assert_eq!(response["error"]["message"], "server is unavailable");
+        assert!(lsp_error_response(
+            r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#,
+            "server is unavailable",
+        )
+        .is_none());
+    }
+
     #[tokio::test]
     async fn health_returns_protocol_version_without_authentication() {
         let temp = tempfile::tempdir().unwrap();
@@ -1008,6 +1165,7 @@ mod tests {
             token: "a".repeat(64),
             allowed_origins: HashSet::new(),
             workspace_roots: vec![project],
+            lsp_hibernation_secs: 30 * 60,
         };
         let listener = TcpListener::bind(config.bind_addr).await.unwrap();
         let address = listener.local_addr().unwrap();
@@ -1040,6 +1198,7 @@ mod tests {
             token: "a".repeat(64),
             allowed_origins: HashSet::from(["http://localhost:5173".to_owned()]),
             workspace_roots: vec![project.clone()],
+            lsp_hibernation_secs: 30 * 60,
         };
         let listener = TcpListener::bind(config.bind_addr).await.unwrap();
         let address = listener.local_addr().unwrap();
@@ -1111,6 +1270,7 @@ mod tests {
             token: "a".repeat(64),
             allowed_origins: HashSet::from(["http://localhost:5173".to_owned()]),
             workspace_roots: vec![project.clone()],
+            lsp_hibernation_secs: 30 * 60,
         };
         let listener = TcpListener::bind(config.bind_addr).await.unwrap();
         let address = listener.local_addr().unwrap();
@@ -1263,23 +1423,27 @@ mod tests {
             ))
             .await
             .unwrap();
-        let history = timeout(Duration::from_secs(3), socket.next())
-            .await
-            .unwrap()
-            .unwrap()
-            .unwrap();
-        let WsMessage::Binary(bytes) = history else {
-            panic!("expected binary PTY history");
-        };
-        assert!(matches!(
-            decode(&bytes).unwrap(),
-            MultiplexedPacket::Pty {
-                session_id: received_id,
-                data: PtyPayload::Output(output),
-            } if received_id == session_id
-                && output.windows(b"ws-reattach-ready".len())
-                    .any(|window| window == b"ws-reattach-ready")
-        ));
+        timeout(Duration::from_secs(3), async {
+            loop {
+                let frame = socket.next().await.unwrap().unwrap();
+                let WsMessage::Binary(bytes) = frame else {
+                    continue;
+                };
+                if matches!(
+                    decode(&bytes).unwrap(),
+                    MultiplexedPacket::Pty {
+                        session_id: received_id,
+                        data: PtyPayload::Output(output),
+                    } if received_id == session_id
+                        && output.windows(b"ws-reattach-ready".len())
+                            .any(|window| window == b"ws-reattach-ready")
+                ) {
+                    break;
+                }
+            }
+        })
+        .await
+        .expect("timed out waiting for PTY history");
 
         socket
             .send(WsMessage::Binary(
@@ -1323,6 +1487,7 @@ mod tests {
             token: "a".repeat(64),
             allowed_origins: HashSet::from(["http://localhost:5173".to_owned()]),
             workspace_roots: vec![project],
+            lsp_hibernation_secs: 30 * 60,
         };
         let listener = TcpListener::bind(config.bind_addr).await.unwrap();
         let address = listener.local_addr().unwrap();
