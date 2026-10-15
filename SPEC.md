@@ -78,19 +78,23 @@ All communication between the Host (Android) and the Guest (Debian VM) goes thro
   * `Vec<u8>` fields use `#[serde(with = "serde_bytes")]` so they become MessagePack's `bin` type (avoiding the 3–4× overhead of a number array).
 * **TypeScript:** `@msgpack/msgpack` (`encode`/`decode`). `bin` fields arrive as `Uint8Array`, ready for `xterm.write()`.
 * **Enums use serde's default external representation** (`{ "Variant": { ...fields } }`, or `"Variant"` for unit variants). **Do not use** `#[serde(tag = ..., content = ...)]`: internally/adjacently tagged representations require `deserialize_any` and break with binary formats.
-* **Maximum frame size:** 32 MiB (`WebSocketUpgrade::max_message_size`). File reads above 16 MiB return `VfsErrorCode::TooLarge`.
+* **Maximum frame size:** 32 MiB. Both the WebSocket and centralized decoder enforce this limit. File reads and writes above 16 MiB return `VfsErrorCode::TooLarge`; directory responses that exceed the frame limit also return `TooLarge`, and oversized watcher batches become `Rescan`.
 * **Versioning:** the `PROTOCOL_VERSION` constant is incremented on every breaking change. Daemon and app refuse mismatched versions during the handshake.
 
 ### 4.2 Handshake and Authentication
 
 The daemon exposes a full shell and file read/write. Since the port is forwarded to the Android Host, **any app or web page on the device** could try to connect to `127.0.0.1:19860`. Therefore:
 
-1. **Shared token:** `bootstrap-avf.sh` generates a random 256-bit token (hex), saved to `~/.config/avf-studio/token` (mode `0600`) in the VM. The user pastes/scans the token into the app once; Tauri stores it in Android secure storage. The daemon also accepts `AVF_TOKEN` via environment variable (development).
+1. **Shared token:** `bootstrap-avf.sh` generates a random 256-bit token (64 hexadecimal characters), saved to `~/.config/avf-studio/token` (mode `0600`) in the VM. The user pastes/scans the token into the app once; Tauri stores it in Android secure storage. The daemon also accepts `AVF_TOKEN` via environment variable (development), which takes precedence over the file. Startup fails if the token is missing, malformed, or the token file is group/world-accessible.
 2. **Mandatory first frame:** the client must send `SystemMessage::Hello` within **5 seconds** of the upgrade. Any other packet before `Hello` is rejected and the connection is closed.
 3. **Validation:** the daemon compares the token in constant time (`subtle::ConstantTimeEq`) and checks `protocol_version`. It replies `Welcome` (success) or `Rejected` (and closes the connection).
-4. **`Origin` allowlist (defense in depth):** the upgrade on `/ws` is only accepted if the `Origin` header is in a configurable list (default: `http://tauri.localhost`, `tauri://localhost`; in development also `http://localhost:5173`). The token remains the primary barrier.
+4. **`Origin` allowlist (defense in depth):** the upgrade on `/ws` is only accepted if the `Origin` header exactly matches a configurable list (`AVF_ALLOWED_ORIGINS`, comma-separated; defaults to `http://tauri.localhost`, `tauri://localhost`, and in debug builds `http://localhost:5173`). Missing and unlisted origins are rejected. `Origin` is not authentication; the shared token remains the primary barrier.
 5. The token **never** goes in the URL (avoids leaking into logs); it only travels inside `Hello`.
 6. `/health` requires no token and returns only `{ "status": "ok", "protocol_version": N }`.
+
+7. **Project roots:** `AVF_WORKSPACE_ROOTS` is required and contains one or more existing absolute UTF-8 project directories separated using the host OS path-list convention. VFS list/read/write/watch requests must be within one of these roots. Paths must be absolute POSIX paths without `.` or `..` components, and filesystem operations must not follow a symlink outside an allowed root. A directory containing non-UTF-8 filenames returns `InvalidPath` because protocol paths are strings. This restriction applies to the app's VFS operations; it does not sandbox future terminal processes or package managers, which run with the daemon user's OS permissions.
+8. **Bind address:** defaults to `127.0.0.1:19860`; `AVF_BIND_ADDR` may change the loopback address/port for development but non-loopback binds are rejected.
+9. **Telemetry:** the client initiates `Ping`; `Pong` reports guest-wide CPU utilization since the previous sample and RAM used/total from `/proc`. The first CPU sample is `0` while establishing a baseline. If guest metrics cannot be read, the daemon logs the failure, sends `ProtocolError`, and closes the connection instead of returning fabricated values.
 
 ### 4.3 Types
 
@@ -196,7 +200,8 @@ pub enum VfsMessage {
         #[serde(with = "serde_bytes")]
         content: Vec<u8>,
         /// Optimistic concurrency: if `Some` and the file's current mtime
-        /// differs, the write is refused with `VfsErrorCode::Conflict`.
+        /// in milliseconds differs, the write is refused with `VfsErrorCode::Conflict`.
+        /// Millisecond filesystem timestamp resolution can miss very rapid external changes.
         expected_modified_ts: Option<u64>,
     },
     WatchReq { req_id: u64, path: String, recursive: bool },
@@ -276,8 +281,9 @@ pub struct FileEntry {
        * *Output (StdOut → WebSocket):* Uses a `tokio::io::BufReader` on `ChildStdout`, reads headers up to `\r\n\r\n`, extracts `Content-Length`, reads exactly that many bytes of JSON body and dispatches a `MultiplexedPacket::Lsp` over the WebSocket.
      * **Graceful Hibernation:** If the WebSocket disconnects, LSP processes stay alive for up to 30 minutes (configurable) to avoid reindexing when the user returns to the app.
   3. **Virtual File System (VFS) & Watcher (`notify`):**
-     * Async operations using `tokio::fs`. File writes are always atomic (write to `.filename.avf.tmp` and `rename`).
-     * File watcher (`notify-debouncer-full`, which preserves the event type for `FsEventKind`) with a 150ms debounce, enabled by `WatchReq`, notifying the front-end of external changes (e.g. `git checkout`, script-generated artifacts). Ignores `.git/objects`, `node_modules`, `target` and `.venv` by default.
+     * VFS paths are resolved relative to an allowlisted project-root directory capability (`cap-std`); capability-scoped filesystem work runs on Tokio's blocking pool. File writes use a unique same-directory temporary file and atomic `rename`; concurrent daemon writes are serialized, existing file permissions are preserved, and the parent directory must already exist.
+     * File watcher (`notify`) with a 150ms event batch, enabled by `WatchReq` and removed by `UnwatchReq` or connection close. Watchers are per connection; bounded event queues report `FsEventKind::Rescan` if events are lost. Rename events preserve `[from, to]`. Ignores `.git/objects`, `node_modules`, `target` and `.venv` by default.
+     * `modified_ts` is milliseconds since the Unix epoch. Optimistic writes compare at that precision; clients should reload after conflicts and avoid treating it as a content hash.
   4. **Port Detector (`/proc/net/tcp` scanner):**
      * Background task that reads `/proc/net/tcp` and `/proc/net/tcp6` every 2 seconds to detect ports in `LISTEN` state (`0A`). Emits `SystemMessage::PortOpened` so the front-end can automatically open a Web Preview or Jupyter panel.
 
@@ -302,7 +308,7 @@ pub struct FileEntry {
 
 ## 7. Phased Implementation Plan (For Agent Execution)
 
-* **Phase 1 (Foundation & Protocol):** Initialize the Cargo workspace, define all message structs in `crates/avf-protocol` and implement the basic `axum` server in `crates/avf-daemon` with authenticated handshake (`Hello`/`Welcome`/`Rejected`), centralized MessagePack encoding, ping/pong, system telemetry and file operations (`VFS`, including `VfsError` and the watcher).
+* **Phase 1 (Foundation & Protocol):** Initialize the Cargo workspace and `crates/avf-protocol`; define and round-trip test every message variant, including MessagePack binary bytes and string UUIDs. Implement `crates/avf-daemon` with `/health`, a binary-only `/ws`, bounded frames/outbound queues, a five-second Hello-first authenticated handshake, exact Origin allowlisting, ping/pong telemetry, and VFS list/read/atomic-write/watch/unwatch operations restricted to configured project-root allowlists. Test malformed and multi-packet frames, handshake ordering/auth/version/origin, VFS path and symlink escapes, conflicts, size limits, watcher lifecycle and event overflow/rescan behavior.
 * **Phase 2 (PTY & Terminal):** Implement the `PtyManager` with ring buffer in the daemon and connect it to the `Xterm.js` component in the front-end, ensuring ANSI color support, dynamic resize and session reconnection.
 * **Phase 3 (Adaptive Workbench, Monaco & VFS):** Build the responsive shell (Compact Mobile Mode vs Expanded Tablet/DeX Mode) and integrate the VM's real file tree with the Monaco Editor (multiple tabs, dirty state, save with `Ctrl+S` or Touch Bar button).
 * **Phase 4 (LSP Bridge):** Implement the `stdio` proxy for `Content-Length` in Rust and plug it into `monaco-languageclient` (validate with Python/`basedpyright` and Rust/`rust-analyzer`).

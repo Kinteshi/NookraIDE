@@ -9,8 +9,8 @@ You don't need a tablet or phone plugged in to develop 95% of the project. Since
 The OS inside Android's AVF is a **regular Debian Linux**. For the Rust code (tokio, axum, portable-pty, notify) and for Linux (ext4, /proc/net/tcp, stdio), **it makes no difference whether the processor underneath is an Intel/AMD x86_64 or a Snapdragon/Tensor aarch64**.
 So your testing flow has **3 simple stages**:
 
-1. **Stage 1 — Day to day (native on your x86_64 PC):** Run `cargo run -p avf-daemon` normally on your Linux desktop. It opens your PC's terminal, reads your PC's files and starts the pyright/rust-analyzer installed on your PC. Zero emulation, instant compilation.
-2. **Stage 2 — Testing the ARM64 binary on the PC (qemu-user-static):** To make sure the ARM64 build works before sending it to the phone, you don't need a heavy VM. Build with `cargo zigbuild --target aarch64-unknown-linux-musl` (produces a single static binary, independent of the phone Debian's glibc version) and run `./target/aarch64-unknown-linux-musl/debug/avf-daemon` directly in your terminal. Your PC's Linux (via binfmt_misc + qemu-user-static) runs ARM64 binaries transparently.
+1. **Stage 1 — Day to day (native on your x86_64 PC):** Configure `AVF_TOKEN` and one or more `AVF_WORKSPACE_ROOTS`, then run `cargo run -p avf-daemon`. Phase 1 tests the protocol, authenticated transport and VFS on the same host. PTY and language servers are later phases.
+2. **Stage 2 — Cross-build the ARM64 binary:** Build for the Debian guest's `aarch64-unknown-linux-gnu` target using a cross linker/sysroot compatible with the guest. Running that binary on an x86_64 PC requires a configured ARM64 emulator/binfmt setup; a successful cross-build alone is not a runtime test.
 3. **Stage 3 — Real test on phone/tablet via adb forward:** Even before building the Tauri APK, you can copy the ARM64 avf-daemon binary into your phone's Debian, run it there, and on your PC use `adb forward tcp:19860 tcp:19860`. Your PC's browser then connects in real time to the Daemon running on the phone's ARM processor over USB.
 
 ### 2. "Does it have to be async?"
@@ -26,26 +26,25 @@ Think about what happens at the same time over a single WebSocket connection bet
 
 If the daemon were synchronous/blocking, your terminal would freeze while it waited for pyright. With `tokio::select!` and async channels (`tokio::sync::mpsc`), Rust handles all these I/O sources simultaneously using under **15 MB of RAM** and almost zero idle CPU.
 
-## Step 1: Prepare the Ground in your Linux Terminal (2 minutes)
+## Step 1: Prepare the Ground in your Linux Terminal
 
-*(Already done in this repo: toolchain installed via pacman, ARM64 musl target added, SPEC.md at the root.)*
+*(The Rust workspace and Phase 1 crates are in this repository; `SPEC.md` is at the root.)*
 
-Open a terminal, create the project folder and install cargo-zigbuild (the best tool today for compiling Rust to ARM64 without C linker headaches):
+From the cloned repository root, install the optional ARM64 cross-compilation tools:
 
 ```bash
-mkdir -p ~/AVFStudio
-cd ~/AVFStudio
-git init
-
-# Create the base monorepo folders so the agent doesn't get lost
-mkdir -p crates/avf-protocol crates/avf-daemon apps scripts
-
-# Add the static ARM64 (musl) target and cargo-zigbuild
-rustup target add aarch64-unknown-linux-musl
+# Add the ARM64 Debian guest target and cargo-zigbuild
+rustup target add aarch64-unknown-linux-gnu
 cargo install cargo-zigbuild
 ```
 
-*(Save SPEC.md at the root: `~/AVFStudio/SPEC.md`.)*
+For local daemon development, run `cargo test --workspace` from the repository root. Configure `AVF_TOKEN` and `AVF_WORKSPACE_ROOTS` before launching the daemon; do not point the VFS roots at the entire guest filesystem.
+
+```bash
+export AVF_TOKEN="$(openssl rand -hex 32)"
+export AVF_WORKSPACE_ROOTS="$PWD"
+cargo run -p avf-daemon
+```
 
 ## Step 2: Where to use each tool (Claude Code vs. Antigravity)
 
@@ -60,41 +59,42 @@ Open **Claude Code** in `~/AVFStudio` and send one prompt at a time. Only move t
 
 **Paste into Claude Code:**
 
-> Read @SPEC.md at the project root. We will execute strictly Phase 1 (Foundation & Protocol), 100% async with Tokio and compatible with both x86_64 and aarch64.
+> Read @SPEC.md at the project root. Implement strictly Phase 1 (Foundation & Protocol); do not implement PTY, LSP, UI, port detection, or Android packaging.
 >
-> 1. Create the workspace `Cargo.toml` at the root including `crates/avf-protocol` and `crates/avf-daemon`.
-> 2. Implement `crates/avf-protocol` with all structs and enums specified in Section 4 of SPEC.md (`MultiplexedPacket`, `SystemMessage`, `PtyPayload`, `VfsMessage`, `FileEntry`), using `serde`, `serde_bytes`, `uuid` (feature `serde`) and `rmp-serde`, with the centralized `encode`/`decode` functions and the round-trip tests from Section 4.4.
-> 3. Implement `crates/avf-daemon` using `tokio` (full), `axum` (feature `ws`), `sysinfo` (real CPU/RAM metrics in `Pong`), and `notify` / `tokio::fs` to answer all `VfsMessage` requests non-blockingly (`ListDirReq`, `ReadFileReq`, `WriteFileReq` with atomic write via temp file).
-> 4. Use one `tokio::sync::mpsc::unbounded_channel` per WebSocket connection so multiple background tasks (VFS watcher, PTY, LSP, System) can send `MultiplexedPacket` to the WebSocket `SplitSink` without lock contention.
-> 5. Expose `/health` and the multiplexed WebSocket at `/ws` on `127.0.0.1:19860`, with the `Hello`/`Welcome`/`Rejected` handshake, token (`AVF_TOKEN` or `~/.config/avf-studio/token`) and the `Origin` allowlist from Section 4.2.
-> 6. Run `cargo check` and `cargo test` until it compiles with zero errors and zero warnings.
+> 1. Create the Cargo workspace and both crates, with the complete Section 4 schema. Centralize struct-map/human-readable MessagePack encode/decode; test every packet and enum variant, binary `Vec<u8>`, string UUID, malformed input, and trailing data.
+> 2. Implement the Tokio/Axum daemon at `127.0.0.1:19860`, `/health`, and `/ws`. Enforce 32 MiB message limits, binary-only frames, a five-second Hello-first handshake, fixed 256-bit hex token validation (environment or private token file), protocol-version checks, exact configurable Origin allowlisting, and do not process application packets before Welcome.
+> 3. Require `AVF_WORKSPACE_ROOTS` to configure one or more existing project roots. Implement VFS list/read/write/watch/unwatch with capability-scoped paths that reject traversal and symlink escapes. Apply the 16 MiB limit to reads and writes, use a unique same-directory temp file plus atomic rename, compare `expected_modified_ts`, and return exactly one request-correlated response.
+> 4. Use bounded outbound and watcher queues. Apply 150 ms watcher batching, ignore `.git/objects`, `node_modules`, `target`, and `.venv`, preserve rename path ordering, emit `Rescan` after overflow, and clean up per-connection watchers.
+> 5. Implement Ping/Pong from `/proc` telemetry with explicit sampling/error behavior. Do not use an unbounded channel as a memory/backpressure shortcut.
+> 6. Add integration tests for handshake ordering, invalid token/version/origin, health, VFS confinement/symlink escapes, size limits, atomic writes/conflicts, and watcher delivery/cleanup. Run `cargo fmt --all -- --check`, `cargo test --workspace`, and `cargo clippy --workspace --all-targets -- -D warnings`.
 
-### Prompt 2 — Phase 2: PTY Manager with Ring Buffer and Async Bridge
+### Prompt 2 — Phase 2: PTY Manager, Ring Buffer and Terminal View
 
 **Paste into Claude Code after Prompt 1 passes:**
 
-> Great. Now the back-end part of Phase 2 of @SPEC.md (Section 5, item 1 – PTY Manager).
+> Implement Phase 2 of @SPEC.md (Section 5, item 1 – PTY Manager, plus its minimal Xterm.js terminal view).
 >
 > 1. Add the `portable-pty` crate to `crates/avf-daemon`.
 > 2. Create `src/pty.rs` managing multiple terminal sessions identified by `Uuid` in an `Arc<tokio::sync::RwLock<HashMap<Uuid, PtySession>>>`.
 > 3. Since `portable-pty` read/write is synchronous (OS-blocking), isolate the `MasterPty` read loop inside `tokio::task::spawn_blocking`, sending read bytes through a Tokio async channel to the WebSocket, never blocking the async runtime.
 > 4. Implement `PtyPayload::Spawn`, `Input`, `Output`, `Resize`, `Reattach`, `Kill`, `Spawned`, `Exit` and `Error`.
 > 5. Implement a 64KB Ring Buffer (`VecDeque<u8>`) per session so that, if the WebSocket client reconnects and sends `PtyPayload::Reattach` (session in the `Pty` envelope), the daemon immediately returns the recent history and keeps streaming the live process output.
-> 6. Integrate the `PtyManager` into the main `/ws` WebSocket loop and validate with `cargo check`.
+> 6. Integrate the `PtyManager` into the main `/ws` WebSocket loop and add a minimal Xterm.js terminal view in `apps/studio-ui` that exercises spawn, input, output, resize, kill and reattach.
+> 7. Keep WebSocket writes serialized through the existing bounded outbound queue; do not add an unbounded sender. Test terminal session behavior and validate with `cargo check` and `cargo test`.
 
-### Prompt 3 — Phase 3: Chameleon Front-end (Mobile, Tablet & DeX) + Xterm + Monaco
+### Prompt 3 — Phase 3: Chameleon Front-end (Mobile, Tablet & DeX) + Monaco
 
 **Paste into Claude Code (or Antigravity):**
 
-> Now create the front-end in `apps/studio-ui` following Phases 2 and 3 and Section 6 of @SPEC.md.
+> Continue the front-end from Phase 2 and implement only Phase 3 and Section 6 of @SPEC.md. Reuse the existing Xterm.js terminal and PTY transport rather than rebuilding them.
 >
 > 1. Initialize a React + TypeScript + Vite + TailwindCSS project in `apps/studio-ui`.
-> 2. Install `zustand`, `lucide-react`, `@xterm/xterm`, `@xterm/addon-fit`, `@xterm/addon-webgl` and `@monaco-editor/react` (or `monaco-editor` directly).
-> 3. Create the multiplexed WebSocket client (`src/services/wsClient.ts`) that connects to `ws://127.0.0.1:19860/ws`, auto-reconnects, measures latency via `Ping/Pong` and dispatches events to the Zustand store.
+> 2. Install `zustand`, `lucide-react` and `@monaco-editor/react` (or `monaco-editor` directly); retain the Phase 2 Xterm dependencies.
+> 3. Extend the existing multiplexed WebSocket client and Zustand store with VFS requests/events while preserving the Phase 2 PTY terminal behavior.
 > 4. Implement the `useAdaptiveLayout` hook and the Chameleon Workbench:
 >    - On screens `< 768px` (Smartphone Mode): show a Bottom Navigation Bar switching between full-screen Explorer, Editor and Terminal, with the Touch Modifier Bar (`ESC`, `TAB`, sticky `CTRL`, brackets, arrows) fixed at the bottom.
 >    - On screens `>= 768px` (Tablet / Samsung DeX / Desktop Mode): show the full VS Code layout (Activity Bar, File Explorer Sidebar, Editor with multiple tabs and resizable bottom Terminal panel).
-> 5. Connect the File Explorer to the daemon's `VfsMessage` messages (browsing real Linux folders, opening files in Monaco and saving with `Ctrl+S` or the Touch Bar button) and connect Xterm.js to the daemon's `PtyPayload`.
+> 5. Connect the File Explorer to the daemon's `VfsMessage` messages (browsing allowed project roots, opening files in Monaco and saving with `Ctrl+S` or the Touch Bar button).
 > 6. Ensure `pnpm build` runs with no TypeScript errors.
 
 ### Prompt 4 — Phase 4: Async LSP Bridge in Rust
@@ -128,9 +128,9 @@ Open **Claude Code** in `~/AVFStudio` and send one prompt at a time. Only move t
 When you want to run the daemon inside your phone or tablet's Linux (AVF):
 
 ```bash
-# Build static ARM64 (musl) — works on any Debian version without glibc errors
-cargo zigbuild --release -p avf-daemon --target aarch64-unknown-linux-musl
+# Cross-build for the Debian guest; configure the Zig target/sysroot to match
+# the guest's glibc baseline before treating the binary as deployable.
+cargo zigbuild --release -p avf-daemon --target aarch64-unknown-linux-gnu
 ```
 
-The final binary will be at `target/aarch64-unknown-linux-musl/release/avf-daemon`.
-Drop it into your Android Downloads folder (mounted at `/mnt/shared` inside AVF's Debian VM) and run it there.
+The final binary will be at `target/aarch64-unknown-linux-gnu/release/avf-daemon`. Validate it in the actual AVF Debian guest before relying on it. A static musl build is an alternative deployment choice, not the default in `SPEC.md`; select and test it separately.

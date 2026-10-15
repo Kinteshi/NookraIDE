@@ -2,13 +2,15 @@
 
 This guide summarizes how to orchestrate current frontier models without blowing the API budget, and how to configure your **Intel Arc B580 (12GB VRAM)** on Linux as a local code and autocomplete engine for the **AVF Studio** project.
 
+Model IDs, availability, context limits, pricing, benchmarks, and promotional dates below are advisory claims, not project requirements; verify them with the provider before relying on them. For Phase 1, implement and test the protocol, transport, and VFS incrementally rather than generating both crates in one large output.
+
 ## 1. Model Matrix for Building AVF Studio
 
 Instead of using a single expensive model for everything, split the `SPEC.md` phases by each model's strengths and cache cost:
 
 | Project Task | Recommended Model | Why? |
 | ----- | ----- | ----- |
-| **Initial Architecture & Multi-File Generation (Phase 1)** | **Gemini 4 Argon** | **1M token** output limit and subsidized pricing until Nov 30, 2026. Can read the whole `SPEC.md` and emit all the Rust crates (`avf-protocol` and `avf-daemon`) at once without truncating. |
+| **Phase 1 Protocol and Daemon Foundation** | Any available long-context model suitable for Rust | A large context helps review `SPEC.md`, but protocol, transport/authentication, and VFS should be implemented and tested as separate milestones. |
 | **Workbench UI/UX & Monaco Integration (Phase 3)** | **Claude Fable 5.1** *(or Sonnet 5.5)* | Best aesthetic sense for React/Tailwind UI and very low cache read cost ($0.25/M tokens) to keep the front-end in memory. |
 | **Heavy Tokio / LSP Concurrency Debugging (Phase 4)** | **GPT-6 Astra** *(or GPT-6.1 Sol)* | Excellent reasoning about *deadlocks* and *async streams* in Rust, and direct terminal execution to validate that JSON-RPC packets match the `Content-Length` header. |
 | **Bulk Iteration, Unit Tests and Boilerplate** | **DeepSeek V4.1 Flash** | Scored 90.6% on Terminal-Bench 2.1 at **$0.15/M input ($0.003 cache hit)**. Ideal for running in a loop in Aider / Roo Code / Claude Code fixing `cargo clippy` warnings. |
