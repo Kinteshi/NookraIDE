@@ -1,0 +1,25 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# Node / front-end
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+
+# Tauri / Android
+apps/studio-ui/src-tauri/target/
+apps/studio-ui/src-tauri/gen/android/**/build/
+*.keystore
+*.jks
+
+# Secrets / local config
+.env
+.env.*
+token
+
+# Editor / OS
+.idea/
+.DS_Store
+*.swp
