@@ -9,7 +9,7 @@ You don't need a tablet or phone plugged in to develop 95% of the project. Since
 The OS inside Android's AVF is a **regular Debian Linux**. For the Rust code (tokio, axum, portable-pty, notify) and for Linux (ext4, /proc/net/tcp, stdio), **it makes no difference whether the processor underneath is an Intel/AMD x86_64 or a Snapdragon/Tensor aarch64**.
 So your testing flow has **3 simple stages**:
 
-1. **Stage 1 — Day to day (native on your x86_64 PC):** Configure `AVF_TOKEN` and one or more `AVF_WORKSPACE_ROOTS`, then run `cargo run -p avf-daemon`. Phase 1 tests the protocol, authenticated transport and VFS on the same host. PTY and language servers are later phases.
+1. **Stage 1 — Day to day (native on your x86_64 PC):** Configure `AVF_TOKEN` and one or more `AVF_WORKSPACE_ROOTS`, then run `cargo run -p avf-daemon`. Phases 1–3 validate the protocol, authenticated transport, VFS, PTY, and frontend on the same host. Language servers and Android packaging remain later phases.
 2. **Stage 2 — Cross-build the ARM64 binary:** Build for the Debian guest's `aarch64-unknown-linux-gnu` target using a cross linker/sysroot compatible with the guest. Running that binary on an x86_64 PC requires a configured ARM64 emulator/binfmt setup; a successful cross-build alone is not a runtime test.
 3. **Stage 3 — Real test on phone/tablet via adb forward:** Even before building the Tauri APK, you can copy the ARM64 avf-daemon binary into your phone's Debian, run it there, and on your PC use `adb forward tcp:19860 tcp:19860`. Your PC's browser then connects in real time to the Daemon running on the phone's ARM processor over USB.
 
@@ -88,14 +88,16 @@ Open **Claude Code** in `~/AVFStudio` and send one prompt at a time. Only move t
 
 > Continue the front-end from Phase 2 and implement only Phase 3 and Section 6 of @SPEC.md. Reuse the existing Xterm.js terminal and PTY transport rather than rebuilding them.
 >
-> 1. Initialize a React + TypeScript + Vite + TailwindCSS project in `apps/studio-ui`.
-> 2. Install `zustand`, `lucide-react` and `@monaco-editor/react` (or `monaco-editor` directly); retain the Phase 2 Xterm dependencies.
-> 3. Extend the existing multiplexed WebSocket client and Zustand store with VFS requests/events while preserving the Phase 2 PTY terminal behavior.
-> 4. Implement the `useAdaptiveLayout` hook and the Chameleon Workbench:
->    - On screens `< 768px` (Smartphone Mode): show a Bottom Navigation Bar switching between full-screen Explorer, Editor and Terminal, with the Touch Modifier Bar (`ESC`, `TAB`, sticky `CTRL`, brackets, arrows) fixed at the bottom.
->    - On screens `>= 768px` (Tablet / Samsung DeX / Desktop Mode): show the full VS Code layout (Activity Bar, File Explorer Sidebar, Editor with multiple tabs and resizable bottom Terminal panel).
-> 5. Connect the File Explorer to the daemon's `VfsMessage` messages (browsing allowed project roots, opening files in Monaco and saving with `Ctrl+S` or the Touch Bar button).
-> 6. Ensure `pnpm build` runs with no TypeScript errors.
+> 1. Extend the Phase 2 React + TypeScript + Vite app in `apps/studio-ui`; configure TailwindCSS and add `zustand` and Monaco (`@monaco-editor/react` or `monaco-editor`). Retain the Phase 2 Xterm dependencies rather than rebuilding the terminal.
+> 2. Extend the multiplexed WebSocket client and Zustand store with request-correlated VFS responses and filesystem events while preserving PTY reconnect and terminal state. The client supplies an absolute project path already included in `AVF_WORKSPACE_ROOTS`; the protocol does not enumerate configured roots.
+> 3. Implement `useAdaptiveLayout` and the Chameleon Workbench:
+>    - On screens `< 768px` (Compact Mode), show four full-screen destinations as specified in `SPEC.md`: Files, Editor, Terminal and Preview/Git. Keep the explorer and command palette in a drawer or sheet.
+>    - On screens `>= 768px` (Expanded Mode), show the Activity Bar, collapsible Explorer, editor tabs/split view and resizable Terminal/Output panel.
+>    - Preserve editor and terminal state across Compact/Expanded transitions; refit Xterm and send `PtyPayload::Resize` after dimensions change.
+> 4. Connect the Explorer to VFS list/read/watch responses. Open text files in Monaco tabs, track dirty state, save with `Ctrl+S` or a button using `expected_modified_ts`, and surface conflicts for explicit reload or overwrite.
+> 5. Add small-screen editor defaults, the touch modifier bar (`ESC`, `TAB`, sticky `CTRL`/`ALT`, delimiters and repeatable arrows), and the `Ctrl+P`, `Ctrl+Shift+P`, `Ctrl+B`, and ``Ctrl+` `` shortcuts.
+> 6. Keep LSP server integration for Phase 4 and Android/Tauri packaging for Phase 5. Preview/Git navigation may be present, but do not imply backend features that have not been implemented.
+> 7. Validate mobile and expanded viewport behavior and ensure `pnpm --filter @avf-studio/studio-ui build` has no TypeScript errors.
 
 ### Prompt 4 — Phase 4: Async LSP Bridge in Rust
 
@@ -122,6 +124,8 @@ Open **Claude Code** in `~/AVFStudio` and send one prompt at a time. Only move t
    cd apps/studio-ui && pnpm dev
    ```
 3. Open http://localhost:5173 in the browser, press F12 and toggle between **Phone (412x915)** and **DeX/Tablet (1920x1080)** resolutions.
+
+For the Phase 2 terminal harness, start the daemon with `AVF_TOKEN` and `AVF_WORKSPACE_ROOTS` set (see Step 1), then enter that same token in the UI's password field. The development Origin `http://localhost:5173` is allowed by default in debug builds. The harness keeps the token in memory only; do not put it in source files or browser storage.
 
 ### B. Building the Static ARM64 Binary for Android's Debian VM
 

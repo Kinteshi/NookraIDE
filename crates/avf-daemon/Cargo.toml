@@ -10,6 +10,7 @@ axum.workspace = true
 cap-std.workspace = true
 futures-util.workspace = true
 notify.workspace = true
+portable-pty = "0.9"
 serde.workspace = true
 serde_json.workspace = true
 subtle.workspace = true

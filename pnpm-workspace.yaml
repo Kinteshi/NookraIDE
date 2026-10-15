@@ -1,0 +1,4 @@
+packages:
+  - apps/studio-ui
+allowBuilds:
+  esbuild: true

@@ -1,8 +1,9 @@
+mod pty;
 mod vfs;
 
 use avf_protocol::{
-    decode, encode, FsEventKind, MultiplexedPacket, RejectReason, SystemMessage, VfsErrorCode,
-    VfsMessage, MAX_FRAME_SIZE, PROTOCOL_VERSION,
+    decode, encode, FsEventKind, MultiplexedPacket, PtyPayload, RejectReason, SystemMessage,
+    VfsErrorCode, VfsMessage, MAX_FRAME_SIZE, PROTOCOL_VERSION,
 };
 use axum::{
     extract::{
@@ -19,6 +20,7 @@ use notify::{
     event::{ModifyKind, RenameMode},
     Event, EventKind, RecursiveMode, Watcher,
 };
+use pty::{PtyEvent, PtyManager};
 use serde::Serialize;
 use std::{
     collections::{HashMap, HashSet},
@@ -153,6 +155,7 @@ fn default_origins() -> HashSet<String> {
 struct AppState {
     config: Arc<AppConfig>,
     vfs: Vfs,
+    pty: PtyManager,
     telemetry: Arc<Telemetry>,
 }
 
@@ -196,6 +199,7 @@ fn app(config: AppConfig) -> io::Result<Router> {
     let state = AppState {
         config: Arc::new(config),
         vfs,
+        pty: PtyManager::default(),
         telemetry: Arc::new(Telemetry::default()),
     };
     Ok(Router::new()
@@ -300,7 +304,7 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
         &MultiplexedPacket::System(SystemMessage::Welcome {
             protocol_version: PROTOCOL_VERSION,
             daemon_version: env!("CARGO_PKG_VERSION").to_owned(),
-            pty_sessions: Vec::new(),
+            pty_sessions: state.pty.sessions().await,
         }),
     )
     .await
@@ -334,6 +338,7 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
         }
     });
     let mut watches = HashMap::<String, WatchHandle>::new();
+    let mut pty_forwarders = HashMap::new();
     loop {
         tokio::select! {
             result = &mut writer => {
@@ -363,7 +368,16 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                                 break;
                             }
                         };
-                        if process_packet(packet, &state, &outbound, &mut watches).await.is_err() {
+                        if process_packet(
+                            packet,
+                            &state,
+                            &outbound,
+                            &mut watches,
+                            &mut pty_forwarders,
+                        )
+                        .await
+                        .is_err()
+                        {
                             break;
                         }
                     }
@@ -386,6 +400,10 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
         }
     }
     drop(watches);
+    for (session_id, (subscriber_id, task)) in pty_forwarders.drain() {
+        task.abort();
+        state.pty.detach(session_id, subscriber_id).await;
+    }
     drop(outbound);
     if let Err(error) = timeout(Duration::from_secs(1), &mut writer).await {
         warn!(%error, "websocket writer did not stop promptly");
@@ -402,6 +420,7 @@ async fn process_packet(
     state: &AppState,
     outbound: &mpsc::Sender<OutboundFrame>,
     watches: &mut HashMap<String, WatchHandle>,
+    pty_forwarders: &mut HashMap<uuid::Uuid, (u64, tokio::task::JoinHandle<()>)>,
 ) -> Result<(), ()> {
     match packet {
         MultiplexedPacket::System(SystemMessage::Ping { timestamp }) => {
@@ -492,14 +511,127 @@ async fn process_packet(
             };
             send_outbound(outbound, MultiplexedPacket::Vfs(response)).await
         }
+        MultiplexedPacket::Pty { session_id, data } => match data {
+            PtyPayload::Spawn {
+                shell,
+                cwd,
+                cols,
+                rows,
+            } => match state.pty.spawn(session_id, shell, cwd, cols, rows).await {
+                Ok((_info, pid)) => {
+                    send_pty_payload(outbound, session_id, PtyPayload::Spawned { pid }).await?;
+                    attach_pty(session_id, state, outbound, pty_forwarders).await
+                }
+                Err(message) => {
+                    send_pty_payload(outbound, session_id, PtyPayload::Error { message }).await
+                }
+            },
+            PtyPayload::Input(data) => match state.pty.input(session_id, data).await {
+                Ok(()) => Ok(()),
+                Err(message) => {
+                    send_pty_payload(outbound, session_id, PtyPayload::Error { message }).await
+                }
+            },
+            PtyPayload::Resize { cols, rows } => {
+                match state.pty.resize(session_id, cols, rows).await {
+                    Ok(()) => Ok(()),
+                    Err(message) => {
+                        send_pty_payload(outbound, session_id, PtyPayload::Error { message }).await
+                    }
+                }
+            }
+            PtyPayload::Reattach => attach_pty(session_id, state, outbound, pty_forwarders).await,
+            PtyPayload::Kill => match state.pty.kill(session_id).await {
+                Ok(()) => Ok(()),
+                Err(message) => {
+                    send_pty_payload(outbound, session_id, PtyPayload::Error { message }).await
+                }
+            },
+            PtyPayload::Spawned { .. }
+            | PtyPayload::Output(_)
+            | PtyPayload::Exit { .. }
+            | PtyPayload::Error { .. } => {
+                send_pty_payload(
+                    outbound,
+                    session_id,
+                    PtyPayload::Error {
+                        message: "client sent a daemon-only PTY message".to_owned(),
+                    },
+                )
+                .await
+            }
+        },
         _ => {
-            warn!("client sent a packet type not supported in Phase 1");
-            let _ =
-                send_protocol_error_outbound(outbound, "packet type is not supported in Phase 1")
-                    .await;
+            warn!("client sent a packet type not supported by the daemon");
+            let _ = send_protocol_error_outbound(outbound, "packet type is not supported").await;
             Err(())
         }
     }
+}
+
+async fn send_pty_payload(
+    outbound: &mpsc::Sender<OutboundFrame>,
+    session_id: uuid::Uuid,
+    data: PtyPayload,
+) -> Result<(), ()> {
+    send_outbound(outbound, MultiplexedPacket::Pty { session_id, data }).await
+}
+
+async fn attach_pty(
+    session_id: uuid::Uuid,
+    state: &AppState,
+    outbound: &mpsc::Sender<OutboundFrame>,
+    forwarders: &mut HashMap<uuid::Uuid, (u64, tokio::task::JoinHandle<()>)>,
+) -> Result<(), ()> {
+    if let Some((subscriber_id, task)) = forwarders.remove(&session_id) {
+        task.abort();
+        state.pty.detach(session_id, subscriber_id).await;
+    }
+
+    let subscription = match state.pty.attach(session_id).await {
+        Ok(subscription) => subscription,
+        Err(message) => {
+            return send_pty_payload(outbound, session_id, PtyPayload::Error { message }).await;
+        }
+    };
+    let subscriber_id = subscription.id;
+    let mut receiver = subscription.receiver;
+    let pty = state.pty.clone();
+    let outbound = outbound.clone();
+    let task = tokio::spawn(async move {
+        let mut exited = false;
+        while let Some(event) = receiver.recv().await {
+            let payload = match event {
+                PtyEvent::Output(data) => PtyPayload::Output(data),
+                PtyEvent::Error(message) => PtyPayload::Error { message },
+                PtyEvent::Exit(code) => {
+                    exited = true;
+                    PtyPayload::Exit { code }
+                }
+            };
+            if send_pty_payload(&outbound, session_id, payload)
+                .await
+                .is_err()
+                || exited
+            {
+                break;
+            }
+        }
+        if !exited {
+            let _ = send_pty_payload(
+                &outbound,
+                session_id,
+                PtyPayload::Error {
+                    message: "terminal output stream stopped; reattach to recover buffered output"
+                        .to_owned(),
+                },
+            )
+            .await;
+        }
+        pty.detach(session_id, subscriber_id).await;
+    });
+    forwarders.insert(session_id, (subscriber_id, task));
+    Ok(())
 }
 
 fn vfs_error(req_id: u64, error: VfsFailure) -> VfsMessage {
@@ -838,7 +970,7 @@ fn parse_meminfo(contents: &str) -> Option<(u64, u64)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use avf_protocol::{decode, encode, MultiplexedPacket, SystemMessage, VfsMessage};
+    use avf_protocol::{decode, encode, MultiplexedPacket, PtyPayload, SystemMessage, VfsMessage};
     use axum::http::HeaderValue;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio_tungstenite::tungstenite::{
@@ -964,6 +1096,220 @@ mod tests {
         ));
 
         socket.close(None).await.unwrap();
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn websocket_pty_survives_disconnect_and_reattaches_with_history() {
+        use tokio::time::{sleep, timeout, Duration};
+
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path().join("project");
+        std::fs::create_dir(&project).unwrap();
+        let config = AppConfig {
+            bind_addr: "127.0.0.1:0".parse().unwrap(),
+            token: "a".repeat(64),
+            allowed_origins: HashSet::from(["http://localhost:5173".to_owned()]),
+            workspace_roots: vec![project.clone()],
+        };
+        let listener = TcpListener::bind(config.bind_addr).await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app(config).unwrap()).await.unwrap();
+        });
+        let session_id = uuid::Uuid::new_v4();
+
+        let mut request = format!("ws://{address}/ws").into_client_request().unwrap();
+        request
+            .headers_mut()
+            .insert(WS_ORIGIN, HeaderValue::from_static("http://localhost:5173"));
+        let (mut socket, _) = tokio_tungstenite::connect_async(request).await.unwrap();
+        socket
+            .send(WsMessage::Binary(
+                encode(&MultiplexedPacket::System(SystemMessage::Hello {
+                    protocol_version: PROTOCOL_VERSION,
+                    auth_token: "a".repeat(64),
+                    client_name: "pty-test".into(),
+                }))
+                .into(),
+            ))
+            .await
+            .unwrap();
+        let welcome = timeout(Duration::from_secs(3), socket.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let WsMessage::Binary(bytes) = welcome else {
+            panic!("expected binary Welcome");
+        };
+        assert!(matches!(
+            decode(&bytes).unwrap(),
+            MultiplexedPacket::System(SystemMessage::Welcome { pty_sessions, .. })
+                if pty_sessions.is_empty()
+        ));
+
+        socket
+            .send(WsMessage::Binary(
+                encode(&MultiplexedPacket::Pty {
+                    session_id,
+                    data: PtyPayload::Spawn {
+                        shell: Some("/bin/sh".to_owned()),
+                        cwd: Some(project.to_string_lossy().into_owned()),
+                        cols: 80,
+                        rows: 24,
+                    },
+                })
+                .into(),
+            ))
+            .await
+            .unwrap();
+        loop {
+            let response = timeout(Duration::from_secs(5), socket.next())
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+            let WsMessage::Binary(bytes) = response else {
+                panic!("expected binary PTY response");
+            };
+            match decode(&bytes).unwrap() {
+                MultiplexedPacket::Pty {
+                    session_id: received_id,
+                    data: PtyPayload::Spawned { .. },
+                } if received_id == session_id => break,
+                MultiplexedPacket::Pty {
+                    data: PtyPayload::Error { message },
+                    ..
+                } => panic!("PTY spawn failed: {message}"),
+                _ => {}
+            }
+        }
+        socket
+            .send(WsMessage::Binary(
+                encode(&MultiplexedPacket::Pty {
+                    session_id,
+                    data: PtyPayload::Input(b"printf 'ws-reattach-ready\\n'\n".to_vec()),
+                })
+                .into(),
+            ))
+            .await
+            .unwrap();
+        let mut first_output = Vec::new();
+        timeout(Duration::from_secs(5), async {
+            loop {
+                let response = socket.next().await.unwrap().unwrap();
+                let WsMessage::Binary(bytes) = response else {
+                    continue;
+                };
+                if let MultiplexedPacket::Pty {
+                    data: PtyPayload::Output(bytes),
+                    ..
+                } = decode(&bytes).unwrap()
+                {
+                    first_output.extend(bytes);
+                    if first_output
+                        .windows(b"ws-reattach-ready".len())
+                        .any(|window| window == b"ws-reattach-ready")
+                    {
+                        break;
+                    }
+                }
+            }
+        })
+        .await
+        .expect("timed out waiting for shell output");
+
+        socket.close(None).await.unwrap();
+        sleep(Duration::from_millis(50)).await;
+
+        let mut request = format!("ws://{address}/ws").into_client_request().unwrap();
+        request
+            .headers_mut()
+            .insert(WS_ORIGIN, HeaderValue::from_static("http://localhost:5173"));
+        let (mut socket, _) = tokio_tungstenite::connect_async(request).await.unwrap();
+        socket
+            .send(WsMessage::Binary(
+                encode(&MultiplexedPacket::System(SystemMessage::Hello {
+                    protocol_version: PROTOCOL_VERSION,
+                    auth_token: "a".repeat(64),
+                    client_name: "pty-reconnect-test".into(),
+                }))
+                .into(),
+            ))
+            .await
+            .unwrap();
+        let welcome = timeout(Duration::from_secs(3), socket.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let WsMessage::Binary(bytes) = welcome else {
+            panic!("expected binary Welcome");
+        };
+        assert!(matches!(
+            decode(&bytes).unwrap(),
+            MultiplexedPacket::System(SystemMessage::Welcome { pty_sessions, .. })
+                if pty_sessions.iter().any(|info| info.session_id == session_id)
+        ));
+
+        socket
+            .send(WsMessage::Binary(
+                encode(&MultiplexedPacket::Pty {
+                    session_id,
+                    data: PtyPayload::Reattach,
+                })
+                .into(),
+            ))
+            .await
+            .unwrap();
+        let history = timeout(Duration::from_secs(3), socket.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let WsMessage::Binary(bytes) = history else {
+            panic!("expected binary PTY history");
+        };
+        assert!(matches!(
+            decode(&bytes).unwrap(),
+            MultiplexedPacket::Pty {
+                session_id: received_id,
+                data: PtyPayload::Output(output),
+            } if received_id == session_id
+                && output.windows(b"ws-reattach-ready".len())
+                    .any(|window| window == b"ws-reattach-ready")
+        ));
+
+        socket
+            .send(WsMessage::Binary(
+                encode(&MultiplexedPacket::Pty {
+                    session_id,
+                    data: PtyPayload::Kill,
+                })
+                .into(),
+            ))
+            .await
+            .unwrap();
+        timeout(Duration::from_secs(5), async {
+            loop {
+                let response = socket.next().await.unwrap().unwrap();
+                let WsMessage::Binary(bytes) = response else {
+                    continue;
+                };
+                if matches!(
+                    decode(&bytes).unwrap(),
+                    MultiplexedPacket::Pty {
+                        session_id: received_id,
+                        data: PtyPayload::Exit { .. },
+                    } if received_id == session_id
+                ) {
+                    break;
+                }
+            }
+        })
+        .await
+        .expect("PTY process did not report exit after Kill");
         server.abort();
     }
 
