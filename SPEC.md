@@ -1,94 +1,98 @@
-# **SPEC.md — AVF Studio (Native-Feel VS Code IDE for Android Mobile, Tablets & DeX powered by AVF)**
+# SPEC.md — AVF Studio (Native-Feel VS Code IDE for Android Mobile, Tablets & DeX powered by AVF)
 
-## **1\. Visão Geral do Projeto**
+## 1. Project Overview
 
-O **AVF Studio** é uma IDE de código aberto, desenhada para o ecossistema Android moderno — adaptando-se dinamicamente desde **smartphones** (uso portátil em tela vertical) até **tablets em 120Hz** e **modos Desktop nativos (Samsung DeX / Android 16+ Desktop Mode)** com múltiplos monitores, mouse e teclado físico.
+**AVF Studio** is an open-source IDE designed for the modern Android ecosystem. It adapts dynamically from **smartphones** (portable, portrait use) to **120Hz tablets** and **native Desktop modes (Samsung DeX / Android 16+ Desktop Mode)** with multiple monitors, mouse and physical keyboard.
 
-Em vez de rodar compiladores em emuladores lentos (`proot`) ou depender exclusivamente de nuvem remota, o AVF Studio utiliza uma arquitetura **Host-Guest Local**:
+Instead of running compilers in slow emulators (`proot`) or relying exclusively on a remote cloud, AVF Studio uses a **local Host-Guest architecture**:
 
-* **Host (Front-end Android Universal):** App **Tauri v2** contendo uma interface visual e muscular idêntica ao VS Code (`Monaco Editor` \+ `@codingame/monaco-vscode-api` \+ Workbench camaleão responsivo \+ `Xterm.js`).  
-* **Guest (Back-end Linux):** Um Daemon assíncrono ultraleve escrito em **Rust** (`avf-daemon`) rodando dentro da máquina virtual Debian nativa do **Android Virtualization Framework (AVF / KVM)**.
+* **Host (Universal Android front-end):** A **Tauri v2** app with a UI that looks and behaves like VS Code (`Monaco Editor` + `@codingame/monaco-vscode-api` + responsive chameleon Workbench + `Xterm.js`).
+* **Guest (Linux back-end):** An ultra-light async daemon written in **Rust** (`avf-daemon`) running inside the native Debian virtual machine of the **Android Virtualization Framework (AVF / KVM)**.
 
-## **2\. Arquitetura do Sistema e Fluxo de Dados**
+## 2. System Architecture and Data Flow
 
-\+-----------------------------------------------------------------------+  
-| HOST: ANDROID DEVICE (Phone / Tablet / DeX \- Tauri v2 \+ SystemWebView)|  
-|                                                                       |  
-|  \+-----------------------+  \+-------------------+  \+---------------+  |  
-|  |   Monaco Editor UI    |  |  Xterm.js (WebGL) |  | File Explorer |  |  
-|  | (monaco-languageclient)|  |  Terminal Canvas  |  |  & Git Tree   |  |  
-|  \+-----------+-----------+  \+---------+---------+  \+-------+-------+  |  
-|              |                        |                    |          |  
-|              \+------------------------+--------------------+          |  
-|                                       |                               |  
-|                     \[ Tauri IPC Bridge (Rust Core) \]                  |  
-\+---------------------------------------|-------------------------------+  
-                                        |  
-                      Multiplexed WebSocket (localhost:19860)  
-                  \[ 1 frame Binary = 1 MultiplexedPacket em MessagePack (Hello+token primeiro) \]  
-                                        |  
-\+---------------------------------------|-------------------------------+  
-| GUEST: AVF DEBIAN VM (KVM Virtualized Linux)                          |  
-|                                                                       |  
-|  \+-----------------------------------------------------------------+  |  
-|  |                  avf-ide-daemon (Tokio / Axum)                  |  |  
-|  |                                                                 |  |  
-|  |  \+-------------------+  \+------------------+  \+--------------+  |  |  
-|  |  |    LSP Router     |  |   PTY Manager    |  | VFS & Git    |  |  |  
-|  |  | (Async Stdio Pipe)|  |  (portable-pty)  |  | (notify/git2)|  |  |  
-|  |  \+---------+---------+  \+--------+---------+  \+------+-------+  |  |  
-|  \+------------|---------------------|-------------------|----------+  |  
-|               |                     |                   |             |  
-|       \+-------+-------+     \+-------+-------+   \+-------+-------+     |  
-|       | rust-analyzer |     |  zsh / bash   |   |  Linux ext4   |     |  
-|       | pyright / ruff|     |  tmux / htop  |   |  File System  |     |  
-|       | clangd / vtsls|     |  python / uv  |   |  (Fast I/O)   |     |  
-|       \+---------------+     \+---------------+   \+---------------+     |  
-\+-----------------------------------------------------------------------+
+```
++-----------------------------------------------------------------------+
+| HOST: ANDROID DEVICE (Phone / Tablet / DeX - Tauri v2 + SystemWebView)|
+|                                                                       |
+|  +-----------------------+  +-------------------+  +---------------+  |
+|  |   Monaco Editor UI    |  |  Xterm.js (WebGL) |  | File Explorer |  |
+|  |(monaco-languageclient)|  |  Terminal Canvas  |  |  & Git Tree   |  |
+|  +-----------+-----------+  +---------+---------+  +-------+-------+  |
+|              |                        |                    |          |
+|              +------------------------+--------------------+          |
+|                                       |                               |
+|                     [ Tauri IPC Bridge (Rust Core) ]                  |
++---------------------------------------|-------------------------------+
+                                        |
+                      Multiplexed WebSocket (localhost:19860)
+        [ 1 Binary frame = 1 MultiplexedPacket in MessagePack (Hello+token first) ]
+                                        |
++---------------------------------------|-------------------------------+
+| GUEST: AVF DEBIAN VM (KVM Virtualized Linux)                          |
+|                                                                       |
+|  +-----------------------------------------------------------------+  |
+|  |                  avf-ide-daemon (Tokio / Axum)                  |  |
+|  |                                                                 |  |
+|  |  +-------------------+  +------------------+  +--------------+  |  |
+|  |  |    LSP Router     |  |   PTY Manager    |  | VFS & Git    |  |  |
+|  |  | (Async Stdio Pipe)|  |  (portable-pty)  |  | (notify/git2)|  |  |
+|  |  +---------+---------+  +--------+---------+  +------+-------+  |  |
+|  +------------|---------------------|-------------------|----------+  |
+|               |                     |                   |             |
+|       +-------+-------+     +-------+-------+   +-------+-------+     |
+|       | rust-analyzer |     |  zsh / bash   |   |  Linux ext4   |     |
+|       | pyright / ruff|     |  tmux / htop  |   |  File System  |     |
+|       | clangd / vtsls|     |  python / uv  |   |  (Fast I/O)   |     |
+|       +---------------+     +---------------+   +---------------+     |
++-----------------------------------------------------------------------+
+```
 
-## **3\. Estrutura do Monorepo (Cargo Workspace \+ pnpm)**
+## 3. Monorepo Structure (Cargo Workspace + pnpm)
 
-avf-studio/  
-├── Cargo.toml                 \# Workspace Rust compartilhado  
-├── pnpm-workspace.yaml        \# Workspace Node/Front-end  
-├── crates/  
-│   ├── avf-protocol/          \# Structs compartilhadas (Serde, envelopes RPC/LSP/PTY/VFS)  
-│   └── avf-daemon/            \# Binário Linux (aarch64-unknown-linux-gnu / x86\_64) para a VM Debian  
-├── apps/  
-│   └── studio-ui/             \# Front-end React 19 \+ TypeScript \+ Tailwind \+ Monaco \+ Xterm.js  
-│       └── src-tauri/         \# Core Tauri v2 (Android target \+ detecção de janela/DeX)  
-├── docs/                      \# Guias de apoio (roteiro de execução, setup de modelos/Arc B580)  
-└── scripts/  
-    └── bootstrap-avf.sh       \# Provisiona o daemon no systemd da VM AVF e gera o token de autenticação
+```
+avf-studio/
+├── Cargo.toml                 # Shared Rust workspace
+├── pnpm-workspace.yaml        # Node/front-end workspace
+├── crates/
+│   ├── avf-protocol/          # Shared structs (Serde, RPC/LSP/PTY/VFS envelopes)
+│   └── avf-daemon/            # Linux binary (aarch64-unknown-linux-gnu / x86_64) for the Debian VM
+├── apps/
+│   └── studio-ui/             # Front-end React 19 + TypeScript + Tailwind + Monaco + Xterm.js
+│       └── src-tauri/         # Tauri v2 core (Android target + window/DeX detection)
+├── docs/                      # Supporting guides (execution roadmap, model/Arc B580 setup)
+└── scripts/
+    └── bootstrap-avf.sh       # Provisions the daemon in the AVF VM's systemd and generates the auth token
+```
 
-## **4\. Contrato de Protocolo (`crates/avf-protocol`)**
+## 4. Protocol Contract (`crates/avf-protocol`)
 
-Toda a comunicação entre o Host (Android) e o Guest (VM Debian) passa por uma única conexão WebSocket multiplexada (`ws://127.0.0.1:19860/ws`) para evitar overhead de múltiplas conexões e facilitar reconexão automática após *sleep* do aparelho ou transição de tela (ex: plugar o celular num monitor DeX).
+All communication between the Host (Android) and the Guest (Debian VM) goes through a single multiplexed WebSocket connection (`ws://127.0.0.1:19860/ws`). This avoids the overhead of multiple connections and makes automatic reconnection easier after the device sleeps or the screen changes (e.g. plugging the phone into a DeX monitor).
 
-### **4.1 Codificação (Wire Format)**
+### 4.1 Encoding (Wire Format)
 
-* **Um frame = um pacote.** Cada mensagem WebSocket do tipo **Binary** carrega exatamente um `MultiplexedPacket` codificado em **MessagePack**. Frames do tipo Text são rejeitados com `SystemMessage::ProtocolError` e a conexão é encerrada.
-* **Rust:** `rmp-serde` usando `rmp_serde::Serializer::new(buf).with_struct_map().with_human_readable()`:
-  * `with_struct_map()` → structs viram mapas com nomes de campo (tolerante à evolução do protocolo e legível no DevTools).
-  * `with_human_readable()` → `Uuid` é serializado como string (`"550e8400-..."`), não como 16 bytes crus.
-  * Campos `Vec<u8>` usam `#[serde(with = "serde_bytes")]` para virar o tipo `bin` do MessagePack (sem o overhead de 3–4× de um array de números).
-* **TypeScript:** `@msgpack/msgpack` (`encode`/`decode`). Campos `bin` chegam como `Uint8Array`, prontos para `xterm.write()`.
-* **Enums usam a representação externa padrão do serde** (`{ "Variante": { ...campos } }` ou `"Variante"` para variantes unitárias). **Não usar** `#[serde(tag = ..., content = ...)]`: representações *internally/adjacently tagged* exigem `deserialize_any` e quebram com formatos binários.
-* **Tamanho máximo de frame:** 32 MiB (`WebSocketUpgrade::max_message_size`). Leituras de arquivo acima de 16 MiB retornam `VfsErrorCode::TooLarge`.
-* **Versionamento:** a constante `PROTOCOL_VERSION` é incrementada a cada mudança incompatível. Daemon e app recusam versões diferentes no handshake.
+* **One frame = one packet.** Each **Binary** WebSocket message carries exactly one `MultiplexedPacket` encoded as **MessagePack**. Text frames are rejected with `SystemMessage::ProtocolError` and the connection is closed.
+* **Rust:** `rmp-serde` using `rmp_serde::Serializer::new(buf).with_struct_map().with_human_readable()`:
+  * `with_struct_map()` → structs become maps with field names (tolerant to protocol evolution and readable in DevTools).
+  * `with_human_readable()` → `Uuid` is serialized as a string (`"550e8400-..."`), not as 16 raw bytes.
+  * `Vec<u8>` fields use `#[serde(with = "serde_bytes")]` so they become MessagePack's `bin` type (avoiding the 3–4× overhead of a number array).
+* **TypeScript:** `@msgpack/msgpack` (`encode`/`decode`). `bin` fields arrive as `Uint8Array`, ready for `xterm.write()`.
+* **Enums use serde's default external representation** (`{ "Variant": { ...fields } }`, or `"Variant"` for unit variants). **Do not use** `#[serde(tag = ..., content = ...)]`: internally/adjacently tagged representations require `deserialize_any` and break with binary formats.
+* **Maximum frame size:** 32 MiB (`WebSocketUpgrade::max_message_size`). File reads above 16 MiB return `VfsErrorCode::TooLarge`.
+* **Versioning:** the `PROTOCOL_VERSION` constant is incremented on every breaking change. Daemon and app refuse mismatched versions during the handshake.
 
-### **4.2 Handshake e Autenticação**
+### 4.2 Handshake and Authentication
 
-O daemon expõe um shell completo e leitura/escrita de arquivos. Como a porta é encaminhada para o Host Android, **qualquer app ou página web no aparelho** poderia tentar se conectar a `127.0.0.1:19860`. Por isso:
+The daemon exposes a full shell and file read/write. Since the port is forwarded to the Android Host, **any app or web page on the device** could try to connect to `127.0.0.1:19860`. Therefore:
 
-1. **Token compartilhado:** o `bootstrap-avf.sh` gera um token aleatório de 256 bits (hex), salvo em `~/.config/avf-studio/token` (permissão `0600`) na VM. O usuário cola/escaneia o token no app uma única vez; o Tauri o guarda no armazenamento seguro do Android. O daemon também aceita `AVF_TOKEN` via variável de ambiente (desenvolvimento).
-2. **Primeiro frame obrigatório:** o cliente deve enviar `SystemMessage::Hello` em até **5 segundos** após o upgrade. Qualquer outro pacote antes do `Hello` é rejeitado e a conexão é fechada.
-3. **Validação:** o daemon compara o token em tempo constante (`subtle::ConstantTimeEq`) e confere `protocol_version`. Responde `Welcome` (sucesso) ou `Rejected` (e fecha a conexão).
-4. **Allowlist de `Origin` (defesa em profundidade):** o upgrade em `/ws` só é aceito se o header `Origin` estiver em uma lista configurável (padrão: `http://tauri.localhost`, `tauri://localhost`; em desenvolvimento também `http://localhost:5173`). O token continua sendo a barreira principal.
-5. O token **nunca** vai na URL (evita vazar em logs); trafega apenas dentro do `Hello`.
-6. `/health` não exige token e retorna apenas `{ "status": "ok", "protocol_version": N }`.
+1. **Shared token:** `bootstrap-avf.sh` generates a random 256-bit token (hex), saved to `~/.config/avf-studio/token` (mode `0600`) in the VM. The user pastes/scans the token into the app once; Tauri stores it in Android secure storage. The daemon also accepts `AVF_TOKEN` via environment variable (development).
+2. **Mandatory first frame:** the client must send `SystemMessage::Hello` within **5 seconds** of the upgrade. Any other packet before `Hello` is rejected and the connection is closed.
+3. **Validation:** the daemon compares the token in constant time (`subtle::ConstantTimeEq`) and checks `protocol_version`. It replies `Welcome` (success) or `Rejected` (and closes the connection).
+4. **`Origin` allowlist (defense in depth):** the upgrade on `/ws` is only accepted if the `Origin` header is in a configurable list (default: `http://tauri.localhost`, `tauri://localhost`; in development also `http://localhost:5173`). The token remains the primary barrier.
+5. The token **never** goes in the URL (avoids leaking into logs); it only travels inside `Hello`.
+6. `/health` requires no token and returns only `{ "status": "ok", "protocol_version": N }`.
 
-### **4.3 Tipos**
+### 4.3 Types
 
 ```rust
 use serde::{Deserialize, Serialize};
@@ -100,10 +104,10 @@ pub const PROTOCOL_VERSION: u32 = 1;
 pub enum MultiplexedPacket {
     System(SystemMessage),
     Vfs(VfsMessage),
-    /// `session_id` é gerado pelo CLIENTE (UUID v4) no momento do `Spawn`
-    /// e identifica a sessão em todas as mensagens seguintes.
+    /// `session_id` is generated by the CLIENT (UUID v4) at `Spawn` time
+    /// and identifies the session in all subsequent messages.
     Pty { session_id: Uuid, data: PtyPayload },
-    /// `json_rpc` é o corpo JSON-RPC puro, sem o header `Content-Length`.
+    /// `json_rpc` is the raw JSON-RPC body, without the `Content-Length` header.
     Lsp { server_id: String, json_rpc: String },
 }
 
@@ -111,26 +115,26 @@ pub enum MultiplexedPacket {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum SystemMessage {
-    // Handshake (cliente → daemon, sempre o primeiro frame)
+    // Handshake (client → daemon, always the first frame)
     Hello { protocol_version: u32, auth_token: String, client_name: String },
-    // Handshake (daemon → cliente)
+    // Handshake (daemon → client)
     Welcome {
         protocol_version: u32,
         daemon_version: String,
-        /// Sessões PTY vivas, para o cliente decidir quais reanexar.
+        /// Live PTY sessions, so the client can decide which to reattach.
         pty_sessions: Vec<PtySessionInfo>,
     },
     Rejected { reason: RejectReason },
 
-    // Telemetria
+    // Telemetry
     Ping { timestamp: u64 },
     Pong { timestamp: u64, cpu_usage: f32, mem_used_mb: u64, mem_total_mb: u64 },
 
-    // Detector de portas (daemon → cliente)
+    // Port detector (daemon → client)
     PortOpened { port: u16, protocol: PortProtocol, process_name: Option<String> },
     PortClosed { port: u16, protocol: PortProtocol },
 
-    /// Frame malformado, tipo de frame inválido ou mensagem fora de ordem.
+    /// Malformed frame, invalid frame type, or out-of-order message.
     ProtocolError { message: String },
 }
 
@@ -157,33 +161,33 @@ pub struct PtySessionInfo {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum PtyPayload {
-    // cliente → daemon
+    // client → daemon
     Spawn { shell: Option<String>, cwd: Option<String>, cols: u16, rows: u16 },
     Input(#[serde(with = "serde_bytes")] Vec<u8>),
     Resize { cols: u16, rows: u16 },
-    /// Reanexa à sessão do envelope. O daemon responde com um `Output`
-    /// contendo o ring buffer (até 64KB) e segue transmitindo ao vivo.
+    /// Reattaches to the envelope's session. The daemon replies with an `Output`
+    /// containing the ring buffer (up to 64KB) and keeps streaming live.
     Reattach,
-    /// Encerra o processo (SIGHUP, depois SIGKILL após 2s).
+    /// Terminates the process (SIGHUP, then SIGKILL after 2s).
     Kill,
 
-    // daemon → cliente
+    // daemon → client
     Spawned { pid: u32 },
     Output(#[serde(with = "serde_bytes")] Vec<u8>),
-    /// `code` é `None` quando o processo foi morto por sinal.
+    /// `code` is `None` when the process was killed by a signal.
     Exit { code: Option<i32> },
-    /// Ex.: sessão inexistente em `Reattach`/`Input`, `session_id` duplicado em `Spawn`, falha ao iniciar o shell.
+    /// E.g.: unknown session on `Reattach`/`Input`, duplicate `session_id` on `Spawn`, shell failed to start.
     Error { message: String },
 }
 
 // ───────────────────────────── VFS ─────────────────────────────
 
-/// `req_id` é atribuído pelo cliente, único por conexão. Toda requisição
-/// recebe exatamente UMA resposta: o `*Res` correspondente ou `VfsError`.
-/// Caminhos são absolutos (POSIX) dentro da VM.
+/// `req_id` is assigned by the client, unique per connection. Every request
+/// gets exactly ONE response: the matching `*Res` or `VfsError`.
+/// Paths are absolute (POSIX) inside the VM.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum VfsMessage {
-    // cliente → daemon
+    // client → daemon
     ListDirReq { req_id: u64, path: String },
     ReadFileReq { req_id: u64, path: String },
     WriteFileReq {
@@ -191,14 +195,14 @@ pub enum VfsMessage {
         path: String,
         #[serde(with = "serde_bytes")]
         content: Vec<u8>,
-        /// Concorrência otimista: se `Some` e o mtime atual do arquivo for
-        /// diferente, a escrita é recusada com `VfsErrorCode::Conflict`.
+        /// Optimistic concurrency: if `Some` and the file's current mtime
+        /// differs, the write is refused with `VfsErrorCode::Conflict`.
         expected_modified_ts: Option<u64>,
     },
     WatchReq { req_id: u64, path: String, recursive: bool },
     UnwatchReq { req_id: u64, path: String },
 
-    // daemon → cliente
+    // daemon → client
     ListDirRes { req_id: u64, entries: Vec<FileEntry> },
     ReadFileRes {
         req_id: u64,
@@ -210,7 +214,7 @@ pub enum VfsMessage {
     WatchRes { req_id: u64 },
     VfsError { req_id: u64, code: VfsErrorCode, message: String },
 
-    // daemon → cliente (não solicitado)
+    // daemon → client (unsolicited)
     FsEvent { kind: FsEventKind, paths: Vec<String> },
 }
 
@@ -232,9 +236,9 @@ pub enum FsEventKind {
     Create,
     Modify,
     Remove,
-    /// `paths` = `[origem, destino]`.
+    /// `paths` = `[from, to]`.
     Rename,
-    /// O watcher perdeu eventos (overflow); o cliente deve recarregar a árvore.
+    /// The watcher lost events (overflow); the client must reload the tree.
     Rescan,
 }
 
@@ -245,62 +249,61 @@ pub struct FileEntry {
     pub is_dir: bool,
     pub is_symlink: bool,
     pub size: u64,
-    /// Milissegundos desde a época Unix.
+    /// Milliseconds since the Unix epoch.
     pub modified_ts: u64,
 }
 ```
 
-### **4.4 Garantias Exigidas por Testes (`avf-protocol`)**
+### 4.4 Guarantees Required by Tests (`avf-protocol`)
 
-* Teste de *round-trip* (`encode → decode == original`) para **todas** as variantes de todos os enums acima.
-* Teste garantindo que `Vec<u8>` é codificado como `bin` do MessagePack (e não como array) e que `Uuid` é codificado como string.
-* Funções públicas `encode(&MultiplexedPacket) -> Vec<u8>` e `decode(&[u8]) -> Result<MultiplexedPacket, DecodeError>` centralizadas na crate, para que daemon e testes nunca configurem o `rmp-serde` de formas diferentes.
+* *Round-trip* test (`encode → decode == original`) for **every** variant of every enum above.
+* Test ensuring `Vec<u8>` is encoded as MessagePack `bin` (not as an array) and `Uuid` is encoded as a string.
+* Public functions `encode(&MultiplexedPacket) -> Vec<u8>` and `decode(&[u8]) -> Result<MultiplexedPacket, DecodeError>` centralized in the crate, so the daemon and tests never configure `rmp-serde` differently.
 
-## **5\. Especificação do `avf-daemon` (Rust / Guest VM)**
+## 5. `avf-daemon` Specification (Rust / Guest VM)
 
-* **Runtime & Web Server:** `tokio` (full) \+ `axum` (com suporte a WebSockets em `/ws` e healthcheck em `/health`).  
-* **Porta Padrão:** `127.0.0.1:19860` (exposta para o Host Android via Port Forwarding nativo do AVF).  
-* **Segurança:** handshake obrigatório com token e allowlist de `Origin`, conforme Seção 4.2. Nenhuma mensagem PTY/VFS/LSP é processada antes do `Welcome`.  
-* **Módulos Core:**  
-  1. **PTY Manager (`portable-pty`):**  
-     * Criação, redimensionamento dinâmico (`PtySize { rows, cols }`) e persistência de sessões de terminal (`/bin/bash`, `/bin/zsh` ou `tmux`).  
-     * **Ring Buffer de Reconexão:** Mantém os últimos 64KB de output de cada sessão em memória (`VecDeque<u8>`). Se o usuário bloquear o celular ou plugar num monitor externo (causando recriação da Activity Android), ao enviar `PtyPayload::Reattach`, o daemon devolve o histórico imediatamente sem matar o processo em execução.  
-  2. **LSP Bridge (`tokio::process`):**  
-     * Gerencia o ciclo de vida de servidores LSP via `stdio` (ex: `rust-analyzer`, `basedpyright-langserver --stdio`, `vtsls --stdio`, `clangd`).  
-     * **Framing / Unframing:**  
-       * *Entrada (WebSocket \-\> StdIn):* Recebe a string `json_rpc` limpa do Monaco, calcula `json_rpc.len()`, formata `Content-Length: {}\r\n\r\n{}` e escreve no `ChildStdin`.  
-       * *Saída (StdOut \-\> WebSocket):* Usa um `tokio::io::BufReader` no `ChildStdout`, lê os cabeçalhos até `\r\n\r\n`, extrai o `Content-Length`, lê o número exato de bytes do corpo JSON e despacha um `MultiplexedPacket::Lsp` pelo WebSocket.  
-     * **Graceful Hibernation:** Se o WebSocket desconectar, os processos LSP permanecem vivos por até 30 minutos (configurável) para evitar reindexação quando o usuário voltar ao app.  
-  3. **Virtual File System (VFS) & Watcher (`notify`):**  
-     * Operações assíncronas usando `tokio::fs`. Escrita de arquivos sempre atômica (escreve em `.filename.avf.tmp` e faz `rename`).  
-     * File watcher (`notify-debouncer-full`, que preserva o tipo do evento para `FsEventKind`) com debounce de 150ms, ativado por `WatchReq`, notificando o front-end sobre mudanças externas (ex: `git checkout`, artefatos gerados por scripts). Ignora `.git/objects`, `node_modules`, `target` e `.venv` por padrão.  
-  4. **Port Detector (`/proc/net/tcp` scanner):**  
-     * Task em background que lê `/proc/net/tcp` e `/proc/net/tcp6` a cada 2 segundos para detectar portas em estado `LISTEN` (`0A`). Emite `SystemMessage::PortOpened` para o front-end abrir um painel de Web Preview ou Jupyter automaticamente.
+* **Runtime & Web Server:** `tokio` (full) + `axum` (with WebSocket support on `/ws` and healthcheck on `/health`).
+* **Default Port:** `127.0.0.1:19860` (exposed to the Android Host via AVF's native port forwarding).
+* **Security:** mandatory handshake with token and `Origin` allowlist, per Section 4.2. No PTY/VFS/LSP message is processed before `Welcome`.
+* **Core Modules:**
+  1. **PTY Manager (`portable-pty`):**
+     * Creation, dynamic resizing (`PtySize { rows, cols }`) and persistence of terminal sessions (`/bin/bash`, `/bin/zsh` or `tmux`).
+     * **Reconnection Ring Buffer:** Keeps the last 64KB of output for each session in memory (`VecDeque<u8>`). If the user locks the phone or plugs into an external monitor (causing the Android Activity to be recreated), on `PtyPayload::Reattach` the daemon immediately returns the history without killing the running process.
+  2. **LSP Bridge (`tokio::process`):**
+     * Manages the lifecycle of LSP servers via `stdio` (e.g. `rust-analyzer`, `basedpyright-langserver --stdio`, `vtsls --stdio`, `clangd`).
+     * **Framing / Unframing:**
+       * *Input (WebSocket → StdIn):* Receives the clean `json_rpc` string from Monaco, computes `json_rpc.len()`, formats `Content-Length: {}\r\n\r\n{}` and writes it to `ChildStdin`.
+       * *Output (StdOut → WebSocket):* Uses a `tokio::io::BufReader` on `ChildStdout`, reads headers up to `\r\n\r\n`, extracts `Content-Length`, reads exactly that many bytes of JSON body and dispatches a `MultiplexedPacket::Lsp` over the WebSocket.
+     * **Graceful Hibernation:** If the WebSocket disconnects, LSP processes stay alive for up to 30 minutes (configurable) to avoid reindexing when the user returns to the app.
+  3. **Virtual File System (VFS) & Watcher (`notify`):**
+     * Async operations using `tokio::fs`. File writes are always atomic (write to `.filename.avf.tmp` and `rename`).
+     * File watcher (`notify-debouncer-full`, which preserves the event type for `FsEventKind`) with a 150ms debounce, enabled by `WatchReq`, notifying the front-end of external changes (e.g. `git checkout`, script-generated artifacts). Ignores `.git/objects`, `node_modules`, `target` and `.venv` by default.
+  4. **Port Detector (`/proc/net/tcp` scanner):**
+     * Background task that reads `/proc/net/tcp` and `/proc/net/tcp6` every 2 seconds to detect ports in `LISTEN` state (`0A`). Emits `SystemMessage::PortOpened` so the front-end can automatically open a Web Preview or Jupyter panel.
 
-## **6\. Especificação do `studio-ui` (Front-end Camaleão: Mobile, Tablet & DeX)**
+## 6. `studio-ui` Specification (Chameleon Front-end: Mobile, Tablet & DeX)
 
-* **Framework UI:** React 19 \+ TypeScript \+ Zustand (gerenciamento de estado) \+ TailwindCSS.  
-* **Core Editor:** `monaco-editor` integrado com `@codingame/monaco-vscode-api` e `monaco-languageclient`.  
-* **Terminal:** `@xterm/xterm` com `@xterm/addon-webgl` e `@xterm/addon-fit`.  
-* **Motor de Layout Adaptativo (`useAdaptiveLayout`):** O front-end reage em tempo real às dimensões da janela (`window.innerWidth`), orientação e presença de periféricos (`pointer: fine` vs `pointer: coarse`):  
-  1. **Modo Compacto / Mobile (`width < 768px` \- Smartphones em modo retrato):**  
-     * **Navegação Inferior (Bottom Navigation Bar):** Alternância rápida em 1 toque entre 4 visões em tela cheia: *Arquivos*, *Editor*, *Terminal* e *Preview/Git* (com suporte a *swipe* lateral nas bordas).  
-     * **Editor Otimizado para Tela Pequena:** Oculta o *Minimap* automaticamente, reduz o espaçamento da *gutter* de números de linha e ativa *Word Wrap* por padrão para evitar rolagem horizontal no celular.  
-     * **Drawer Deslizante:** A árvore de arquivos e a paleta de comandos abrem como *Bottom Sheets* ou gavetas sobrepostas.  
-  2. **Modo Expandido / Workstation (`width >= 768px` \- Tablets, Foldables abertos, Samsung DeX e Android 16+ Desktop Mode):**  
-     * **Layout VS Code Completo:** Activity Bar lateral esquerda, Sidebar retrátil, Área de Editores com suporte a *Split View* (Horizontal/Vertical) e Painel Inferior redimensionável para Terminal/Output.  
-     * **Continuidade DeX Zero-Reload:** Ao conectar o celular em um monitor externo (transição de Modo Compacto para Expandido), o estado do Zustand preserva as instâncias do Monaco e chama `fitAddon.fit()` no Xterm.js, disparando `PtyPayload::Resize` para o daemon sem perder nenhuma linha digitada.  
-* **Recursos de Ergonomia Mobile & Desktop:**  
-  1. **Touch Modifier Bar (Auto-hide inteligente):** Barra compacta acoplada logo acima do teclado virtual (`visualViewport` API) exibida sempre que nenhum teclado físico é detectado. Contém teclas de precisão: `ESC`, `TAB`, `CTRL` (sticky), `ALT` (sticky), `{`, `}`, `(`, `)`, `[`, `]`, `:`, `;`, `/`, e trackpad virtual/setas direcionais com *repeat* suave.  
-  2. **Keyboard Shortcut Interceptor:** Captura limpa de `Ctrl+P` (Quick Open), `Ctrl+Shift+P` (Command Palette), `Ctrl+B` (Toggle Sidebar) e \`Ctrl+\`\` (Toggle Terminal) quando em modo DeX/Teclado físico.  
-  3. **Indicador de Saúde da VM:** Badge na Status Bar mostrando uso de CPU/RAM da VM Debian, latência do ping WebSocket (em ms) e botão de *Wake/Reconnect* rápido.  
-  4. **Local AI Copilot Provider:** Integração nativa do Monaco (`registerInlineCompletionsProvider`) que aponta para um endpoint OpenAI-compatible configurável (ex: sua Intel Arc B580 na rede local/Tailscale rodando Qwen Coder para autocomplete FIM a custo zero).
+* **UI Framework:** React 19 + TypeScript + Zustand (state management) + TailwindCSS.
+* **Core Editor:** `monaco-editor` integrated with `@codingame/monaco-vscode-api` and `monaco-languageclient`.
+* **Terminal:** `@xterm/xterm` with `@xterm/addon-webgl` and `@xterm/addon-fit`.
+* **Adaptive Layout Engine (`useAdaptiveLayout`):** The front-end reacts in real time to window dimensions (`window.innerWidth`), orientation, and presence of peripherals (`pointer: fine` vs `pointer: coarse`):
+  1. **Compact / Mobile Mode (`width < 768px` – smartphones in portrait):**
+     * **Bottom Navigation Bar:** One-tap switching between 4 full-screen views: *Files*, *Editor*, *Terminal* and *Preview/Git* (with lateral edge-swipe support).
+     * **Small-Screen Optimized Editor:** Automatically hides the *Minimap*, reduces line-number *gutter* spacing and enables *Word Wrap* by default to avoid horizontal scrolling on the phone.
+     * **Sliding Drawer:** The file tree and command palette open as *Bottom Sheets* or overlay drawers.
+  2. **Expanded / Workstation Mode (`width >= 768px` – tablets, unfolded foldables, Samsung DeX and Android 16+ Desktop Mode):**
+     * **Full VS Code Layout:** Left Activity Bar, collapsible Sidebar, Editor Area with *Split View* support (horizontal/vertical) and resizable Bottom Panel for Terminal/Output.
+     * **Zero-Reload DeX Continuity:** When the phone is connected to an external monitor (Compact → Expanded transition), Zustand state preserves the Monaco instances and calls `fitAddon.fit()` on Xterm.js, sending `PtyPayload::Resize` to the daemon without losing any typed line.
+* **Mobile & Desktop Ergonomics:**
+  1. **Touch Modifier Bar (smart auto-hide):** Compact bar docked just above the virtual keyboard (`visualViewport` API), shown whenever no physical keyboard is detected. Contains precision keys: `ESC`, `TAB`, `CTRL` (sticky), `ALT` (sticky), `{`, `}`, `(`, `)`, `[`, `]`, `:`, `;`, `/`, plus a virtual trackpad/arrow keys with smooth *repeat*.
+  2. **Keyboard Shortcut Interceptor:** Clean capture of `Ctrl+P` (Quick Open), `Ctrl+Shift+P` (Command Palette), `Ctrl+B` (Toggle Sidebar) and ``Ctrl+` `` (Toggle Terminal) in DeX/physical keyboard mode.
+  3. **VM Health Indicator:** Status Bar badge showing Debian VM CPU/RAM usage, WebSocket ping latency (ms) and a quick *Wake/Reconnect* button.
+  4. **Local AI Copilot Provider:** Native Monaco integration (`registerInlineCompletionsProvider`) pointing to a configurable OpenAI-compatible endpoint (e.g. your Intel Arc B580 on the local network/Tailscale running Qwen Coder for zero-cost FIM autocomplete).
 
-## **7\. Plano de Implementação em Fases (Para Execução por Agentes)**
+## 7. Phased Implementation Plan (For Agent Execution)
 
-* **Fase 1 (Fundação & Protocolo):** Inicializar o workspace Cargo, definir todas as structs de mensagens em `crates/avf-protocol` e implementar o servidor `axum` básico em `crates/avf-daemon` com handshake autenticado (`Hello`/`Welcome`/`Rejected`), codificação MessagePack centralizada, ping/pong, telemetria de sistema e operações de arquivo (`VFS`, incluindo `VfsError` e watcher).  
-* **Fase 2 (PTY & Terminal):** Implementar o `PtyManager` com ring buffer no daemon e conectar ao componente `Xterm.js` no front-end, garantindo suporte a cores ANSI, resize dinâmico e reconexão de sessão.  
-* **Fase 3 (Adaptive Workbench, Monaco & VFS):** Construir o shell responsivo (Modo Compacto Mobile vs Modo Expandido Tablet/DeX) e integrar a árvore de arquivos real da VM ao Monaco Editor (múltiplas abas, dirty state, salvar com `Ctrl+S` ou botão na Touch Bar).  
-* **Fase 4 (LSP Bridge):** Implementar o proxy de `stdio` para `Content-Length` no Rust e plugar no `monaco-languageclient` (validar com Python/`basedpyright` e Rust/`rust-analyzer`).  
-* **Fase 5 (Empacotamento Android & Bootstrap):** Configurar o build Android do Tauri v2 (incluindo flags no `AndroidManifest.xml` para suporte a redimensionamento livre no DeX/Desktop Mode: `android:resizeableActivity="true"`) e criar o script `bootstrap-avf.sh` (instala o serviço systemd e gera o token em `~/.config/avf-studio/token`).
-
+* **Phase 1 (Foundation & Protocol):** Initialize the Cargo workspace, define all message structs in `crates/avf-protocol` and implement the basic `axum` server in `crates/avf-daemon` with authenticated handshake (`Hello`/`Welcome`/`Rejected`), centralized MessagePack encoding, ping/pong, system telemetry and file operations (`VFS`, including `VfsError` and the watcher).
+* **Phase 2 (PTY & Terminal):** Implement the `PtyManager` with ring buffer in the daemon and connect it to the `Xterm.js` component in the front-end, ensuring ANSI color support, dynamic resize and session reconnection.
+* **Phase 3 (Adaptive Workbench, Monaco & VFS):** Build the responsive shell (Compact Mobile Mode vs Expanded Tablet/DeX Mode) and integrate the VM's real file tree with the Monaco Editor (multiple tabs, dirty state, save with `Ctrl+S` or Touch Bar button).
+* **Phase 4 (LSP Bridge):** Implement the `stdio` proxy for `Content-Length` in Rust and plug it into `monaco-languageclient` (validate with Python/`basedpyright` and Rust/`rust-analyzer`).
+* **Phase 5 (Android Packaging & Bootstrap):** Configure the Tauri v2 Android build (including `AndroidManifest.xml` flags for free resizing in DeX/Desktop Mode: `android:resizeableActivity="true"`) and create the `bootstrap-avf.sh` script (installs the systemd service and generates the token at `~/.config/avf-studio/token`).
