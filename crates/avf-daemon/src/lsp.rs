@@ -24,10 +24,17 @@ const MAX_HISTORY_SIZE: usize = 1024 * 1024;
 const OUTPUT_CAPACITY: usize = 128;
 const INPUT_CAPACITY: usize = 32;
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 struct ServerCommand {
     program: String,
     args: Vec<String>,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+struct LaunchConfig {
+    command: ServerCommand,
+    cwd: Option<std::path::PathBuf>,
+    env: Vec<(String, String)>,
 }
 
 struct OutputHistory {
@@ -63,6 +70,7 @@ impl OutputHistory {
 struct LspSession {
     generation: u64,
     pid: u32,
+    launch: LaunchConfig,
     command_tx: mpsc::Sender<String>,
     client_count_tx: watch::Sender<usize>,
     output_tx: broadcast::Sender<String>,
@@ -118,36 +126,69 @@ impl LspRouter {
         )
     }
 
+    #[cfg(test)]
     pub(crate) async fn attach(&self, server_id: &str) -> Result<LspAttachment, String> {
-        let command = self
+        self.attach_with(server_id, server_id, Vec::new(), None, Vec::new())
+            .await
+    }
+
+    pub(crate) async fn attach_with(
+        &self,
+        server_id: &str,
+        session_key: &str,
+        extra_args: Vec<String>,
+        cwd: Option<std::path::PathBuf>,
+        env: Vec<(String, String)>,
+    ) -> Result<LspAttachment, String> {
+        let mut command = self
             .servers
             .get(server_id)
             .cloned()
             .ok_or_else(|| format!("unsupported language server: {server_id}"))?;
+        command.args.extend(extra_args);
+        let launch = LaunchConfig { command, cwd, env };
+        let session_key = session_key.to_owned();
         let mut sessions = self.sessions.lock().await;
 
         if sessions
-            .get(server_id)
-            .is_some_and(|session| session.command_tx.is_closed())
+            .get(&session_key)
+            .is_some_and(|session| session.clients == 0)
         {
-            sessions.remove(server_id);
+            sessions.remove(&session_key);
         }
 
-        if !sessions.contains_key(server_id) {
+        if sessions
+            .get(&session_key)
+            .is_some_and(|session| session.command_tx.is_closed())
+        {
+            sessions.remove(&session_key);
+        }
+
+        if let Some(session) = sessions.get(&session_key) {
+            if session.launch != launch {
+                return Err("RPC launch identity collision".into());
+            }
+        }
+
+        if !sessions.contains_key(&session_key) {
             let generation = self.next_generation.fetch_add(1, Ordering::Relaxed);
-            let mut child = Command::new(&command.program)
-                .args(&command.args)
+            let mut command_builder = Command::new(&launch.command.program);
+            command_builder
+                .args(&launch.command.args)
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
-                .kill_on_drop(true)
-                .spawn()
-                .map_err(|error| {
-                    format!(
-                        "could not start language server {server_id} ({}): {error}",
-                        command.program
-                    )
-                })?;
+                .kill_on_drop(true);
+            if let Some(cwd) = &launch.cwd {
+                command_builder.current_dir(cwd);
+            }
+            command_builder.envs(launch.env.iter().map(|(name, value)| (name, value)));
+            let mut child = command_builder.spawn().map_err(|error| {
+                format!(
+                    "could not start language server {server_id} ({}): {error}",
+                    launch.command.program
+                )
+            })?;
             let pid = child
                 .id()
                 .ok_or_else(|| format!("language server {server_id} has no process id"))?;
@@ -168,7 +209,7 @@ impl LspRouter {
             let (client_count_tx, client_count_rx) = watch::channel(1);
             let (output_tx, _) = broadcast::channel(OUTPUT_CAPACITY);
             let history = Arc::new(Mutex::new(OutputHistory::new()));
-            let process_server_id = server_id.to_owned();
+            let process_server_id = session_key.clone();
             let process_history = history.clone();
             let process_output = output_tx.clone();
             let stderr_server_id = server_id.to_owned();
@@ -206,15 +247,16 @@ impl LspRouter {
                 hibernation,
                 ServerCleanup {
                     sessions: Arc::downgrade(&self.sessions),
-                    server_id: server_id.to_owned(),
+                    server_id: session_key.clone(),
                     generation,
                 },
             ));
             sessions.insert(
-                server_id.to_owned(),
+                session_key.clone(),
                 LspSession {
                     generation,
                     pid,
+                    launch,
                     command_tx,
                     client_count_tx,
                     output_tx,
@@ -222,13 +264,13 @@ impl LspRouter {
                     clients: 1,
                 },
             );
-        } else if let Some(session) = sessions.get_mut(server_id) {
+        } else if let Some(session) = sessions.get_mut(&session_key) {
             session.clients += 1;
             session.client_count_tx.send_replace(session.clients);
         }
 
         let session = sessions
-            .get(server_id)
+            .get(&session_key)
             .expect("LSP session was inserted before returning");
         let history_guard = session.history.lock().await;
         let history = history_guard.messages.iter().cloned().collect();
@@ -239,6 +281,12 @@ impl LspRouter {
             pid: session.pid,
             history,
             receiver,
+        })
+    }
+
+    pub(crate) fn command_matches(&self, server_id: &str, command: &[String]) -> bool {
+        self.servers.get(server_id).is_some_and(|server| {
+            command.first() == Some(&server.program) && command[1..] == server.args
         })
     }
 
@@ -302,6 +350,13 @@ fn default_servers() -> HashMap<String, ServerCommand> {
             ServerCommand {
                 program: "basedpyright-langserver".to_owned(),
                 args: vec!["--stdio".to_owned()],
+            },
+        ),
+        (
+            "ruff".to_owned(),
+            ServerCommand {
+                program: "ruff".to_owned(),
+                args: vec!["server".to_owned()],
             },
         ),
         (
@@ -426,7 +481,19 @@ async fn read_server_output<R>(
     }
 }
 
-async fn read_lsp_message<R>(reader: &mut R) -> io::Result<Option<String>>
+pub(crate) async fn read_lsp_message<R>(reader: &mut R) -> io::Result<Option<String>>
+where
+    R: AsyncBufRead + Unpin,
+{
+    let Some(message) = read_content_length_message(reader).await? else {
+        return Ok(None);
+    };
+    validate_json_rpc(&message)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    Ok(Some(message))
+}
+
+pub(crate) async fn read_content_length_message<R>(reader: &mut R) -> io::Result<Option<String>>
 where
     R: AsyncBufRead + Unpin,
 {
@@ -489,14 +556,12 @@ where
     }
     let mut bytes = vec![0; content_length];
     reader.read_exact(&mut bytes).await?;
-    let message = String::from_utf8(bytes)
-        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-    validate_json_rpc(&message)
-        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-    Ok(Some(message))
+    String::from_utf8(bytes)
+        .map(Some)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
 }
 
-async fn write_lsp_message<W>(writer: &mut W, json_rpc: &str) -> io::Result<()>
+pub(crate) async fn write_lsp_message<W>(writer: &mut W, json_rpc: &str) -> io::Result<()>
 where
     W: AsyncWrite + Unpin,
 {
@@ -530,6 +595,14 @@ mod tests {
     use super::*;
     use tokio::io::AsyncReadExt;
 
+    #[test]
+    fn ruff_server_command_is_registered_exactly() {
+        let router = LspRouter::new(Duration::from_secs(1));
+
+        assert!(router.command_matches("ruff", &["ruff".into(), "server".into()]));
+        assert!(!router.command_matches("ruff", &["ruff".into(), "--server".into()]));
+    }
+
     #[tokio::test]
     async fn reads_content_length_frames_and_multibyte_json() {
         let first = r#"{"jsonrpc":"2.0","method":"window/logMessage","params":{"message":"café"}}"#;
@@ -554,7 +627,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn router_forwards_json_rpc_and_hibernates_until_reconnected() {
+    async fn router_restarts_lsp_session_after_all_clients_detach() {
         let router = LspRouter::with_servers(
             Duration::from_secs(2),
             HashMap::from([(
@@ -581,7 +654,8 @@ mod tests {
         assert!(router.has_session("test").await);
 
         let reattached = router.attach("test").await.unwrap();
-        assert!(reattached.history.iter().any(|message| message == request));
+        assert_ne!(reattached.pid, attachment.pid);
+        assert!(reattached.history.is_empty());
         router.stop("test", reattached.generation).await;
         assert!(!router.has_session("test").await);
     }

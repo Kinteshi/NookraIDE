@@ -31,6 +31,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.avfstudio.nativeide.workbench.NativeWorkbench
+import com.avfstudio.nativeide.assets.AssetPackGrammarLoader
 import io.github.rosemoe.sora.event.ContentChangeEvent
 import io.github.rosemoe.sora.langs.textmate.TextMateColorScheme
 import io.github.rosemoe.sora.langs.textmate.TextMateLanguage
@@ -41,6 +43,7 @@ import io.github.rosemoe.sora.langs.textmate.registry.dsl.languages
 import io.github.rosemoe.sora.langs.textmate.registry.provider.FileResolver
 import io.github.rosemoe.sora.widget.CodeEditor
 import org.eclipse.tm4e.core.registry.IThemeSource
+import java.io.File
 import java.io.FileNotFoundException
 import kotlin.math.ceil
 
@@ -49,7 +52,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             MaterialTheme(colorScheme = darkColorScheme()) {
-                NativeEditorLab()
+                NativeWorkbench()
             }
         }
     }
@@ -197,7 +200,7 @@ internal fun buildSampleDocument(lines: Int): String = buildString(lines * 112) 
     }
 }
 
-private object PythonTextMate {
+internal object PythonTextMate {
     @Volatile
     private var initialized = false
 
@@ -215,6 +218,15 @@ private object PythonTextMate {
                 }
             },
         )
+        FileProviderRegistry.getInstance().addFileProvider(
+            FileResolver { path ->
+                val prefix = "asset-packs/"
+                if (!path.startsWith(prefix)) return@FileResolver null
+                val root = File(appContext.filesDir, "asset-packs").canonicalFile
+                val file = File(root, path.removePrefix(prefix)).canonicalFile
+                if (file.path.startsWith(root.path + File.separator) && file.isFile) file.inputStream() else null
+            },
+        )
 
         val definition = languages {
             language("python") {
@@ -223,6 +235,7 @@ private object PythonTextMate {
             }
         }.build()
         GrammarRegistry.getInstance().loadGrammars(definition)
+        AssetPackGrammarLoader.loadInstalled(appContext)
 
         val theme = IThemeSource.fromInputStream(
             appContext.assets.open("textmate/avf-dark.tmTheme.json"),

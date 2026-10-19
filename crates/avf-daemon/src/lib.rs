@@ -1,15 +1,24 @@
 #[cfg(feature = "native-protocol")]
+mod git;
+#[cfg(feature = "native-protocol")]
 mod lsp;
 mod ports;
 mod pty;
+#[cfg(feature = "native-protocol")]
+mod rpc_stdio;
+#[cfg(feature = "native-protocol")]
+mod search;
+#[cfg(feature = "native-protocol")]
+#[allow(dead_code)]
+mod tools;
 mod vfs;
 
 use avf_protocol::{
     decode, encode, FsEventKind, MultiplexedPacket, PtyPayload, RejectReason, SystemMessage,
-    VfsErrorCode, VfsMessage, MAX_FRAME_SIZE, PROTOCOL_VERSION,
+    VfsErrorCode, VfsMessage, MAX_CHUNK_SIZE, MAX_FRAME_SIZE, PROTOCOL_VERSION,
 };
 #[cfg(feature = "native-protocol")]
-use avf_protocol::{RpcKind, RpcMessage};
+use avf_protocol::{GitMessage, RpcKind, RpcMessage, SearchMessage};
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
@@ -30,6 +39,8 @@ use notify::{
 use ports::PortScanner;
 use pty::{PtyEvent, PtyManager};
 use serde::Serialize;
+#[cfg(feature = "native-protocol")]
+use std::hash::{Hash, Hasher};
 use std::{
     collections::{HashMap, HashSet},
     env,
@@ -37,6 +48,7 @@ use std::{
     io,
     net::SocketAddr,
     path::{Path, PathBuf},
+    process::Stdio,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -56,6 +68,24 @@ const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 const OUTBOUND_CAPACITY: usize = 128;
 const WATCH_EVENT_CAPACITY: usize = 128;
 const WATCH_DEBOUNCE: Duration = Duration::from_millis(150);
+const MAX_PENDING_WRITES: usize = 8;
+#[cfg(feature = "native-protocol")]
+const MAX_ACTIVE_SEARCHES: usize = 8;
+#[cfg(feature = "native-protocol")]
+const MAX_ACTIVE_GIT_OPERATIONS: usize = 8;
+
+#[cfg(feature = "native-protocol")]
+type GitPromptAnswers = Arc<Mutex<HashMap<(u64, u64), oneshot::Sender<String>>>>;
+
+#[cfg(feature = "native-protocol")]
+struct GitForwarder {
+    task: tokio::task::JoinHandle<()>,
+}
+
+#[cfg(all(feature = "native-protocol", unix))]
+pub fn git_askpass_helper() -> Result<(), String> {
+    git::run_askpass_helper()
+}
 
 #[derive(Clone)]
 pub struct AppConfig {
@@ -159,6 +189,7 @@ fn default_origins() -> HashSet<String> {
     let mut origins = HashSet::from([
         "http://tauri.localhost".to_owned(),
         "tauri://localhost".to_owned(),
+        "avf-native-android://localhost".to_owned(),
     ]);
     if cfg!(debug_assertions) {
         origins.insert("http://localhost:5173".to_owned());
@@ -173,6 +204,10 @@ struct AppState {
     pty: PtyManager,
     #[cfg(feature = "native-protocol")]
     lsp: LspRouter,
+    #[cfg(feature = "native-protocol")]
+    installed_tools: Arc<HashMap<String, tools::ToolManifest>>,
+    #[cfg(feature = "native-protocol")]
+    tool_registry_home: Option<PathBuf>,
     ports: PortScanner,
     telemetry: Arc<Telemetry>,
 }
@@ -216,9 +251,17 @@ fn app(config: AppConfig) -> io::Result<Router> {
     let vfs = Vfs::new(&config.workspace_roots)?;
     let ports = PortScanner::default();
     ports.start();
+    #[cfg(feature = "native-protocol")]
+    let tool_registry_home = Some(
+        tools::default_home().map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?,
+    );
     let state = AppState {
         #[cfg(feature = "native-protocol")]
         lsp: LspRouter::new(Duration::from_secs(config.lsp_hibernation_secs)),
+        #[cfg(feature = "native-protocol")]
+        installed_tools: Arc::new(HashMap::new()),
+        #[cfg(feature = "native-protocol")]
+        tool_registry_home,
         config: Arc::new(config),
         vfs,
         pty: PtyManager::default(),
@@ -360,11 +403,33 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
             }
         }
     });
+    #[cfg(feature = "native-protocol")]
+    let (search_messages_tx, mut search_messages_rx) = mpsc::channel::<SearchMessage>(128);
+    #[cfg(feature = "native-protocol")]
+    let search_stream_outbound = outbound.clone();
+    #[cfg(feature = "native-protocol")]
+    let mut search_stream_task = tokio::spawn(async move {
+        while let Some(message) = search_messages_rx.recv().await {
+            if send_outbound(&search_stream_outbound, MultiplexedPacket::Search(message))
+                .await
+                .is_err()
+            {
+                break;
+            }
+        }
+    });
     let mut port_events = state.ports.subscribe();
     #[cfg(feature = "native-protocol")]
     let mut rpc_forwarders = HashMap::new();
+    #[cfg(feature = "native-protocol")]
+    let mut search_forwarders = HashMap::<u64, tokio::task::JoinHandle<()>>::new();
+    #[cfg(feature = "native-protocol")]
+    let mut git_forwarders = HashMap::<u64, GitForwarder>::new();
+    #[cfg(feature = "native-protocol")]
+    let git_prompt_answers = Arc::new(Mutex::new(HashMap::new()));
     let mut watches = HashMap::<String, WatchHandle>::new();
     let mut pty_forwarders = HashMap::new();
+    let mut pending_writes = HashMap::<String, vfs::WriteStage>::new();
     for event in state.ports.current().await {
         if send_outbound(&outbound, MultiplexedPacket::System(event))
             .await
@@ -408,8 +473,17 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                             &outbound,
                             &mut watches,
                             &mut pty_forwarders,
+                            &mut pending_writes,
                             #[cfg(feature = "native-protocol")]
                             &mut rpc_forwarders,
+                            #[cfg(feature = "native-protocol")]
+                            &mut search_forwarders,
+                            #[cfg(feature = "native-protocol")]
+                            &search_messages_tx,
+                            #[cfg(feature = "native-protocol")]
+                            &mut git_forwarders,
+                            #[cfg(feature = "native-protocol")]
+                            &git_prompt_answers,
                         )
                         .await
                         .is_err()
@@ -456,10 +530,34 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
     #[cfg(feature = "native-protocol")]
     for (_, forwarder) in rpc_forwarders.drain() {
         forwarder.task.abort();
-        state
-            .lsp
-            .detach(&forwarder.tool, forwarder.generation)
-            .await;
+        if let RpcRoute::Lsp {
+            session_key,
+            generation,
+            ..
+        } = forwarder.route
+        {
+            state.lsp.detach(&session_key, generation).await;
+        }
+    }
+    #[cfg(feature = "native-protocol")]
+    for (_, task) in search_forwarders.drain() {
+        task.abort();
+    }
+    #[cfg(feature = "native-protocol")]
+    for (_, forwarder) in git_forwarders.drain() {
+        forwarder.task.abort();
+    }
+    #[cfg(feature = "native-protocol")]
+    git_prompt_answers.lock().await.clear();
+    #[cfg(feature = "native-protocol")]
+    {
+        drop(search_messages_tx);
+        if timeout(Duration::from_secs(1), &mut search_stream_task)
+            .await
+            .is_err()
+        {
+            search_stream_task.abort();
+        }
     }
     drop(outbound);
     if let Err(error) = timeout(Duration::from_secs(1), &mut writer).await {
@@ -467,18 +565,28 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
     }
 }
 
+#[derive(Debug)]
 enum OutboundFrame {
     Packet(MultiplexedPacket),
     Control(Message),
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn process_packet(
     packet: MultiplexedPacket,
     state: &AppState,
     outbound: &mpsc::Sender<OutboundFrame>,
     watches: &mut HashMap<String, WatchHandle>,
     pty_forwarders: &mut HashMap<uuid::Uuid, (u64, tokio::task::JoinHandle<()>)>,
+    pending_writes: &mut HashMap<String, vfs::WriteStage>,
     #[cfg(feature = "native-protocol")] rpc_forwarders: &mut HashMap<uuid::Uuid, RpcForwarder>,
+    #[cfg(feature = "native-protocol")] search_forwarders: &mut HashMap<
+        u64,
+        tokio::task::JoinHandle<()>,
+    >,
+    #[cfg(feature = "native-protocol")] search_messages_tx: &mpsc::Sender<SearchMessage>,
+    #[cfg(feature = "native-protocol")] git_forwarders: &mut HashMap<u64, GitForwarder>,
+    #[cfg(feature = "native-protocol")] git_prompt_answers: &GitPromptAnswers,
 ) -> Result<(), ()> {
     match packet {
         MultiplexedPacket::System(SystemMessage::Ping { timestamp }) => {
@@ -511,12 +619,26 @@ async fn process_packet(
             };
             send_outbound(outbound, MultiplexedPacket::Vfs(response)).await
         }
-        MultiplexedPacket::Vfs(VfsMessage::ReadFileReq { req_id, path }) => {
-            let response = match state.vfs.read_file(path).await {
-                Ok((content, modified_ts)) => VfsMessage::ReadFileRes {
+        MultiplexedPacket::Vfs(VfsMessage::StatReq { req_id, path }) => {
+            let response = match state.vfs.stat(path).await {
+                Ok(entry) => VfsMessage::StatRes { req_id, entry },
+                Err(error) => vfs_error(req_id, error),
+            };
+            send_outbound(outbound, MultiplexedPacket::Vfs(response)).await
+        }
+        MultiplexedPacket::Vfs(VfsMessage::ReadFileReq {
+            req_id,
+            path,
+            offset,
+            len,
+        }) => {
+            let response = match state.vfs.read_file_range(path, offset, len).await {
+                Ok((content, eof, modified_ts, size)) => VfsMessage::ReadFileRes {
                     req_id,
                     content,
+                    eof,
                     modified_ts,
+                    size,
                 },
                 Err(error) => vfs_error(req_id, error),
             };
@@ -527,15 +649,185 @@ async fn process_packet(
             path,
             content,
             expected_modified_ts,
+            truncate,
+            offset,
         }) => {
-            let response = match state
-                .vfs
-                .write_file(path, content, expected_modified_ts)
-                .await
-            {
-                Ok(modified_ts) => VfsMessage::WriteFileRes {
+            let response = if content.len() > MAX_CHUNK_SIZE {
+                VfsMessage::VfsError {
                     req_id,
-                    modified_ts,
+                    code: VfsErrorCode::TooLarge,
+                    message: "write chunk exceeds the 4 MiB limit".into(),
+                }
+            } else if truncate {
+                if offset != 0 {
+                    VfsMessage::VfsError {
+                        req_id,
+                        code: VfsErrorCode::InvalidPath,
+                        message: "a new chunked write must start at offset zero".into(),
+                    }
+                } else if !pending_writes.contains_key(&path)
+                    && pending_writes.len() >= MAX_PENDING_WRITES
+                {
+                    VfsMessage::VfsError {
+                        req_id,
+                        code: VfsErrorCode::TooLarge,
+                        message: format!(
+                            "connection has reached the {MAX_PENDING_WRITES} pending-write limit"
+                        ),
+                    }
+                } else {
+                    match state
+                        .vfs
+                        .begin_write_stage(path.clone(), expected_modified_ts)
+                        .await
+                    {
+                        Ok(mut stage) => {
+                            match state
+                                .vfs
+                                .append_write_stage(&mut stage, offset, content)
+                                .await
+                            {
+                                Ok(()) => {
+                                    pending_writes.insert(path, stage);
+                                    VfsMessage::Ack {
+                                        req_id,
+                                        modified_ts: None,
+                                        trash_id: None,
+                                    }
+                                }
+                                Err(error) => vfs_error(req_id, error),
+                            }
+                        }
+                        Err(error) => vfs_error(req_id, error),
+                    }
+                }
+            } else {
+                if expected_modified_ts.is_some() {
+                    VfsMessage::VfsError {
+                        req_id,
+                        code: VfsErrorCode::Conflict,
+                        message: "expected_modified_ts is only valid on the first write chunk"
+                            .into(),
+                    }
+                } else {
+                    let result = match pending_writes.get_mut(&path) {
+                        Some(stage) => state.vfs.append_write_stage(stage, offset, content).await,
+                        None => Err(VfsFailure {
+                            code: VfsErrorCode::InvalidPath,
+                            message: "chunked write must begin with truncate=true at offset zero"
+                                .into(),
+                        }),
+                    };
+                    match result {
+                        Ok(()) => VfsMessage::Ack {
+                            req_id,
+                            modified_ts: None,
+                            trash_id: None,
+                        },
+                        Err(error) => {
+                            if error.code != VfsErrorCode::Conflict {
+                                pending_writes.remove(&path);
+                            }
+                            vfs_error(req_id, error)
+                        }
+                    }
+                }
+            };
+            send_outbound(outbound, MultiplexedPacket::Vfs(response)).await
+        }
+        MultiplexedPacket::Vfs(VfsMessage::FlushReq { req_id, path }) => {
+            let response = match pending_writes.remove(&path) {
+                Some(stage) => match state.vfs.flush_write_stage(stage).await {
+                    Ok(modified_ts) => VfsMessage::Ack {
+                        req_id,
+                        modified_ts: Some(modified_ts),
+                        trash_id: None,
+                    },
+                    Err(error) => vfs_error(req_id, error),
+                },
+                None => VfsMessage::VfsError {
+                    req_id,
+                    code: VfsErrorCode::NotFound,
+                    message: "no pending chunked write exists for this path".into(),
+                },
+            };
+            send_outbound(outbound, MultiplexedPacket::Vfs(response)).await
+        }
+        MultiplexedPacket::Vfs(VfsMessage::CreateReq { req_id, path, kind }) => {
+            let response = match state.vfs.create(path, kind).await {
+                Ok(()) => VfsMessage::Ack {
+                    req_id,
+                    modified_ts: None,
+                    trash_id: None,
+                },
+                Err(error) => vfs_error(req_id, error),
+            };
+            send_outbound(outbound, MultiplexedPacket::Vfs(response)).await
+        }
+        MultiplexedPacket::Vfs(VfsMessage::DeleteReq {
+            req_id,
+            path,
+            recursive,
+            to_trash,
+        }) => {
+            let response = match state.vfs.delete(path, recursive, to_trash).await {
+                Ok(trash_id) => VfsMessage::Ack {
+                    req_id,
+                    modified_ts: None,
+                    trash_id,
+                },
+                Err(error) => vfs_error(req_id, error),
+            };
+            send_outbound(outbound, MultiplexedPacket::Vfs(response)).await
+        }
+        MultiplexedPacket::Vfs(VfsMessage::RenameReq {
+            req_id,
+            from,
+            to,
+            overwrite,
+        }) => {
+            let response = match state.vfs.rename(from, to, overwrite).await {
+                Ok(()) => VfsMessage::Ack {
+                    req_id,
+                    modified_ts: None,
+                    trash_id: None,
+                },
+                Err(error) => vfs_error(req_id, error),
+            };
+            send_outbound(outbound, MultiplexedPacket::Vfs(response)).await
+        }
+        MultiplexedPacket::Vfs(VfsMessage::CopyReq {
+            req_id,
+            from,
+            to,
+            overwrite,
+        }) => {
+            let response = match state.vfs.copy(from, to, overwrite).await {
+                Ok(()) => VfsMessage::Ack {
+                    req_id,
+                    modified_ts: None,
+                    trash_id: None,
+                },
+                Err(error) => vfs_error(req_id, error),
+            };
+            send_outbound(outbound, MultiplexedPacket::Vfs(response)).await
+        }
+        MultiplexedPacket::Vfs(VfsMessage::RootsReq { req_id }) => {
+            send_outbound(
+                outbound,
+                MultiplexedPacket::Vfs(VfsMessage::RootsRes {
+                    req_id,
+                    roots: state.vfs.roots().await,
+                }),
+            )
+            .await
+        }
+        MultiplexedPacket::Vfs(VfsMessage::RestoreReq { req_id, trash_id }) => {
+            let response = match state.vfs.restore(trash_id).await {
+                Ok(()) => VfsMessage::Ack {
+                    req_id,
+                    modified_ts: None,
+                    trash_id: None,
                 },
                 Err(error) => vfs_error(req_id, error),
             };
@@ -623,6 +915,21 @@ async fn process_packet(
         MultiplexedPacket::Rpc(message) => {
             process_rpc_message(message, state, outbound, rpc_forwarders).await
         }
+        #[cfg(feature = "native-protocol")]
+        MultiplexedPacket::Search(message) => {
+            process_search_message(
+                message,
+                state,
+                outbound,
+                search_forwarders,
+                search_messages_tx,
+            )
+            .await
+        }
+        #[cfg(feature = "native-protocol")]
+        MultiplexedPacket::Git(message) => {
+            process_git_message(message, state, outbound, git_forwarders, git_prompt_answers).await
+        }
         _ => {
             warn!("client sent a packet type not supported by the daemon");
             let _ = send_protocol_error_outbound(outbound, "packet type is not supported").await;
@@ -633,9 +940,20 @@ async fn process_packet(
 
 #[cfg(feature = "native-protocol")]
 struct RpcForwarder {
-    tool: String,
-    generation: u64,
+    route: RpcRoute,
     task: tokio::task::JoinHandle<()>,
+}
+
+#[cfg(feature = "native-protocol")]
+enum RpcRoute {
+    Lsp {
+        session_key: String,
+        generation: u64,
+    },
+    Direct {
+        kind: RpcKind,
+        input: mpsc::Sender<String>,
+    },
 }
 
 #[cfg(feature = "native-protocol")]
@@ -664,90 +982,183 @@ async fn process_rpc_message(
                 )
                 .await;
             }
-            let unsupported = match kind {
-                RpcKind::Lsp => None,
-                RpcKind::Dap | RpcKind::Acp | RpcKind::Custom => {
-                    Some(format!("{kind:?} bridges are not implemented yet"))
-                }
-            }
-            .or_else(|| (!args.is_empty()).then(|| "tool arguments are not supported yet".into()))
-            .or_else(|| {
-                cwd.is_some()
-                    .then(|| "bridge working directories are not supported yet".into())
-            })
-            .or_else(|| {
-                (!env.is_empty())
-                    .then(|| "bridge environment variables are not supported yet".into())
-            });
+            let unsupported = (kind == RpcKind::Custom)
+                .then(|| "custom RPC bridges are not implemented".to_owned());
             if let Some(message) = unsupported {
                 return send_rpc(outbound, RpcMessage::Error { bridge_id, message }).await;
             }
+            let installed_tools = if let Some(home) = &state.tool_registry_home {
+                let home = home.clone();
+                match tokio::task::spawn_blocking(move || tools::installed_tool_map(&home)).await {
+                    Ok(Ok(tools)) => tools,
+                    Ok(Err(message)) => {
+                        return send_rpc(outbound, RpcMessage::Error { bridge_id, message }).await;
+                    }
+                    Err(error) => {
+                        return send_rpc(
+                            outbound,
+                            RpcMessage::Error {
+                                bridge_id,
+                                message: format!("could not load guest tool registry: {error}"),
+                            },
+                        )
+                        .await;
+                    }
+                }
+            } else {
+                state.installed_tools.as_ref().clone()
+            };
+            let Some(manifest) = installed_tools.get(&tool) else {
+                return send_rpc(
+                    outbound,
+                    RpcMessage::Error {
+                        bridge_id,
+                        message: format!("tool '{tool}' is not installed in the guest registry"),
+                    },
+                )
+                .await;
+            };
+            let (cwd, env) =
+                match validate_rpc_launch_options(&state.vfs, manifest, &args, cwd, env) {
+                    Ok(options) => options,
+                    Err(message) => {
+                        return send_rpc(outbound, RpcMessage::Error { bridge_id, message }).await;
+                    }
+                };
+            if kind == RpcKind::Lsp {
+                if manifest.kind != "lsp" || !state.lsp.command_matches(&tool, &manifest.command) {
+                    return send_rpc(
+                        outbound,
+                        RpcMessage::Error {
+                            bridge_id,
+                            message: format!(
+                                "tool '{tool}' is not registered as a supported LSP server"
+                            ),
+                        },
+                    )
+                    .await;
+                }
+                let session_key = lsp_session_key(&tool, &args, &cwd, &env);
+                let attachment = match state
+                    .lsp
+                    .attach_with(&tool, &session_key, args, cwd, env)
+                    .await
+                {
+                    Ok(attachment) => attachment,
+                    Err(message) => {
+                        return send_rpc(outbound, RpcMessage::Error { bridge_id, message }).await;
+                    }
+                };
+                let generation = attachment.generation;
+                if send_rpc(
+                    outbound,
+                    RpcMessage::Started {
+                        bridge_id,
+                        pid: attachment.pid,
+                    },
+                )
+                .await
+                .is_err()
+                {
+                    state.lsp.detach(&session_key, generation).await;
+                    return Err(());
+                }
+                for body in attachment.history {
+                    if send_rpc(outbound, RpcMessage::Message { bridge_id, body })
+                        .await
+                        .is_err()
+                    {
+                        state.lsp.detach(&session_key, generation).await;
+                        return Err(());
+                    }
+                }
 
-            let attachment = match state.lsp.attach(&tool).await {
-                Ok(attachment) => attachment,
+                let mut receiver = attachment.receiver;
+                let task_outbound = outbound.clone();
+                let task = tokio::spawn(async move {
+                    loop {
+                        match receiver.recv().await {
+                            Ok(body) => {
+                                if send_rpc(&task_outbound, RpcMessage::Message { bridge_id, body })
+                                    .await
+                                    .is_err()
+                                {
+                                    break;
+                                }
+                            }
+                            Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                                warn!(%bridge_id, skipped, "websocket missed RPC bridge messages");
+                            }
+                            Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                                let _ = send_rpc(
+                                    &task_outbound,
+                                    RpcMessage::Exited {
+                                        bridge_id,
+                                        code: None,
+                                    },
+                                )
+                                .await;
+                                break;
+                            }
+                        }
+                    }
+                });
+                forwarders.insert(
+                    bridge_id,
+                    RpcForwarder {
+                        route: RpcRoute::Lsp {
+                            session_key,
+                            generation,
+                        },
+                        task,
+                    },
+                );
+                return Ok(());
+            }
+
+            let expected_manifest_kind = match kind {
+                RpcKind::Dap => "dap",
+                RpcKind::Acp => "acp-agent",
+                RpcKind::Lsp | RpcKind::Custom => unreachable!("handled above"),
+            };
+            if manifest.kind != expected_manifest_kind {
+                return send_rpc(
+                    outbound,
+                    RpcMessage::Error {
+                        bridge_id,
+                        message: format!("tool '{tool}' is not registered for {kind:?} bridges"),
+                    },
+                )
+                .await;
+            }
+            let (pid, input, task, start_gate) = match start_direct_rpc_bridge(
+                &manifest.command,
+                &args,
+                cwd,
+                env,
+                kind,
+                bridge_id,
+                outbound,
+            )
+            .await
+            {
+                Ok(bridge) => bridge,
                 Err(message) => {
                     return send_rpc(outbound, RpcMessage::Error { bridge_id, message }).await;
                 }
             };
-            let generation = attachment.generation;
-            if send_rpc(
-                outbound,
-                RpcMessage::Started {
-                    bridge_id,
-                    pid: attachment.pid,
-                },
-            )
-            .await
-            .is_err()
+            if send_rpc(outbound, RpcMessage::Started { bridge_id, pid })
+                .await
+                .is_err()
             {
-                state.lsp.detach(&tool, generation).await;
+                task.abort();
                 return Err(());
             }
-            for body in attachment.history {
-                if send_rpc(outbound, RpcMessage::Message { bridge_id, body })
-                    .await
-                    .is_err()
-                {
-                    state.lsp.detach(&tool, generation).await;
-                    return Err(());
-                }
-            }
-
-            let mut receiver = attachment.receiver;
-            let task_outbound = outbound.clone();
-            let task = tokio::spawn(async move {
-                loop {
-                    match receiver.recv().await {
-                        Ok(body) => {
-                            if send_rpc(&task_outbound, RpcMessage::Message { bridge_id, body })
-                                .await
-                                .is_err()
-                            {
-                                break;
-                            }
-                        }
-                        Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                            warn!(%bridge_id, skipped, "websocket missed RPC bridge messages");
-                        }
-                        Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                            let _ = send_rpc(
-                                &task_outbound,
-                                RpcMessage::Exited {
-                                    bridge_id,
-                                    code: None,
-                                },
-                            )
-                            .await;
-                            break;
-                        }
-                    }
-                }
-            });
+            let _ = start_gate.send(());
             forwarders.insert(
                 bridge_id,
                 RpcForwarder {
-                    tool,
-                    generation,
+                    route: RpcRoute::Direct { kind, input },
                     task,
                 },
             );
@@ -764,7 +1175,20 @@ async fn process_rpc_message(
                 )
                 .await;
             };
-            match state.lsp.send(&forwarder.tool, body).await {
+            let result = match &forwarder.route {
+                RpcRoute::Lsp { session_key, .. } => state.lsp.send(session_key, body).await,
+                RpcRoute::Direct { kind, input } => {
+                    rpc_stdio::validate(*kind, &body).and_then(|()| {
+                        input.try_send(body).map_err(|error| match error {
+                            mpsc::error::TrySendError::Full(_) => {
+                                "RPC bridge input queue is full".into()
+                            }
+                            mpsc::error::TrySendError::Closed(_) => "RPC bridge has exited".into(),
+                        })
+                    })
+                }
+            };
+            match result {
                 Ok(()) => Ok(()),
                 Err(message) => send_rpc(outbound, RpcMessage::Error { bridge_id, message }).await,
             }
@@ -772,7 +1196,14 @@ async fn process_rpc_message(
         RpcMessage::Stop { bridge_id } => match forwarders.remove(&bridge_id) {
             Some(forwarder) => {
                 forwarder.task.abort();
-                state.lsp.stop(&forwarder.tool, forwarder.generation).await;
+                if let RpcRoute::Lsp {
+                    session_key,
+                    generation,
+                    ..
+                } = forwarder.route
+                {
+                    state.lsp.stop(&session_key, generation).await;
+                }
                 send_rpc(
                     outbound,
                     RpcMessage::Exited {
@@ -809,8 +1240,421 @@ async fn process_rpc_message(
 }
 
 #[cfg(feature = "native-protocol")]
+async fn start_direct_rpc_bridge(
+    command: &[String],
+    extra_args: &[String],
+    cwd: Option<PathBuf>,
+    env: Vec<(String, String)>,
+    kind: RpcKind,
+    bridge_id: uuid::Uuid,
+    outbound: &mpsc::Sender<OutboundFrame>,
+) -> Result<
+    (
+        u32,
+        mpsc::Sender<String>,
+        tokio::task::JoinHandle<()>,
+        oneshot::Sender<()>,
+    ),
+    String,
+> {
+    let Some((program, command_args)) = command.split_first() else {
+        return Err("tool manifest has an empty command".into());
+    };
+    let mut process_command = tokio::process::Command::new(program);
+    process_command
+        .args(command_args)
+        .args(extra_args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true);
+    if let Some(cwd) = cwd {
+        process_command.current_dir(cwd);
+    }
+    let mut child = process_command
+        .envs(env)
+        .spawn()
+        .map_err(|error| format!("could not start RPC tool {program}: {error}"))?;
+    let pid = child
+        .id()
+        .ok_or_else(|| format!("RPC tool {program} has no process id"))?;
+    let stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| format!("RPC tool {program} has no stdin pipe"))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| format!("RPC tool {program} has no stdout pipe"))?;
+    let (input, mut input_rx) = mpsc::channel::<String>(32);
+    let (start_tx, start_rx) = oneshot::channel();
+    let task_outbound = outbound.clone();
+    let task = tokio::spawn(async move {
+        if start_rx.await.is_err() {
+            return;
+        }
+        let writer_outbound = task_outbound.clone();
+        let writer = tokio::spawn(async move {
+            let mut stdin = stdin;
+            while let Some(body) = input_rx.recv().await {
+                if let Err(error) = rpc_stdio::write(kind, &mut stdin, &body).await {
+                    let _ = send_rpc(
+                        &writer_outbound,
+                        RpcMessage::Error {
+                            bridge_id,
+                            message: format!("RPC bridge write failed: {error}"),
+                        },
+                    )
+                    .await;
+                    break;
+                }
+            }
+        });
+        let reader_outbound = task_outbound.clone();
+        let reader = tokio::spawn(async move {
+            let mut stdout = tokio::io::BufReader::new(stdout);
+            loop {
+                match rpc_stdio::read(kind, &mut stdout).await {
+                    Ok(Some(body)) => {
+                        if send_rpc(&reader_outbound, RpcMessage::Message { bridge_id, body })
+                            .await
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                    Ok(None) => break,
+                    Err(error) => {
+                        let _ = send_rpc(
+                            &reader_outbound,
+                            RpcMessage::Error {
+                                bridge_id,
+                                message: format!("RPC bridge read failed: {error}"),
+                            },
+                        )
+                        .await;
+                        break;
+                    }
+                }
+            }
+        });
+        let exit = child.wait().await;
+        writer.abort();
+        let _ = reader.await;
+        let code = match exit {
+            Ok(status) => status.code(),
+            Err(error) => {
+                let _ = send_rpc(
+                    &task_outbound,
+                    RpcMessage::Error {
+                        bridge_id,
+                        message: format!("RPC tool wait failed: {error}"),
+                    },
+                )
+                .await;
+                None
+            }
+        };
+        let _ = send_rpc(&task_outbound, RpcMessage::Exited { bridge_id, code }).await;
+    });
+    Ok((pid, input, task, start_tx))
+}
+
+#[cfg(feature = "native-protocol")]
 async fn send_rpc(outbound: &mpsc::Sender<OutboundFrame>, message: RpcMessage) -> Result<(), ()> {
     send_outbound(outbound, MultiplexedPacket::Rpc(message)).await
+}
+
+#[cfg(feature = "native-protocol")]
+async fn process_search_message(
+    message: SearchMessage,
+    state: &AppState,
+    outbound: &mpsc::Sender<OutboundFrame>,
+    tasks: &mut HashMap<u64, tokio::task::JoinHandle<()>>,
+    search_messages: &mpsc::Sender<SearchMessage>,
+) -> Result<(), ()> {
+    match message {
+        start @ SearchMessage::StartReq { req_id, .. } => {
+            tasks.retain(|_, task| !task.is_finished());
+            if tasks.contains_key(&req_id) {
+                return send_outbound(
+                    outbound,
+                    MultiplexedPacket::Search(SearchMessage::Error {
+                        req_id,
+                        message: "search request id is already active".into(),
+                    }),
+                )
+                .await;
+            }
+            if tasks.len() >= MAX_ACTIVE_SEARCHES {
+                return send_outbound(
+                    outbound,
+                    MultiplexedPacket::Search(SearchMessage::Error {
+                        req_id,
+                        message: format!(
+                            "at most {MAX_ACTIVE_SEARCHES} search requests may run concurrently"
+                        ),
+                    }),
+                )
+                .await;
+            }
+            match search::start(state.vfs.clone(), start, search_messages.clone()) {
+                Ok((task_id, task)) => {
+                    tasks.insert(task_id, task);
+                    Ok(())
+                }
+                Err(message) => {
+                    send_outbound(
+                        outbound,
+                        MultiplexedPacket::Search(SearchMessage::Error { req_id, message }),
+                    )
+                    .await
+                }
+            }
+        }
+        SearchMessage::Cancel { req_id } => match tasks.remove(&req_id) {
+            Some(task) => {
+                task.abort();
+                send_outbound(
+                    outbound,
+                    MultiplexedPacket::Search(SearchMessage::Done {
+                        req_id,
+                        total: 0,
+                        truncated: true,
+                        elapsed_ms: 0,
+                    }),
+                )
+                .await
+            }
+            None => {
+                send_outbound(
+                    outbound,
+                    MultiplexedPacket::Search(SearchMessage::Error {
+                        req_id,
+                        message: "search request is not active".into(),
+                    }),
+                )
+                .await
+            }
+        },
+        SearchMessage::Match { req_id, .. }
+        | SearchMessage::Done { req_id, .. }
+        | SearchMessage::Error { req_id, .. } => {
+            send_outbound(
+                outbound,
+                MultiplexedPacket::Search(SearchMessage::Error {
+                    req_id,
+                    message: "client sent a daemon-only search message".into(),
+                }),
+            )
+            .await
+        }
+    }
+}
+
+#[cfg(feature = "native-protocol")]
+async fn process_git_message(
+    message: GitMessage,
+    state: &AppState,
+    outbound: &mpsc::Sender<OutboundFrame>,
+    forwarders: &mut HashMap<u64, GitForwarder>,
+    prompt_answers: &GitPromptAnswers,
+) -> Result<(), ()> {
+    match message {
+        GitMessage::Req { req_id, repo, op } => {
+            forwarders.retain(|_, forwarder| !forwarder.task.is_finished());
+            if forwarders.contains_key(&req_id) {
+                return send_outbound(
+                    outbound,
+                    MultiplexedPacket::Git(GitMessage::Error {
+                        req_id,
+                        message: "Git request ID is already active".into(),
+                    }),
+                )
+                .await;
+            }
+            if forwarders.len() >= MAX_ACTIVE_GIT_OPERATIONS {
+                return send_outbound(
+                    outbound,
+                    MultiplexedPacket::Git(GitMessage::Error {
+                        req_id,
+                        message: "too many active Git operations".into(),
+                    }),
+                )
+                .await;
+            }
+
+            let network_operation = matches!(
+                &op,
+                avf_protocol::GitOp::Fetch
+                    | avf_protocol::GitOp::Pull { .. }
+                    | avf_protocol::GitOp::Push { .. }
+                    | avf_protocol::GitOp::Clone { .. }
+            );
+            let state_vfs = state.vfs.clone();
+            let repository = repo.clone();
+            let outbound = outbound.clone();
+            let answers = prompt_answers.clone();
+            let task = tokio::spawn(async move {
+                let (prompt_tx, mut prompt_rx) = mpsc::channel(4);
+                if network_operation
+                    && send_outbound(
+                        &outbound,
+                        MultiplexedPacket::Git(GitMessage::Progress {
+                            req_id,
+                            phase: "starting".into(),
+                            percent: Some(0),
+                            detail: "Starting Git network operation".into(),
+                        }),
+                    )
+                    .await
+                    .is_err()
+                {
+                    return;
+                }
+
+                let operation = async {
+                    if network_operation {
+                        git::execute_network(&state_vfs, &repository, op, prompt_tx).await
+                    } else {
+                        git::execute(&state_vfs, &repository, op).await
+                    }
+                };
+                tokio::pin!(operation);
+                let result = loop {
+                    tokio::select! {
+                        result = &mut operation => break result,
+                        prompt = prompt_rx.recv(), if network_operation => {
+                            let Some(prompt) = prompt else { continue };
+                            let prompt_id = prompt.prompt_id;
+                            answers
+                                .lock()
+                                .await
+                                .insert((req_id, prompt_id), prompt.answer);
+                            if send_outbound(
+                                &outbound,
+                                MultiplexedPacket::Git(GitMessage::Prompt {
+                                    req_id,
+                                    prompt_id,
+                                    text: prompt.text,
+                                    secret: prompt.secret,
+                                }),
+                            )
+                            .await
+                            .is_err()
+                            {
+                                return;
+                            }
+                        }
+                    }
+                };
+
+                answers
+                    .lock()
+                    .await
+                    .retain(|(active_req_id, _), _| *active_req_id != req_id);
+                let result = match result {
+                    Ok(result) => {
+                        if let avf_protocol::GitResult::Status { entries, .. } = &result {
+                            if let Err(error) =
+                                state_vfs.cache_git_status(&repository, entries).await
+                            {
+                                let _ = send_outbound(
+                                    &outbound,
+                                    MultiplexedPacket::Git(GitMessage::Error {
+                                        req_id,
+                                        message: format!(
+                                            "Git status succeeded but its VFS metadata could not be refreshed: {}",
+                                            error.message
+                                        ),
+                                    }),
+                                )
+                                .await;
+                                return;
+                            }
+                        }
+                        if network_operation {
+                            let _ = send_outbound(
+                                &outbound,
+                                MultiplexedPacket::Git(GitMessage::Progress {
+                                    req_id,
+                                    phase: "complete".into(),
+                                    percent: Some(100),
+                                    detail: "Git network operation complete".into(),
+                                }),
+                            )
+                            .await;
+                        }
+                        GitMessage::Res { req_id, result }
+                    }
+                    Err(message) => GitMessage::Error { req_id, message },
+                };
+                let _ = send_outbound(&outbound, MultiplexedPacket::Git(result)).await;
+            });
+            forwarders.insert(req_id, GitForwarder { task });
+            Ok(())
+        }
+        GitMessage::PromptAnswer {
+            req_id,
+            prompt_id,
+            answer,
+        } => {
+            if answer.len() > 64 * 1024
+                || answer
+                    .bytes()
+                    .any(|byte| matches!(byte, b'\0' | b'\r' | b'\n'))
+            {
+                return send_outbound(
+                    outbound,
+                    MultiplexedPacket::Git(GitMessage::Error {
+                        req_id,
+                        message: "Git credential answer is invalid or too long".into(),
+                    }),
+                )
+                .await;
+            }
+            let sender = prompt_answers.lock().await.remove(&(req_id, prompt_id));
+            match sender {
+                Some(sender) => {
+                    if sender.send(answer).is_ok() {
+                        Ok(())
+                    } else {
+                        send_outbound(
+                            outbound,
+                            MultiplexedPacket::Git(GitMessage::Error {
+                                req_id,
+                                message: "Git prompt is no longer active".into(),
+                            }),
+                        )
+                        .await
+                    }
+                }
+                None => {
+                    send_outbound(
+                        outbound,
+                        MultiplexedPacket::Git(GitMessage::Error {
+                            req_id,
+                            message: "Git prompt is no longer active".into(),
+                        }),
+                    )
+                    .await
+                }
+            }
+        }
+        GitMessage::Res { req_id, .. }
+        | GitMessage::Progress { req_id, .. }
+        | GitMessage::Prompt { req_id, .. }
+        | GitMessage::Error { req_id, .. } => {
+            send_outbound(
+                outbound,
+                MultiplexedPacket::Git(GitMessage::Error {
+                    req_id,
+                    message: "client sent a daemon-only Git message".into(),
+                }),
+            )
+            .await
+        }
+    }
 }
 
 async fn send_pty_payload(
@@ -884,6 +1728,91 @@ fn vfs_error(req_id: u64, error: VfsFailure) -> VfsMessage {
         code: error.code,
         message: error.message,
     }
+}
+
+#[cfg(feature = "native-protocol")]
+type RpcLaunchOptions = (Option<PathBuf>, Vec<(String, String)>);
+
+#[cfg(feature = "native-protocol")]
+fn validate_rpc_launch_options(
+    vfs: &Vfs,
+    manifest: &tools::ToolManifest,
+    args: &[String],
+    cwd: Option<String>,
+    env: Vec<(String, String)>,
+) -> Result<RpcLaunchOptions, String> {
+    const MAX_ARGS: usize = 128;
+    const MAX_ARGUMENT_BYTES: usize = 16 * 1024;
+    const MAX_ENV_VARIABLES: usize = 32;
+    const MAX_ENV_VALUE_BYTES: usize = 64 * 1024;
+
+    let argument_size = args.iter().try_fold(0usize, |size, argument| {
+        if argument.contains('\0') {
+            return None;
+        }
+        size.checked_add(argument.len())
+    });
+    if args.len() > MAX_ARGS || argument_size.is_none_or(|size| size > MAX_ARGUMENT_BYTES) {
+        return Err("RPC launch arguments exceed the permitted limits".into());
+    }
+
+    let cwd = cwd
+        .map(|cwd| -> Result<PathBuf, String> {
+            let resolved = vfs.resolve(&cwd).map_err(|error| {
+                format!(
+                    "RPC working directory is outside the VFS: {}",
+                    error.message
+                )
+            })?;
+            let canonical = std::fs::canonicalize(&resolved.absolute)
+                .map_err(|error| format!("cannot resolve RPC working directory: {error}"))?;
+            if canonical != resolved.absolute || !canonical.is_dir() {
+                return Err(
+                    "RPC working directory must be an existing, non-symlink directory".into(),
+                );
+            }
+            Ok(canonical)
+        })
+        .transpose()?;
+
+    if env.len() > MAX_ENV_VARIABLES {
+        return Err(format!(
+            "at most {MAX_ENV_VARIABLES} RPC environment variables are allowed"
+        ));
+    }
+    let mut seen = HashSet::with_capacity(env.len());
+    for (name, value) in &env {
+        if !manifest.env_allowlist.iter().any(|allowed| allowed == name) {
+            return Err(format!(
+                "environment variable '{name}' is not allowed by tool '{}'",
+                manifest.name
+            ));
+        }
+        if !seen.insert(name) {
+            return Err(format!("duplicate RPC environment variable '{name}'"));
+        }
+        if value.len() > MAX_ENV_VALUE_BYTES || value.contains('\0') {
+            return Err(format!(
+                "invalid value for RPC environment variable '{name}'"
+            ));
+        }
+    }
+    Ok((cwd, env))
+}
+
+#[cfg(feature = "native-protocol")]
+fn lsp_session_key(
+    tool: &str,
+    args: &[String],
+    cwd: &Option<PathBuf>,
+    env: &[(String, String)],
+) -> String {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    tool.hash(&mut hasher);
+    args.hash(&mut hasher);
+    cwd.hash(&mut hasher);
+    env.hash(&mut hasher);
+    format!("{tool}:{:016x}", hasher.finish())
 }
 
 async fn send_outbound(
@@ -1002,6 +1931,7 @@ async fn start_watch(
         })?;
     let (cancel_sender, cancel_receiver) = oneshot::channel();
     tokio::spawn(watch_events(
+        vfs.clone(),
         path.to_string_lossy().into_owned(),
         event_receiver,
         overflow,
@@ -1018,12 +1948,15 @@ async fn start_watch(
 }
 
 async fn watch_events(
+    vfs: Vfs,
     watch_path: String,
     mut events: mpsc::Receiver<notify::Result<Event>>,
     overflow: Arc<AtomicBool>,
     outbound: mpsc::Sender<OutboundFrame>,
     mut cancel: oneshot::Receiver<()>,
 ) {
+    #[cfg(not(feature = "native-protocol"))]
+    let _ = &vfs;
     let root = PathBuf::from(&watch_path);
     let mut debounce = interval(WATCH_DEBOUNCE);
     debounce.tick().await;
@@ -1036,6 +1969,8 @@ async fn watch_events(
                 if overflow.swap(false, Ordering::AcqRel) {
                     pending.clear();
                     pending_renames.clear();
+                    #[cfg(feature = "native-protocol")]
+                    refresh_watched_git_status(&vfs, std::slice::from_ref(&watch_path)).await;
                     if send_watch_event(&outbound, FsEventKind::Rescan, vec![watch_path.clone()]).await.is_err() {
                         break;
                     }
@@ -1043,11 +1978,15 @@ async fn watch_events(
                     for (kind, paths) in pending.drain() {
                         let mut paths = paths.into_iter().collect::<Vec<_>>();
                         paths.sort();
+                        #[cfg(feature = "native-protocol")]
+                        refresh_watched_git_status(&vfs, &paths).await;
                         if send_watch_event(&outbound, kind, paths).await.is_err() {
                             return;
                         }
                     }
                     for paths in pending_renames.drain(..) {
+                        #[cfg(feature = "native-protocol")]
+                        refresh_watched_git_status(&vfs, &paths).await;
                         if send_watch_event(&outbound, FsEventKind::Rename, paths).await.is_err() {
                             return;
                         }
@@ -1090,6 +2029,13 @@ async fn watch_events(
                 }
             }
         }
+    }
+}
+
+#[cfg(feature = "native-protocol")]
+async fn refresh_watched_git_status(vfs: &Vfs, paths: &[String]) {
+    if let Err(error) = git::refresh_status_for_paths(vfs, paths).await {
+        warn!(%error, "could not refresh Git file metadata after filesystem event");
     }
 }
 
@@ -1216,13 +2162,117 @@ mod tests {
     use super::*;
     use avf_protocol::{decode, encode, MultiplexedPacket, PtyPayload, SystemMessage, VfsMessage};
     #[cfg(feature = "native-protocol")]
-    use avf_protocol::{RpcKind, RpcMessage};
+    use avf_protocol::{GitMessage, GitOp, RpcKind, RpcMessage, SearchMessage};
     use axum::http::HeaderValue;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio_tungstenite::tungstenite::{
         client::IntoClientRequest, http::header::ORIGIN as WS_ORIGIN,
         protocol::Message as WsMessage,
     };
+    use tokio_tungstenite::WebSocketStream;
+
+    async fn next_vfs_response<S>(socket: &mut WebSocketStream<S>, req_id: u64) -> VfsMessage
+    where
+        S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+    {
+        timeout(Duration::from_secs(3), async {
+            loop {
+                let Some(Ok(WsMessage::Binary(bytes))) = socket.next().await else {
+                    continue;
+                };
+                let MultiplexedPacket::Vfs(message) = decode(&bytes).unwrap() else {
+                    continue;
+                };
+                let received_id = match &message {
+                    VfsMessage::ListDirRes { req_id, .. }
+                    | VfsMessage::StatRes { req_id, .. }
+                    | VfsMessage::ReadFileRes { req_id, .. }
+                    | VfsMessage::Ack { req_id, .. }
+                    | VfsMessage::RootsRes { req_id, .. }
+                    | VfsMessage::WatchRes { req_id }
+                    | VfsMessage::VfsError { req_id, .. } => *req_id,
+                    VfsMessage::FsEvent { .. }
+                    | VfsMessage::ListDirReq { .. }
+                    | VfsMessage::StatReq { .. }
+                    | VfsMessage::ReadFileReq { .. }
+                    | VfsMessage::WriteFileReq { .. }
+                    | VfsMessage::FlushReq { .. }
+                    | VfsMessage::CreateReq { .. }
+                    | VfsMessage::DeleteReq { .. }
+                    | VfsMessage::RenameReq { .. }
+                    | VfsMessage::CopyReq { .. }
+                    | VfsMessage::RootsReq { .. }
+                    | VfsMessage::RestoreReq { .. }
+                    | VfsMessage::WatchReq { .. }
+                    | VfsMessage::UnwatchReq { .. } => continue,
+                };
+                if received_id == req_id {
+                    break message;
+                }
+            }
+        })
+        .await
+        .expect("timed out waiting for VFS response")
+    }
+
+    #[cfg(feature = "native-protocol")]
+    async fn next_search_message<S>(socket: &mut WebSocketStream<S>, req_id: u64) -> SearchMessage
+    where
+        S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+    {
+        timeout(Duration::from_secs(3), async {
+            loop {
+                let Some(Ok(WsMessage::Binary(bytes))) = socket.next().await else {
+                    continue;
+                };
+                let MultiplexedPacket::Search(message) = decode(&bytes).unwrap() else {
+                    continue;
+                };
+                let received_id = match &message {
+                    SearchMessage::StartReq { req_id, .. }
+                    | SearchMessage::Cancel { req_id }
+                    | SearchMessage::Match { req_id, .. }
+                    | SearchMessage::Done { req_id, .. }
+                    | SearchMessage::Error { req_id, .. } => *req_id,
+                };
+                if received_id == req_id {
+                    break message;
+                }
+            }
+        })
+        .await
+        .expect("timed out waiting for search response")
+    }
+
+    #[cfg(feature = "native-protocol")]
+    async fn next_git_message<S>(socket: &mut WebSocketStream<S>, req_id: u64) -> GitMessage
+    where
+        S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+    {
+        timeout(Duration::from_secs(5), async {
+            loop {
+                let Some(Ok(WsMessage::Binary(bytes))) = socket.next().await else {
+                    continue;
+                };
+                let MultiplexedPacket::Git(message) = decode(&bytes).unwrap() else {
+                    continue;
+                };
+                let received_id = match &message {
+                    GitMessage::Req { req_id, .. }
+                    | GitMessage::Res { req_id, .. }
+                    | GitMessage::Progress { req_id, .. }
+                    | GitMessage::Prompt { req_id, .. }
+                    | GitMessage::PromptAnswer { req_id, .. }
+                    | GitMessage::Error { req_id, .. } => *req_id,
+                };
+                if received_id == req_id {
+                    break message;
+                }
+            }
+        })
+        .await
+        .expect("timed out waiting for Git response")
+    }
 
     #[test]
     fn parses_cpu_and_memory_proc_data() {
@@ -1293,6 +2343,21 @@ mod tests {
             vfs: Vfs::new(std::slice::from_ref(&project)).unwrap(),
             pty: PtyManager::default(),
             lsp: LspRouter::test_router(Duration::from_secs(30), "test", "cat", Vec::new()),
+            installed_tools: Arc::new(HashMap::from([
+                (
+                    "test".to_owned(),
+                    test_tool_manifest("test", "lsp", vec!["cat".into()]),
+                ),
+                (
+                    "test-dap".to_owned(),
+                    test_tool_manifest("test-dap", "dap", vec!["cat".into()]),
+                ),
+                (
+                    "test-acp".to_owned(),
+                    test_tool_manifest("test-acp", "acp-agent", vec!["cat".into()]),
+                ),
+            ])),
+            tool_registry_home: None,
             ports: PortScanner::default(),
             telemetry: Arc::new(Telemetry::default()),
         };
@@ -1306,8 +2371,8 @@ mod tests {
                 tool: "test".into(),
                 kind: RpcKind::Lsp,
                 args: Vec::new(),
-                cwd: None,
-                env: Vec::new(),
+                cwd: Some(project.to_string_lossy().into_owned()),
+                env: vec![("TEST_ALLOWED".into(), "value".into())],
             },
             &state,
             &outbound,
@@ -1335,16 +2400,20 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(matches!(
-            timeout(Duration::from_secs(1), received.recv())
-                .await
-                .unwrap()
-                .unwrap(),
-            OutboundFrame::Packet(MultiplexedPacket::Rpc(RpcMessage::Message {
-                bridge_id: received_id,
-                body: received_body,
-            })) if received_id == bridge_id && received_body == body
-        ));
+        let response = timeout(Duration::from_secs(1), received.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(
+                &response,
+                OutboundFrame::Packet(MultiplexedPacket::Rpc(RpcMessage::Message {
+                    bridge_id: received_id,
+                    body: received_body,
+                })) if *received_id == bridge_id && received_body == body
+            ),
+            "unexpected LSP response: {response:?}"
+        );
 
         process_rpc_message(
             RpcMessage::Message {
@@ -1380,6 +2449,89 @@ mod tests {
                 code: None,
             })) if received_id == bridge_id
         ));
+
+        for (tool, kind, args, cwd, env, body) in [
+            (
+                "test-dap",
+                RpcKind::Dap,
+                vec!["-".into()],
+                Some(project.to_string_lossy().into_owned()),
+                vec![("TEST_ALLOWED".into(), "value".into())],
+                r#"{"seq":1,"type":"request","command":"initialize"}"#,
+            ),
+            (
+                "test-acp",
+                RpcKind::Acp,
+                Vec::new(),
+                None,
+                Vec::new(),
+                r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#,
+            ),
+        ] {
+            let bridge_id = uuid::Uuid::new_v4();
+            process_rpc_message(
+                RpcMessage::Start {
+                    bridge_id,
+                    tool: tool.into(),
+                    kind,
+                    args,
+                    cwd,
+                    env,
+                },
+                &state,
+                &outbound,
+                &mut forwarders,
+            )
+            .await
+            .unwrap();
+            assert!(matches!(
+                received.recv().await.unwrap(),
+                OutboundFrame::Packet(MultiplexedPacket::Rpc(RpcMessage::Started {
+                    bridge_id: received_id,
+                    pid,
+                })) if received_id == bridge_id && pid > 0
+            ));
+            process_rpc_message(
+                RpcMessage::Message {
+                    bridge_id,
+                    body: body.into(),
+                },
+                &state,
+                &outbound,
+                &mut forwarders,
+            )
+            .await
+            .unwrap();
+            let response = timeout(Duration::from_secs(1), received.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(
+                matches!(
+                    &response,
+                    OutboundFrame::Packet(MultiplexedPacket::Rpc(RpcMessage::Message {
+                        bridge_id: received_id,
+                        body: received_body,
+                    })) if *received_id == bridge_id && received_body == body
+                ),
+                "unexpected direct RPC response: {response:?}"
+            );
+            process_rpc_message(
+                RpcMessage::Stop { bridge_id },
+                &state,
+                &outbound,
+                &mut forwarders,
+            )
+            .await
+            .unwrap();
+            assert!(matches!(
+                received.recv().await.unwrap(),
+                OutboundFrame::Packet(MultiplexedPacket::Rpc(RpcMessage::Exited {
+                    bridge_id: received_id,
+                    code: None,
+                })) if received_id == bridge_id
+            ));
+        }
 
         let rejected_id = uuid::Uuid::new_v4();
         process_rpc_message(
@@ -1435,9 +2587,9 @@ mod tests {
                 bridge_id: options_id,
                 tool: "test".into(),
                 kind: RpcKind::Lsp,
-                args: vec!["--version".into()],
+                args: Vec::new(),
                 cwd: None,
-                env: Vec::new(),
+                env: vec![("NOT_ALLOWED".into(), "secret".into())],
             },
             &state,
             &outbound,
@@ -1452,6 +2604,27 @@ mod tests {
                 ..
             })) if received_id == options_id
         ));
+    }
+
+    #[cfg(feature = "native-protocol")]
+    fn test_tool_manifest(name: &str, kind: &str, command: Vec<String>) -> tools::ToolManifest {
+        tools::ToolManifest {
+            name: name.into(),
+            version: "1".into(),
+            kind: kind.into(),
+            languages: Vec::new(),
+            command,
+            install: tools::InstallSpec {
+                apt: Some(vec!["test".into()]),
+                uv: None,
+                npm: None,
+                cargo: None,
+                download: None,
+            },
+            settings_section: name.into(),
+            env_allowlist: vec!["TEST_ALLOWED".into()],
+            initialization_options: serde_json::json!({}),
+        }
     }
 
     #[tokio::test]
@@ -1505,23 +2678,246 @@ mod tests {
                 encode(&MultiplexedPacket::Vfs(VfsMessage::ReadFileReq {
                     req_id: 1,
                     path: outside.to_string_lossy().into_owned(),
+                    offset: 0,
+                    len: 64,
                 }))
                 .into(),
             ))
             .await
             .unwrap();
-        let response = socket.next().await.unwrap().unwrap();
-        let WsMessage::Binary(bytes) = response else {
-            panic!("expected binary VFS response");
-        };
         assert!(matches!(
-            decode(&bytes).unwrap(),
-            MultiplexedPacket::Vfs(VfsMessage::VfsError {
+            next_vfs_response(&mut socket, 1).await,
+            VfsMessage::VfsError {
                 req_id: 1,
                 code: VfsErrorCode::PermissionDenied,
                 ..
-            })
+            }
         ));
+
+        let target = project.join("chunked.txt");
+        let target = target.to_string_lossy().into_owned();
+        for (req_id, offset, truncate, content) in [
+            (2, 0, true, b"chunk-".to_vec()),
+            (3, 6, false, b"write".to_vec()),
+        ] {
+            socket
+                .send(WsMessage::Binary(
+                    encode(&MultiplexedPacket::Vfs(VfsMessage::WriteFileReq {
+                        req_id,
+                        path: target.clone(),
+                        content,
+                        expected_modified_ts: None,
+                        truncate,
+                        offset,
+                    }))
+                    .into(),
+                ))
+                .await
+                .unwrap();
+            assert!(matches!(
+                next_vfs_response(&mut socket, req_id).await,
+                VfsMessage::Ack {
+                    req_id: received_id,
+                    modified_ts: None,
+                    trash_id: None,
+                } if received_id == req_id
+            ));
+        }
+        socket
+            .send(WsMessage::Binary(
+                encode(&MultiplexedPacket::Vfs(VfsMessage::FlushReq {
+                    req_id: 4,
+                    path: target.clone(),
+                }))
+                .into(),
+            ))
+            .await
+            .unwrap();
+        assert!(matches!(
+            next_vfs_response(&mut socket, 4).await,
+            VfsMessage::Ack {
+                req_id: 4,
+                modified_ts: Some(_),
+                trash_id: None,
+            }
+        ));
+        socket
+            .send(WsMessage::Binary(
+                encode(&MultiplexedPacket::Vfs(VfsMessage::ReadFileReq {
+                    req_id: 5,
+                    path: target.clone(),
+                    offset: 0,
+                    len: 32,
+                }))
+                .into(),
+            ))
+            .await
+            .unwrap();
+        match next_vfs_response(&mut socket, 5).await {
+            VfsMessage::ReadFileRes {
+                content, eof, size, ..
+            } => {
+                assert_eq!(content, b"chunk-write");
+                assert!(eof);
+                assert_eq!(size, 11);
+            }
+            response => panic!("expected VFS read response, got {response:?}"),
+        }
+
+        #[cfg(feature = "native-protocol")]
+        {
+            socket
+                .send(WsMessage::Binary(
+                    encode(&MultiplexedPacket::Search(SearchMessage::StartReq {
+                        req_id: 6,
+                        roots: vec![project.to_string_lossy().into_owned()],
+                        query: "chunk-write".into(),
+                        regex: false,
+                        case_sensitive: true,
+                        whole_word: false,
+                        include: Vec::new(),
+                        exclude: Vec::new(),
+                        max_results: 10,
+                        context_lines: 0,
+                    }))
+                    .into(),
+                ))
+                .await
+                .unwrap();
+            loop {
+                match next_search_message(&mut socket, 6).await {
+                    SearchMessage::Match {
+                        path,
+                        preview,
+                        line,
+                        ..
+                    } => {
+                        assert_eq!(path, target);
+                        assert_eq!(line, 1);
+                        assert!(preview.contains("chunk-write"));
+                    }
+                    SearchMessage::Done {
+                        total, truncated, ..
+                    } => {
+                        assert_eq!(total, 1);
+                        assert!(!truncated);
+                        break;
+                    }
+                    SearchMessage::Error { message, .. } => {
+                        panic!("unexpected search failure: {message}")
+                    }
+                    _ => unreachable!("client-only search message received from daemon"),
+                }
+            }
+
+            for (req_id, op) in [(7, GitOp::Init), (8, GitOp::Status)] {
+                socket
+                    .send(WsMessage::Binary(
+                        encode(&MultiplexedPacket::Git(GitMessage::Req {
+                            req_id,
+                            repo: project.to_string_lossy().into_owned(),
+                            op,
+                        }))
+                        .into(),
+                    ))
+                    .await
+                    .unwrap();
+                match next_git_message(&mut socket, req_id).await {
+                    GitMessage::Res { result, .. } if req_id == 7 => {
+                        assert!(matches!(result, avf_protocol::GitResult::Success));
+                    }
+                    GitMessage::Res { result, .. } if req_id == 8 => {
+                        assert!(matches!(result, avf_protocol::GitResult::Status { .. }));
+                    }
+                    GitMessage::Error { message, .. } => panic!("Git request failed: {message}"),
+                    other => panic!("unexpected Git response: {other:?}"),
+                }
+            }
+
+            let git = |args: &[&str]| {
+                let output = std::process::Command::new("git")
+                    .arg("-C")
+                    .arg(&project)
+                    .args(args)
+                    .output()
+                    .unwrap();
+                assert!(
+                    output.status.success(),
+                    "Git setup command failed: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            };
+            git(&["config", "user.name", "Integration Test"]);
+            git(&["config", "user.email", "integration@example.invalid"]);
+            git(&["add", "main.rs"]);
+            git(&["commit", "--quiet", "-m", "initial"]);
+            let bare_remote = temp.path().join("origin.git");
+            let output = std::process::Command::new("git")
+                .args(["init", "--bare", "--quiet"])
+                .arg(&bare_remote)
+                .output()
+                .unwrap();
+            assert!(output.status.success());
+            git(&["remote", "add", "origin", bare_remote.to_str().unwrap()]);
+
+            for (req_id, op) in [
+                (
+                    10,
+                    GitOp::Push {
+                        set_upstream: true,
+                        force_with_lease: false,
+                    },
+                ),
+                (11, GitOp::Fetch),
+            ] {
+                socket
+                    .send(WsMessage::Binary(
+                        encode(&MultiplexedPacket::Git(GitMessage::Req {
+                            req_id,
+                            repo: project.to_string_lossy().into_owned(),
+                            op,
+                        }))
+                        .into(),
+                    ))
+                    .await
+                    .unwrap();
+                let mut saw_progress = false;
+                loop {
+                    match next_git_message(&mut socket, req_id).await {
+                        GitMessage::Progress { .. } => saw_progress = true,
+                        GitMessage::Res { result, .. } => {
+                            assert!(matches!(result, avf_protocol::GitResult::Success));
+                            assert!(saw_progress);
+                            break;
+                        }
+                        GitMessage::Error { message, .. } => {
+                            panic!("Git network request failed: {message}")
+                        }
+                        other => panic!("unexpected Git network response: {other:?}"),
+                    }
+                }
+            }
+
+            socket
+                .send(WsMessage::Binary(
+                    encode(&MultiplexedPacket::Vfs(VfsMessage::StatReq {
+                        req_id: 9,
+                        path: target.clone(),
+                    }))
+                    .into(),
+                ))
+                .await
+                .unwrap();
+            match next_vfs_response(&mut socket, 9).await {
+                VfsMessage::StatRes { entry, .. } => {
+                    assert_eq!(
+                        entry.git_status,
+                        Some(avf_protocol::GitFileStatus::Untracked)
+                    );
+                }
+                response => panic!("expected VFS stat response, got {response:?}"),
+            }
+        }
 
         socket.close(None).await.unwrap();
         server.abort();
@@ -1754,7 +3150,10 @@ mod tests {
         let config = AppConfig {
             bind_addr: "127.0.0.1:0".parse().unwrap(),
             token: "a".repeat(64),
-            allowed_origins: HashSet::from(["http://localhost:5173".to_owned()]),
+            allowed_origins: HashSet::from([
+                "http://localhost:5173".to_owned(),
+                "avf-native-android://localhost".to_owned(),
+            ]),
             workspace_roots: vec![project],
             lsp_hibernation_secs: 30 * 60,
         };
@@ -1847,6 +3246,32 @@ mod tests {
             })
         ));
 
+        let mut request = format!("ws://{address}/ws").into_client_request().unwrap();
+        request.headers_mut().insert(
+            WS_ORIGIN,
+            HeaderValue::from_static("avf-native-android://localhost"),
+        );
+        let (mut socket, _) = tokio_tungstenite::connect_async(request).await.unwrap();
+        socket
+            .send(WsMessage::Binary(
+                encode(&MultiplexedPacket::System(SystemMessage::Hello {
+                    protocol_version: PROTOCOL_VERSION,
+                    auth_token: "a".repeat(64),
+                    client_name: "native-android-test".into(),
+                }))
+                .into(),
+            ))
+            .await
+            .unwrap();
+        let response = socket.next().await.unwrap().unwrap();
+        let WsMessage::Binary(bytes) = response else {
+            panic!("expected binary Welcome");
+        };
+        assert!(matches!(
+            decode(&bytes).unwrap(),
+            MultiplexedPacket::System(SystemMessage::Welcome { .. })
+        ));
+
         server.abort();
     }
 
@@ -1888,12 +3313,18 @@ mod tests {
 
     #[tokio::test]
     async fn watcher_overflow_requests_a_rescan() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = temp.path().join("workspace");
+        std::fs::create_dir(&workspace).unwrap();
+        let vfs = Vfs::new(std::slice::from_ref(&workspace)).unwrap();
+        let watch_path = workspace.to_string_lossy().into_owned();
         let (outbound, mut outgoing) = mpsc::channel(OUTBOUND_CAPACITY);
         let (_events_sender, events_receiver) = mpsc::channel(WATCH_EVENT_CAPACITY);
         let overflow = Arc::new(AtomicBool::new(true));
         let (cancel_sender, cancel_receiver) = oneshot::channel();
         let task = tokio::spawn(watch_events(
-            "/workspace".to_owned(),
+            vfs,
+            watch_path.clone(),
             events_receiver,
             overflow,
             outbound,
@@ -1909,7 +3340,7 @@ mod tests {
             OutboundFrame::Packet(MultiplexedPacket::Vfs(VfsMessage::FsEvent {
                 kind: FsEventKind::Rescan,
                 paths,
-            })) if paths == vec!["/workspace"]
+            })) if paths == vec![watch_path]
         ));
         let _ = cancel_sender.send(());
         task.await.unwrap();

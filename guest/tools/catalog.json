@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "tools": [
+    {
+      "name": "basedpyright",
+      "version": "1.x",
+      "kind": "lsp",
+      "languages": ["python"],
+      "command": ["basedpyright-langserver", "--stdio"],
+      "install": {
+        "uv": ["basedpyright"]
+      },
+      "settingsSection": "basedpyright",
+      "env_allowlist": [],
+      "initializationOptions": {}
+    },
+    {
+      "name": "ruff",
+      "version": "latest",
+      "kind": "lsp",
+      "languages": ["python"],
+      "command": ["ruff", "server"],
+      "install": {
+        "uv": ["ruff"]
+      },
+      "settingsSection": "ruff",
+      "env_allowlist": [],
+      "initializationOptions": {}
+    },
+    {
+      "name": "vtsls",
+      "version": "latest",
+      "kind": "lsp",
+      "languages": ["typescript", "javascript"],
+      "command": ["vtsls", "--stdio"],
+      "install": {
+        "npm": ["@vtsls/language-server"]
+      },
+      "settingsSection": "typescript",
+      "env_allowlist": [],
+      "initializationOptions": {}
+    },
+    {
+      "name": "rust-analyzer",
+      "version": "system",
+      "kind": "lsp",
+      "languages": ["rust"],
+      "command": ["rust-analyzer"],
+      "install": {
+        "apt": ["rust-analyzer"]
+      },
+      "settingsSection": "rust-analyzer",
+      "env_allowlist": [],
+      "initializationOptions": {}
+    },
+    {
+      "name": "debugpy",
+      "version": "system",
+      "kind": "dap",
+      "languages": ["python"],
+      "command": ["python3", "-m", "debugpy.adapter"],
+      "install": {
+        "apt": ["python3-debugpy"]
+      },
+      "settingsSection": "python",
+      "env_allowlist": [],
+      "initializationOptions": {}
+    }
+  ]
+}

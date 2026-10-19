@@ -34,7 +34,12 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("io.github.Rosemoe.sora-editor:editor:0.23.6")
     implementation("io.github.Rosemoe.sora-editor:language-textmate:0.23.6")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.google.code.gson:gson:2.13.1")
+    implementation("org.msgpack:msgpack-core:0.9.8")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     testImplementation("junit:junit:4.13.2")
+    testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
+    testImplementation("com.google.code.gson:gson:2.13.1")
 }

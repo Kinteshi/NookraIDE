@@ -5,6 +5,8 @@ use uuid::Uuid;
 pub const PROTOCOL_VERSION: u32 = 2;
 pub const MAX_FRAME_SIZE: usize = 32 * 1024 * 1024;
 pub const MAX_FILE_SIZE: usize = 16 * 1024 * 1024;
+pub const MAX_CHUNK_SIZE: usize = 4 * 1024 * 1024;
+pub const MAX_PAGED_FILE_SIZE: usize = 256 * 1024 * 1024;
 
 pub type DecodeError = rmp_serde::decode::Error;
 
@@ -44,6 +46,8 @@ pub enum MultiplexedPacket {
     Vfs(VfsMessage),
     Pty { session_id: Uuid, data: PtyPayload },
     Rpc(RpcMessage),
+    Search(SearchMessage),
+    Git(GitMessage),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -178,9 +182,15 @@ pub enum VfsMessage {
         req_id: u64,
         path: String,
     },
+    StatReq {
+        req_id: u64,
+        path: String,
+    },
     ReadFileReq {
         req_id: u64,
         path: String,
+        offset: u64,
+        len: u32,
     },
     WriteFileReq {
         req_id: u64,
@@ -188,6 +198,42 @@ pub enum VfsMessage {
         #[serde(with = "serde_bytes")]
         content: Vec<u8>,
         expected_modified_ts: Option<u64>,
+        truncate: bool,
+        offset: u64,
+    },
+    FlushReq {
+        req_id: u64,
+        path: String,
+    },
+    CreateReq {
+        req_id: u64,
+        path: String,
+        kind: EntryKind,
+    },
+    DeleteReq {
+        req_id: u64,
+        path: String,
+        recursive: bool,
+        to_trash: bool,
+    },
+    RenameReq {
+        req_id: u64,
+        from: String,
+        to: String,
+        overwrite: bool,
+    },
+    CopyReq {
+        req_id: u64,
+        from: String,
+        to: String,
+        overwrite: bool,
+    },
+    RootsReq {
+        req_id: u64,
+    },
+    RestoreReq {
+        req_id: u64,
+        trash_id: Uuid,
     },
     WatchReq {
         req_id: u64,
@@ -202,15 +248,26 @@ pub enum VfsMessage {
         req_id: u64,
         entries: Vec<FileEntry>,
     },
+    StatRes {
+        req_id: u64,
+        entry: FileEntry,
+    },
     ReadFileRes {
         req_id: u64,
         #[serde(with = "serde_bytes")]
         content: Vec<u8>,
+        eof: bool,
         modified_ts: u64,
+        size: u64,
     },
-    WriteFileRes {
+    Ack {
         req_id: u64,
-        modified_ts: u64,
+        modified_ts: Option<u64>,
+        trash_id: Option<Uuid>,
+    },
+    RootsRes {
+        req_id: u64,
+        roots: Vec<String>,
     },
     WatchRes {
         req_id: u64,
@@ -227,6 +284,12 @@ pub enum VfsMessage {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum EntryKind {
+    File,
+    Dir,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum VfsErrorCode {
     NotFound,
     PermissionDenied,
@@ -237,6 +300,7 @@ pub enum VfsErrorCode {
     Conflict,
     InvalidPath,
     Io,
+    Unsupported,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -256,6 +320,215 @@ pub struct FileEntry {
     pub is_symlink: bool,
     pub size: u64,
     pub modified_ts: u64,
+    pub mode: u32,
+    pub is_hidden: bool,
+    pub git_status: Option<GitFileStatus>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum GitFileStatus {
+    Untracked,
+    Added,
+    Modified,
+    Deleted,
+    Renamed,
+    Copied,
+    Conflicted,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum SearchMessage {
+    StartReq {
+        req_id: u64,
+        roots: Vec<String>,
+        query: String,
+        regex: bool,
+        case_sensitive: bool,
+        whole_word: bool,
+        include: Vec<String>,
+        exclude: Vec<String>,
+        max_results: u32,
+        context_lines: u8,
+    },
+    Cancel {
+        req_id: u64,
+    },
+    Match {
+        req_id: u64,
+        path: String,
+        line: u32,
+        col: u32,
+        len: u32,
+        preview: String,
+        context_before: Vec<String>,
+        context_after: Vec<String>,
+    },
+    Done {
+        req_id: u64,
+        total: u32,
+        truncated: bool,
+        elapsed_ms: u32,
+    },
+    Error {
+        req_id: u64,
+        message: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum GitMessage {
+    Req {
+        req_id: u64,
+        repo: String,
+        op: GitOp,
+    },
+    Res {
+        req_id: u64,
+        result: GitResult,
+    },
+    Progress {
+        req_id: u64,
+        phase: String,
+        percent: Option<u8>,
+        detail: String,
+    },
+    Prompt {
+        req_id: u64,
+        prompt_id: u64,
+        text: String,
+        secret: bool,
+    },
+    PromptAnswer {
+        req_id: u64,
+        prompt_id: u64,
+        answer: String,
+    },
+    Error {
+        req_id: u64,
+        message: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum GitOp {
+    Status,
+    DiffFile {
+        path: String,
+        staged: bool,
+    },
+    Stage(Vec<String>),
+    Unstage(Vec<String>),
+    Discard(Vec<String>),
+    Commit {
+        message: String,
+        amend: bool,
+        signoff: bool,
+    },
+    Branches,
+    Checkout {
+        name: String,
+        create: bool,
+    },
+    Log {
+        rev: Option<String>,
+        limit: u32,
+        path: Option<String>,
+    },
+    Show {
+        rev: String,
+        path: String,
+    },
+    Fetch,
+    Pull {
+        rebase: bool,
+    },
+    Push {
+        set_upstream: bool,
+        force_with_lease: bool,
+    },
+    Stash {
+        op: StashOp,
+    },
+    Blame {
+        path: String,
+    },
+    Remotes,
+    Init,
+    Clone {
+        url: String,
+        dest: String,
+    },
+    MergeStatus,
+    Resolve {
+        path: String,
+        content: Vec<u8>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum StashOp {
+    List,
+    Push { include_untracked: bool },
+    Pop { index: usize },
+    Apply { index: usize },
+    Drop { index: usize },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum GitResult {
+    Success,
+    Status {
+        branch: Option<String>,
+        upstream: Option<String>,
+        ahead: u32,
+        behind: u32,
+        entries: Vec<GitStatusEntry>,
+    },
+    Diff {
+        path: String,
+        staged: bool,
+        patch: String,
+    },
+    Branches(Vec<GitBranch>),
+    Commits(Vec<GitCommit>),
+    Text(String),
+    Remotes(Vec<GitRemote>),
+    MergeStatus {
+        has_conflicts: bool,
+        conflicted_paths: Vec<String>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GitStatusEntry {
+    pub path: String,
+    pub original_path: Option<String>,
+    pub index_status: String,
+    pub worktree_status: String,
+    pub status: GitFileStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GitBranch {
+    pub name: String,
+    pub is_current: bool,
+    pub upstream: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GitCommit {
+    pub hash: String,
+    pub parents: Vec<String>,
+    pub author: String,
+    pub timestamp: i64,
+    pub subject: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GitRemote {
+    pub name: String,
+    pub fetch_url: Option<String>,
+    pub push_url: Option<String>,
 }
 
 #[cfg(test)]
@@ -271,6 +544,9 @@ mod tests {
             is_symlink: false,
             size: 12,
             modified_ts: 42,
+            mode: 0o755,
+            is_hidden: false,
+            git_status: Some(GitFileStatus::Modified),
         };
         let mut packets = vec![
             MultiplexedPacket::System(SystemMessage::Hello {
@@ -419,21 +695,68 @@ mod tests {
                 req_id: 1,
                 path: "/workspace".into(),
             }),
+            MultiplexedPacket::Vfs(VfsMessage::StatReq {
+                req_id: 11,
+                path: "/workspace/a".into(),
+            }),
             MultiplexedPacket::Vfs(VfsMessage::ReadFileReq {
                 req_id: 2,
                 path: "/workspace/a".into(),
+                offset: 4,
+                len: 1024,
             }),
             MultiplexedPacket::Vfs(VfsMessage::WriteFileReq {
                 req_id: 3,
                 path: "/workspace/a".into(),
                 content: vec![1, 2, 3],
                 expected_modified_ts: Some(42),
+                truncate: true,
+                offset: 0,
             }),
             MultiplexedPacket::Vfs(VfsMessage::WriteFileReq {
                 req_id: 10,
                 path: "/workspace/new".into(),
                 content: Vec::new(),
                 expected_modified_ts: None,
+                truncate: false,
+                offset: 3,
+            }),
+            MultiplexedPacket::Vfs(VfsMessage::FlushReq {
+                req_id: 12,
+                path: "/workspace/a".into(),
+            }),
+            MultiplexedPacket::Vfs(VfsMessage::CreateReq {
+                req_id: 13,
+                path: "/workspace/new-dir".into(),
+                kind: EntryKind::Dir,
+            }),
+            MultiplexedPacket::Vfs(VfsMessage::CreateReq {
+                req_id: 54,
+                path: "/workspace/new-file".into(),
+                kind: EntryKind::File,
+            }),
+            MultiplexedPacket::Vfs(VfsMessage::DeleteReq {
+                req_id: 14,
+                path: "/workspace/old".into(),
+                recursive: true,
+                to_trash: true,
+            }),
+            MultiplexedPacket::Vfs(VfsMessage::RenameReq {
+                req_id: 15,
+                from: "/workspace/a".into(),
+                to: "/workspace/b".into(),
+                overwrite: false,
+            }),
+            MultiplexedPacket::Vfs(VfsMessage::CopyReq {
+                req_id: 16,
+                from: "/workspace/a".into(),
+                to: "/workspace/b".into(),
+                overwrite: true,
+            }),
+            MultiplexedPacket::Vfs(VfsMessage::RootsReq { req_id: 17 }),
+            MultiplexedPacket::Vfs(VfsMessage::RestoreReq {
+                req_id: 18,
+                trash_id: id,
             }),
             MultiplexedPacket::Vfs(VfsMessage::WatchReq {
                 req_id: 4,
@@ -451,11 +774,27 @@ mod tests {
             MultiplexedPacket::Vfs(VfsMessage::ReadFileRes {
                 req_id: 7,
                 content: vec![1, 2],
+                eof: true,
                 modified_ts: 42,
+                size: 2,
             }),
-            MultiplexedPacket::Vfs(VfsMessage::WriteFileRes {
+            MultiplexedPacket::Vfs(VfsMessage::StatRes {
                 req_id: 8,
-                modified_ts: 42,
+                entry: entry.clone(),
+            }),
+            MultiplexedPacket::Vfs(VfsMessage::Ack {
+                req_id: 19,
+                modified_ts: Some(42),
+                trash_id: None,
+            }),
+            MultiplexedPacket::Vfs(VfsMessage::Ack {
+                req_id: 20,
+                modified_ts: None,
+                trash_id: Some(id),
+            }),
+            MultiplexedPacket::Vfs(VfsMessage::RootsRes {
+                req_id: 21,
+                roots: vec!["/workspace".into()],
             }),
             MultiplexedPacket::Vfs(VfsMessage::WatchRes { req_id: 9 }),
             MultiplexedPacket::Vfs(VfsMessage::FsEvent {
@@ -474,6 +813,7 @@ mod tests {
             VfsErrorCode::Conflict,
             VfsErrorCode::InvalidPath,
             VfsErrorCode::Io,
+            VfsErrorCode::Unsupported,
         ]
         .into_iter()
         .enumerate()
@@ -496,6 +836,227 @@ mod tests {
                 paths: vec!["/workspace/a".into(), "/workspace/b".into()],
             }));
         }
+        for status in [
+            GitFileStatus::Untracked,
+            GitFileStatus::Added,
+            GitFileStatus::Modified,
+            GitFileStatus::Deleted,
+            GitFileStatus::Renamed,
+            GitFileStatus::Copied,
+            GitFileStatus::Conflicted,
+        ] {
+            packets.push(MultiplexedPacket::Git(GitMessage::Res {
+                req_id: 30,
+                result: GitResult::Status {
+                    branch: Some("main".into()),
+                    upstream: Some("origin/main".into()),
+                    ahead: 1,
+                    behind: 2,
+                    entries: vec![GitStatusEntry {
+                        path: "src/lib.rs".into(),
+                        original_path: None,
+                        index_status: "M".into(),
+                        worktree_status: " ".into(),
+                        status,
+                    }],
+                },
+            }));
+        }
+        packets.extend([
+            MultiplexedPacket::Search(SearchMessage::StartReq {
+                req_id: 40,
+                roots: vec!["/workspace".into()],
+                query: "needle".into(),
+                regex: false,
+                case_sensitive: false,
+                whole_word: true,
+                include: vec!["*.rs".into()],
+                exclude: vec!["target".into()],
+                max_results: 1000,
+                context_lines: 2,
+            }),
+            MultiplexedPacket::Search(SearchMessage::Cancel { req_id: 40 }),
+            MultiplexedPacket::Search(SearchMessage::Match {
+                req_id: 40,
+                path: "/workspace/src/lib.rs".into(),
+                line: 12,
+                col: 3,
+                len: 6,
+                preview: "a needle b".into(),
+                context_before: vec!["before".into()],
+                context_after: vec!["after".into()],
+            }),
+            MultiplexedPacket::Search(SearchMessage::Done {
+                req_id: 40,
+                total: 1,
+                truncated: false,
+                elapsed_ms: 12,
+            }),
+            MultiplexedPacket::Search(SearchMessage::Error {
+                req_id: 40,
+                message: "search failed".into(),
+            }),
+            MultiplexedPacket::Git(GitMessage::Req {
+                req_id: 50,
+                repo: "/workspace".into(),
+                op: GitOp::Push {
+                    set_upstream: true,
+                    force_with_lease: false,
+                },
+            }),
+            MultiplexedPacket::Git(GitMessage::Progress {
+                req_id: 50,
+                phase: "fetch".into(),
+                percent: Some(10),
+                detail: "fetching".into(),
+            }),
+            MultiplexedPacket::Git(GitMessage::Prompt {
+                req_id: 50,
+                prompt_id: 1,
+                text: "Passphrase".into(),
+                secret: true,
+            }),
+            MultiplexedPacket::Git(GitMessage::PromptAnswer {
+                req_id: 50,
+                prompt_id: 1,
+                answer: "secret".into(),
+            }),
+            MultiplexedPacket::Git(GitMessage::Error {
+                req_id: 50,
+                message: "git failed".into(),
+            }),
+        ]);
+        for kind in [RpcKind::Dap, RpcKind::Acp, RpcKind::Custom] {
+            packets.push(MultiplexedPacket::Rpc(RpcMessage::Start {
+                bridge_id: id,
+                tool: "tool".into(),
+                kind,
+                args: Vec::new(),
+                cwd: None,
+                env: Vec::new(),
+            }));
+        }
+        for op in [
+            GitOp::Status,
+            GitOp::DiffFile {
+                path: "file".into(),
+                staged: true,
+            },
+            GitOp::Stage(vec!["file".into()]),
+            GitOp::Unstage(vec!["file".into()]),
+            GitOp::Discard(vec!["file".into()]),
+            GitOp::Commit {
+                message: "message".into(),
+                amend: true,
+                signoff: false,
+            },
+            GitOp::Branches,
+            GitOp::Checkout {
+                name: "branch".into(),
+                create: true,
+            },
+            GitOp::Log {
+                rev: Some("HEAD".into()),
+                limit: 5,
+                path: Some("file".into()),
+            },
+            GitOp::Show {
+                rev: "HEAD".into(),
+                path: "file".into(),
+            },
+            GitOp::Fetch,
+            GitOp::Pull { rebase: true },
+            GitOp::Push {
+                set_upstream: true,
+                force_with_lease: true,
+            },
+            GitOp::Blame {
+                path: "file".into(),
+            },
+            GitOp::Remotes,
+            GitOp::Init,
+            GitOp::Clone {
+                url: "https://example.invalid/repo".into(),
+                dest: "repo".into(),
+            },
+            GitOp::MergeStatus,
+            GitOp::Resolve {
+                path: "file".into(),
+                content: vec![0, 255],
+            },
+        ] {
+            packets.push(MultiplexedPacket::Git(GitMessage::Req {
+                req_id: 51,
+                repo: "/workspace".into(),
+                op,
+            }));
+        }
+        for op in [
+            StashOp::List,
+            StashOp::Push {
+                include_untracked: true,
+            },
+            StashOp::Pop { index: 0 },
+            StashOp::Apply { index: 1 },
+            StashOp::Drop { index: 2 },
+        ] {
+            packets.push(MultiplexedPacket::Git(GitMessage::Req {
+                req_id: 52,
+                repo: "/workspace".into(),
+                op: GitOp::Stash { op },
+            }));
+        }
+        packets.extend([
+            MultiplexedPacket::Git(GitMessage::Res {
+                req_id: 53,
+                result: GitResult::Success,
+            }),
+            MultiplexedPacket::Git(GitMessage::Res {
+                req_id: 53,
+                result: GitResult::Diff {
+                    path: "file".into(),
+                    staged: false,
+                    patch: "patch".into(),
+                },
+            }),
+            MultiplexedPacket::Git(GitMessage::Res {
+                req_id: 53,
+                result: GitResult::Branches(vec![GitBranch {
+                    name: "main".into(),
+                    is_current: true,
+                    upstream: Some("origin/main".into()),
+                }]),
+            }),
+            MultiplexedPacket::Git(GitMessage::Res {
+                req_id: 53,
+                result: GitResult::Commits(vec![GitCommit {
+                    hash: "abc123".into(),
+                    parents: vec!["parent".into()],
+                    author: "author".into(),
+                    timestamp: 1,
+                    subject: "subject".into(),
+                }]),
+            }),
+            MultiplexedPacket::Git(GitMessage::Res {
+                req_id: 53,
+                result: GitResult::Text("text".into()),
+            }),
+            MultiplexedPacket::Git(GitMessage::Res {
+                req_id: 53,
+                result: GitResult::Remotes(vec![GitRemote {
+                    name: "origin".into(),
+                    fetch_url: Some("url".into()),
+                    push_url: Some("url".into()),
+                }]),
+            }),
+            MultiplexedPacket::Git(GitMessage::Res {
+                req_id: 53,
+                result: GitResult::MergeStatus {
+                    has_conflicts: true,
+                    conflicted_paths: vec!["file".into()],
+                },
+            }),
+        ]);
         packets
     }
 
