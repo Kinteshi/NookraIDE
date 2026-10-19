@@ -1,7 +1,0 @@
-packages:
-  - apps/studio-ui
-allowBuilds:
-  esbuild: true
-minimumReleaseAgeExclude:
-  - monaco-languageclient@11.0.3
-  - vscode-ws-jsonrpc@4.0.3

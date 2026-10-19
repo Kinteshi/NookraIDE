@@ -1,3 +1,4 @@
+#[cfg(feature = "native-protocol")]
 mod lsp;
 mod ports;
 mod pty;
@@ -7,6 +8,8 @@ use avf_protocol::{
     decode, encode, FsEventKind, MultiplexedPacket, PtyPayload, RejectReason, SystemMessage,
     VfsErrorCode, VfsMessage, MAX_FRAME_SIZE, PROTOCOL_VERSION,
 };
+#[cfg(feature = "native-protocol")]
+use avf_protocol::{RpcKind, RpcMessage};
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
@@ -18,6 +21,7 @@ use axum::{
     Json, Router,
 };
 use futures_util::{SinkExt, StreamExt};
+#[cfg(feature = "native-protocol")]
 use lsp::LspRouter;
 use notify::{
     event::{ModifyKind, RenameMode},
@@ -167,6 +171,7 @@ struct AppState {
     config: Arc<AppConfig>,
     vfs: Vfs,
     pty: PtyManager,
+    #[cfg(feature = "native-protocol")]
     lsp: LspRouter,
     ports: PortScanner,
     telemetry: Arc<Telemetry>,
@@ -212,6 +217,7 @@ fn app(config: AppConfig) -> io::Result<Router> {
     let ports = PortScanner::default();
     ports.start();
     let state = AppState {
+        #[cfg(feature = "native-protocol")]
         lsp: LspRouter::new(Duration::from_secs(config.lsp_hibernation_secs)),
         config: Arc::new(config),
         vfs,
@@ -355,7 +361,8 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
         }
     });
     let mut port_events = state.ports.subscribe();
-    let mut lsp_forwarders = HashMap::new();
+    #[cfg(feature = "native-protocol")]
+    let mut rpc_forwarders = HashMap::new();
     let mut watches = HashMap::<String, WatchHandle>::new();
     let mut pty_forwarders = HashMap::new();
     for event in state.ports.current().await {
@@ -401,7 +408,8 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                             &outbound,
                             &mut watches,
                             &mut pty_forwarders,
-                            &mut lsp_forwarders,
+                            #[cfg(feature = "native-protocol")]
+                            &mut rpc_forwarders,
                         )
                         .await
                         .is_err()
@@ -445,9 +453,13 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
         task.abort();
         state.pty.detach(session_id, subscriber_id).await;
     }
-    for (server_id, (generation, task)) in lsp_forwarders.drain() {
-        task.abort();
-        state.lsp.detach(&server_id, generation).await;
+    #[cfg(feature = "native-protocol")]
+    for (_, forwarder) in rpc_forwarders.drain() {
+        forwarder.task.abort();
+        state
+            .lsp
+            .detach(&forwarder.tool, forwarder.generation)
+            .await;
     }
     drop(outbound);
     if let Err(error) = timeout(Duration::from_secs(1), &mut writer).await {
@@ -466,7 +478,7 @@ async fn process_packet(
     outbound: &mpsc::Sender<OutboundFrame>,
     watches: &mut HashMap<String, WatchHandle>,
     pty_forwarders: &mut HashMap<uuid::Uuid, (u64, tokio::task::JoinHandle<()>)>,
-    lsp_forwarders: &mut HashMap<String, (u64, tokio::task::JoinHandle<()>)>,
+    #[cfg(feature = "native-protocol")] rpc_forwarders: &mut HashMap<uuid::Uuid, RpcForwarder>,
 ) -> Result<(), ()> {
     match packet {
         MultiplexedPacket::System(SystemMessage::Ping { timestamp }) => {
@@ -607,85 +619,9 @@ async fn process_packet(
                 .await
             }
         },
-        MultiplexedPacket::Lsp {
-            server_id,
-            json_rpc,
-        } => {
-            if !lsp_forwarders.contains_key(&server_id) {
-                let attachment = match state.lsp.attach(&server_id).await {
-                    Ok(attachment) => attachment,
-                    Err(message) => {
-                        if let Some(json_rpc) = lsp_error_response(&json_rpc, &message) {
-                            send_outbound(
-                                outbound,
-                                MultiplexedPacket::Lsp {
-                                    server_id,
-                                    json_rpc,
-                                },
-                            )
-                            .await?;
-                        } else {
-                            send_protocol_error_outbound(outbound, &message).await?;
-                        }
-                        return Ok(());
-                    }
-                };
-                for history in attachment.history {
-                    send_outbound(
-                        outbound,
-                        MultiplexedPacket::Lsp {
-                            server_id: server_id.clone(),
-                            json_rpc: history,
-                        },
-                    )
-                    .await?;
-                }
-                let mut receiver = attachment.receiver;
-                let output_server_id = server_id.clone();
-                let outbound = outbound.clone();
-                let task = tokio::spawn(async move {
-                    loop {
-                        match receiver.recv().await {
-                            Ok(json_rpc) => {
-                                if send_outbound(
-                                    &outbound,
-                                    MultiplexedPacket::Lsp {
-                                        server_id: output_server_id.clone(),
-                                        json_rpc,
-                                    },
-                                )
-                                .await
-                                .is_err()
-                                {
-                                    break;
-                                }
-                            }
-                            Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                                warn!(server = %output_server_id, skipped, "websocket missed language server messages");
-                            }
-                            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                        }
-                    }
-                });
-                lsp_forwarders.insert(server_id.clone(), (attachment.generation, task));
-            }
-            match state.lsp.send(&server_id, json_rpc.clone()).await {
-                Ok(()) => Ok(()),
-                Err(message) => {
-                    if let Some(json_rpc) = lsp_error_response(&json_rpc, &message) {
-                        send_outbound(
-                            outbound,
-                            MultiplexedPacket::Lsp {
-                                server_id,
-                                json_rpc,
-                            },
-                        )
-                        .await
-                    } else {
-                        send_protocol_error_outbound(outbound, &message).await
-                    }
-                }
-            }
+        #[cfg(feature = "native-protocol")]
+        MultiplexedPacket::Rpc(message) => {
+            process_rpc_message(message, state, outbound, rpc_forwarders).await
         }
         _ => {
             warn!("client sent a packet type not supported by the daemon");
@@ -695,20 +631,186 @@ async fn process_packet(
     }
 }
 
-fn lsp_error_response(request: &str, message: &str) -> Option<String> {
-    let request: serde_json::Value = serde_json::from_str(request).ok()?;
-    let id = request.as_object()?.get("id")?.clone();
-    Some(
-        serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "error": {
-                "code": -32002,
-                "message": message,
-            },
-        })
-        .to_string(),
-    )
+#[cfg(feature = "native-protocol")]
+struct RpcForwarder {
+    tool: String,
+    generation: u64,
+    task: tokio::task::JoinHandle<()>,
+}
+
+#[cfg(feature = "native-protocol")]
+async fn process_rpc_message(
+    message: RpcMessage,
+    state: &AppState,
+    outbound: &mpsc::Sender<OutboundFrame>,
+    forwarders: &mut HashMap<uuid::Uuid, RpcForwarder>,
+) -> Result<(), ()> {
+    match message {
+        RpcMessage::Start {
+            bridge_id,
+            tool,
+            kind,
+            args,
+            cwd,
+            env,
+        } => {
+            if forwarders.contains_key(&bridge_id) {
+                return send_rpc(
+                    outbound,
+                    RpcMessage::Error {
+                        bridge_id,
+                        message: "bridge id is already active on this connection".into(),
+                    },
+                )
+                .await;
+            }
+            let unsupported = match kind {
+                RpcKind::Lsp => None,
+                RpcKind::Dap | RpcKind::Acp | RpcKind::Custom => {
+                    Some(format!("{kind:?} bridges are not implemented yet"))
+                }
+            }
+            .or_else(|| (!args.is_empty()).then(|| "tool arguments are not supported yet".into()))
+            .or_else(|| {
+                cwd.is_some()
+                    .then(|| "bridge working directories are not supported yet".into())
+            })
+            .or_else(|| {
+                (!env.is_empty())
+                    .then(|| "bridge environment variables are not supported yet".into())
+            });
+            if let Some(message) = unsupported {
+                return send_rpc(outbound, RpcMessage::Error { bridge_id, message }).await;
+            }
+
+            let attachment = match state.lsp.attach(&tool).await {
+                Ok(attachment) => attachment,
+                Err(message) => {
+                    return send_rpc(outbound, RpcMessage::Error { bridge_id, message }).await;
+                }
+            };
+            let generation = attachment.generation;
+            if send_rpc(
+                outbound,
+                RpcMessage::Started {
+                    bridge_id,
+                    pid: attachment.pid,
+                },
+            )
+            .await
+            .is_err()
+            {
+                state.lsp.detach(&tool, generation).await;
+                return Err(());
+            }
+            for body in attachment.history {
+                if send_rpc(outbound, RpcMessage::Message { bridge_id, body })
+                    .await
+                    .is_err()
+                {
+                    state.lsp.detach(&tool, generation).await;
+                    return Err(());
+                }
+            }
+
+            let mut receiver = attachment.receiver;
+            let task_outbound = outbound.clone();
+            let task = tokio::spawn(async move {
+                loop {
+                    match receiver.recv().await {
+                        Ok(body) => {
+                            if send_rpc(&task_outbound, RpcMessage::Message { bridge_id, body })
+                                .await
+                                .is_err()
+                            {
+                                break;
+                            }
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                            warn!(%bridge_id, skipped, "websocket missed RPC bridge messages");
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                            let _ = send_rpc(
+                                &task_outbound,
+                                RpcMessage::Exited {
+                                    bridge_id,
+                                    code: None,
+                                },
+                            )
+                            .await;
+                            break;
+                        }
+                    }
+                }
+            });
+            forwarders.insert(
+                bridge_id,
+                RpcForwarder {
+                    tool,
+                    generation,
+                    task,
+                },
+            );
+            Ok(())
+        }
+        RpcMessage::Message { bridge_id, body } => {
+            let Some(forwarder) = forwarders.get(&bridge_id) else {
+                return send_rpc(
+                    outbound,
+                    RpcMessage::Error {
+                        bridge_id,
+                        message: "RPC bridge is not active".into(),
+                    },
+                )
+                .await;
+            };
+            match state.lsp.send(&forwarder.tool, body).await {
+                Ok(()) => Ok(()),
+                Err(message) => send_rpc(outbound, RpcMessage::Error { bridge_id, message }).await,
+            }
+        }
+        RpcMessage::Stop { bridge_id } => match forwarders.remove(&bridge_id) {
+            Some(forwarder) => {
+                forwarder.task.abort();
+                state.lsp.stop(&forwarder.tool, forwarder.generation).await;
+                send_rpc(
+                    outbound,
+                    RpcMessage::Exited {
+                        bridge_id,
+                        code: None,
+                    },
+                )
+                .await
+            }
+            None => {
+                send_rpc(
+                    outbound,
+                    RpcMessage::Error {
+                        bridge_id,
+                        message: "RPC bridge is not active".into(),
+                    },
+                )
+                .await
+            }
+        },
+        RpcMessage::Started { bridge_id, .. }
+        | RpcMessage::Exited { bridge_id, .. }
+        | RpcMessage::Error { bridge_id, .. } => {
+            send_rpc(
+                outbound,
+                RpcMessage::Error {
+                    bridge_id,
+                    message: "client sent a daemon-only RPC message".into(),
+                },
+            )
+            .await
+        }
+    }
+}
+
+#[cfg(feature = "native-protocol")]
+async fn send_rpc(outbound: &mpsc::Sender<OutboundFrame>, message: RpcMessage) -> Result<(), ()> {
+    send_outbound(outbound, MultiplexedPacket::Rpc(message)).await
 }
 
 async fn send_pty_payload(
@@ -1113,6 +1215,8 @@ fn parse_meminfo(contents: &str) -> Option<(u64, u64)> {
 mod tests {
     use super::*;
     use avf_protocol::{decode, encode, MultiplexedPacket, PtyPayload, SystemMessage, VfsMessage};
+    #[cfg(feature = "native-protocol")]
+    use avf_protocol::{RpcKind, RpcMessage};
     use axum::http::HeaderValue;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio_tungstenite::tungstenite::{
@@ -1138,21 +1242,6 @@ mod tests {
         assert!(is_ignored(Path::new("/project/.git/objects/ab")));
         assert!(is_ignored(Path::new("/project/node_modules/pkg")));
         assert!(!is_ignored(Path::new("/project/src/main.rs")));
-    }
-
-    #[test]
-    fn lsp_errors_reply_to_json_rpc_requests() {
-        let request = r#"{"jsonrpc":"2.0","id":7,"method":"initialize","params":{}}"#;
-        let response = lsp_error_response(request, "server is unavailable").unwrap();
-        let response: serde_json::Value = serde_json::from_str(&response).unwrap();
-        assert_eq!(response["id"], 7);
-        assert_eq!(response["error"]["code"], -32002);
-        assert_eq!(response["error"]["message"], "server is unavailable");
-        assert!(lsp_error_response(
-            r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#,
-            "server is unavailable",
-        )
-        .is_none());
     }
 
     #[tokio::test]
@@ -1181,8 +1270,188 @@ mod tests {
         client.read_to_end(&mut response).await.unwrap();
         let response = String::from_utf8(response).unwrap();
         assert!(response.contains("200 OK"));
-        assert!(response.contains(r#"{"status":"ok","protocol_version":1}"#));
+        assert!(response.contains(&format!(
+            r#"{{"status":"ok","protocol_version":{PROTOCOL_VERSION}}}"#
+        )));
         server.abort();
+    }
+
+    #[cfg(feature = "native-protocol")]
+    #[tokio::test]
+    async fn rpc_lsp_bridge_starts_forwards_and_stops() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path().join("project");
+        std::fs::create_dir(&project).unwrap();
+        let state = AppState {
+            config: Arc::new(AppConfig {
+                bind_addr: "127.0.0.1:0".parse().unwrap(),
+                token: "a".repeat(64),
+                allowed_origins: HashSet::new(),
+                workspace_roots: vec![project.clone()],
+                lsp_hibernation_secs: 30 * 60,
+            }),
+            vfs: Vfs::new(std::slice::from_ref(&project)).unwrap(),
+            pty: PtyManager::default(),
+            lsp: LspRouter::test_router(Duration::from_secs(30), "test", "cat", Vec::new()),
+            ports: PortScanner::default(),
+            telemetry: Arc::new(Telemetry::default()),
+        };
+        let (outbound, mut received) = mpsc::channel(8);
+        let bridge_id = uuid::Uuid::new_v4();
+        let mut forwarders = HashMap::new();
+
+        process_rpc_message(
+            RpcMessage::Start {
+                bridge_id,
+                tool: "test".into(),
+                kind: RpcKind::Lsp,
+                args: Vec::new(),
+                cwd: None,
+                env: Vec::new(),
+            },
+            &state,
+            &outbound,
+            &mut forwarders,
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            received.recv().await.unwrap(),
+            OutboundFrame::Packet(MultiplexedPacket::Rpc(RpcMessage::Started {
+                bridge_id: received_id,
+                pid,
+            })) if received_id == bridge_id && pid > 0
+        ));
+
+        let body = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#;
+        process_rpc_message(
+            RpcMessage::Message {
+                bridge_id,
+                body: body.into(),
+            },
+            &state,
+            &outbound,
+            &mut forwarders,
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            timeout(Duration::from_secs(1), received.recv())
+                .await
+                .unwrap()
+                .unwrap(),
+            OutboundFrame::Packet(MultiplexedPacket::Rpc(RpcMessage::Message {
+                bridge_id: received_id,
+                body: received_body,
+            })) if received_id == bridge_id && received_body == body
+        ));
+
+        process_rpc_message(
+            RpcMessage::Message {
+                bridge_id,
+                body: "not JSON-RPC".into(),
+            },
+            &state,
+            &outbound,
+            &mut forwarders,
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            received.recv().await.unwrap(),
+            OutboundFrame::Packet(MultiplexedPacket::Rpc(RpcMessage::Error {
+                bridge_id: received_id,
+                ..
+            })) if received_id == bridge_id
+        ));
+
+        process_rpc_message(
+            RpcMessage::Stop { bridge_id },
+            &state,
+            &outbound,
+            &mut forwarders,
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            received.recv().await.unwrap(),
+            OutboundFrame::Packet(MultiplexedPacket::Rpc(RpcMessage::Exited {
+                bridge_id: received_id,
+                code: None,
+            })) if received_id == bridge_id
+        ));
+
+        let rejected_id = uuid::Uuid::new_v4();
+        process_rpc_message(
+            RpcMessage::Start {
+                bridge_id: rejected_id,
+                tool: "test".into(),
+                kind: RpcKind::Dap,
+                args: Vec::new(),
+                cwd: None,
+                env: Vec::new(),
+            },
+            &state,
+            &outbound,
+            &mut forwarders,
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            received.recv().await.unwrap(),
+            OutboundFrame::Packet(MultiplexedPacket::Rpc(RpcMessage::Error {
+                bridge_id: received_id,
+                ..
+            })) if received_id == rejected_id
+        ));
+
+        let unregistered_id = uuid::Uuid::new_v4();
+        process_rpc_message(
+            RpcMessage::Start {
+                bridge_id: unregistered_id,
+                tool: "/bin/sh".into(),
+                kind: RpcKind::Lsp,
+                args: Vec::new(),
+                cwd: None,
+                env: Vec::new(),
+            },
+            &state,
+            &outbound,
+            &mut forwarders,
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            received.recv().await.unwrap(),
+            OutboundFrame::Packet(MultiplexedPacket::Rpc(RpcMessage::Error {
+                bridge_id: received_id,
+                ..
+            })) if received_id == unregistered_id
+        ));
+
+        let options_id = uuid::Uuid::new_v4();
+        process_rpc_message(
+            RpcMessage::Start {
+                bridge_id: options_id,
+                tool: "test".into(),
+                kind: RpcKind::Lsp,
+                args: vec!["--version".into()],
+                cwd: None,
+                env: Vec::new(),
+            },
+            &state,
+            &outbound,
+            &mut forwarders,
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            received.recv().await.unwrap(),
+            OutboundFrame::Packet(MultiplexedPacket::Rpc(RpcMessage::Error {
+                bridge_id: received_id,
+                ..
+            })) if received_id == options_id
+        ));
     }
 
     #[tokio::test]

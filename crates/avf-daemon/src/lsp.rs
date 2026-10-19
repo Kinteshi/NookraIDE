@@ -62,6 +62,7 @@ impl OutputHistory {
 
 struct LspSession {
     generation: u64,
+    pid: u32,
     command_tx: mpsc::Sender<String>,
     client_count_tx: watch::Sender<usize>,
     output_tx: broadcast::Sender<String>,
@@ -71,6 +72,7 @@ struct LspSession {
 
 pub(crate) struct LspAttachment {
     pub generation: u64,
+    pub pid: u32,
     pub history: Vec<String>,
     pub receiver: broadcast::Receiver<String>,
 }
@@ -95,6 +97,25 @@ impl LspRouter {
             hibernation,
             next_generation: Arc::new(AtomicU64::new(1)),
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_router(
+        hibernation: Duration,
+        tool: &str,
+        program: &str,
+        args: Vec<String>,
+    ) -> Self {
+        Self::with_servers(
+            hibernation,
+            HashMap::from([(
+                tool.to_owned(),
+                ServerCommand {
+                    program: program.to_owned(),
+                    args,
+                },
+            )]),
+        )
     }
 
     pub(crate) async fn attach(&self, server_id: &str) -> Result<LspAttachment, String> {
@@ -127,6 +148,9 @@ impl LspRouter {
                         command.program
                     )
                 })?;
+            let pid = child
+                .id()
+                .ok_or_else(|| format!("language server {server_id} has no process id"))?;
             let stdin = child
                 .stdin
                 .take()
@@ -190,6 +214,7 @@ impl LspRouter {
                 server_id.to_owned(),
                 LspSession {
                     generation,
+                    pid,
                     command_tx,
                     client_count_tx,
                     output_tx,
@@ -211,6 +236,7 @@ impl LspRouter {
         drop(history_guard);
         Ok(LspAttachment {
             generation: session.generation,
+            pid: session.pid,
             history,
             receiver,
         })
@@ -245,6 +271,22 @@ impl LspRouter {
         }
         session.clients = session.clients.saturating_sub(1);
         session.client_count_tx.send_replace(session.clients);
+    }
+
+    pub(crate) async fn stop(&self, server_id: &str, generation: u64) {
+        let mut sessions = self.sessions.lock().await;
+        let Some(session) = sessions.get_mut(server_id) else {
+            return;
+        };
+        if session.generation != generation {
+            return;
+        }
+        if session.clients > 1 {
+            session.clients -= 1;
+            session.client_count_tx.send_replace(session.clients);
+        } else {
+            sessions.remove(server_id);
+        }
     }
 
     #[cfg(test)]
@@ -524,6 +566,7 @@ mod tests {
             )]),
         );
         let attachment = router.attach("test").await.unwrap();
+        assert_ne!(attachment.pid, 0);
         let mut receiver = attachment.receiver;
         let request = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#;
         router.send("test", request.to_owned()).await.unwrap();
@@ -539,7 +582,8 @@ mod tests {
 
         let reattached = router.attach("test").await.unwrap();
         assert!(reattached.history.iter().any(|message| message == request));
-        router.detach("test", reattached.generation).await;
+        router.stop("test", reattached.generation).await;
+        assert!(!router.has_session("test").await);
     }
 
     #[tokio::test]

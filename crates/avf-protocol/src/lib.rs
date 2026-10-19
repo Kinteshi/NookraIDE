@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::io::Cursor;
 use uuid::Uuid;
 
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 pub const MAX_FRAME_SIZE: usize = 32 * 1024 * 1024;
 pub const MAX_FILE_SIZE: usize = 16 * 1024 * 1024;
 
@@ -43,7 +43,46 @@ pub enum MultiplexedPacket {
     System(SystemMessage),
     Vfs(VfsMessage),
     Pty { session_id: Uuid, data: PtyPayload },
-    Lsp { server_id: String, json_rpc: String },
+    Rpc(RpcMessage),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RpcKind {
+    Lsp,
+    Dap,
+    Acp,
+    Custom,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum RpcMessage {
+    Start {
+        bridge_id: Uuid,
+        tool: String,
+        kind: RpcKind,
+        args: Vec<String>,
+        cwd: Option<String>,
+        env: Vec<(String, String)>,
+    },
+    Started {
+        bridge_id: Uuid,
+        pid: u32,
+    },
+    Message {
+        bridge_id: Uuid,
+        body: String,
+    },
+    Stop {
+        bridge_id: Uuid,
+    },
+    Exited {
+        bridge_id: Uuid,
+        code: Option<i32>,
+    },
+    Error {
+        bridge_id: Uuid,
+        message: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -347,10 +386,35 @@ mod tests {
                     message: "failed".into(),
                 },
             },
-            MultiplexedPacket::Lsp {
-                server_id: "rust-analyzer".into(),
-                json_rpc: r#"{"jsonrpc":"2.0"}"#.into(),
-            },
+            MultiplexedPacket::Rpc(RpcMessage::Start {
+                bridge_id: id,
+                tool: "basedpyright".into(),
+                kind: RpcKind::Lsp,
+                args: vec!["--stdio".into()],
+                cwd: Some("/workspace".into()),
+                env: vec![("TOKEN".into(), "secret".into())],
+            }),
+            MultiplexedPacket::Rpc(RpcMessage::Started {
+                bridge_id: id,
+                pid: 1234,
+            }),
+            MultiplexedPacket::Rpc(RpcMessage::Message {
+                bridge_id: id,
+                body: r#"{"jsonrpc":"2.0"}"#.into(),
+            }),
+            MultiplexedPacket::Rpc(RpcMessage::Stop { bridge_id: id }),
+            MultiplexedPacket::Rpc(RpcMessage::Exited {
+                bridge_id: id,
+                code: Some(0),
+            }),
+            MultiplexedPacket::Rpc(RpcMessage::Exited {
+                bridge_id: id,
+                code: None,
+            }),
+            MultiplexedPacket::Rpc(RpcMessage::Error {
+                bridge_id: id,
+                message: "failed".into(),
+            }),
             MultiplexedPacket::Vfs(VfsMessage::ListDirReq {
                 req_id: 1,
                 path: "/workspace".into(),
