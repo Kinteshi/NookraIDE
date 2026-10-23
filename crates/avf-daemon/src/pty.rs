@@ -290,6 +290,8 @@ fn create_session(
 
     let mut command = CommandBuilder::new(shell.clone());
     command.cwd(&cwd);
+    command.env("TERM", "xterm-256color");
+    command.env("COLORTERM", "truecolor");
     let mut child = pair
         .slave
         .spawn_command(command)

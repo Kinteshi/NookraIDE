@@ -67,6 +67,59 @@ object EditorCommands {
         command("workbench.action.openSettings", "Open Settings", "Ctrl+,"),
     )
 
+    val copilot: List<EditorCommand> = listOf(
+        command("editor.action.inlineSuggest.trigger", "Trigger Inline Suggestion", "Alt+\\"),
+        command("workbench.action.chat.open", "Open Copilot Chat", "Ctrl+Alt+I"),
+        command("github.copilot.signIn", "GitHub Copilot: Sign In", ""),
+        command("github.copilot.signOut", "GitHub Copilot: Sign Out", ""),
+        command("github.copilot.toggleInlineSuggestions", "GitHub Copilot: Toggle Inline Suggestions", ""),
+    )
+
+    /** Workbench-level commands (VS Code defaults) that also work while the terminal has focus. */
+    val workbench: List<EditorCommand> = listOf(
+        command("workbench.action.terminal.toggleTerminal", "Toggle Terminal", "Ctrl+`"),
+        command("workbench.action.terminal.new", "New Terminal", "Ctrl+Shift+`"),
+        command("workbench.action.toggleSidebarVisibility", "Toggle Primary Side Bar", "Ctrl+B"),
+        command("workbench.action.togglePanel", "Toggle Panel", "Ctrl+J"),
+        command("workbench.view.explorer", "Show Explorer", "Ctrl+Shift+E"),
+        command("workbench.actions.view.problems", "Show Problems", "Ctrl+Shift+M"),
+        command("workbench.action.gotoSymbol", "Show Outline", "Ctrl+Shift+O"),
+        command("workbench.action.output.toggleOutput", "Toggle Output", "Ctrl+Shift+U"),
+        command("workbench.action.nextEditor", "Open Next Editor", "Ctrl+PageDown"),
+        command("workbench.action.previousEditor", "Open Previous Editor", "Ctrl+PageUp"),
+        command("workbench.action.openGlobalKeybindings", "Keyboard Shortcuts", "Ctrl+K Ctrl+S"),
+        command("workbench.action.debug.run", "Run Active File in Terminal", "Ctrl+F5"),
+        command("editor.action.fontZoomIn", "Editor Font Zoom In", "Ctrl+="),
+        command("editor.action.fontZoomOut", "Editor Font Zoom Out", "Ctrl+-"),
+        command("workbench.action.openSettingsJson", "Open User Settings (JSON)", ""),
+        command("workbench.action.connect", "Connect to Guest", ""),
+        command("jupyter.selectKernel", "Notebook: Select Kernel", ""),
+        command("jupyter.runAll", "Notebook: Run All Cells", ""),
+        command("jupyter.interruptKernel", "Notebook: Interrupt Kernel", ""),
+        command("jupyter.restartKernel", "Notebook: Restart Kernel", ""),
+        command("github.copilot.chat.signIn", "GitHub Copilot: Sign In to Chat (Terminal)", ""),
+    )
+
+    val all: List<EditorCommand> get() = top50 + language + copilot + workbench
+
+    private val globalIds = setOf(
+        "workbench.action.files.save",
+        "workbench.action.files.saveAs",
+        "workbench.action.files.openFile",
+        "workbench.action.quickOpen",
+        "workbench.action.showCommands",
+        "workbench.action.closeActiveEditor",
+        "workbench.action.files.newUntitledFile",
+        "workbench.action.closeOtherEditors",
+        "workbench.action.reopenClosedEditor",
+        "workbench.action.quickSwitchEditor",
+        "workbench.action.openSettings",
+        "workbench.action.chat.open",
+    )
+
+    /** Bindings honoured when focus is outside the code editor (terminal, chat, notebooks, dialogs). */
+    val global: List<EditorCommand> get() = all.filter { it.id in globalIds } + workbench
+
     private fun command(id: String, title: String, keybinding: String) =
         EditorCommand(id, title, keybinding)
 }
@@ -92,8 +145,8 @@ data class KeyStroke(
     }
 }
 
-class EditorKeybindingDispatcher(commands: List<EditorCommand> = EditorCommands.top50 + EditorCommands.language) {
-    private val bindings = commands.map { command ->
+class EditorKeybindingDispatcher(commands: List<EditorCommand> = EditorCommands.all) {
+    private val bindings = commands.filter { it.keybinding.isNotEmpty() }.map { command ->
         command.keybinding.split(' ').map(KeyStroke::parse) to command.id
     }
     private var pendingChord: KeyStroke? = null
@@ -113,3 +166,48 @@ class EditorKeybindingDispatcher(commands: List<EditorCommand> = EditorCommands.
         return null
     }
 }
+
+/** Maps an Android hardware key to the key names used in VS Code keybindings. */
+internal fun editorKeyStroke(
+    keyCode: Int,
+    ctrl: Boolean,
+    shift: Boolean,
+    alt: Boolean,
+    allowUnmodified: Boolean = false,
+): KeyStroke? {
+    val key = when (keyCode) {
+        in android.view.KeyEvent.KEYCODE_A..android.view.KeyEvent.KEYCODE_Z ->
+            ('A' + (keyCode - android.view.KeyEvent.KEYCODE_A)).toString()
+        in android.view.KeyEvent.KEYCODE_0..android.view.KeyEvent.KEYCODE_9 ->
+            ('0' + (keyCode - android.view.KeyEvent.KEYCODE_0)).toString()
+        in android.view.KeyEvent.KEYCODE_F1..android.view.KeyEvent.KEYCODE_F12 ->
+            "F${keyCode - android.view.KeyEvent.KEYCODE_F1 + 1}"
+        else -> namedKeys[keyCode] ?: return null
+    }
+    if (!ctrl && !alt && !shift && !allowUnmodified && key != "TAB" && !key.matches(Regex("F\\d+"))) return null
+    return KeyStroke(key, ctrl, shift, alt)
+}
+
+private val namedKeys = mapOf(
+    android.view.KeyEvent.KEYCODE_DPAD_UP to "UP",
+    android.view.KeyEvent.KEYCODE_DPAD_DOWN to "DOWN",
+    android.view.KeyEvent.KEYCODE_DPAD_LEFT to "LEFT",
+    android.view.KeyEvent.KEYCODE_DPAD_RIGHT to "RIGHT",
+    android.view.KeyEvent.KEYCODE_PAGE_UP to "PAGEUP",
+    android.view.KeyEvent.KEYCODE_PAGE_DOWN to "PAGEDOWN",
+    android.view.KeyEvent.KEYCODE_TAB to "TAB",
+    android.view.KeyEvent.KEYCODE_ENTER to "ENTER",
+    android.view.KeyEvent.KEYCODE_SPACE to "SPACE",
+    android.view.KeyEvent.KEYCODE_ESCAPE to "ESCAPE",
+    android.view.KeyEvent.KEYCODE_GRAVE to "`",
+    android.view.KeyEvent.KEYCODE_SLASH to "/",
+    android.view.KeyEvent.KEYCODE_BACKSLASH to "\\",
+    android.view.KeyEvent.KEYCODE_LEFT_BRACKET to "[",
+    android.view.KeyEvent.KEYCODE_RIGHT_BRACKET to "]",
+    android.view.KeyEvent.KEYCODE_COMMA to ",",
+    android.view.KeyEvent.KEYCODE_PERIOD to ".",
+    android.view.KeyEvent.KEYCODE_EQUALS to "=",
+    android.view.KeyEvent.KEYCODE_MINUS to "-",
+    android.view.KeyEvent.KEYCODE_SEMICOLON to ";",
+    android.view.KeyEvent.KEYCODE_APOSTROPHE to "'",
+)

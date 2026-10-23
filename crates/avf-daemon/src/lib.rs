@@ -140,9 +140,11 @@ impl AppConfig {
         if allowed_origins.is_empty() {
             return Err("AVF_ALLOWED_ORIGINS cannot be empty".into());
         }
+        // A reattach after every client detached starts a fresh server, so an idle
+        // server only costs guest memory; stop it shortly after the last client leaves.
         let lsp_hibernation_secs = match env::var("AVF_LSP_HIBERNATION_SECS") {
             Ok(value) => value.parse::<u64>()?,
-            Err(env::VarError::NotPresent) => 30 * 60,
+            Err(env::VarError::NotPresent) => 60,
             Err(error) => return Err(Box::new(error)),
         };
 
@@ -1119,6 +1121,7 @@ async fn process_rpc_message(
             let expected_manifest_kind = match kind {
                 RpcKind::Dap => "dap",
                 RpcKind::Acp => "acp-agent",
+                RpcKind::Kernel => "kernel",
                 RpcKind::Lsp | RpcKind::Custom => unreachable!("handled above"),
             };
             if manifest.kind != expected_manifest_kind {
@@ -2620,6 +2623,7 @@ mod tests {
                 npm: None,
                 cargo: None,
                 download: None,
+                script: None,
             },
             settings_section: name.into(),
             env_allowlist: vec!["TEST_ALLOWED".into()],

@@ -21,7 +21,8 @@ class SettingsResolverTest {
             "openFiles",
             resolved.getAsJsonObject("python").getAsJsonObject("analysis").get("diagnosticMode").asString,
         )
-        assertEquals(true, resolved.get("user.extra").asBoolean)
+        // Dotted keys are VS Code shorthand for nested objects.
+        assertEquals(true, resolved.getAsJsonObject("user").get("extra").asBoolean)
     }
 
     @Test
@@ -38,6 +39,16 @@ class SettingsResolverTest {
             "strict",
             sections.getValue("python.analysis.typeCheckingMode").asString,
         )
+    }
+
+    @Test
+    fun dottedKeysMergeWithNestedObjectsAcrossScopes() {
+        val user = json("""{"editor.fontSize":16,"editor":{"tabSize":2},"[python]":{"editor.tabSize":8}}""")
+        val resolved = SettingsResolver.merge(JsonObject(), user, json("""{"editor.wordWrap":"on"}"""), "python")
+
+        assertEquals(16, resolved.getAsJsonObject("editor").get("fontSize").asInt)
+        assertEquals(8, resolved.getAsJsonObject("editor").get("tabSize").asInt)
+        assertEquals("on", resolved.getAsJsonObject("editor").get("wordWrap").asString)
     }
 
     private fun json(text: String): JsonObject = JsonParser.parseString(text).asJsonObject

@@ -5,7 +5,7 @@ import com.google.gson.JsonObject
 
 object SettingsResolver {
     fun merge(defaults: JsonObject, user: JsonObject, workspace: JsonObject, languageId: String? = null): JsonObject {
-        val merged = mergeObjects(defaults, user, workspace)
+        val merged = mergeObjects(expandDottedKeys(defaults), expandDottedKeys(user), expandDottedKeys(workspace))
         if (languageId != null) {
             val languageOverrides = merged.getAsJsonObject("[$languageId]")?.deepCopy() ?: JsonObject()
             merged.remove("[$languageId]")
@@ -25,6 +25,27 @@ object SettingsResolver {
         }
         visit(settings, "")
         return sections
+    }
+
+    /** VS Code accepts `"editor.fontSize": 14` as well as nested objects; normalise to nesting. */
+    fun expandDottedKeys(settings: JsonObject): JsonObject {
+        val result = JsonObject()
+        settings.entrySet().forEach { (name, value) ->
+            val expanded = if (value.isJsonObject) expandDottedKeys(value.asJsonObject) else value.deepCopy()
+            val parts = if (name.startsWith("[")) listOf(name) else name.split('.')
+            var nested: JsonElement = expanded
+            parts.drop(1).asReversed().forEach { part -> nested = JsonObject().apply { add(part, nested) } }
+            val existing = result.get(parts.first())
+            result.add(
+                parts.first(),
+                if (existing?.isJsonObject == true && nested.isJsonObject) {
+                    mergeObjects(existing.asJsonObject, nested.asJsonObject)
+                } else {
+                    nested
+                },
+            )
+        }
+        return result
     }
 
     private fun mergeObjects(vararg scopes: JsonObject): JsonObject {

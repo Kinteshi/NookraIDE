@@ -41,6 +41,10 @@ class GuestVfsClient(
     private val pending = ConcurrentHashMap<Long, CompletableFuture<IncomingPacket>>()
     private val pendingRpcStarts = ConcurrentHashMap<UUID, CompletableFuture<RpcEvent.Started>>()
     private val rpcEventListeners = ConcurrentHashMap<UUID, (RpcEvent) -> Unit>()
+    private val ptyListeners = ConcurrentHashMap<UUID, (PtyEvent) -> Unit>()
+    /** Terminal sessions the guest still runs, from the latest handshake; reattach to keep them. */
+    @Volatile var guestPtySessions: List<PtySessionInfo> = emptyList()
+        private set
     @Volatile private var socket: WebSocket? = null
     @Volatile private var connected = CompletableFuture<Unit>()
     @Volatile var connectionStateListener: ((Boolean, String?) -> Unit)? = null
@@ -95,6 +99,7 @@ class GuestVfsClient(
                                     IOException("Guest protocol version ${packet.protocolVersion} is unsupported"),
                                 )
                             } else {
+                                guestPtySessions = packet.ptySessions
                                 handshake.complete(Unit)
                                 connectionStateListener?.invoke(true, null)
                             }
@@ -109,6 +114,7 @@ class GuestVfsClient(
                         is IncomingPacket.Error ->
                             completeExceptionally(packet.requestId, GuestVfsException(packet.code, packet.message))
                         is IncomingPacket.Rpc -> handleRpcEvent(packet.event)
+                        is IncomingPacket.Pty -> ptyListeners[packet.event.sessionId]?.invoke(packet.event)
                         is IncomingPacket.Unexpected ->
                             handshake.completeExceptionally(IOException(packet.message))
                         IncomingPacket.Ignored -> Unit
@@ -123,7 +129,9 @@ class GuestVfsClient(
                 }
 
                 override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
-                    webSocket.close(code, reason)
+                    // 1005, 1006 and 1015 describe a close without a status and may not be sent back.
+                    webSocket.close(if (code in setOf(1005, 1006, 1015)) 1000 else code, null)
+                    handshake.completeExceptionally(IOException("Guest closed the connection ($code) $reason".trim()))
                     failPending(IOException("Guest connection closing: $reason"))
                     if (socket === webSocket) socket = null
                     connectionStateListener?.invoke(false, reason)
@@ -189,20 +197,23 @@ class GuestVfsClient(
     override fun flush(path: String): CompletableFuture<IncomingPacket.Ack> =
         request("FlushReq", mapOf("path" to path)).thenApply { it as IncomingPacket.Ack }
 
-    fun startLanguageServer(tool: String, cwd: String, args: List<String> = emptyList()): CompletableFuture<UUID> {
+    fun startLanguageServer(tool: String, cwd: String, args: List<String> = emptyList()): CompletableFuture<UUID> =
+        startRpc(tool, cwd, "Lsp", args)
+
+    fun startRpc(tool: String, cwd: String, kind: String, args: List<String> = emptyList()): CompletableFuture<UUID> {
         val activeSocket = connectedSocket()
             ?: return CompletableFuture.failedFuture(IOException("Guest is not connected"))
         val bridgeId = UUID.randomUUID()
         val started = CompletableFuture<RpcEvent.Started>()
         pendingRpcStarts[bridgeId] = started
-        if (!activeSocket.send(ByteString.of(*MessagePackVfsCodec.rpcStart(bridgeId, tool, args, cwd)))) {
+        if (!activeSocket.send(ByteString.of(*MessagePackVfsCodec.rpcStart(bridgeId, tool, args, cwd, kind)))) {
             pendingRpcStarts.remove(bridgeId)
             return CompletableFuture.failedFuture(IOException("Guest WebSocket is not accepting RPC messages"))
         }
         scheduler.schedule(
             {
                 pendingRpcStarts.remove(bridgeId)?.completeExceptionally(
-                    IOException("Language server $tool did not start before the timeout"),
+                    IOException("Guest tool $tool did not start before the timeout"),
                 )
             },
             30,
@@ -228,6 +239,28 @@ class GuestVfsClient(
         }
         return CompletableFuture.completedFuture(Unit)
     }
+
+    fun addPtyListener(sessionId: UUID, listener: (PtyEvent) -> Unit) {
+        ptyListeners[sessionId] = listener
+    }
+
+    fun removePtyListener(sessionId: UUID) {
+        ptyListeners.remove(sessionId)
+    }
+
+    fun ptySpawn(sessionId: UUID, cwd: String?, cols: Int, rows: Int): Boolean =
+        sendFrame(MessagePackVfsCodec.ptySpawn(sessionId, cwd, cols, rows))
+
+    fun ptyInput(sessionId: UUID, data: ByteArray): Boolean = sendFrame(MessagePackVfsCodec.ptyInput(sessionId, data))
+
+    fun ptyResize(sessionId: UUID, cols: Int, rows: Int): Boolean =
+        sendFrame(MessagePackVfsCodec.ptyResize(sessionId, cols, rows))
+
+    fun ptyReattach(sessionId: UUID): Boolean = sendFrame(MessagePackVfsCodec.ptyCommand(sessionId, "Reattach"))
+
+    fun ptyKill(sessionId: UUID): Boolean = sendFrame(MessagePackVfsCodec.ptyCommand(sessionId, "Kill"))
+
+    private fun sendFrame(frame: ByteArray): Boolean = connectedSocket()?.send(ByteString.of(*frame)) == true
 
     override fun isConnected(): Boolean = connected.isDone && !connected.isCompletedExceptionally && socket != null
 
@@ -293,6 +326,7 @@ class GuestVfsClient(
         socket = null
         failPending(IOException("Guest client closed"))
         rpcEventListeners.clear()
+        ptyListeners.clear()
         scheduler.shutdownNow()
         http.dispatcher.executorService.shutdown()
     }

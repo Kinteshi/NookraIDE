@@ -2,6 +2,19 @@
   "schema_version": 1,
   "tools": [
     {
+      "name": "ty",
+      "version": "0.x",
+      "kind": "lsp",
+      "languages": ["python"],
+      "command": ["ty", "server"],
+      "install": {
+        "uv": ["ty"]
+      },
+      "settingsSection": "ty",
+      "env_allowlist": [],
+      "initializationOptions": {}
+    },
+    {
       "name": "basedpyright",
       "version": "1.x",
       "kind": "lsp",
@@ -50,6 +63,74 @@
         "apt": ["rust-analyzer"]
       },
       "settingsSection": "rust-analyzer",
+      "env_allowlist": [],
+      "initializationOptions": {}
+    },
+    {
+      "name": "copilot-language-server",
+      "version": "1.560.0",
+      "kind": "lsp",
+      "languages": ["*"],
+      "command": ["copilot-language-server", "--stdio"],
+      "install": {
+        "download": {
+          "binary": "copilot-language-server",
+          "archive_member": "package/copilot-language-server",
+          "artifacts": {
+            "aarch64": {
+              "url": "https://registry.npmjs.org/@github/copilot-language-server-linux-arm64/-/copilot-language-server-linux-arm64-1.560.0.tgz",
+              "sha256": "46306e79199b4934bff7d4bb5e4ff8cf308ecd7fb1a259669fe877438dbcd927"
+            },
+            "x86_64": {
+              "url": "https://registry.npmjs.org/@github/copilot-language-server-linux-x64/-/copilot-language-server-linux-x64-1.560.0.tgz",
+              "sha256": "c806f9e0aa8ac00027b240c2a59b9241570992d2c25d742c4e55516c3f28e46f"
+            }
+          }
+        }
+      },
+      "settingsSection": "github-copilot",
+      "env_allowlist": [],
+      "initializationOptions": {}
+    },
+    {
+      "name": "copilot",
+      "version": "1.0.103",
+      "kind": "acp-agent",
+      "languages": ["*"],
+      "command": ["copilot", "--acp", "--stdio"],
+      "install": {
+        "download": {
+          "binary": "copilot",
+          "archive_member": "package/copilot",
+          "artifacts": {
+            "aarch64": {
+              "url": "https://registry.npmjs.org/@github/copilot-linux-arm64/-/copilot-linux-arm64-1.0.103.tgz",
+              "sha256": "59db9c1b5b34374220f201681c02f245a5977d34e415687c5a0a46eff95b1a63"
+            },
+            "x86_64": {
+              "url": "https://registry.npmjs.org/@github/copilot-linux-x64/-/copilot-linux-x64-1.0.103.tgz",
+              "sha256": "f3b064d98211b472a3e4cd0e63a9b643177a910a2189d6d3c946fd0df94323fd"
+            }
+          }
+        }
+      },
+      "settingsSection": "github-copilot",
+      "env_allowlist": [],
+      "initializationOptions": {}
+    },
+    {
+      "name": "jupyter",
+      "version": "bridge-1",
+      "kind": "kernel",
+      "languages": ["python"],
+      "command": ["avf-jupyter-bridge"],
+      "install": {
+        "script": {
+          "binary": "avf-jupyter-bridge",
+          "asset": "avf-jupyter-bridge.py"
+        }
+      },
+      "settingsSection": "jupyter",
       "env_allowlist": [],
       "initializationOptions": {}
     },

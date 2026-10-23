@@ -6,6 +6,20 @@
 
 ---
 
+## Scope reset (2026-10-23)
+
+Track B is resumed as the **low-memory editor** for the reference tablet, where the code-server workbench (Track A) has not been reliable enough under memory pressure (see `docs/feasibility.md` on the host kernel panics). The scope is narrowed to match SPEC.md ADR-6: the app hosts a fast editor with language intelligence, and everything else stays in the guest's terminal.
+
+* **In scope:** the editor, Explorer, tabs, Problems, Outline, Command Palette (N2), language intelligence and theme import (N3), the integrated terminal (Section 9, via the daemon's PTY sessions and ConnectBot's Apache-2.0 `termlib`), Jupyter notebooks (Section 5.9, through a kernel bridge; see below), a settings page over VS Code-compatible `settings.json` keys, VS Code default keybindings, and GitHub Copilot inline completions and chat (a subset of N8).
+* **Out of scope for now:** Search, Tasks and Ports views (N4), the Source Control UI (N5), debugging (N6), the built-in chat agent, provider profiles, ACP agents other than Copilot, and MCP settings (rest of N8). Git and search are used from the terminal.
+* **Look and feel:** Material You throughout (dynamic colour on Android 12+, light/dark/system, optional pure black), replacing the VS Code-styled chrome. Syntax colours come from VS Code's Dark+/Light+ (MIT) and switch with the theme; an imported VS Code theme overrides them.
+* **Jupyter without Jupyter Server:** `avf-jupyter-bridge` (shipped inside the daemon, installed with `avf-native-daemon tools install jupyter`) runs under `uv run --script` with `jupyter_client`, discovers kernels in conda prefixes, virtualenvs and system Python, and drives one kernel per notebook over IPC sockets. The app talks to it through a `Kernel` RPC bridge (newline-delimited JSON-RPC). Notebooks are nbformat 4.5 files edited natively: code and Markdown cells, streamed outputs, PNG/JPEG images, errors, Run All, interrupt and restart.
+* **No on-device AI.** Completion and chat run on GitHub's service through Copilot's own guest tools; there is no local model and no provider-key manager.
+* **Language servers are chosen for memory.** Python uses `ty` (Rust) with Ruff; `basedpyright` remains in the catalog as an opt-in (`"avf.python.languageServer": "basedpyright"`). Servers start when the first document of their language opens and stop a minute after the last one closes; the daemon stops a detached server after 60 s instead of 30 min. TypeScript keeps `vtsls` until TypeScript 7's native `tsc --lsp` is measured on the device.
+* **Long-term direction:** if Zed's remote development reaches the needed support on Android, it may replace this editor; nothing here should make that harder (the guest stays an ordinary Linux machine).
+
+---
+
 ## 0. Relationship to Track A and expectation setting
 
 ### 0.1 Shared with Track A (do not duplicate)
@@ -330,7 +344,11 @@ Ghost text in the editor from the *Autocomplete* provider profile (shared with T
 
 ### 8.2 GitHub Copilot
 
-Tool pack `copilot-language-server` (`@github/copilot-language-server`, installed with the server's bundled Node). The app speaks its LSP dialect over the `Rpc` bridge: device-code sign-in flow surfaced natively, `textDocument/inlineCompletion`, status, and sign-out. The completion source picker lets the user choose Copilot, a provider profile, or both with priority. Respect GitHub's terms as published for third-party editor integrations at implementation time **[VERIFY]**.
+Two tool packs, both installed as pinned, SHA-256-verified native binaries from GitHub's npm platform packages (no Node in the guest): `copilot-language-server` (`@github/copilot-language-server-linux-<arch>`) for completions and `copilot` (`@github/copilot-linux-<arch>`, the Copilot CLI) for chat. The `download` install method (`binary`, `archive_member`, per-architecture `url` + `sha256`) fetches with `curl`, verifies, and installs the single executable into `~/.local/bin`.
+
+* **Completions:** the app speaks the language server's documented protocol over the `Rpc` bridge: `initializationOptions.editorInfo`/`editorPluginInfo`, the `signIn` device flow finished through `workspace/executeCommand` (the server opens GitHub with `window/showDocument`), `didChangeStatus`, `textDocument/didFocus`, `textDocument/inlineCompletion`, `textDocument/didShowCompletion`, and the item command on acceptance. sora-editor 0.23.6 cannot draw inline ghost text, so the suggestion is shown in a card above the editor; Tab accepts and Escape dismisses while it is visible, and Alt+\\ requests one explicitly.
+* **Chat:** `copilot --acp --stdio` over an `Acp` bridge (Copilot CLI's ACP server, public preview). The Chat view streams `agent_message_chunk`, thoughts, tool calls and plans, and answers `session/request_permission` with the user's choice. The client advertises no file-system or terminal capabilities; the agent edits files in the guest with its own tools, and the editor's conflict detection catches files that change underneath open tabs. Sign-in is `copilot login` in the Linux Terminal or an ACP `authenticate` method when the agent offers one.
+* Respect GitHub's terms as published for third-party editor integrations **[VERIFY]**.
 
 ### 8.3 Built-in chat agent
 

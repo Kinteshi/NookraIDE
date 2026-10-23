@@ -1,0 +1,108 @@
+# Native IDE (Track B) — handoff
+
+Last updated: 2026-10-23, 16:15 (UTC−3). Read this first when resuming. Scope decisions are in
+[NATIVE-ANDROID-IDE-SPEC.md](NATIVE-ANDROID-IDE-SPEC.md) under "Scope reset (2026-10-23)".
+
+## Where things are
+
+* **Branch:** `agents/reset-and-implement-native-android-ide`. The work below is committed as `Native IDE: Material You workbench, terminal, Jupyter, Copilot` (not pushed). The untracked top-level `android/` folder holds build leftovers from the Track A branch, so ignore it.
+* **App:** `apps/native-android-ide`, package `com.avfstudio.nativeide`.
+* **Guest daemon:** `crates/avf-daemon` with protocol `crates/avf-protocol`. The guest tool catalog is `guest/tools/catalog.json`, and the Jupyter bridge is `guest/tools/avf-jupyter-bridge.py`; the daemon embeds both.
+* **Guest install script:** `scripts/install-native-daemon.sh`.
+
+## Build and test
+
+```sh
+# App (Android SDK at /root/Android/sdk; local.properties is git-ignored)
+./apps/native-android-ide/gradlew -p apps/native-android-ide :app:testDebugUnitTest :app:assembleDebug
+# Daemon tests, then the ARM64 build for the guest (cargo-zigbuild lives in ~/.cargo/bin)
+cargo test -p avf-daemon -p avf-protocol
+PATH=$HOME/.cargo/bin:$PATH cargo zigbuild --release -p avf-daemon --target aarch64-unknown-linux-gnu.2.28
+```
+
+At last run: the app had 65 unit tests and the daemon 66 + 18, all passing; clippy was clean.
+
+## Reference tablet (Galaxy Tab S11 Ultra, SM-X930)
+
+* **adb:** wireless at `192.0.2.66:<port>`. The port changes after reboots, so ask the user for the new one.
+* **Guest services:**
+  * Track A Supervisor on 19860.
+  * Track B daemon `avf-native.service` on **19870**, binary `~/.local/bin/avf-native-daemon`, token in `~/.config/avf-native/env`, workspace `~/Projects`.
+  * A system code-server on 8080, which is not ours.
+* **Running guest commands:** push a script to `/sdcard/Download`, bring Linux Terminal to the front, and type `bash /mnt/shared/Download/x.sh`. Write results to `/mnt/shared/Download/*.log` and read them back with adb.
+* **Never send Back to Linux Terminal.** It shuts the VM down and the app then kills it forcibly. After a VM stop, "Preparando o terminal" is just the boot (about a minute).
+* **Guest reset:** at 13:46 on 2026-10-23 the Debian image was reset from Terminal → Settings → Recovery (not by automation), which wiped the whole guest, Track A and the system code-server included. To re-provision Track B, push the arm64 daemon and run `scripts/install-native-daemon.sh` (it now bootstraps a pinned, checksum-verified uv 0.13.0 and no longer needs openssl). Then enter the new token in the app and accept port 19870 in the notification shade.
+* **Port forwarding after a reboot:** forwards can be missing even though the ports are allowed. Toggle the port off and on in Terminal → Settings → Controle de portas. A new port raises a notification; tap *Aceitar*.
+* **The token:** never print it. To fill the app's Connect dialog, have a guest script copy the value to `/sdcard/Download`, type it on the device in 4-character chunks with `sleep 0.3` between them (8-character chunks still dropped characters), then delete the copy. The app saves the profile encrypted, so this is a one-time step per guest.
+* **Updating the daemon:** reinstall the binary, then `systemctl --user stop avf-native; sleep 3; start` (never `restart`).
+* **The tablet still panics:** a sixth host kernel panic happened at 13:06 on 2026-10-23 with the VM running (dropbox `SYSTEM_LAST_KMSG_10_20261023_130718_KP`). The log is truncated before the panic line.
+
+## Done
+
+### Guest (daemon)
+* **Tool catalog:**
+  * Python language servers: ty (default), ruff and basedpyright (opt-in).
+  * Copilot: `copilot-language-server` and `copilot` (the CLI, used for ACP chat). Both are pinned per-architecture npm tarballs with SHA-256 checks, so no Node is needed.
+  * Jupyter: `jupyter`, the bundled bridge, installed by the new `script` install method.
+* **Idle language servers:** a detached server stops after 60 s instead of 30 min.
+* **New `Kernel` RPC kind** for the Jupyter bridge: newline-delimited JSON-RPC, like ACP.
+* **Terminals:** PTY shells get `TERM=xterm-256color` and `COLORTERM=truecolor`.
+* **Jupyter bridge:** runs under `uv run --script` with `jupyter_client`. It finds kernels in conda prefixes and envs, venvs and system Python, and lists environments that lack ipykernel. It uses IPC sockets and runs one kernel per notebook.
+
+### App
+* **Architecture:** all logic moved from the 3,500-line composable into `WorkbenchController`. The UI is split across:
+  * `NativeWorkbench` (the shell)
+  * `EditorPane`
+  * `SidePanes`
+  * `PanelArea` (terminal, problems, output)
+  * `CopilotChatPane`
+  * `NotebookEditor`
+  * `SettingsScreen`
+  * `WorkbenchDialogs`
+  * `WorkbenchTheme`
+* **Material You:** dynamic colour, light/dark/system, an optional pure-black mode, a navigation rail, rounded panes, and a bottom navigation bar on phones.
+* **Syntax colouring:** VS Code's MagicPython grammar plus Dark+/Light+ themes (MIT; licence in `assets/textmate/VSCODE-LICENSE.txt`). They follow the app theme, and an imported VSIX theme overrides them.
+* **Settings page:** writes VS Code-style keys to `settings.json` (`editor.*`, `files.autoSave`, `terminal.integrated.fontSize`, `avf.*`). Dotted keys are accepted, and a raw JSON editor is still available.
+* **Shortcuts:** VS Code defaults, including Ctrl+`, Ctrl+Shift+`, Ctrl+B, Ctrl+J, Ctrl+Shift+E/M/O/U, Ctrl+PageUp/Down, Ctrl+K Ctrl+S, Ctrl+F5 (run file), and Ctrl+= / Ctrl+-. Some still work while the terminal has focus (`EditorCommands.global`).
+* **Terminal:** ConnectBot `termlib` 0.3.14 (Apache-2.0) over the daemon's PTY. Supports multiple sessions, reattach after a reconnect, and theme colours.
+* **Notebooks:** open `.ipynb`; edit code and Markdown cells; run with Shift/Ctrl/Alt+Enter; run all, interrupt, restart, clear, save. Outputs show stream text, errors and PNG/JPEG images. A kernel picker includes an "Install ipykernel" option that runs pip in a terminal.
+* **Copilot:**
+  * Inline suggestions appear as ghost text at the cursor (Tab accepts, Esc dismisses). Copilot stays off until sign-in succeeds. The status-bar item turns suggestions off when the status is Normal; in any other state (signed out, error) it starts sign-in instead. Toggling it while signed out was what silently switched Copilot off before.
+  * Chat sits in the right-hand pane, over ACP. **Sign-in** runs `copilot login --device-code && exit` in a terminal; the app reads the one-time code from the output and shows it in a chat card with *Copy code and open GitHub* and *Cancel*. The guest runs a display server, so a plain `copilot login` picks the browser flow with a loopback callback on guest port 37733; the device flow needs no forwarding. With no keyring in the guest, the CLI stores its token under `~/.copilot/`, where the daemon-launched `copilot --acp` (same user) reads it.
+* **Terminal links** (plain URLs and OSC 8) open in the Android browser; only http(s).
+* **Quick Open:** recursive workspace index.
+* **Syntax colouring after edits** (was "turned white"): the bracket/semantic colorizer ran on a background thread and could read sora's placeholder spans (`[0:TEXT_NORMAL]`, returned when the analyzer holds the span lock) and write them back. It now runs on the UI thread from `NativeCodeEditor.setStyles/updateStyles`, skips the pass when any line read is a placeholder, and invalidates sora's cached line renders (`updateStyles` with a `SequenceUpdateRange`) after writing. Semantic tokens are also requested when switching tabs.
+* **Fixes:**
+  * `file:///` URIs
+  * LSP `shutdown`/`exit` sent without params
+  * Python language servers started on demand and stopped when idle; scratch files are ignored
+  * close codes 1005/1006 handled
+  * semantic-token ContentModified errors silenced
+
+### Verified on the tablet
+* Connect, Explorer, open files, ty and Ruff diagnostics, and the servers stopping when idle.
+* Terminal: commands, colours, resize.
+* Ctrl+` and the command palette shortcut.
+* Notebook: kernel picker, run all, stdout and results, an inline matplotlib image, restart.
+* Copilot inline suggestions: signed in, status Normal.
+* Chat sign-in up to GitHub's Device Activation page: the code card, copy-and-open into the browser, and Cancel. Approving the device was left to the user.
+* Colours stay correct when opening a file, on edit bursts, and on new lines (`~/Projects/hl_test.py`).
+* Measured memory (earlier build): daemon 7 MB, ty 41 MB, ruff 18 MB, Copilot language server 283 MB, `copilot --acp` 288 MB.
+
+## Remaining (in priority order)
+
+1. **Finish chat sign-in on the device** (needs the user to approve on GitHub): tap Sign in in the chat pane, approve the code, then confirm that the daemon-launched `copilot --acp` answers a prompt. If it doesn't, check where the CLI stored the token (`~/.copilot/`, without printing it).
+2. **Copilot language server memory when signed out:** after a guest reset, Copilot stays enabled and its server (~280 MB) keeps running while it reports "not signed in". Consider stopping it until sign-in.
+3. **Re-measure the app's memory (PSS/RSS)** with the new UI, termlib and Material icons; the debug APK is 39 MB.
+4. **Small notebook gaps:**
+   - HTML-only outputs show a placeholder.
+   - Kernel completion isn't wired: `KernelClient.complete` exists but no UI uses it.
+   - `NotebookCell` autofocus (added at the end, not yet seen on device).
+   - The reset guest has no Python with ipykernel; check the kernel picker's "Install ipykernel" flow on a fresh guest (Debian's system pip is externally managed).
+5. **Not built yet:** customisable keybindings (`keybindings.json`), TypeScript 7 `tsc --lsp` measurement (Node isn't in the guest), and a phone-width check of the compact layout.
+6. **Decide later whether to merge daemon changes with Track A's Supervisor branch.** The two branches' `lib.rs` have diverged. Track A's guest install was also lost in the reset.
+
+## Device leftovers to clean up
+
+The 13:46 guest reset removed the earlier test files. Current leftovers:
+* `~/Projects/hl_test.py` (highlighting test file). The app also keeps an unsaved draft of it with test edits, and test lines in the `welcome.py` scratch file; close both without saving.

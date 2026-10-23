@@ -1,7 +1,6 @@
 package com.avfstudio.nativeide.language
 
 import com.avfstudio.nativeide.transport.GuestVfsClient
-import com.avfstudio.nativeide.transport.RpcEvent
 import com.avfstudio.nativeide.editor.LspPosition
 import com.avfstudio.nativeide.editor.LspRange
 import com.avfstudio.nativeide.editor.LspTextEdit
@@ -9,16 +8,13 @@ import com.avfstudio.nativeide.editor.EditorDecoration
 import com.google.gson.Gson
 import com.google.gson.JsonArray
 import com.google.gson.JsonElement
+import com.google.gson.JsonNull
 import com.google.gson.JsonObject
-import com.google.gson.JsonParser
 import java.io.Closeable
 import java.io.IOException
 import java.net.URI
-import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.atomic.AtomicLong
-import java.util.concurrent.TimeUnit
 
 data class LanguageDiagnostic(
     val uri: String,
@@ -30,27 +26,46 @@ data class LanguageDiagnostic(
 )
 
 class LanguageClient(
-    private val transport: GuestVfsClient,
+    transport: GuestVfsClient,
     private val settings: Map<String, JsonElement> = emptyMap(),
     private val gson: Gson = Gson(),
+    private val initializationOptions: JsonObject? = null,
 ) : Closeable {
     @Volatile private var configuredSettings: Map<String, JsonElement> =
         settings.mapValues { (_, value) -> value.deepCopy() }
-    private val requestIds = AtomicLong(0)
-    private val pendingRequests = ConcurrentHashMap<Long, CompletableFuture<JsonElement>>()
+    private val connection = JsonRpcConnection(transport, "Lsp", gson)
     private val openedDocuments = ConcurrentHashMap.newKeySet<String>()
     @Volatile private var semanticTokenTypes: List<String> = emptyList()
     @Volatile private var semanticTokenModifiers: List<String> = emptyList()
-    @Volatile private var bridgeId: UUID? = null
+    @Volatile private var workspaceRoot: String? = null
     @Volatile var isReady: Boolean = false
+        private set
+    /** True from [start] until the server stops, so callers do not launch it twice. */
+    @Volatile var isStarted: Boolean = false
         private set
     @Volatile var diagnosticsListener: ((String, List<LanguageDiagnostic>) -> Unit)? = null
     @Volatile var messageListener: ((String) -> Unit)? = null
+    /** Receives notifications this client does not handle itself, such as Copilot status. */
+    @Volatile var notificationListener: ((String, JsonObject) -> Unit)? = null
+    /** Opens a `window/showDocument` URI outside the editor; returns whether it was shown. */
+    @Volatile var showDocumentHandler: ((String) -> Boolean)? = null
 
-    fun start(rootPath: String, tool: String = "basedpyright"): CompletableFuture<Unit> =
-        transport.startLanguageServer(tool, rootPath).thenCompose { id ->
-            bridgeId = id
-            transport.addRpcEventListener(id, ::onRpcEvent)
+    init {
+        connection.notificationHandler = ::handleNotification
+        connection.requestHandler = ::handleRequest
+        connection.errorListener = { message -> messageListener?.invoke(message) }
+        connection.exitListener = { code ->
+            isReady = false
+            isStarted = false
+            openedDocuments.clear()
+            messageListener?.invoke("Language server exited (${code ?: "unknown"})")
+        }
+    }
+
+    fun start(rootPath: String, tool: String = "ty"): CompletableFuture<Unit> {
+        isStarted = true
+        workspaceRoot = rootPath
+        return connection.start(tool, rootPath).thenCompose {
             request("initialize", initializeParams(rootPath)).thenApply { initializeResult ->
                 val capabilities = initializeResult.asJsonObject.getAsJsonObject("capabilities")
                 val semanticProvider = capabilities?.getAsJsonObject("semanticTokensProvider")
@@ -68,14 +83,11 @@ class LanguageClient(
         }.whenComplete { _, error ->
             if (error != null) {
                 isReady = false
-                bridgeId?.let { id ->
-                    transport.removeRpcEventListener(id)
-                    transport.stopRpc(id)
-                }
-                bridgeId = null
-                failRequests(error)
+                isStarted = false
+                connection.stop()
             }
         }
+    }
 
     fun didOpen(path: String, languageId: String, version: Long, text: String) {
         if (!isReady || path.startsWith("scratch:") || !openedDocuments.add(path)) return
@@ -174,90 +186,49 @@ class LanguageClient(
 
     fun onDisconnected() {
         isReady = false
-        bridgeId?.let(transport::removeRpcEventListener)
-        bridgeId = null
+        isStarted = false
         openedDocuments.clear()
-        failRequests(IOException("Guest connection was lost"))
+        connection.detach(IOException("Guest connection was lost"))
     }
 
-    fun request(method: String, params: JsonElement): CompletableFuture<JsonElement> {
-        val id = requestIds.incrementAndGet()
-        val result = CompletableFuture<JsonElement>()
-        pendingRequests[id] = result
-        val message = JsonObject().apply {
-            addProperty("jsonrpc", "2.0")
-            addProperty("id", id)
-            addProperty("method", method)
-            add("params", params)
-        }
-        send(message).whenComplete { _, error ->
-            if (error != null) pendingRequests.remove(id)?.completeExceptionally(error)
-        }
-        CompletableFuture.delayedExecutor(30, TimeUnit.SECONDS).execute {
-            pendingRequests.remove(id)?.completeExceptionally(IOException("LSP request $method timed out"))
-        }
-        return result
-    }
+    fun request(method: String, params: JsonElement): CompletableFuture<JsonElement> =
+        connection.request(method, params)
 
     fun notify(method: String, params: JsonElement) {
-        val message = JsonObject().apply {
-            addProperty("jsonrpc", "2.0")
-            addProperty("method", method)
-            add("params", params)
-        }
-        send(message).whenComplete { _, error ->
+        connection.notify(method, params).whenComplete { _, error ->
             if (error != null) messageListener?.invoke("LSP notification $method failed: ${error.message}")
         }
     }
 
-    private fun send(message: JsonObject): CompletableFuture<Unit> {
-        val id = bridgeId ?: return CompletableFuture.failedFuture(IOException("Language server is not started"))
-        return transport.sendRpcMessage(id, gson.toJson(message))
-    }
-
-    private fun onRpcEvent(event: RpcEvent) {
-        if (event.bridgeId != bridgeId) return
-        when (event) {
-            is RpcEvent.Message -> handleMessage(event.body)
-            is RpcEvent.Error -> failRequests(IOException(event.message))
-            is RpcEvent.Exited -> {
-                isReady = false
-                transport.removeRpcEventListener(event.bridgeId)
-                bridgeId = null
-                openedDocuments.clear()
-                failRequests(IOException("Language server exited with code ${event.code ?: "unknown"}"))
-                messageListener?.invoke("Language server exited (${event.code ?: "unknown"})")
-            }
-            is RpcEvent.Started -> Unit
+    private fun handleNotification(method: String, params: JsonObject) {
+        when (method) {
+            "textDocument/publishDiagnostics" -> publishDiagnostics(params)
+            "window/showMessage" ->
+                messageListener?.invoke(params.get("message")?.asString ?: "Language server message")
+            "window/logMessage", "\$/progress", "\$/logTrace" -> Unit
+            else -> notificationListener?.invoke(method, params)
         }
     }
 
-    private fun handleMessage(body: String) {
-        val message = try {
-            JsonParser.parseString(body).asJsonObject
-        } catch (error: Exception) {
-            messageListener?.invoke("Language server sent invalid JSON-RPC: ${error.message}")
-            return
-        }
-        if (message.has("method")) {
-            val method = message.get("method").asString
-            val params = message.getAsJsonObject("params") ?: JsonObject()
-            when (method) {
-                "textDocument/publishDiagnostics" -> publishDiagnostics(params)
-                "workspace/configuration" -> respondConfiguration(message.get("id"), params)
-                "window/showMessage", "window/logMessage" ->
-                    messageListener?.invoke(params.get("message")?.asString ?: "Language server message")
+    private fun handleRequest(method: String, params: JsonObject): CompletableFuture<JsonElement>? =
+        when (method) {
+            "workspace/configuration" -> CompletableFuture.completedFuture(configurationResult(params))
+            "workspace/workspaceFolders" -> CompletableFuture.completedFuture(
+                workspaceRoot?.let { root -> workspaceFolders(root) } ?: JsonNull.INSTANCE,
+            )
+            "window/showMessageRequest" -> {
+                messageListener?.invoke(params.get("message")?.asString ?: "Language server message")
+                CompletableFuture.completedFuture(JsonNull.INSTANCE)
             }
-            return
+            "window/showDocument" -> {
+                val uri = params.get("uri")?.asString
+                val shown = uri != null && showDocumentHandler?.invoke(uri) == true
+                CompletableFuture.completedFuture(JsonObject().apply { addProperty("success", shown) })
+            }
+            "window/workDoneProgress/create", "client/registerCapability", "client/unregisterCapability" ->
+                CompletableFuture.completedFuture(JsonNull.INSTANCE)
+            else -> null
         }
-        val id = message.get("id")?.asLong ?: return
-        val pending = pendingRequests.remove(id) ?: return
-        if (message.has("error")) {
-            pending.completeExceptionally(IOException("LSP request failed: ${message.get("error")}"))
-        } else {
-            pending.complete(message.get("result") ?: com.google.gson.JsonNull.INSTANCE)
-        }
-    }
 
     private fun publishDiagnostics(params: JsonObject) {
         val uri = params.get("uri")?.asString ?: return
@@ -278,40 +249,35 @@ class LanguageClient(
         diagnosticsListener?.invoke(uri, diagnostics)
     }
 
-    private fun respondConfiguration(id: JsonElement?, params: JsonObject) {
-        if (id == null) return
+    private fun configurationResult(params: JsonObject): JsonArray {
         val sections = params.getAsJsonArray("items") ?: JsonArray()
         val result = JsonArray()
         sections.forEach { section ->
             val name = section.asJsonObject.get("section")?.asString
             result.add(name?.let(configuredSettings::get) ?: JsonObject())
         }
-        val response = JsonObject().apply {
-            addProperty("jsonrpc", "2.0")
-            add("id", id)
-            add("result", result)
-        }
-        send(response).whenComplete { _, error ->
-            if (error != null) messageListener?.invoke("workspace/configuration failed: ${error.message}")
-        }
+        return result
     }
 
-    private fun failRequests(error: Throwable) {
-        pendingRequests.values.forEach { it.completeExceptionally(error) }
-        pendingRequests.clear()
+    private fun workspaceFolders(rootPath: String) = JsonArray().apply {
+        add(JsonObject().apply {
+            addProperty("uri", fileUri(rootPath))
+            addProperty("name", rootPath.substringAfterLast('/').ifEmpty { "workspace" })
+        })
     }
 
     private fun initializeParams(rootPath: String) = JsonObject().apply {
-        add("processId", com.google.gson.JsonNull.INSTANCE)
+        add("processId", JsonNull.INSTANCE)
         addProperty("rootUri", fileUri(rootPath))
-        add("workspaceFolders", JsonArray().apply {
-            add(JsonObject().apply {
-                addProperty("uri", fileUri(rootPath))
-                addProperty("name", rootPath.substringAfterLast('/').ifEmpty { "workspace" })
-            })
-        })
+        add("workspaceFolders", workspaceFolders(rootPath))
         addProperty("trace", "off")
+        initializationOptions?.let { add("initializationOptions", it.deepCopy()) }
         add("capabilities", JsonObject().apply {
+            add("window", JsonObject().apply {
+                addProperty("workDoneProgress", true)
+                add("showDocument", JsonObject().apply { addProperty("support", true) })
+                add("showMessage", JsonObject())
+            })
             add("workspace", JsonObject().apply {
                 addProperty("configuration", true)
                 addProperty("workspaceFolders", true)
@@ -396,21 +362,16 @@ class LanguageClient(
         }
     }
 
-    private fun fileUri(path: String): String = URI("file", null, path, null).toASCIIString()
+    private fun fileUri(path: String): String = URI("file", "", path, null).toASCIIString()
 
     override fun close() {
-        val id = bridgeId ?: return
+        if (connection.bridgeId == null) return
         isReady = false
-        request("shutdown", JsonObject()).whenComplete { _, _ ->
-            val exit = JsonObject().apply {
-                addProperty("jsonrpc", "2.0")
-                addProperty("method", "exit")
-                add("params", JsonObject())
-                }
-            transport.sendRpcMessage(id, gson.toJson(exit)).whenComplete { _, _ ->
-                transport.stopRpc(id)
-                transport.removeRpcEventListener(id)
-                bridgeId = null
+        openedDocuments.clear()
+        request("shutdown", JsonNull.INSTANCE).whenComplete { _, _ ->
+            connection.notify("exit", JsonNull.INSTANCE).whenComplete { _, _ ->
+                connection.stop()
+                isStarted = false
             }
         }
     }

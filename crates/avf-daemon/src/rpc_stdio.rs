@@ -8,7 +8,8 @@ pub(crate) fn validate(kind: RpcKind, body: &str) -> Result<(), String> {
     if body.len() > MAX_RPC_MESSAGE_SIZE {
         return Err("RPC message exceeds the 16 MiB limit".into());
     }
-    if kind == RpcKind::Acp && (body.contains('\n') || body.contains('\r')) {
+    let line_framed = matches!(kind, RpcKind::Acp | RpcKind::Kernel);
+    if line_framed && (body.contains('\n') || body.contains('\r')) {
         return Err("ACP messages must be a single newline-free JSON value".into());
     }
     let value: serde_json::Value =
@@ -16,8 +17,7 @@ pub(crate) fn validate(kind: RpcKind, body: &str) -> Result<(), String> {
     if !value.is_object() {
         return Err("RPC messages must be JSON objects".into());
     }
-    if kind == RpcKind::Acp && value.get("jsonrpc").and_then(|value| value.as_str()) != Some("2.0")
-    {
+    if line_framed && value.get("jsonrpc").and_then(|value| value.as_str()) != Some("2.0") {
         return Err("ACP messages must use JSON-RPC 2.0".into());
     }
     Ok(())
@@ -36,7 +36,7 @@ where
                 .map_err(|message| io::Error::new(io::ErrorKind::InvalidData, message))?;
             Ok(Some(message))
         }
-        RpcKind::Acp => read_line_json(reader).await,
+        RpcKind::Acp | RpcKind::Kernel => read_line_json(reader).await,
         RpcKind::Lsp | RpcKind::Custom => Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "stdio bridge requires a DAP or ACP kind",
@@ -57,7 +57,7 @@ where
             writer.write_all(body.as_bytes()).await?;
             writer.flush().await
         }
-        RpcKind::Acp => {
+        RpcKind::Acp | RpcKind::Kernel => {
             writer.write_all(body.as_bytes()).await?;
             writer.write_all(b"\n").await?;
             writer.flush().await

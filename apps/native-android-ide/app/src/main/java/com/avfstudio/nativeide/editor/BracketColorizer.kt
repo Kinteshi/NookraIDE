@@ -1,5 +1,6 @@
 package com.avfstudio.nativeide.editor
 
+import io.github.rosemoe.sora.lang.analysis.SequenceUpdateRange
 import io.github.rosemoe.sora.lang.styling.Span
 import io.github.rosemoe.sora.lang.styling.TextStyle
 import io.github.rosemoe.sora.widget.CodeEditor
@@ -7,7 +8,6 @@ import io.github.rosemoe.sora.widget.schemes.EditorColorScheme
 import android.graphics.Color as AndroidColor
 import java.util.Collections
 import java.util.IdentityHashMap
-import java.util.concurrent.Executors
 
 data class BracketColorToken(val offset: Int, val depth: Int)
 
@@ -105,6 +105,19 @@ fun bracketColorTokens(text: String, languageId: String): List<BracketColorToken
 private const val BRACKET_COLOR_COUNT = 3
 private val BRACKET_COLOR_IDS = intArrayOf(500_001, 500_002, 500_003)
 private val BRACKET_COLORS = intArrayOf(0xFF7FC8FF.toInt(), 0xFFFFC66D.toInt(), 0xFFC792EA.toInt())
+// VS Code Light+ bracket-pair and semantic colours, used when the app theme is light.
+private val LIGHT_BRACKET_COLORS = intArrayOf(0xFF0431FA.toInt(), 0xFF319331.toInt(), 0xFF7B3814.toInt())
+private val LIGHT_SEMANTIC_COLORS = mapOf(
+    500_010 to 0xFF267F99.toInt(),
+    500_011 to 0xFF795E26.toInt(),
+    500_012 to 0xFF001080.toInt(),
+    500_013 to 0xFF0070C1.toInt(),
+    500_014 to 0xFFAF00DB.toInt(),
+    500_015 to 0xFFA31515.toInt(),
+    500_016 to 0xFF098658.toInt(),
+    500_017 to 0xFF008000.toInt(),
+    500_018 to 0xFF000000.toInt(),
+)
 private val SEMANTIC_TOKEN_COLORS = mapOf(
     "class" to (500_010 to 0xFF4EC9B0.toInt()),
     "enum" to (500_010 to 0xFF4EC9B0.toInt()),
@@ -131,18 +144,29 @@ class SoraBracketColorizer(
     private val languageId: String,
 ) {
     private val injected = Collections.newSetFromMap(IdentityHashMap<Span, Boolean>())
-    @Volatile private var semanticDecorations: List<EditorDecoration> = emptyList()
+    private var semanticDecorations: List<EditorDecoration> = emptyList()
 
+    /** Called on the UI thread. */
     fun setSemanticDecorations(decorations: List<EditorDecoration>) {
         semanticDecorations = decorations
-        updateAsync()
+        update()
     }
 
-    fun updateAsync() {
-        colorizerExecutor.execute(::update)
-    }
+    private var applying = false
 
+    /** Re-applies bracket and semantic colours over the analyzer's spans. Runs on the UI thread,
+     *  normally right after the analyzer publishes. */
     fun update() {
+        if (applying) return
+        applying = true
+        try {
+            applyOverlay()
+        } finally {
+            applying = false
+        }
+    }
+
+    private fun applyOverlay() {
         val styles = editor.styles ?: return
         val spans = styles.spans ?: return
         if (!spans.supportsModify()) return
@@ -178,19 +202,29 @@ class SoraBracketColorizer(
             Triple(range.start.line, range.start.character, range.end.character to colorId)
         }.groupBy({ it.first }, { it.second to it.third })
 
+        // Read every line before writing any: while the analyzer holds the span locks, sora's
+        // reader returns a fresh placeholder list ([0:TEXT_NORMAL]) instead of the line's real
+        // (unmodifiable) spans. Writing that back would leave the line uncoloured until it is
+        // edited again, so give up and let the analyzer's next publish call update() again.
         val reader = spans.read()
+        val lineSpans = ArrayList<List<Span>>(editor.lineCount)
+        // getSpansOnLine takes and releases its own locks; moveToLine would keep the last line locked.
+        for (line in 0 until editor.lineCount) {
+            val read = reader.getSpansOnLine(line)
+            if (read is ArrayList<*>) return
+            lineSpans += read
+        }
         val modifier = spans.modify()
         val previousInjected = injected.toSet()
         injected.clear()
         for (line in 0 until editor.lineCount) {
-            reader.moveToLine(line)
-            val base = reader.getSpansOnLine(line)
+            val base = lineSpans[line]
                 .filterNot(previousInjected::contains)
                 .sortedBy(Span::getColumn)
             val lineTokens = tokensByLine[line].orEmpty()
             val semanticTokens = semanticByLine[line].orEmpty()
             if ((lineTokens.isEmpty() && semanticTokens.isEmpty()) || base.isEmpty()) {
-                if (base.size != reader.getSpanCount()) modifier.setSpansOnLine(line, base)
+                if (base.size != lineSpans[line].size) modifier.setSpansOnLine(line, base)
                 continue
             }
 
@@ -224,7 +258,10 @@ class SoraBracketColorizer(
             output.sortBy(Span::getColumn)
             modifier.setSpansOnLine(line, output)
         }
-        editor.postInvalidate()
+        // sora caches each drawn line (hardware RenderNodes) and redraws one only when its range
+        // is invalidated; a plain invalidate() would keep showing the old, or uncoloured, lines.
+        // This re-enters update() through NativeCodeEditor.updateStyles, which [applying] stops.
+        if (editor.lineCount > 0) editor.updateStyles(styles, SequenceUpdateRange(0, editor.lineCount - 1))
     }
 
     private fun coloredSpan(column: Int, source: Span, colorId: Int): Span =
@@ -242,12 +279,12 @@ class SoraBracketColorizer(
         (style and TextStyle.FOREGROUND_BITS.inv()) or colorId.toLong()
 
     companion object {
-        fun configureColors(editor: CodeEditor, semanticColors: Map<String, String> = emptyMap()) {
+        fun configureColors(editor: CodeEditor, semanticColors: Map<String, String> = emptyMap(), light: Boolean = false) {
             BRACKET_COLOR_IDS.forEachIndexed { index, colorId ->
-                editor.colorScheme.setColor(colorId, BRACKET_COLORS[index])
+                editor.colorScheme.setColor(colorId, (if (light) LIGHT_BRACKET_COLORS else BRACKET_COLORS)[index])
             }
             SEMANTIC_TOKEN_COLORS.values.distinct().forEach { (colorId, color) ->
-                editor.colorScheme.setColor(colorId, color)
+                editor.colorScheme.setColor(colorId, if (light) LIGHT_SEMANTIC_COLORS[colorId] ?: color else color)
             }
             semanticColors.forEach { (tokenType, value) ->
                 val colorId = SEMANTIC_TOKEN_COLORS[tokenType.substringBefore('.')]?.first ?: return@forEach
@@ -264,11 +301,10 @@ class SoraBracketColorizer(
                 editor.colorScheme.setColor(colorId, color)
             }
             editor.setHighlightBracketPair(true)
-            editor.colorScheme.setColor(EditorColorScheme.HIGHLIGHTED_DELIMITERS_FOREGROUND, 0xFFFFFFFF.toInt())
-        }
-
-        private val colorizerExecutor = Executors.newSingleThreadExecutor { task ->
-            Thread(task, "sora-bracket-colorizer").apply { isDaemon = true }
+            editor.colorScheme.setColor(
+                EditorColorScheme.HIGHLIGHTED_DELIMITERS_FOREGROUND,
+                if (light) 0xFF000000.toInt() else 0xFFFFFFFF.toInt(),
+            )
         }
     }
 }

@@ -55,6 +55,8 @@ pub enum RpcKind {
     Lsp,
     Dap,
     Acp,
+    /// Newline-delimited JSON-RPC like `Acp`, for Jupyter kernel bridges.
+    Kernel,
     Custom,
 }
 
@@ -926,7 +928,7 @@ mod tests {
                 message: "git failed".into(),
             }),
         ]);
-        for kind in [RpcKind::Dap, RpcKind::Acp, RpcKind::Custom] {
+        for kind in [RpcKind::Dap, RpcKind::Acp, RpcKind::Kernel, RpcKind::Custom] {
             packets.push(MultiplexedPacket::Rpc(RpcMessage::Start {
                 bridge_id: id,
                 tool: "tool".into(),

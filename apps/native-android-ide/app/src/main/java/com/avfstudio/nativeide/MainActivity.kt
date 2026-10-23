@@ -7,6 +7,7 @@ import android.os.SystemClock
 import android.view.ViewTreeObserver
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -17,10 +18,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -50,11 +49,8 @@ import kotlin.math.ceil
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent {
-            MaterialTheme(colorScheme = darkColorScheme()) {
-                NativeWorkbench()
-            }
-        }
+        enableEdgeToEdge()
+        setContent { NativeWorkbench() }
     }
 }
 
@@ -200,6 +196,9 @@ internal fun buildSampleDocument(lines: Int): String = buildString(lines * 112) 
     }
 }
 
+internal const val LIGHT_SYNTAX_THEME = "avf-light.tmTheme.json"
+internal const val DARK_SYNTAX_THEME = "avf-dark.tmTheme.json"
+
 internal object PythonTextMate {
     @Volatile
     private var initialized = false
@@ -237,12 +236,12 @@ internal object PythonTextMate {
         GrammarRegistry.getInstance().loadGrammars(definition)
         AssetPackGrammarLoader.loadInstalled(appContext)
 
-        val theme = IThemeSource.fromInputStream(
-            appContext.assets.open("textmate/avf-dark.tmTheme.json"),
-            "avf-dark.tmTheme.json",
-            Charsets.UTF_8,
-        )
-        ThemeRegistry.getInstance().loadTheme(theme)
+        // Light and dark syntax themes follow the Material theme; an imported VS Code theme wins.
+        listOf(LIGHT_SYNTAX_THEME, DARK_SYNTAX_THEME).forEach { fileName ->
+            ThemeRegistry.getInstance().loadTheme(
+                IThemeSource.fromInputStream(appContext.assets.open("textmate/$fileName"), fileName, Charsets.UTF_8),
+            )
+        }
         initialized = true
     }
 }

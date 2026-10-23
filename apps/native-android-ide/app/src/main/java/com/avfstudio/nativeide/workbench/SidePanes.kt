@@ -1,0 +1,267 @@
+package com.avfstudio.nativeide.workbench
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.InsertDriveFile
+import androidx.compose.material.icons.outlined.Code
+import androidx.compose.material.icons.outlined.DataObject
+import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.Functions
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.WarningAmber
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import com.avfstudio.nativeide.language.LanguageDiagnostic
+
+@Composable
+fun SidebarContent(controller: WorkbenchController, view: SidebarView, modifier: Modifier = Modifier) {
+    Column(modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceContainerLow)) {
+        Row(
+            Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 6.dp, bottom = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(view.title, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+            if (view == SidebarView.Explorer) {
+                IconButton(onClick = { controller.currentDirectory.takeIf(String::isNotEmpty)?.let(controller::loadDirectory) }) {
+                    Icon(Icons.Outlined.Refresh, contentDescription = "Refresh")
+                }
+            }
+        }
+        when (view) {
+            SidebarView.Explorer -> ExplorerList(controller)
+            SidebarView.Outline -> OutlineList(controller)
+            SidebarView.Problems -> ProblemsList(controller)
+            SidebarView.References -> ReferencesList(controller)
+        }
+    }
+}
+
+@Composable
+fun ExplorerList(controller: WorkbenchController) {
+    val directory = controller.currentDirectory
+    when {
+        !controller.connected && controller.roots.isEmpty() -> EmptyMessage("Connect to a guest to browse its workspace.")
+        directory.isEmpty() -> LazyColumn {
+            items(controller.roots) { root ->
+                PaneRow(Icons.Outlined.Folder, root.substringAfterLast('/').ifEmpty { root }) { controller.loadDirectory(root) }
+            }
+        }
+        else -> LazyColumn {
+            item {
+                val parent = directory.substringBeforeLast('/', "")
+                val atRoot = controller.roots.any { it.trimEnd('/') == directory.trimEnd('/') }
+                PaneRow(Icons.AutoMirrored.Outlined.ArrowBack, if (atRoot) directory else "..", muted = true) {
+                    if (!atRoot && parent.isNotEmpty()) controller.loadDirectory(parent)
+                }
+            }
+            items(controller.entries, key = { it.path }) { entry ->
+                PaneRow(
+                    when {
+                        entry.isDirectory -> Icons.Outlined.Folder
+                        entry.name.endsWith(".ipynb") -> Icons.Outlined.Code
+                        else -> Icons.AutoMirrored.Outlined.InsertDriveFile
+                    },
+                    entry.name,
+                    selected = entry.path == controller.activePath,
+                ) {
+                    if (entry.isDirectory) controller.loadDirectory(entry.path) else controller.openPath(entry.path)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun OutlineList(controller: WorkbenchController) {
+    val document = controller.activeDocument
+    val rows = remember(controller.outlineSymbols) { flattenOutline(controller.outlineSymbols) }
+    when {
+        document == null -> EmptyMessage("Open a file to show its symbols.")
+        rows.isEmpty() -> EmptyMessage("No symbols found.")
+        else -> LazyColumn {
+            items(rows) { (symbol, depth) ->
+                PaneRow(
+                    when (symbol.kind) {
+                        5, 10, 11, 23 -> Icons.Outlined.DataObject
+                        6, 9, 12 -> Icons.Outlined.Functions
+                        else -> Icons.Outlined.Code
+                    },
+                    symbol.name,
+                    indent = depth,
+                ) {
+                    val uri = java.net.URI("file", "", document.path, null).toASCIIString()
+                    controller.navigateToLocation(LanguageLocation(uri, symbol.range))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ProblemsList(controller: WorkbenchController) {
+    val issues = controller.languageServerIssues
+    val diagnostics = controller.diagnostics
+    if (issues.isEmpty() && diagnostics.isEmpty()) {
+        EmptyMessage("No problems have been detected in the open files.")
+        return
+    }
+    LazyColumn {
+        items(issues) { issue ->
+            ProblemRow(Icons.Outlined.ErrorOutline, MaterialTheme.colorScheme.error, "${issue.server} unavailable", issue.message) {}
+        }
+        items(diagnostics) { diagnostic -> DiagnosticRow(diagnostic) { controller.navigateToLocation(LanguageLocation(diagnostic.uri, diagnostic.range)) } }
+    }
+}
+
+@Composable
+private fun DiagnosticRow(diagnostic: LanguageDiagnostic, onClick: () -> Unit) {
+    val colors = MaterialTheme.colorScheme
+    val (icon, tint) = when (diagnostic.severity) {
+        1 -> Icons.Outlined.ErrorOutline to colors.error
+        2 -> Icons.Outlined.WarningAmber to colors.tertiary
+        else -> Icons.Outlined.Info to colors.primary
+    }
+    val line = diagnostic.range.getAsJsonObject("start")?.get("line")?.asInt?.plus(1)
+    ProblemRow(
+        icon,
+        tint,
+        diagnostic.message.lineSequence().first(),
+        "${diagnostic.uri.substringAfterLast('/')}${line?.let { ":$it" }.orEmpty()}${diagnostic.source?.let { " · $it" }.orEmpty()}",
+        onClick,
+    )
+}
+
+@Composable
+private fun ProblemRow(icon: ImageVector, tint: androidx.compose.ui.graphics.Color, title: String, detail: String, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(18.dp).padding(top = 2.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(detail, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun ReferencesList(controller: WorkbenchController) {
+    val locations = controller.referenceLocations
+    if (locations.isEmpty()) {
+        EmptyMessage("Run Find All References (Shift+F12) on a symbol.")
+        return
+    }
+    LazyColumn {
+        items(locations) { location ->
+            val line = location.range.getAsJsonObject("start")?.get("line")?.asInt?.plus(1) ?: 1
+            PaneRow(Icons.AutoMirrored.Outlined.InsertDriveFile, "${location.uri.substringAfterLast('/')}:$line") {
+                controller.navigateToLocation(location)
+            }
+        }
+    }
+}
+
+@Composable
+fun OutputLog(controller: WorkbenchController) {
+    val lines = controller.outputLog
+    LazyColumn(Modifier.fillMaxSize().padding(horizontal = 12.dp), reverseLayout = true) {
+        items(lines.asReversed()) { line ->
+            Text(
+                line,
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(vertical = 1.dp),
+            )
+        }
+    }
+}
+
+@Composable
+fun PaneRow(
+    icon: ImageVector,
+    label: String,
+    muted: Boolean = false,
+    selected: Boolean = false,
+    indent: Int = 0,
+    onClick: () -> Unit,
+) {
+    val colors = MaterialTheme.colorScheme
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 6.dp)
+            .background(if (selected) colors.secondaryContainer else androidx.compose.ui.graphics.Color.Transparent, MaterialTheme.shapes.small)
+            .clickable(onClick = onClick)
+            .padding(start = (10 + indent * 14).dp, end = 10.dp, top = 7.dp, bottom = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            modifier = Modifier.size(18.dp),
+            tint = if (selected) colors.onSecondaryContainer else colors.onSurfaceVariant,
+        )
+        Text(
+            label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = when {
+                selected -> colors.onSecondaryContainer
+                muted -> colors.onSurfaceVariant
+                else -> colors.onSurface
+            },
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+fun EmptyMessage(text: String) {
+    Text(
+        text,
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(16.dp),
+    )
+}
+
+@Composable
+fun PaneDivider() = HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+internal fun flattenOutline(symbols: List<OutlineSymbol>): List<Pair<OutlineSymbol, Int>> =
+    buildList {
+        fun append(items: List<OutlineSymbol>, depth: Int) {
+            items.forEach { symbol ->
+                add(symbol to depth)
+                append(symbol.children, depth + 1)
+            }
+        }
+        append(symbols, 0)
+    }

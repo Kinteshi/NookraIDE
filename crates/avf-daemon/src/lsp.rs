@@ -353,6 +353,20 @@ fn default_servers() -> HashMap<String, ServerCommand> {
             },
         ),
         (
+            "ty".to_owned(),
+            ServerCommand {
+                program: "ty".to_owned(),
+                args: vec!["server".to_owned()],
+            },
+        ),
+        (
+            "copilot-language-server".to_owned(),
+            ServerCommand {
+                program: "copilot-language-server".to_owned(),
+                args: vec!["--stdio".to_owned()],
+            },
+        ),
+        (
             "ruff".to_owned(),
             ServerCommand {
                 program: "ruff".to_owned(),

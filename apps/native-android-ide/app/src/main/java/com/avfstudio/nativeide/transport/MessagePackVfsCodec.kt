@@ -33,12 +33,13 @@ internal object MessagePackVfsCodec {
             }
         }
 
-    fun rpcStart(bridgeId: UUID, tool: String, args: List<String>, cwd: String?): ByteArray =
+    fun rpcStart(bridgeId: UUID, tool: String, args: List<String>, cwd: String?, kind: String = "Lsp"): ByteArray =
         rpcPacket("Start") {
+            require(kind in setOf("Lsp", "Dap", "Acp", "Kernel")) { "Unsupported RPC bridge kind: $kind" }
             packMapHeader(6)
             stringField("bridge_id", bridgeId.toString())
             stringField("tool", tool)
-            stringField("kind", "Lsp")
+            stringField("kind", kind)
             packString("args")
             packArrayHeader(args.size)
             args.forEach(::packString)
@@ -60,6 +61,42 @@ internal object MessagePackVfsCodec {
             packMapHeader(1)
             stringField("bridge_id", bridgeId.toString())
         }
+
+    fun ptySpawn(sessionId: UUID, cwd: String?, cols: Int, rows: Int): ByteArray =
+        ptyPacket(sessionId) {
+            packMapHeader(1)
+            packString("Spawn")
+            packMapHeader(4)
+            packString("shell")
+            packNil()
+            packString("cwd")
+            cwd?.let(::packString) ?: packNil()
+            stringField("cols", cols)
+            stringField("rows", rows)
+        }
+
+    fun ptyInput(sessionId: UUID, data: ByteArray): ByteArray =
+        ptyPacket(sessionId) {
+            packMapHeader(1)
+            packString("Input")
+            packBinaryHeader(data.size)
+            writePayload(data)
+        }
+
+    fun ptyResize(sessionId: UUID, cols: Int, rows: Int): ByteArray =
+        ptyPacket(sessionId) {
+            packMapHeader(1)
+            packString("Resize")
+            packMapHeader(2)
+            stringField("cols", cols)
+            stringField("rows", rows)
+        }
+
+    /** Unit variants (`Reattach`, `Kill`) are encoded as bare strings. */
+    fun ptyCommand(sessionId: UUID, command: String): ByteArray {
+        require(command == "Reattach" || command == "Kill") { "Unsupported PTY command: $command" }
+        return ptyPacket(sessionId) { packString(command) }
+    }
 
     fun decode(bytes: ByteArray): IncomingPacket {
         val packet = MessagePack.newDefaultUnpacker(bytes).use { it.unpackValue() }
@@ -137,14 +174,53 @@ internal object MessagePackVfsCodec {
             }
         }
 
+        val pty = packet.mapStringValue("Pty")
+        if (pty != null) {
+            val fields = pty.asMapValue().map().mapKeys { it.key.asString() }
+            val sessionId = UUID.fromString(fields.getValue("session_id").asString())
+            val data = fields.getValue("data")
+            if (data.isStringValue) return IncomingPacket.Ignored
+            val variant = data.singleEntry()
+            val event = when (variant.key.asString()) {
+                "Spawned" -> PtyEvent.Spawned(
+                    sessionId,
+                    variant.value.asMapValue().map().mapKeys { it.key.asString() }.getValue("pid").asLong(),
+                )
+                "Output" -> PtyEvent.Output(sessionId, variant.value.asBinaryValue().asByteArray())
+                "Exit" -> PtyEvent.Exit(
+                    sessionId,
+                    variant.value.asMapValue().map().mapKeys { it.key.asString() }["code"]
+                        ?.takeUnless { it.isNilValue }?.asLong()?.toInt(),
+                )
+                "Error" -> PtyEvent.Error(
+                    sessionId,
+                    variant.value.asMapValue().map().mapKeys { it.key.asString() }.getValue("message").asString(),
+                )
+                else -> return IncomingPacket.Ignored
+            }
+            return IncomingPacket.Pty(event)
+        }
+
         val system = packet.mapStringValue("System")
             ?: return IncomingPacket.Unexpected("packet did not contain a System or Vfs variant")
         val variant = system.singleEntry()
         return when (variant.key.asString()) {
-            "Welcome" -> IncomingPacket.Welcome(
-                protocolVersion = variant.value.asMapValue().map().mapKeys { it.key.asString() }
-                    .getValue("protocol_version").asLong().toInt(),
-            )
+            "Welcome" -> {
+                val fields = variant.value.asMapValue().map().mapKeys { it.key.asString() }
+                IncomingPacket.Welcome(
+                    protocolVersion = fields.getValue("protocol_version").asLong().toInt(),
+                    ptySessions = fields["pty_sessions"]?.takeUnless { it.isNilValue }?.asArrayValue()?.list()
+                        ?.map { session ->
+                            val values = session.asMapValue().map().mapKeys { it.key.asString() }
+                            PtySessionInfo(
+                                sessionId = UUID.fromString(values.getValue("session_id").asString()),
+                                cwd = values["cwd"]?.takeUnless { it.isNilValue }?.asString().orEmpty(),
+                                cols = values["cols"]?.asLong()?.toInt() ?: 80,
+                                rows = values["rows"]?.asLong()?.toInt() ?: 24,
+                            )
+                        }.orEmpty(),
+                )
+            }
             "Rejected" -> IncomingPacket.Rejected(variant.value.toString())
             "ProtocolError" -> IncomingPacket.Unexpected(variant.value.toString())
             else -> IncomingPacket.Ignored
@@ -164,6 +240,18 @@ internal object MessagePackVfsCodec {
 
     private fun rpcPacket(variant: String, fields: org.msgpack.core.MessagePacker.() -> Unit): ByteArray =
         packet("Rpc", variant, fields)
+
+    private fun ptyPacket(sessionId: UUID, data: org.msgpack.core.MessagePacker.() -> Unit): ByteArray {
+        val packer = MessagePack.newDefaultBufferPacker()
+        packer.packMapHeader(1)
+        packer.packString("Pty")
+        packer.packMapHeader(2)
+        packer.stringField("session_id", sessionId.toString())
+        packer.packString("data")
+        packer.data()
+        packer.close()
+        return packer.toByteArray()
+    }
 
     private fun org.msgpack.core.MessagePacker.stringField(key: String, value: String) {
         packString(key)
@@ -192,7 +280,7 @@ internal object MessagePackVfsCodec {
 }
 
 sealed interface IncomingPacket {
-    data class Welcome(val protocolVersion: Int) : IncomingPacket
+    data class Welcome(val protocolVersion: Int, val ptySessions: List<PtySessionInfo> = emptyList()) : IncomingPacket
     data class Rejected(val reason: String) : IncomingPacket
     data class ReadFile(
         val requestId: Long,
@@ -207,6 +295,7 @@ sealed interface IncomingPacket {
     data class Roots(val requestId: Long, val roots: List<String>) : IncomingPacket
     data class Error(val requestId: Long, val code: String, val message: String) : IncomingPacket
     data class Rpc(val event: RpcEvent) : IncomingPacket
+    data class Pty(val event: PtyEvent) : IncomingPacket
     data class Unexpected(val message: String) : IncomingPacket
     data object Ignored : IncomingPacket
 }
@@ -218,6 +307,17 @@ sealed interface RpcEvent {
     data class Message(override val bridgeId: UUID, val body: String) : RpcEvent
     data class Exited(override val bridgeId: UUID, val code: Int?) : RpcEvent
     data class Error(override val bridgeId: UUID, val message: String) : RpcEvent
+}
+
+data class PtySessionInfo(val sessionId: UUID, val cwd: String, val cols: Int, val rows: Int)
+
+sealed interface PtyEvent {
+    val sessionId: UUID
+
+    data class Spawned(override val sessionId: UUID, val pid: Long) : PtyEvent
+    data class Output(override val sessionId: UUID, val data: ByteArray) : PtyEvent
+    data class Exit(override val sessionId: UUID, val code: Int?) : PtyEvent
+    data class Error(override val sessionId: UUID, val message: String) : PtyEvent
 }
 
 data class FileEntry(
