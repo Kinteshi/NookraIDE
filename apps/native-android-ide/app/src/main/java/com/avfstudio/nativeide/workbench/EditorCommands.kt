@@ -93,6 +93,7 @@ object EditorCommands {
         command("workbench.actions.view.problems", "Show Problems", "Ctrl+Shift+M"),
         command("workbench.action.gotoSymbol", "Show Outline", "Ctrl+Shift+O"),
         command("workbench.action.output.toggleOutput", "Toggle Output", "Ctrl+Shift+U"),
+        command("avf.guest.showResources", "Guest: Show Memory and CPU", ""),
         command("workbench.action.nextEditor", "Open Next Editor", "Ctrl+PageDown"),
         command("workbench.action.previousEditor", "Open Previous Editor", "Ctrl+PageUp"),
         command("workbench.action.openGlobalKeybindings", "Keyboard Shortcuts", "Ctrl+K Ctrl+S"),

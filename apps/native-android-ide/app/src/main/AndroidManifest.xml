@@ -4,6 +4,10 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Package visibility, so "Open Terminal" can find Linux Terminal's launcher entry. -->
+    <queries>
+        <package android:name="com.android.virtualization.terminal" />
+    </queries>
     <application
         android:allowBackup="false"
         android:label="AVF Native IDE"

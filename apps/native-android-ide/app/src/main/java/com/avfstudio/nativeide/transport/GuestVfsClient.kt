@@ -54,6 +54,7 @@ class GuestVfsClient(
     private val ptyListeners = ConcurrentHashMap<UUID, (PtyEvent) -> Unit>()
     private val searchListeners = ConcurrentHashMap<Long, (SearchEvent) -> Unit>()
     private val gitListeners = ConcurrentHashMap<Long, (GitEvent) -> Unit>()
+    private val pendingPings = ConcurrentHashMap<Long, CompletableFuture<GuestStats>>()
     /** Terminal sessions the guest still runs, from the latest handshake; reattach to keep them. */
     @Volatile var guestPtySessions: List<PtySessionInfo> = emptyList()
         private set
@@ -180,6 +181,7 @@ class GuestVfsClient(
                         is IncomingPacket.Rpc -> handleRpcEvent(packet.event)
                         is IncomingPacket.Search -> searchListeners[packet.event.requestId]?.invoke(packet.event)
                         is IncomingPacket.Git -> gitListeners[packet.event.requestId]?.invoke(packet.event)
+                        is IncomingPacket.Stats -> pendingPings.remove(packet.stats.timestamp)?.complete(packet.stats)
                         is IncomingPacket.Pty -> ptyListeners[packet.event.sessionId]?.invoke(packet.event)
                         is IncomingPacket.Unexpected ->
                             handshake.completeExceptionally(IOException(packet.message))
@@ -380,6 +382,20 @@ class GuestVfsClient(
         if (!sendFrame(MessagePackVfsCodec.gitRequest(requestId, repo, operation))) {
             gitListeners.remove(requestId)
             result.completeExceptionally(IOException("Guest is not connected"))
+        }
+        return result
+    }
+
+    /** Guest CPU and memory, sampled by the daemon. */
+    fun ping(): CompletableFuture<GuestStats> {
+        val stamp = System.nanoTime()
+        val result = CompletableFuture<GuestStats>()
+        pendingPings[stamp] = result
+        if (!sendFrame(MessagePackVfsCodec.ping(stamp))) {
+            pendingPings.remove(stamp)
+            result.completeExceptionally(IOException("Guest is not connected"))
+        } else {
+            scheduler.schedule({ pendingPings.remove(stamp)?.completeExceptionally(IOException("Ping timed out")) }, 10, TimeUnit.SECONDS)
         }
         return result
     }

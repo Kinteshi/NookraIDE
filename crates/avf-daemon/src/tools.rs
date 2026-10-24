@@ -826,6 +826,11 @@ pub fn list_installed(home: &Path) -> Result<Vec<ToolManifest>, String> {
             continue;
         }
         let name = entry.file_name().to_string_lossy().into_owned();
+        // Staging directories of a download in progress (possibly another daemon's, during an
+        // update) are not tools yet.
+        if name.starts_with(".download-") {
+            continue;
+        }
         validate_tool_name(&name)?;
         let manifest_path = entry.path().join("manifest.json");
         let metadata = match fs::symlink_metadata(&manifest_path) {
@@ -1268,6 +1273,14 @@ mod tests {
             ToolCommand::Install("basedpyright".into())
         );
         assert!(parse_cli(&["install".into(), "basedpyright".into(), "/bin/sh".into()]).is_err());
+    }
+
+    #[test]
+    fn downloads_in_progress_are_not_listed_as_tools() {
+        let home = tempdir().unwrap();
+        let tools = ensure_tools_root(home.path()).unwrap();
+        fs::create_dir(tools.join(".download-copilot-language-server-866-0")).unwrap();
+        assert_eq!(list_installed(home.path()).unwrap(), vec![]);
     }
 
     #[test]

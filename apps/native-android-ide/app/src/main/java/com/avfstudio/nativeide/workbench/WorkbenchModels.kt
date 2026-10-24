@@ -70,6 +70,7 @@ sealed interface WorkbenchDialog {
     data class GitBranches(val branches: List<com.avfstudio.nativeide.transport.GitBranch>) : WorkbenchDialog
     data class GitConfirmDiscard(val paths: List<String>, val untracked: Int) : WorkbenchDialog
     data object GitClone : WorkbenchDialog
+    data object GuestResources : WorkbenchDialog
     /** Python environments found in the guest; [then] runs after one is chosen (e.g. start debugging). */
     data class InterpreterPicker(val options: List<Pair<String, String>>, val then: (() -> Unit)?) : WorkbenchDialog
     /** Set up (or re-pair) the Linux guest; [reason] says why it opened, e.g. a rejected token. */

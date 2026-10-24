@@ -40,6 +40,7 @@ import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.NoteAdd
 import androidx.compose.material.icons.automirrored.outlined.CallSplit
+import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Terminal
@@ -99,7 +100,16 @@ fun NativeWorkbench() {
             assetMode = mode
             assetPicker.launch(if (mode == "theme") arrayOf("application/json", "text/*", "*/*") else arrayOf("*/*"))
         }
-        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_STOP) controller.persistDrafts() }
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_STOP -> {
+                    controller.persistDrafts()
+                    controller.onAppVisibilityChanged(false)
+                }
+                Lifecycle.Event.ON_START -> controller.onAppVisibilityChanged(true)
+                else -> Unit
+            }
+        }
         lifecycleOwner.lifecycle.addObserver(observer)
         KeyRouter.handler = controller::routeHardwareKey
         onDispose {
@@ -375,6 +385,25 @@ private fun StatusBar(controller: WorkbenchController) {
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f).clickable { controller.runCommand("workbench.action.output.toggleOutput") },
         )
+        controller.guestStats?.takeIf { controller.connected }?.let { stats ->
+            val pressure = stats.totalMb > 0 && stats.footprintMb * 100 / stats.totalMb >= 80
+            Row(
+                Modifier.clickable { controller.dialog = WorkbenchDialog.GuestResources },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.Outlined.Memory,
+                    contentDescription = null,
+                    modifier = Modifier.size(14.dp),
+                    tint = if (pressure) colors.error else colors.onSurfaceVariant,
+                )
+                Text(
+                    " Guest %.1f GB · %d%%".format(stats.footprintMb / 1024f, stats.cpuPercent.toInt()),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (pressure) colors.error else colors.onSurfaceVariant,
+                )
+            }
+        }
         StatusItem(
             if (controller.copilotEnabled) "Copilot · ${controller.copilotStatus}" else "Copilot off",
             Icons.Outlined.AutoAwesome,

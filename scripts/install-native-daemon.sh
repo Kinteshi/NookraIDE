@@ -99,6 +99,15 @@ if $remote; then
   loginctl enable-linger "$USER" 2>/dev/null || echo "note: run 'sudo loginctl enable-linger $USER' to keep the daemon running after logout" >&2
 fi
 
+# Earlier installers added root units that dropped the guest's caches and compacted memory. On AVF
+# that corrupted file pages (programs crashed, ext4 reported I/O errors), so remove them.
+if ! $remote && [ -e /etc/systemd/system/avf-trim-memory.service ] && sudo -n true 2>/dev/null; then
+  sudo -n systemctl disable --now avf-trim-memory.timer avf-trim-memory.path 2>/dev/null || true
+  sudo -n rm -f /etc/systemd/system/avf-trim-memory.service /etc/systemd/system/avf-trim-memory.timer \
+    /etc/systemd/system/avf-trim-memory.path /etc/tmpfiles.d/avf-native.conf
+  sudo -n systemctl daemon-reload
+fi
+
 export PATH="$HOME/.local/bin:$PATH"
 # Source Control needs git; install it from the distribution when sudo works without a password.
 if ! command -v git >/dev/null; then

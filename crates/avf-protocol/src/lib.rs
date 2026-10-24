@@ -122,8 +122,19 @@ pub enum SystemMessage {
     Pong {
         timestamp: u64,
         cpu_usage: f32,
+        /// Total minus available: memory programs hold (cache excluded).
         mem_used_mb: u64,
         mem_total_mb: u64,
+        /// Truly free memory; total minus free is what the guest costs its host.
+        #[serde(default)]
+        mem_free_mb: u64,
+        /// Page cache and buffers, which the host keeps paying for until the guest drops them.
+        #[serde(default)]
+        mem_cached_mb: u64,
+        /// Pages the host reclaimed through the virtio balloon: counted as used inside the guest,
+        /// but no longer costing the host anything.
+        #[serde(default)]
+        mem_balloon_mb: u64,
     },
     PortOpened {
         port: u16,
@@ -704,6 +715,9 @@ mod tests {
                 cpu_usage: 12.5,
                 mem_used_mb: 100,
                 mem_total_mb: 256,
+                mem_free_mb: 64,
+                mem_cached_mb: 92,
+                mem_balloon_mb: 32,
             }),
             MultiplexedPacket::System(SystemMessage::PortOpened {
                 port: 8000,

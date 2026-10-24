@@ -12,6 +12,11 @@ internal object MessagePackVfsCodec {
         stringField("client_name", "avf-native-android-ide")
     }
 
+    fun ping(timestamp: Long): ByteArray = packet("System", "Ping") {
+        packMapHeader(1)
+        stringField("timestamp", timestamp)
+    }
+
     /** First packet of a pairing connection: trades a one-time code for the session token. */
     fun pair(code: String): ByteArray = packet("System", "Pair") {
         packMapHeader(3)
@@ -346,6 +351,21 @@ internal object MessagePackVfsCodec {
                     IncomingPacket.Rejected(entry.key.asString(), fields["attempts_left"]?.asLong()?.toInt())
                 }
             }
+            "Pong" -> {
+                val fields = variant.value.asMapValue().map().mapKeys { it.key.asString() }
+                fun mb(name: String) = fields[name]?.takeUnless { it.isNilValue }?.asLong() ?: 0L
+                IncomingPacket.Stats(
+                    GuestStats(
+                        timestamp = mb("timestamp"),
+                        cpuPercent = fields["cpu_usage"]?.asFloatValue()?.toFloat() ?: 0f,
+                        usedMb = mb("mem_used_mb"),
+                        totalMb = mb("mem_total_mb"),
+                        freeMb = mb("mem_free_mb"),
+                        cachedMb = mb("mem_cached_mb"),
+                        balloonMb = mb("mem_balloon_mb"),
+                    ),
+                )
+            }
             "Paired" -> IncomingPacket.Paired(
                 variant.value.asMapValue().map().entries.first { it.key.asString() == "token" }.value.asString(),
             )
@@ -406,10 +426,30 @@ internal object MessagePackVfsCodec {
     private fun Value.asBoolean(): Boolean = asBooleanValue().boolean
 }
 
+/**
+ * One `Pong`. Inside the guest, [usedMb] (total − available) includes the virtio balloon, which
+ * Android already took back ([balloonMb]); cached pages stay resident on the host until the guest
+ * drops them. So the tablet pays for programs plus cache: total − free − balloon.
+ */
+data class GuestStats(
+    val timestamp: Long,
+    val cpuPercent: Float,
+    val usedMb: Long,
+    val totalMb: Long,
+    val freeMb: Long,
+    val cachedMb: Long,
+    val balloonMb: Long = 0,
+) {
+    val footprintMb: Long get() = if (freeMb > 0) (totalMb - freeMb - balloonMb).coerceAtLeast(0) else usedMb
+    /** The footprint without cache, so programs + cache + free + balloon add up to the total. */
+    val programsMb: Long get() = if (freeMb > 0) (footprintMb - cachedMb).coerceAtLeast(0) else (usedMb - balloonMb).coerceAtLeast(0)
+}
+
 sealed interface IncomingPacket {
     data class Welcome(val protocolVersion: Int, val ptySessions: List<PtySessionInfo> = emptyList()) : IncomingPacket
     data class Rejected(val reason: String, val attemptsLeft: Int? = null) : IncomingPacket
     data class Paired(val token: String) : IncomingPacket
+    data class Stats(val stats: GuestStats) : IncomingPacket
     data class Search(val event: SearchEvent) : IncomingPacket
     data class Git(val event: GitEvent) : IncomingPacket
     data class ReadFile(

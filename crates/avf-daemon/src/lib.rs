@@ -723,6 +723,9 @@ async fn process_packet(
                             cpu_usage: sample.cpu_usage,
                             mem_used_mb: sample.mem_used_mb,
                             mem_total_mb: sample.mem_total_mb,
+                            mem_free_mb: sample.mem_free_mb,
+                            mem_cached_mb: sample.mem_cached_mb,
+                            mem_balloon_mb: sample.mem_balloon_mb,
                         }),
                     )
                     .await
@@ -2212,16 +2215,23 @@ struct SystemSample {
     cpu_usage: f32,
     mem_used_mb: u64,
     mem_total_mb: u64,
+    mem_free_mb: u64,
+    mem_cached_mb: u64,
+    mem_balloon_mb: u64,
 }
 
 impl Telemetry {
     async fn sample(&self) -> io::Result<SystemSample> {
         let stat = tokio::fs::read_to_string("/proc/stat").await?;
         let meminfo = tokio::fs::read_to_string("/proc/meminfo").await?;
+        let balloon_pages = tokio::fs::read_to_string("/proc/vmstat")
+            .await
+            .map(|vmstat| balloon_pages(&vmstat))
+            .unwrap_or(0);
         let (total, idle) = parse_cpu_stat(&stat).ok_or_else(|| {
             io::Error::new(io::ErrorKind::InvalidData, "missing aggregate CPU row")
         })?;
-        let (mem_total, mem_available) = parse_meminfo(&meminfo).ok_or_else(|| {
+        let memory = parse_meminfo(&meminfo).ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
                 "missing memory totals in /proc/meminfo",
@@ -2244,8 +2254,12 @@ impl Telemetry {
         let mebibyte = 1024 * 1024;
         Ok(SystemSample {
             cpu_usage,
-            mem_used_mb: mem_total.saturating_sub(mem_available) / mebibyte,
-            mem_total_mb: mem_total / mebibyte,
+            mem_used_mb: memory.total.saturating_sub(memory.available) / mebibyte,
+            mem_total_mb: memory.total / mebibyte,
+            mem_free_mb: memory.free / mebibyte,
+            mem_cached_mb: memory.cached / mebibyte,
+            // Pages are 4 KiB on the AVF guest; vmstat counts them, not bytes.
+            mem_balloon_mb: balloon_pages * 4096 / mebibyte,
         })
     }
 }
@@ -2263,23 +2277,43 @@ fn parse_cpu_stat(contents: &str) -> Option<(u64, u64)> {
     Some((total, idle))
 }
 
-fn parse_meminfo(contents: &str) -> Option<(u64, u64)> {
-    let mut total_kib = None;
-    let mut available_kib = None;
-    let mut free_kib = None;
+/// Byte counts from /proc/meminfo.
+#[derive(Debug, PartialEq)]
+struct MemInfo {
+    total: u64,
+    available: u64,
+    free: u64,
+    /// Page cache plus buffers, minus shared memory (tmpfs), i.e. what drop_caches can release.
+    cached: u64,
+}
+
+fn parse_meminfo(contents: &str) -> Option<MemInfo> {
+    let mut fields = HashMap::new();
     for line in contents.lines() {
-        let (name, value) = line.split_once(':')?;
-        let value = value.split_whitespace().next()?.parse::<u64>().ok()?;
-        match name {
-            "MemTotal" => total_kib = Some(value),
-            "MemAvailable" => available_kib = Some(value),
-            "MemFree" => free_kib = Some(value),
-            _ => {}
+        let Some((name, value)) = line.split_once(':') else {
+            continue;
+        };
+        if let Some(value) = value.split_whitespace().next().and_then(|value| value.parse::<u64>().ok()) {
+            fields.insert(name.trim(), value);
         }
     }
-    let total = total_kib?.checked_mul(1024)?;
-    let available = available_kib.or(free_kib)?.checked_mul(1024)?;
-    Some((total, available.min(total)))
+    let kib = |name: &str| fields.get(name).and_then(|value| value.checked_mul(1024));
+    let total = kib("MemTotal")?;
+    let free = kib("MemFree").unwrap_or(0).min(total);
+    let available = kib("MemAvailable").or(kib("MemFree"))?.min(total);
+    let cached = (kib("Cached").unwrap_or(0) + kib("Buffers").unwrap_or(0)).saturating_sub(kib("Shmem").unwrap_or(0));
+    Some(MemInfo { total, available, free, cached })
+}
+
+/// Pages currently held by the virtio balloon (inflated minus deflated), from /proc/vmstat.
+fn balloon_pages(vmstat: &str) -> u64 {
+    let count = |name: &str| {
+        vmstat
+            .lines()
+            .find_map(|line| line.strip_prefix(name)?.strip_prefix(' ')?.trim().parse::<u64>().ok())
+            .unwrap_or(0)
+    };
+    count("balloon_inflate").saturating_sub(count("balloon_deflate"))
 }
 
 #[cfg(test)]
@@ -2407,8 +2441,22 @@ mod tests {
         );
         assert_eq!(
             parse_meminfo("MemTotal: 2048 kB\nMemAvailable: 1024 kB\n"),
-            Some((2 * 1024 * 1024, 1024 * 1024))
+            Some(MemInfo { total: 2 * 1024 * 1024, available: 1024 * 1024, free: 0, cached: 0 })
         );
+        assert_eq!(
+            parse_meminfo(
+                "MemTotal: 4000 kB\nMemFree: 1000 kB\nMemAvailable: 3000 kB\nBuffers: 100 kB\nCached: 1500 kB\nShmem: 200 kB\n"
+            ),
+            Some(MemInfo { total: 4000 * 1024, available: 3000 * 1024, free: 1000 * 1024, cached: 1400 * 1024 })
+        );
+    }
+
+    #[test]
+    fn balloon_pages_are_inflated_minus_deflated() {
+        // Recorded on the AVF guest with a 1 GiB balloon.
+        let vmstat = "nr_free_pages 526245\nballoon_inflate 471859\nballoon_deflate 209715\nballoon_migrate 49187\n";
+        assert_eq!(balloon_pages(vmstat) * 4096 / (1024 * 1024), 1024);
+        assert_eq!(balloon_pages("nr_free_pages 1\n"), 0);
     }
 
     #[test]

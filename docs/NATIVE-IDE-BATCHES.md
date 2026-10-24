@@ -148,10 +148,34 @@ stack, variables, debug console. Restore the F9 binding when it works.
 * Not run: the remote installer and the PowerShell script on a real host (they change services
   and firewall rules); the PowerShell script was only parse-checked.
 
+## 9. Guest resources, reconnect, setup on the tablet (done; checked on the tablet)
+* Status-bar chip "Guest x GB · y%" (what the guest costs the tablet: total − free − balloon) and
+  a panel: programs / cache / free / returned-to-Android bar, ten-minute graph, the tools the app
+  runs in the guest, "Stop idle tools". Also "Guest: Show Memory and CPU" in the palette, since
+  touch taps on the bottom 44 px land in Android's gesture zone on the tablet.
+* Daemon `Pong` adds `mem_free_mb`, `mem_cached_mb`, `mem_balloon_mb` (`/proc/vmstat`
+  balloon_inflate − balloon_deflate); older daemons fall back to used memory.
+* Reconnect: backoff (2 s … 60 s, ten tries) after a lost connection, after "Open Terminal", and
+  on returning to the app after an "unreachable" failure. "Open Terminal" uses the launcher intent
+  (brings the running Terminal forward) and needs a `<queries>` entry for package visibility.
+* Daemon tool listing skips `.download-*` staging directories (Copilot reported "Invalid tool
+  name" while the installer was downloading).
+* Checked on the tablet: unreachable banner → Open Terminal → Retry; the full setup flow (copy,
+  paste in Terminal, pairing code, connect) twice; the panel against the new daemon.
+* Removed: dropping the guest's page cache. Root units (`drop_caches` + `compact_memory` every
+  10 minutes and on request) corrupted file pages on the AVF guest: programs crashed with SIGSEGV
+  and SIGILL, ext4 reported I/O errors and remounted read-only. Reproduced on the second attempt
+  with Terminal in the background; a single `drop_caches` or `compact_memory` alone did not show
+  it. After a VM restart fsck found nothing to fix and `dpkg --verify` was clean. The installer
+  now removes those units. Don't bring back cache trimming without a reproducer outside the
+  user's guest.
+
 ## Backlog
 * Finish Copilot chat sign-in on the tablet (needs the user's approval on GitHub).
 * Stop the Copilot language server (~280 MB) while signed out.
 * Re-measure the app's memory.
+* Tablet checks still pending from batches 3, 5, 6, 7: notebook arrows, Copilot chips, search,
+  Git, debugging.
 * Notebook gaps: HTML outputs, kernel completion UI.
 * Customisable keybindings (`keybindings.json`), TypeScript 7 measurement, compact layout check.
 * Remove the `AVFKEY` routing log once the Book Cover keyboard is confirmed.

@@ -47,6 +47,10 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.font.FontWeight
@@ -200,6 +204,7 @@ fun WorkbenchDialogHost(controller: WorkbenchController) {
             dismissButton = { TextButton(onClick = { controller.dialog = null }) { Text("Cancel") } },
         )
         WorkbenchDialog.GitClone -> GitCloneDialog(controller)
+        WorkbenchDialog.GuestResources -> GuestResourcesDialog(controller)
         is WorkbenchDialog.InterpreterPicker -> PaletteDialog(
             placeholder = "Select a Python interpreter",
             query = controller.commandFilter,
@@ -590,8 +595,8 @@ private fun GuestSetupDialog(controller: WorkbenchController, setup: WorkbenchDi
                 HorizontalDivider()
                 Text("Or pair with a computer (Linux, or Windows through WSL)", style = MaterialTheme.typography.titleSmall)
                 Text(
-                    "On the computer, install the daemon with scripts/install-host-daemon.sh (or the WSL script on " +
-                        "Windows); it prints a connection string starting with avf://. Paste it here.",
+                    "On the computer, run scripts/install-native-daemon.sh --remote (on Windows, " +
+                        "install-host-daemon-wsl.ps1); it prints a connection string starting with avf://. Paste it here.",
                     style = MaterialTheme.typography.bodySmall,
                     color = colors.onSurfaceVariant,
                 )
@@ -807,5 +812,86 @@ private fun DiffText(patch: String) {
                 modifier = Modifier.fillMaxWidth().background(background).padding(horizontal = 6.dp),
             )
         }
+    }
+}
+
+/** Guest memory and CPU, and what the app runs there. */
+@Composable
+private fun GuestResourcesDialog(controller: WorkbenchController) {
+    val colors = MaterialTheme.colorScheme
+    val stats = controller.guestStats
+    AlertDialog(
+        onDismissRequest = { controller.dialog = null },
+        title = { Text("Guest resources") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (stats == null) {
+                    Text("Waiting for the first sample…")
+                } else {
+                    val total = stats.totalMb.coerceAtLeast(1)
+                    val balloon = stats.balloonMb.coerceAtMost(total)
+                    val programs = stats.programsMb.coerceAtMost(total - balloon)
+                    val cache = stats.cachedMb.coerceAtMost(total - balloon - programs)
+                    Text(
+                        "Costs the tablet %.1f of %.1f GB · CPU %d%%".format(stats.footprintMb / 1024f, total / 1024f, stats.cpuPercent.toInt()),
+                        style = MaterialTheme.typography.titleSmall,
+                    )
+                    Row(Modifier.fillMaxWidth().height(14.dp).clip(RoundedCornerShape(7.dp)).background(colors.surfaceContainerHighest)) {
+                        if (programs > 0) Box(Modifier.weight(programs.toFloat()).fillMaxHeight().background(colors.primary))
+                        if (cache > 0) Box(Modifier.weight(cache.toFloat()).fillMaxHeight().background(colors.tertiary))
+                        val rest = total - programs - cache - balloon
+                        if (rest > 0) Box(Modifier.weight(rest.toFloat()).fillMaxHeight())
+                        if (balloon > 0) Box(Modifier.weight(balloon.toFloat()).fillMaxHeight().background(colors.outlineVariant))
+                    }
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        Legend(colors.primary, "Programs ${programs} MB")
+                        Legend(colors.tertiary, "Cache ${cache} MB")
+                        Legend(colors.surfaceContainerHighest, "Free ${stats.freeMb} MB")
+                        if (balloon > 0) Legend(colors.outlineVariant, "Returned to Android ${balloon} MB")
+                    }
+                    Text(
+                        "The guest keeps file cache until it runs short, and the tablet pays for it meanwhile. " +
+                            "Linux Terminal takes memory back (the balloon) while it is in the background. " +
+                            "Stopping tools you don't need is the reliable way to give memory back.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.onSurfaceVariant,
+                    )
+                    FootprintGraph(controller.guestFootprintHistory, total, colors.primary)
+                }
+                Text("Running for the app", style = MaterialTheme.typography.titleSmall)
+                val components = controller.guestComponents
+                if (components.isEmpty()) {
+                    Text("Nothing besides the daemon.", style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
+                } else {
+                    components.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall) }
+                }
+                FilledTonalButton(onClick = controller::stopIdleGuestTools, enabled = components.isNotEmpty()) { Text("Stop idle tools") }
+            }
+        },
+        confirmButton = { TextButton(onClick = { controller.dialog = null }) { Text("Close") } },
+    )
+}
+
+@Composable
+private fun Legend(color: androidx.compose.ui.graphics.Color, label: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(10.dp).clip(RoundedCornerShape(3.dp)).background(color))
+        Text(" $label", style = MaterialTheme.typography.labelSmall)
+    }
+}
+
+/** The guest's footprint over the last ten minutes (5-second samples), scaled to its total memory. */
+@Composable
+private fun FootprintGraph(history: List<Long>, totalMb: Long, color: androidx.compose.ui.graphics.Color) {
+    if (history.size < 2) return
+    androidx.compose.foundation.Canvas(Modifier.fillMaxWidth().height(48.dp)) {
+        val step = size.width / (history.size - 1)
+        val path = androidx.compose.ui.graphics.Path()
+        history.forEachIndexed { index, value ->
+            val x = index * step
+            val y = size.height * (1f - value.toFloat() / totalMb)
+            if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
+        }
+        drawPath(path, color, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx()))
     }
 }

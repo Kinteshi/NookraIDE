@@ -76,6 +76,7 @@ import com.avfstudio.nativeide.transport.GitFileStatus
 import com.avfstudio.nativeide.transport.GitOperation
 import com.avfstudio.nativeide.transport.GitResult
 import com.avfstudio.nativeide.transport.GitStatusEntry
+import com.avfstudio.nativeide.transport.GuestStats
 import com.avfstudio.nativeide.transport.PtyEvent
 import com.avfstudio.nativeide.transport.parseConnectionString
 import com.avfstudio.nativeide.transport.SearchQuery
@@ -102,6 +103,7 @@ private const val SCRATCH_WELCOME_PATH = "scratch:/welcome.py"
 private const val MAX_IMPORTED_THEME_BYTES = 8 * 1024 * 1024
 private const val MAX_OUTPUT_LINES = 500
 private const val MAX_QUICK_OPEN_FILES = 5000
+private const val LINUX_TERMINAL_PACKAGE = "com.android.virtualization.terminal"
 private val skippedDirectories = setOf(
     ".git", "node_modules", "__pycache__", ".venv", "venv", ".mypy_cache", ".ruff_cache", ".pytest_cache",
     ".ipynb_checkpoints", "dist", "build", "target", ".gradle", ".idea", ".tox",
@@ -332,7 +334,10 @@ class WorkbenchController(private val context: Context) {
                 if (!isConnected && !busy) {
                     GuestConnectionService.stop(context)
                     if (!failure.isNullOrBlank()) status = "Guest disconnected: $failure"
+                    // The daemon restarts on updates and the VM may pause; come back by ourselves.
+                    if (wasConnected) scheduleReconnect()
                 }
+                wasConnected = isConnected
             }
         }
         languageClients.values.forEach { client ->
@@ -370,6 +375,7 @@ class WorkbenchController(private val context: Context) {
     }
 
     fun dispose() {
+        stopStatsPolling()
         editorSubscription.close()
         languageClients.values.forEach(LanguageClient::close)
         copilot.language.close()
@@ -554,6 +560,11 @@ class WorkbenchController(private val context: Context) {
                     }
                 }
                 startKeepAlive("Connected")
+                startStatsPolling()
+                guestUnreachable = false
+                reconnectAttempt = 0
+                scheduledReconnect?.cancel(false)
+                scheduledReconnect = null
                 status = when {
                     keepAliveError != null -> "Connected; background keepalive unavailable: $keepAliveError"
                     guestRoots.isEmpty() -> "Connected; guest has no workspace roots"
@@ -686,6 +697,75 @@ class WorkbenchController(private val context: Context) {
             add("end", end)
         }
         navigateToLocation(LanguageLocation(java.net.URI("file", "", match.path, null).toASCIIString(), range))
+    }
+
+    // Guest resources -----------------------------------------------------------------------------
+
+    /** Latest daemon sample; null until connected. */
+    var guestStats by mutableStateOf<GuestStats?>(null)
+        private set
+    /** Recent footprints (MB), oldest first, for the resources panel's graph. */
+    val guestFootprintHistory = mutableStateListOf<Long>()
+    private var statsPoll: ScheduledFuture<*>? = null
+    private var appVisible = true
+
+    /** The activity's visibility: sampling stops while the app is in the background. */
+    fun onAppVisibilityChanged(visible: Boolean) {
+        appVisible = visible
+        if (visible) startStatsPolling() else stopStatsPolling()
+        // Coming back from Linux Terminal usually means the guest is up now.
+        if (visible && guestUnreachable && !connected && !busy && scheduledReconnect == null) {
+            autoConnecting = true
+            connectGuest()
+        }
+    }
+
+    private fun startStatsPolling() {
+        if (statsPoll != null || !appVisible || !vfs.isConnected()) return
+        statsPoll = timer.scheduleWithFixedDelay({ sampleGuest() }, 0, 5, TimeUnit.SECONDS)
+    }
+
+    private fun stopStatsPolling() {
+        statsPoll?.cancel(false)
+        statsPoll = null
+    }
+
+    private fun sampleGuest() {
+        if (!vfs.isConnected()) {
+            post { stopStatsPolling() }
+            return
+        }
+        vfs.ping().whenComplete { stats, error ->
+            if (error != null) return@whenComplete
+            post {
+                guestStats = stats
+                guestFootprintHistory.add(stats.footprintMb)
+                if (guestFootprintHistory.size > 120) guestFootprintHistory.removeAt(0)
+            }
+        }
+    }
+
+    /** What the guest is running for the app, for the resources panel. */
+    val guestComponents: List<String>
+        get() = buildList {
+            languageClients.filterValues { it.isStarted }.keys.forEach { language ->
+                add(if (language == "python") "${settings.pythonLanguageServer} (Python)" else languageServerTool(language))
+            }
+            if (copilot.language.isStarted) add("Copilot language server (~280 MB)")
+            if (chatAgent.isStarted) add("Copilot chat agent (~290 MB)")
+            notebooks.values.count { it.kernel.isStarted }.takeIf { it > 0 }?.let { add("$it Jupyter kernel${if (it == 1) "" else "s"}") }
+            if (debugger.isStarted) add("Python debugger")
+            terminals.count { !it.exited }.takeIf { it > 0 }?.let { add("$it terminal${if (it == 1) "" else "s"}") }
+        }
+
+    /** Stops tools that no open document needs, the chat agent and the debugger. */
+    fun stopIdleGuestTools() {
+        val needed = documents.filterNot { it.path.startsWith("scratch:") || it.path in notebooks }
+            .flatMap { languageClientsFor(it.path) }.toSet()
+        languageClients.values.filter { it.isStarted && it !in needed }.forEach(LanguageClient::close)
+        if (chatAgent.isStarted && !chatBusy) endChatSession()
+        if (debugger.isStarted && debugState == DebugState.Idle) debugger.stop()
+        status = "Stopped idle guest tools"
     }
 
     // Debugging ---------------------------------------------------------------------------------
@@ -1143,6 +1223,29 @@ class WorkbenchController(private val context: Context) {
     // Guest setup, pairing and reset detection ----------------------------------------------
 
 
+    private var wasConnected = false
+    private var guestUnreachable = false
+    private var reconnectAttempt = 0
+    private var scheduledReconnect: ScheduledFuture<*>? = null
+
+    /** Retries a lost connection with backoff (2 s … 60 s, ten attempts). */
+    private fun scheduleReconnect() {
+        if (!settings.autoConnect || endpoint.isBlank() || token.isBlank() || scheduledReconnect != null) return
+        if (reconnectAttempt >= 10) return
+        val delay = listOf(2L, 5L, 10L, 20L, 30L, 60L)[reconnectAttempt.coerceAtMost(5)]
+        reconnectAttempt++
+        status = "Guest disconnected; reconnecting in ${delay}s"
+        scheduledReconnect = timer.schedule({
+            post {
+                scheduledReconnect = null
+                if (!connected && !busy) {
+                    autoConnecting = true
+                    connectGuest()
+                }
+            }
+        }, delay, TimeUnit.SECONDS)
+    }
+
     private fun onConnectFailed(error: Throwable) {
         val causes = generateSequence(error) { it.cause }.toList()
         val rejected = causes.filterIsInstance<GuestRejectedException>().firstOrNull()
@@ -1160,10 +1263,12 @@ class WorkbenchController(private val context: Context) {
                 )
             }
             unreachable -> {
+                guestUnreachable = true
                 guestProblem = "Can't reach the guest daemon. Open Linux Terminal so the guest starts; " +
                     "if it was reset, set it up again."
                 status = guestProblem!!
                 if (!wasAutomatic && dialog == WorkbenchDialog.Connect) dialog = null
+                if (reconnectAttempt > 0) scheduleReconnect()
             }
             else -> {
                 guestProblem = "Connection failed: ${rejected?.message ?: error.cause?.message ?: error.message}"
@@ -1201,11 +1306,20 @@ class WorkbenchController(private val context: Context) {
     }
 
     fun openLinuxTerminal() {
-        val intent = Intent(Intent.ACTION_MAIN)
-            .setClassName("com.android.virtualization.terminal", "com.android.virtualization.terminal.MainActivity")
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        // The launcher intent brings a running Terminal forward; a bare ACTION_MAIN would start a
+        // second Terminal screen that never attaches to the VM.
+        val intent = (
+            context.packageManager.getLaunchIntentForPackage(LINUX_TERMINAL_PACKAGE)
+                ?: Intent(Intent.ACTION_MAIN)
+                    .addCategory(Intent.CATEGORY_LAUNCHER)
+                    .setClassName(LINUX_TERMINAL_PACKAGE, "$LINUX_TERMINAL_PACKAGE.MainActivity")
+            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
         if (runCatching { context.startActivity(intent) }.isFailure) {
             status = "Linux Terminal isn't installed; enable it in Developer options"
+        } else if (!connected) {
+            // The VM takes a few seconds to boot; keep trying while the user is in Terminal.
+            reconnectAttempt = 0
+            scheduleReconnect()
         }
     }
 
@@ -1318,7 +1432,6 @@ class WorkbenchController(private val context: Context) {
         autoConnecting = false
         loadDirectory(workspace)
         restoreSession(workspace)
-        refreshGitStatus()
         loadWorkspaceSettings(workspace).whenComplete { loaded, settingsError ->
             post {
                 if (settingsError != null) {
@@ -1329,6 +1442,7 @@ class WorkbenchController(private val context: Context) {
                     updateLanguageSettings()
                 }
                 workspaceRoot = workspace
+                refreshGitStatus()
                 documents.forEach { ensureLanguageServers(it.path) }
                 startCopilot()
                 notebooks.values.forEach { session ->
@@ -3406,6 +3520,7 @@ class WorkbenchController(private val context: Context) {
                 panelVisible = !(panelVisible && panelTab == PanelTab.Output)
                 panelTab = PanelTab.Output
             }
+            "avf.guest.showResources" -> dialog = WorkbenchDialog.GuestResources
             "workbench.action.terminal.toggleTerminal" -> toggleTerminal()
             "workbench.action.terminal.new" -> newTerminal()
             "workbench.action.chat.open" -> {
