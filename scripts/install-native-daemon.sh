@@ -81,7 +81,6 @@ $tls_line
 Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 Restart=on-failure
 RestartSec=2
-NoNewPrivileges=true
 UMask=0077
 
 [Install]
@@ -97,6 +96,34 @@ systemctl --user start avf-native.service
 if $remote; then
   # Keep the service running without an open login session (allowed for your own user on most distros).
   loginctl enable-linger "$USER" 2>/dev/null || echo "note: run 'sudo loginctl enable-linger $USER' to keep the daemon running after logout" >&2
+fi
+
+# The app's terminal runs under the unit above, so it must not set NoNewPrivileges: sudo refuses to
+# run under it.
+
+# AVF guests: free-page reporting hands freed guest pages to Android. On the reference tablet,
+# guest memory got corrupted twice under host memory pressure (ext4 "Directory block failed
+# checksum", programs failing with EIO/SIGSEGV; the disk was fine after a reboot). Report only
+# completely free 4 MiB blocks (order 10, the most the kernel accepts) to cut that traffic down.
+# Don't unbind virtio_balloon instead: crosvm resets the VM when the guest does that, and Android
+# then stops it. Undo: sudo systemctl disable avf-page-reporting.service and reboot.
+reporting=/sys/module/page_reporting/parameters/page_reporting_order
+if ! $remote && [ -e "$reporting" ] && sudo -n true 2>/dev/null; then
+  sudo -n tee /etc/systemd/system/avf-page-reporting.service >/dev/null <<'REPORTING'
+[Unit]
+Description=Report only large free blocks to the AVF host (AVF Studio)
+ConditionPathExists=/sys/module/page_reporting/parameters/page_reporting_order
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'echo 10 > /sys/module/page_reporting/parameters/page_reporting_order'
+
+[Install]
+WantedBy=multi-user.target
+REPORTING
+  sudo -n systemctl daemon-reload
+  sudo -n systemctl enable --now avf-page-reporting.service
 fi
 
 # Earlier installers added root units that dropped the guest's caches and compacted memory. On AVF

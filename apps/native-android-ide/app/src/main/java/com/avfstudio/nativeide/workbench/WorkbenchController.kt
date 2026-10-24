@@ -51,6 +51,8 @@ import com.avfstudio.nativeide.document.PagedDocument
 import com.avfstudio.nativeide.document.SaveResult
 import com.avfstudio.nativeide.editor.EditorEvent
 import com.avfstudio.nativeide.editor.LspPosition
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import com.avfstudio.nativeide.editor.LspRange
 import com.avfstudio.nativeide.editor.LspTextEdit
 import com.avfstudio.nativeide.editor.SoraTextEditorHost
@@ -326,6 +328,8 @@ class WorkbenchController(private val context: Context) {
                 if (!isConnected) {
                     languageClients.values.forEach(LanguageClient::onDisconnected)
                     copilot.language.onDisconnected()
+                    notebookMirrors.clear()
+                    notebooks.values.forEach { it.cellSuggestion = null }
                     chatAgent.onDisconnected()
                     notebooks.values.forEach { it.kernel.onDisconnected(); it.kernelState = "Disconnected" }
                     inlineSuggestion = null
@@ -1588,6 +1592,7 @@ class WorkbenchController(private val context: Context) {
         documents.firstOrNull { it.path == path }?.let(closedDocuments::add)
         notifyDocumentClosed(path)
         notebooks.remove(path)?.kernel?.stop()
+        closeNotebookMirror(path)
         documents.removeAll { it.path == path }
         if (activePath == path) activePath = documents.lastOrNull()?.path
         persistSession()
@@ -2579,6 +2584,8 @@ class WorkbenchController(private val context: Context) {
                     status = "Copilot: ${error.cause?.message ?: error.message}"
                 } else {
                     copilotStatus = "Ready"
+                    // A new server instance hasn't seen any notebook mirror yet.
+                    notebookMirrors.clear()
                     documents.forEach(::notifyDocumentOpened)
                     copilot.didFocus(activePath?.takeUnless { it.startsWith("scratch:") })
                 }
@@ -2684,6 +2691,7 @@ class WorkbenchController(private val context: Context) {
         if (cursor.isSelected) return
         val version = document.version
         val position = LspPosition(cursor.leftLine, cursor.leftColumn)
+        copilotLog { "request ${document.path.substringAfterLast('/')} ${position.line}:${position.character} v$version invoked=$invoked" }
         copilot.inlineCompletion(document.path, version, position, settings.tabSize, settings.insertSpaces, invoked)
             .whenComplete { suggestions, error ->
                 post {
@@ -2691,6 +2699,9 @@ class WorkbenchController(private val context: Context) {
                     val stillCurrent = activePath == document.path && document.version == version &&
                         current != null && current.leftLine == position.line && current.leftColumn == position.character
                     val suggestion = suggestions?.firstOrNull { it.insertText.isNotBlank() }
+                    copilotLog {
+                        "reply ${suggestions?.size} current=$stillCurrent (v${document.version} ${current?.leftLine}:${current?.leftColumn}) error=${error?.cause?.message ?: error?.message}"
+                    }
                     when {
                         error != null -> if (invoked) status = "Copilot: ${error.cause?.message ?: error.message}"
                         stillCurrent && suggestion != null -> {
@@ -3151,14 +3162,20 @@ class WorkbenchController(private val context: Context) {
                 session.kernelState = if (specs.isEmpty()) "No kernels yet" else "No kernel"
                 val preferred = preferredSpec ?: session.notebook.kernelName ?: settings.jupyterDefaultKernel
                 val match = specs.firstOrNull { it.name == preferred }
-                if (match != null && session.kernelName == null) startKernel(session, match) else {
+                if (match != null && session.kernelName == null) {
+                    // A notebook from elsewhere (VS Code, Copilot) names a kernel such as "python3"
+                    // that may not start here; fall back to asking instead of failing on every run.
+                    startKernel(session, match, onFailure = {
+                        dialog = WorkbenchDialog.KernelPicker(session.document.path, specs, discovery.installable)
+                    })
+                } else {
                     dialog = WorkbenchDialog.KernelPicker(session.document.path, specs, discovery.installable)
                 }
             }
         }
     }
 
-    fun startKernel(session: NotebookSession, spec: com.avfstudio.nativeide.notebook.KernelSpec) {
+    fun startKernel(session: NotebookSession, spec: com.avfstudio.nativeide.notebook.KernelSpec, onFailure: (() -> Unit)? = null) {
         if (dialog is WorkbenchDialog.KernelPicker) dialog = null
         val directory = session.document.path.substringBeforeLast('/')
         session.kernelState = "Starting ${spec.displayName}…"
@@ -3175,6 +3192,9 @@ class WorkbenchController(private val context: Context) {
                 if (error != null) {
                     session.kernelState = "Kernel failed to start"
                     status = "Kernel ${spec.displayName}: ${error.cause?.message ?: error.message}"
+                    // Queued cells wait for the kernel picked next instead of retrying this one.
+                    if (onFailure != null) onFailure() else pendingExecution.remove(session.document.path)?.forEach { it.queued = false }
+                    documentRevision++
                 } else {
                     session.kernelName = spec.displayName
                     session.kernelState = "Idle"
@@ -3191,6 +3211,13 @@ class WorkbenchController(private val context: Context) {
     }
 
     private val pendingExecution = mutableMapOf<String, MutableList<NotebookCell>>()
+
+    /** Drops cells waiting for a kernel (the picker was dismissed), so the next run asks again. */
+    fun cancelPendingExecution(session: NotebookSession) {
+        pendingExecution.remove(session.document.path)
+        session.notebook.cells.forEach { it.queued = false }
+        documentRevision++
+    }
 
     /**
      * Installs ipykernel into a guest environment in a visible terminal, so nothing changes
@@ -3287,11 +3314,12 @@ class WorkbenchController(private val context: Context) {
     }
 
     /** Selects and focuses the cell [delta] away from [cell]; false at either end of the notebook. */
-    fun selectAdjacentCell(session: NotebookSession, cell: NotebookCell, delta: Int): Boolean {
+    fun selectAdjacentCell(session: NotebookSession, cell: NotebookCell, delta: Int, goalX: Float? = null): Boolean {
         val cells = session.notebook.cells
         val target = cells.getOrNull(cells.indexOf(cell) + delta) ?: return false
         session.selectedCell = target.id
         session.caretAtEnd = delta < 0
+        session.caretGoalX = goalX
         session.focusRequest++
         return true
     }
@@ -3310,6 +3338,92 @@ class WorkbenchController(private val context: Context) {
     fun onCellEdited(session: NotebookSession) {
         session.notebook.dirty = true
         documentRevision++
+    }
+
+    // Copilot in notebooks ----------------------------------------------------------------------
+
+    /** Notebook path → the text last sent to Copilot for its mirror document, and its version. */
+    private val notebookMirrors = mutableMapOf<String, Pair<String, Long>>()
+    private var scheduledCellRequest: ScheduledFuture<*>? = null
+
+    private fun mirrorPath(notebookPath: String) = "$notebookPath.avf-copilot.py"
+
+    /** Sends the notebook's cells to Copilot as one Python document; returns its line map and version. */
+    private fun syncNotebookMirror(session: NotebookSession): Pair<NotebookMirror, Long> {
+        val path = session.document.path
+        val mirror = notebookMirror(session.notebook.cells)
+        val previous = notebookMirrors[path]
+        val version = when {
+            previous == null -> 1L.also { copilot.language.didOpen(mirrorPath(path), "python", it, mirror.text) }
+            previous.first != mirror.text -> (previous.second + 1).also { copilot.language.didChange(mirrorPath(path), it, mirror.text) }
+            else -> previous.second
+        }
+        notebookMirrors[path] = mirror.text to version
+        return mirror to version
+    }
+
+    private fun closeNotebookMirror(path: String) {
+        if (notebookMirrors.remove(path) != null) copilot.language.didClose(mirrorPath(path))
+    }
+
+    /** Every cell edit or caret move: drop a suggestion that no longer fits and ask again after typing. */
+    fun onCellInput(session: NotebookSession, cell: NotebookCell, value: TextFieldValue, textChanged: Boolean) {
+        val shown = session.cellSuggestion
+        if (shown != null && (shown.cellId != cell.id || !value.selection.collapsed ||
+                cellGhostText(value.text, value.selection.start, shown) == null)
+        ) {
+            session.cellSuggestion = null
+        }
+        if (!textChanged) return
+        scheduledCellRequest?.cancel(false)
+        if (!copilotEnabled || !copilot.language.isReady || cell.type != CellType.Code || !value.selection.collapsed) return
+        val caret = value.selection.start
+        val source = value.text
+        scheduledCellRequest = timer.schedule(
+            { post { requestCellSuggestion(session, cell, source, caret) } },
+            settings.inlineSuggestDelayMs.toLong(),
+            TimeUnit.MILLISECONDS,
+        )
+    }
+
+    private fun requestCellSuggestion(session: NotebookSession, cell: NotebookCell, source: String, caret: Int) {
+        if (cell.source != source || notebooks[session.document.path] !== session) return
+        val (mirror, version) = syncNotebookMirror(session)
+        val startLine = mirror.startLines[cell.id] ?: return
+        val (line, column) = cellPosition(source, caret)
+        copilotLog { "cell request ${cell.id} $line:$column v$version" }
+        copilot.inlineCompletion(
+            mirrorPath(session.document.path), version, LspPosition(startLine + line, column),
+            settings.tabSize, settings.insertSpaces, invoked = false,
+        ).whenComplete { suggestions, error ->
+            post {
+                val suggestion = suggestions?.firstOrNull { it.insertText.isNotBlank() }
+                    ?.let { cellSuggestion(cell, startLine, it) }
+                copilotLog { "cell reply ${suggestions?.size} mapped=${suggestion != null} current=${cell.source == source} error=${error?.message}" }
+                if (suggestion != null && cell.source == source && session.selectedCell == cell.id &&
+                    cellGhostText(source, caret, suggestion) != null
+                ) {
+                    session.cellSuggestion = suggestion
+                    copilot.didShow(suggestion.source)
+                }
+            }
+        }
+    }
+
+    /** Tab with a suggestion showing: the cell text with it applied, caret after it. */
+    fun acceptCellSuggestion(session: NotebookSession, cell: NotebookCell, value: TextFieldValue): TextFieldValue? {
+        val suggestion = session.cellSuggestion?.takeIf { it.cellId == cell.id } ?: return null
+        if (cellGhostText(value.text, value.selection.start, suggestion) == null) return null
+        session.cellSuggestion = null
+        val end = suggestion.end.coerceIn(suggestion.start, value.text.length)
+        val text = value.text.substring(0, suggestion.start) + suggestion.text + value.text.substring(end)
+        copilot.accepted(suggestion.source)
+        return TextFieldValue(text, TextRange(suggestion.start + suggestion.text.length))
+    }
+
+    /** `adb shell setprop log.tag.AVFCOP DEBUG` logs inline suggestion requests and replies. */
+    private inline fun copilotLog(message: () -> String) {
+        if (android.util.Log.isLoggable("AVFCOP", android.util.Log.DEBUG)) android.util.Log.d("AVFCOP", message())
     }
 
     private fun selectNextCell(session: NotebookSession, cell: NotebookCell, insertIfLast: Boolean) {
@@ -3555,7 +3669,7 @@ class WorkbenchController(private val context: Context) {
                 val lastLine = (it.lineCount - 1).coerceAtLeast(0)
                 it.setSelectionRegion(0, 0, lastLine, it.text.getColumnCount(lastLine))
             }
-            "editor.action.indentLines" -> view?.indentSelection()
+            "editor.action.indentLines" -> view?.let { indentOrInsertTab(it, settings.tabSize, settings.insertSpaces) }
             "editor.action.outdentLines" -> view?.unindentSelection()
             "editor.action.commentLine" -> toggleLineComment()
             "editor.action.blockComment" -> toggleBlockComment()

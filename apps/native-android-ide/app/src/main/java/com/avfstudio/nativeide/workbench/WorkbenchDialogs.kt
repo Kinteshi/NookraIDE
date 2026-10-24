@@ -351,7 +351,7 @@ fun WorkbenchDialogHost(controller: WorkbenchController) {
                 },
                 onDismiss = {
                     controller.dialog = null
-                    session?.notebook?.cells?.forEach { it.queued = false }
+                    session?.let(controller::cancelPendingExecution)
                 },
                 onPick = { choice ->
                     when (choice) {

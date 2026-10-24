@@ -178,6 +178,42 @@ stack, variables, debug console. Restore the F9 binding when it works.
   now `rm --cached`); the branch name was squeezed to "…" in the Source Control header (Publish is
   an icon now); the debug console split `print("a", b)` across lines; Copilot retries once.
 
+## 10. Guest safety, editing keys, notebooks, plotly (code done; tablet check partly pending)
+* Guest memory corruption, third time, without any cache trimming: about 30 s after Linux
+  Terminal deflated the balloon while the tablet was out of memory (lmkd "low watermark is
+  breached"), ext4 read directory blocks that failed checksum and remounted read-only. After a
+  restart, fsck had nothing to fix. Suspected: AVF/crosvm under host memory pressure (balloon
+  and free-page reporting). Unconfirmed; no public report found.
+  * The user chose "disable the balloon too", but unbinding `virtio_balloon` makes crosvm reset
+    and Android stops the VM (tried once; the unit file was lost in the crash, so no boot loop).
+    The installer instead adds `avf-page-reporting.service`, which sets `page_reporting_order=10`
+    (the most the kernel accepts) so only whole free 4 MiB blocks are reported.
+* sudo in the app's terminal: the daemon unit no longer sets `NoNewPrivileges` (sudo refuses
+  to run under it). Checked on the guest: `NoNewPrivileges=no`.
+* Tab in the editor: VS Code behaviour (spaces to the next tab stop, or indent the selected lines),
+  from `editor.tabSize` / `editor.insertSpaces`. sora's `indentSelection()` did nothing without a
+  selection.
+* Notebook cells (Compose text fields, not the code editor):
+  * Tab/Shift+Tab indent and outdent; Enter keeps the indentation (one level more after `:`).
+  * Up/Down keep the horizontal position when moving between cells. Checked on the tablet with
+    the `AVFNB` cursor log (`setprop log.tag.AVFNB DEBUG`): every press across a wrapped cell and
+    a three-line cell, both ways, and Left/Right at the edges.
+  * Copilot: cells are mirrored to Copilot as one `# %%` Python document
+    (`<notebook>.avf-copilot.py`); the suggestion is mapped back to the focused cell and drawn as
+    ghost text. Tab accepts, Esc dismisses. `setprop log.tag.AVFCOP DEBUG` logs every request and
+    reply (main editor too).
+* Kernels: the bridge resolves a kernelspec's bare `python` (ipykernel's own `python3` spec) to
+  its environment's interpreter; under `uv run` it pointed at the bridge's Python, so notebooks
+  naming `python3` (as Copilot writes them) failed to start. If the notebook's own kernel fails,
+  the picker opens. Dismissing the picker no longer leaves runs pending, which had stopped the
+  picker from ever opening again.
+* Plotly: kernels start with `PLOTLY_RENDERER=plotly_mimetype` (unless set), and cells draw
+  `application/vnd.plotly.v1+json` in a sandboxed WebView with plotly.js 4.1.1 (what plotly.py 7.1
+  bundles) from cdn.plot.ly; the first plot needs a connection.
+* Status bar: padded above Android's bottom gesture zone, where taps were lost.
+* Not checked on the tablet yet (wireless debugging dropped): editor Tab, cell Tab/Enter, notebook
+  Copilot, plotly, the kernel fallback, the status bar padding, the installer's reporting unit.
+
 ## Backlog
 * Finish Copilot chat sign-in on the tablet (needs the user's approval on GitHub).
 * Stop the Copilot language server (~280 MB) while signed out.

@@ -107,8 +107,26 @@ def generated_kernel_dir(missing):
     return target
 
 
+def resolve_argv(argv, resource_dir):
+    """ipykernel's own kernel.json says just "python"; under `uv run` that would be the bridge's
+    interpreter, which has no ipykernel. Use the interpreter of the prefix the spec belongs to."""
+    if not argv or os.path.isabs(argv[0]) or "/" in argv[0]:
+        return argv
+    # <prefix>/share/jupyter/kernels/<name>
+    prefix = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(resource_dir))))
+    candidate = os.path.join(prefix, "bin", argv[0])
+    return [candidate] + list(argv[1:]) if os.path.exists(candidate) else argv
+
+
+class ResolvingSpecManager(KernelSpecManager):
+    def get_kernel_spec(self, kernel_name):
+        spec = super().get_kernel_spec(kernel_name)
+        spec.argv = resolve_argv(spec.argv, spec.resource_dir)
+        return spec
+
+
 def spec_manager(missing):
-    manager = KernelSpecManager()
+    manager = ResolvingSpecManager()
     extra = [os.path.join(prefix, "share", "jupyter", "kernels") for prefix in candidate_prefixes()]
     extra.append(generated_kernel_dir(missing))
     manager.kernel_dirs = list(dict.fromkeys(manager.kernel_dirs + [d for d in extra if os.path.isdir(d)]))
@@ -154,7 +172,7 @@ class Bridge:
         result = []
         for name, entry in sorted(self.specs.get_all_specs().items()):
             spec = entry.get("spec", {})
-            argv = spec.get("argv") or []
+            argv = resolve_argv(spec.get("argv") or [], entry.get("resource_dir", ""))
             result.append({
                 "name": name,
                 "display_name": spec.get("display_name", name),
@@ -177,7 +195,11 @@ class Bridge:
             transport="ipc",
             ip=os.path.join(runtime, "kernel-%d" % os.getpid()),
         )
-        manager.start_kernel(cwd=params.get("cwd") or os.getcwd())
+        env = dict(os.environ)
+        # Plotly's default in a plain kernel adds the "notebook" renderer, which embeds all of
+        # plotly.js (megabytes) in the first output; the app draws the figure JSON itself.
+        env.setdefault("PLOTLY_RENDERER", "plotly_mimetype")
+        manager.start_kernel(cwd=params.get("cwd") or os.getcwd(), env=env)
         client = manager.client()
         client.start_channels()
         client.wait_for_ready(timeout=120)

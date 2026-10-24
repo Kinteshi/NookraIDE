@@ -91,3 +91,41 @@ internal fun jumpToMatchingBracket(document: DocumentSession, editor: CodeEditor
     return false
 }
 
+
+/** What Tab inserts at the end of [linePrefix]: spaces up to the next tab stop, or a tab. */
+internal fun tabInsertion(linePrefix: String, tabSize: Int, insertSpaces: Boolean): String {
+    if (!insertSpaces) return "\t"
+    val visualColumn = linePrefix.fold(0) { column, char -> if (char == '\t') column + tabSize - column % tabSize else column + 1 }
+    return " ".repeat(tabSize - visualColumn % tabSize)
+}
+
+/**
+ * Tab as in VS Code: a selection across lines indents those lines (not a last line the selection
+ * only touches at column 0, and not blank lines); otherwise the selection is replaced by
+ * [tabInsertion].
+ */
+internal fun indentOrInsertTab(editor: CodeEditor, tabSize: Int, insertSpaces: Boolean) {
+    val cursor = editor.cursor
+    val text = editor.text
+    if (!cursor.isSelected || cursor.leftLine == cursor.rightLine) {
+        val prefix = text.getLineString(cursor.leftLine).substring(0, cursor.leftColumn)
+        editor.commitText(tabInsertion(prefix, tabSize, insertSpaces))
+        return
+    }
+    val unit = if (insertSpaces) " ".repeat(tabSize) else "\t"
+    val (startLine, startColumn, endLine, endColumn) = listOf(cursor.leftLine, cursor.leftColumn, cursor.rightLine, cursor.rightColumn)
+    val lastLine = if (endColumn == 0) endLine - 1 else endLine
+    val indented = (startLine..lastLine).filter { text.getColumnCount(it) > 0 }
+    text.beginBatchEdit()
+    try {
+        indented.forEach { text.insert(it, 0, unit) }
+    } finally {
+        text.endBatchEdit()
+    }
+    editor.setSelectionRegion(
+        startLine,
+        startColumn + if (startLine in indented && startColumn > 0) unit.length else 0,
+        endLine,
+        endColumn + if (endLine in indented) unit.length else 0,
+    )
+}

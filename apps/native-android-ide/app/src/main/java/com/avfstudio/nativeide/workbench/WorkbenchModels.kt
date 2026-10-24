@@ -121,6 +121,10 @@ class NotebookSession(
     var focusRequest by mutableStateOf(0)
     /** Where the cursor lands in the next focused cell: true = end (arrived from below), false = start. */
     var caretAtEnd: Boolean? = null
+    /** With [caretAtEnd], the horizontal position (px) to keep on the target row, as Up/Down do within a cell. */
+    var caretGoalX: Float? = null
+    /** Copilot's suggestion for the focused cell, drawn as ghost text there. */
+    internal var cellSuggestion by mutableStateOf<CellSuggestion?>(null)
 }
 
 /** One file's matches in the Search view. */

@@ -20,6 +20,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.exclude
+import androidx.compose.foundation.layout.mandatorySystemGestures
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -367,7 +371,13 @@ private fun StatusBar(controller: WorkbenchController) {
     val colors = MaterialTheme.colorScheme
     val document = controller.activeDocument
     Row(
-        Modifier.fillMaxWidth().height(28.dp).padding(horizontal = 10.dp),
+        Modifier
+            .fillMaxWidth()
+            // Android swallows most taps in the bottom gesture zone (44 px on the tablet), which
+            // covered the whole bar; sit above it.
+            .windowInsetsPadding(WindowInsets.mandatorySystemGestures.exclude(WindowInsets.safeDrawing).only(WindowInsetsSides.Bottom))
+            .height(28.dp)
+            .padding(horizontal = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {

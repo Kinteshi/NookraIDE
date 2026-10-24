@@ -49,6 +49,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.geometry.Offset
+import android.util.Log
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
@@ -168,6 +171,9 @@ private fun visualRow(layout: TextLayoutResult?, text: String, offset: Int): Int
 private fun visualRowCount(layout: TextLayoutResult?, text: String): Int =
     layout?.takeIf { it.layoutInput.text.length == text.length }?.lineCount ?: (text.count { it == '\n' } + 1)
 
+/** `adb shell setprop log.tag.AVFNB DEBUG` logs every cell cursor move (for key navigation tests). */
+private const val NOTEBOOK_LOG_TAG = "AVFNB"
+
 /** Notebook controls stay tappable but out of the arrow-key path, so Up/Down and Enter can't hit Delete. */
 private fun Modifier.noKeyFocus(): Modifier = focusProperties { canFocus = false }
 
@@ -262,29 +268,55 @@ private fun CellSourceEditor(
     LaunchedEffect(selected, session.focusRequest) {
         if (!selected) return@LaunchedEffect
         session.caretAtEnd?.let { atEnd ->
-            field = field.copy(selection = TextRange(if (atEnd) field.text.length else 0))
+            // Land on the first row (coming from above) or the last one (from below), at the
+            // horizontal position the cursor had, so Up/Down feel like one continuous editor.
+            val goalX = session.caretGoalX
+            if (goalX != null && layout == null) withFrameNanos { }
+            val current = layout?.takeIf { it.layoutInput.text.length == field.text.length }
+            val offset = if (goalX != null && current != null) {
+                val row = if (atEnd) current.lineCount - 1 else 0
+                current.getOffsetForPosition(Offset(goalX, (current.getLineTop(row) + current.getLineBottom(row)) / 2))
+            } else if (atEnd) field.text.length else 0
+            field = field.copy(selection = TextRange(offset))
             session.caretAtEnd = null
+            session.caretGoalX = null
         }
         runCatching { focus.requestFocus() }
+    }
+    LaunchedEffect(field.selection, field.text.length) {
+        if (Log.isLoggable(NOTEBOOK_LOG_TAG, Log.DEBUG)) {
+            val row = visualRow(layout, field.text, field.selection.end)
+            Log.d(NOTEBOOK_LOG_TAG, "cell=${session.notebook.cells.indexOf(cell)} sel=${field.selection.start}-${field.selection.end} row=$row/${visualRowCount(layout, field.text)} len=${field.text.length}")
+        }
+    }
+    fun apply(value: TextFieldValue) {
+        val textChanged = value.text != cell.source
+        field = value
+        if (textChanged) {
+            cell.source = value.text
+            controller.onCellEdited(session)
+        }
+        controller.onCellInput(session, cell, value, textChanged)
+    }
+    val ghost = session.cellSuggestion?.takeIf { it.cellId == cell.id && field.selection.collapsed }
+        ?.let { cellGhostText(field.text, field.selection.start, it) }
+    val shownTransformation = if (ghost != null) {
+        GhostTextTransformation(highlighter, field.selection.start, ghost, colors.onSurfaceVariant.copy(alpha = 0.6f))
+    } else {
+        highlighter
     }
     // Follow changes made elsewhere (cell type toggles, reloads) without losing the cursor.
     if (field.text != cell.source) field = TextFieldValue(cell.source, TextRange(minOf(field.selection.end, cell.source.length)))
     BasicTextField(
         value = field,
-        onValueChange = {
-            field = it
-            if (it.text != cell.source) {
-                cell.source = it.text
-                controller.onCellEdited(session)
-            }
-        },
+        onValueChange = ::apply,
         textStyle = TextStyle(
             fontFamily = FontFamily.Monospace,
             fontSize = controller.settings.editorFontSize.sp,
             color = colors.onSurface,
         ),
         cursorBrush = SolidColor(colors.primary),
-        visualTransformation = highlighter,
+        visualTransformation = shownTransformation,
         onTextLayout = { layout = it },
         modifier = Modifier
             .fillMaxWidth()
@@ -292,18 +324,41 @@ private fun CellSourceEditor(
             .padding(12.dp)
             .focusRequester(focus)
             .onPreviewKeyEvent { event ->
-                if (event.type != KeyEventType.KeyDown || event.isCtrlPressed || event.isAltPressed || event.isShiftPressed) {
+                if (event.type != KeyEventType.KeyDown || event.isCtrlPressed || event.isAltPressed) {
                     return@onPreviewKeyEvent false
                 }
+                val settings = controller.settings
+                if (event.key == Key.Tab && !event.isShiftPressed) {
+                    controller.acceptCellSuggestion(session, cell, field)?.let { accepted ->
+                        apply(accepted)
+                        return@onPreviewKeyEvent true
+                    }
+                }
+                if (event.key == Key.Escape && session.cellSuggestion?.cellId == cell.id) {
+                    session.cellSuggestion = null
+                    return@onPreviewKeyEvent true
+                }
+                if (event.key == Key.Tab) {
+                    apply(
+                        if (event.isShiftPressed) CellTextEdits.outdent(field, settings.tabSize)
+                        else CellTextEdits.indent(field, settings.tabSize, settings.insertSpaces),
+                    )
+                    return@onPreviewKeyEvent true
+                }
+                if (event.isShiftPressed) return@onPreviewKeyEvent false
                 val selection = field.selection
+                val goalX = layout?.takeIf { it.layoutInput.text.length == field.text.length }
+                    ?.getHorizontalPosition(selection.end, usePrimaryDirection = true)
                 when (event.key) {
+                    Key.Enter, Key.NumPadEnter -> cell.type == CellType.Code &&
+                        true.also { apply(CellTextEdits.newline(field, settings.tabSize, settings.insertSpaces)) }
                     // Up on the first visual row / Down on the last one moves between cells, as in Jupyter;
                     // anywhere else the text field moves the cursor (wrapped rows included).
                     Key.DirectionUp -> selection.collapsed && visualRow(layout, field.text, selection.start) == 0 &&
-                        controller.selectAdjacentCell(session, cell, -1)
+                        controller.selectAdjacentCell(session, cell, -1, goalX)
                     Key.DirectionDown -> selection.collapsed &&
                         visualRow(layout, field.text, selection.end) == visualRowCount(layout, field.text) - 1 &&
-                        controller.selectAdjacentCell(session, cell, 1)
+                        controller.selectAdjacentCell(session, cell, 1, goalX)
                     // At the edges Left/Right would hand focus to whatever is beside the cell; keep it here.
                     Key.DirectionLeft -> selection.collapsed && selection.start == 0
                     Key.DirectionRight -> selection.collapsed && selection.end == field.text.length
@@ -357,6 +412,8 @@ private fun CellOutput(output: JsonObject) {
                 }
             }
             when {
+                data.get(PLOTLY_MIME)?.isJsonObject == true ->
+                    PlotlyOutput(data.getAsJsonObject(PLOTLY_MIME), LocalDarkTheme.current, modifier)
                 bitmap != null -> Image(
                     bitmap,
                     contentDescription = "Cell output image",
