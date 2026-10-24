@@ -33,6 +33,27 @@ data class DebugConsoleLine(val text: String, val kind: Kind) {
     enum class Kind { Output, Error, Input, Result, Info }
 }
 
+/**
+ * Appends a DAP `output` chunk. Programs write partial lines (`print("a", b)` arrives as "a", " ",
+ * "6\n"), so a chunk continues the last line until a newline ends it. [lastOpen] says whether the
+ * last line is unfinished; returns the same for the next chunk.
+ */
+fun appendDebugOutput(lines: MutableList<DebugConsoleLine>, chunk: String, kind: DebugConsoleLine.Kind, lastOpen: Boolean): Boolean {
+    if (chunk.isEmpty()) return lastOpen
+    val pieces = chunk.split('\n')
+    pieces.forEachIndexed { index, piece ->
+        val last = lines.lastOrNull()
+        val isLastPiece = index == pieces.lastIndex
+        if (isLastPiece && piece.isEmpty()) return@forEachIndexed
+        if (index == 0 && lastOpen && last != null && last.kind == kind) {
+            lines[lines.lastIndex] = last.copy(text = last.text + piece)
+        } else {
+            lines.add(DebugConsoleLine(piece, kind))
+        }
+    }
+    return !chunk.endsWith('\n')
+}
+
 /** debugpy `launch` arguments for running [program] with [python] in [cwd]. */
 fun pythonLaunchArguments(program: String, cwd: String, python: String, justMyCode: Boolean = true): JsonObject =
     JsonObject().apply {

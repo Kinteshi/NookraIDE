@@ -786,11 +786,16 @@ fn execute_blocking(vfs: Vfs, repo: Repo, op: GitOp) -> Result<GitResult, String
         }
         GitOp::Unstage(paths) => {
             let paths = repo.relative_paths(&vfs, &paths)?;
-            git_success(
-                &repo,
-                &with_paths(&["restore", "--staged"], &paths),
-                "unstage files",
-            )
+            // `restore --staged` needs HEAD; before the first commit, unstaging means dropping the
+            // files from the index (they stay on disk).
+            let has_head = run_git(&repo, &["rev-parse", "--verify", "--quiet", "HEAD"])
+                .is_ok_and(|output| output.status.success());
+            let prefix: &[&str] = if has_head {
+                &["restore", "--staged"]
+            } else {
+                &["rm", "--cached", "--quiet", "-r"]
+            };
+            git_success(&repo, &with_paths(prefix, &paths), "unstage files")
         }
         GitOp::Discard(paths) => {
             let paths = repo.relative_paths(&vfs, &paths)?;
@@ -1696,6 +1701,33 @@ mod tests {
         assert!(entries
             .iter()
             .any(|entry| { entry.path == "new.txt" && entry.status == GitFileStatus::Untracked }));
+    }
+
+    #[tokio::test]
+    async fn unstaging_works_before_the_first_commit() {
+        let repo = TestRepo::new();
+        fs::write(repo.root.join("new.txt"), "new\n").unwrap();
+        let file = repo.root.join("new.txt").to_str().unwrap().to_owned();
+        execute(&repo.vfs, &repo.path(), GitOp::Stage(vec![file.clone()]))
+            .await
+            .unwrap();
+        execute(&repo.vfs, &repo.path(), GitOp::Unstage(vec![file]))
+            .await
+            .unwrap();
+
+        let GitResult::Status {
+            entries, branch, ..
+        } = execute(&repo.vfs, &repo.path(), GitOp::Status)
+            .await
+            .unwrap()
+        else {
+            panic!("expected typed status");
+        };
+        assert!(branch.is_some(), "an unborn branch still has a name");
+        assert!(entries
+            .iter()
+            .any(|entry| entry.path == "new.txt" && entry.status == GitFileStatus::Untracked));
+        assert!(repo.root.join("new.txt").exists());
     }
 
     #[tokio::test]

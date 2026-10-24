@@ -32,7 +32,7 @@ ty + ruff language servers. Details: handoff, sections "Done" and "Verified on t
 * Removed unimplemented bindings; added F8/Shift+F8, Ctrl+U, Shift+Alt+A, multi-line Ctrl+/.
 * Guest: Miniconda in `~/miniconda3`, ipykernel in base.
 
-## 3. Notebook arrows and chat references (done; tablet check pending)
+## 3. Notebook arrows and chat references (done; checked on the tablet)
 * **Bug:** arrow keys inside a cell jump to other cells instead of moving the cursor. Up/Down
   must move line by line (visual lines when wrapped) and only leave the cell from its first or
   last line; Left/Right must never move focus out of a cell.
@@ -75,7 +75,7 @@ ty + ruff language servers. Details: handoff, sections "Done" and "Verified on t
 * Still to check on the tablet: the full flow on a reset guest (or with `avf-native-daemon pair`
   on the current one), the banner when Linux Terminal is closed, and restart → reconnect → tabs.
 
-## 5. Search (done; tablet check pending)
+## 5. Search (done; checked on the tablet)
 The daemon already implements `SearchMessage` (`search.rs`). Build the app codec, a Search side
 view (query, regex/case/word, include/exclude globs), streamed results grouped by file, opening
 at the match, and Ctrl+Shift+F.
@@ -86,7 +86,7 @@ at the match, and Ctrl+Shift+F.
 * On the current tablet guest run `avf-native-daemon tools install ripgrep` (the daemon there
   predates the catalog entry, so reinstall the daemon first via "Set up or pair…").
 
-## 6. Git (done; tablet check pending)
+## 6. Git (done; checked on the tablet)
 The daemon already implements `GitMessage`/`GitOp` (`git.rs`). Build a Source Control view: status
 with stage/unstage/discard, commit message and commit, branch picker and checkout, pull/push/fetch
 with credential prompts (askpass), a diff view, and gutter change markers. Ctrl+Shift+G.
@@ -103,7 +103,7 @@ with credential prompts (askpass), a diff view, and gutter change markers. Ctrl+
 * The installer installs git with `sudo -n apt-get` when it is missing.
 * Not done: editor gutter change markers, a log/history view, stash and merge-conflict tools.
 
-## 7. Debugging (done; tablet check pending)
+## 7. Debugging (done; checked on the tablet)
 DAP over the daemon's `Dap` bridge with debugpy (in the tool catalog): launch the active Python
 file, breakpoints in the gutter (F9), continue/step/stop (F5, F10, F11, Shift+F11, Shift+F5), call
 stack, variables, debug console. Restore the F9 binding when it works.
@@ -169,13 +169,22 @@ stack, variables, debug console. Restore the F9 binding when it works.
   it. After a VM restart fsck found nothing to fix and `dpkg --verify` was clean. The installer
   now removes those units. Don't bring back cache trimming without a reproducer outside the
   user's guest.
+* Tablet round (same day), all on the device: notebook Up/Down by visual row in a wrapped cell and
+  leaving only from the first/last row, Left/Right staying in the cell; search and opening a
+  result; Git view, stage/unstage; a debug session (breakpoint by tapping the gutter, interpreter
+  picker, stack, locals, continue, F9, exit code); chat chips for the active file and Ctrl+Alt+L;
+  automatic reconnect after a daemon restart; tabs restored on launch.
+* Fixed in that round: unstaging failed before the first commit (`restore --staged` needs HEAD;
+  now `rm --cached`); the branch name was squeezed to "…" in the Source Control header (Publish is
+  an icon now); the debug console split `print("a", b)` across lines; Copilot retries once.
 
 ## Backlog
 * Finish Copilot chat sign-in on the tablet (needs the user's approval on GitHub).
 * Stop the Copilot language server (~280 MB) while signed out.
 * Re-measure the app's memory.
-* Tablet checks still pending from batches 3, 5, 6, 7: notebook arrows, Copilot chips, search,
-  Git, debugging.
+* Copilot chat replies on the tablet (attachments work; chat needs the user's sign-in).
+* Copilot sometimes exits right after a daemon restart ("Guest tool exited with code unknown");
+  seen once in two tries, cause unknown. The app retries once after 3 s.
 * Notebook gaps: HTML outputs, kernel completion UI.
 * Customisable keybindings (`keybindings.json`), TypeScript 7 measurement, compact layout check.
 * Remove the `AVFKEY` routing log once the Book Cover keyboard is confirmed.

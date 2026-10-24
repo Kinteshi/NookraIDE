@@ -92,22 +92,22 @@ private fun RepositoryView(controller: WorkbenchController, status: com.avfstudi
         Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        TextButton(onClick = controller::showBranches, modifier = Modifier.weight(1f, fill = false)) {
-            Icon(Icons.AutoMirrored.Outlined.CallSplit, contentDescription = null, modifier = Modifier.size(18.dp))
-            Text(" ${status.branch ?: "(detached)"}", maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
-        val sync = when {
-            status.upstream == null -> "Publish"
-            status.ahead > 0 || status.behind > 0 -> "${status.behind}↓ ${status.ahead}↑"
-            else -> null
-        }
-        sync?.let { label ->
-            TextButton(onClick = if (status.upstream == null) controller::gitPush else controller::gitSync) {
-                Icon(if (status.upstream == null) Icons.Outlined.CloudUpload else Icons.Outlined.Sync, contentDescription = null, modifier = Modifier.size(18.dp))
-                Text(" $label")
+        // The branch gets all the width the buttons leave; a narrow pane used to cut it to "…".
+        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+            TextButton(onClick = controller::showBranches, modifier = Modifier.weight(1f, fill = false)) {
+                Icon(Icons.AutoMirrored.Outlined.CallSplit, contentDescription = null, modifier = Modifier.size(18.dp))
+                Text(" ${status.branch ?: "(detached)"}", maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            if (status.upstream != null && (status.ahead > 0 || status.behind > 0)) {
+                TextButton(onClick = controller::gitSync) {
+                    Icon(Icons.Outlined.Sync, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Text(" ${status.behind}↓ ${status.ahead}↑", maxLines = 1)
+                }
             }
         }
-        Box(Modifier.weight(1f))
+        if (status.upstream == null) {
+            IconButton(onClick = controller::gitPush) { Icon(Icons.Outlined.CloudUpload, contentDescription = "Publish branch") }
+        }
         IconButton(onClick = controller::refreshGitStatus) { Icon(Icons.Outlined.Refresh, contentDescription = "Refresh") }
         Box {
             IconButton(onClick = { menu = true }) { Icon(Icons.Outlined.MoreVert, contentDescription = "More Git actions") }

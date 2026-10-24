@@ -33,6 +33,7 @@ import com.avfstudio.nativeide.assets.VsCodeThemeImporter
 import com.avfstudio.nativeide.debug.DapClient
 import com.avfstudio.nativeide.debug.DebugConsoleLine
 import com.avfstudio.nativeide.debug.DebugFrame
+import com.avfstudio.nativeide.debug.appendDebugOutput
 import com.avfstudio.nativeide.debug.DebugState
 import com.avfstudio.nativeide.debug.DebugVariable
 import com.avfstudio.nativeide.debug.dapInitializeArguments
@@ -785,6 +786,7 @@ class WorkbenchController(private val context: Context) {
         private set
     val debugVariables = mutableStateListOf<DebugVariable>()
     val debugConsole = mutableStateListOf<DebugConsoleLine>()
+    private var debugOutputOpen = false
     /** Where execution is paused (path, 1-based line), drawn in the editor. */
     var executionPoint by mutableStateOf<Pair<String, Int>?>(null)
         private set
@@ -830,6 +832,7 @@ class WorkbenchController(private val context: Context) {
         val cwd = program.substringBeforeLast('/')
         debugState = DebugState.Starting
         debugConsole.clear()
+        debugOutputOpen = false
         debugConsole.add(DebugConsoleLine("Launching ${program.substringAfterLast('/')} with $python", DebugConsoleLine.Kind.Info))
         panelVisible = true
         panelTab = PanelTab.Debug
@@ -874,8 +877,10 @@ class WorkbenchController(private val context: Context) {
             "output" -> {
                 val category = body.get("category")?.asString ?: "console"
                 if (category == "telemetry") return
-                val text = body.get("output")?.asString?.trimEnd('\n') ?: return
-                debugConsole.add(DebugConsoleLine(text, if (category == "stderr") DebugConsoleLine.Kind.Error else DebugConsoleLine.Kind.Output))
+                val text = body.get("output")?.asString ?: return
+                val kind = if (category == "stderr") DebugConsoleLine.Kind.Error else DebugConsoleLine.Kind.Output
+                debugOutputOpen = appendDebugOutput(debugConsole, text, kind, debugOutputOpen)
+                if (debugConsole.size > 2_000) debugConsole.removeRange(0, debugConsole.size - 2_000)
                 if (debugConsole.size > 2_000) debugConsole.removeRange(0, debugConsole.size - 2_000)
             }
             "exited" -> debugConsole.add(DebugConsoleLine("Process exited with code ${body.get("exitCode")?.asInt ?: "?"}", DebugConsoleLine.Kind.Info))
@@ -2555,12 +2560,19 @@ class WorkbenchController(private val context: Context) {
 
     // Copilot -----------------------------------------------------------------------------------
 
-    private fun startCopilot() {
+    private fun startCopilot(retry: Boolean = true) {
         val workspace = workspaceRoot ?: return
         if (!copilotEnabled || copilot.language.isStarted || !vfs.isConnected()) return
         copilotStatus = "Starting"
         copilot.start(workspace).whenComplete { _, error ->
             post {
+                if (error != null && retry && connected) {
+                    // Right after a daemon restart the server sometimes exits at once (seen on the
+                    // tablet, cause unknown); a second start a few seconds later has worked.
+                    status = "Copilot: ${error.cause?.message ?: error.message}; retrying"
+                    timer.schedule({ post { startCopilot(retry = false) } }, 3, TimeUnit.SECONDS)
+                    return@post
+                }
                 reportLanguageServer("copilot", error)
                 if (error != null) {
                     copilotStatus = "Unavailable"
