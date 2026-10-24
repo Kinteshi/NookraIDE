@@ -135,6 +135,10 @@ pub enum SystemMessage {
         /// but no longer costing the host anything.
         #[serde(default)]
         mem_balloon_mb: u64,
+        /// Set when the guest's root filesystem went read-only or ext4 recorded an error since
+        /// boot; on AVF that has meant memory corruption, and the guest needs a restart.
+        #[serde(default)]
+        disk_problem: Option<String>,
     },
     PortOpened {
         port: u16,
@@ -718,6 +722,7 @@ mod tests {
                 mem_free_mb: 64,
                 mem_cached_mb: 92,
                 mem_balloon_mb: 32,
+                disk_problem: Some("read-only".into()),
             }),
             MultiplexedPacket::System(SystemMessage::PortOpened {
                 port: 8000,

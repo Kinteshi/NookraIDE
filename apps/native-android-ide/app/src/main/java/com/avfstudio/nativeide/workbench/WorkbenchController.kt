@@ -1324,6 +1324,14 @@ class WorkbenchController(private val context: Context) {
         status = "Command copied; paste it in Linux Terminal"
     }
 
+    /** Linux Terminal's App info, where Force stop restarts the guest VM. */
+    fun openLinuxTerminalAppInfo() {
+        val intent = Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+            .setData(android.net.Uri.fromParts("package", LINUX_TERMINAL_PACKAGE, null))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        runCatching { context.startActivity(intent) }.onFailure { status = "Could not open App info: ${it.message}" }
+    }
+
     fun openLinuxTerminal() {
         // The launcher intent brings a running Terminal forward; a bare ACTION_MAIN would start a
         // second Terminal screen that never attaches to the VM.
@@ -2710,7 +2718,8 @@ class WorkbenchController(private val context: Context) {
                         current != null && current.leftLine == position.line && current.leftColumn == position.character
                     val suggestion = suggestions?.firstOrNull { it.insertText.isNotBlank() }
                     copilotLog {
-                        "reply ${suggestions?.size} current=$stillCurrent (v${document.version} ${current?.leftLine}:${current?.leftColumn}) error=${error?.cause?.message ?: error?.message}"
+                        "reply ${suggestions?.size} current=$stillCurrent (v${document.version} ${current?.leftLine}:${current?.leftColumn}) " +
+                            "range=${suggestion?.range} text=${suggestion?.insertText?.take(60)?.replace("\n", "⏎")} error=${error?.cause?.message ?: error?.message}"
                     }
                     when {
                         error != null -> if (invoked) status = "Copilot: ${error.cause?.message ?: error.message}"
@@ -3039,7 +3048,15 @@ class WorkbenchController(private val context: Context) {
                 session.exitCode = event.code
                 session.emulator.writeInput("\r\n[process exited with code ${event.code ?: "?"}]\r\n".toByteArray())
             }
-            is PtyEvent.Error -> session.emulator.writeInput("\r\n[terminal error: ${event.message}]\r\n".toByteArray())
+            is PtyEvent.Error -> {
+                // After the daemon restarts (an update, a guest reboot) its shells are gone.
+                val text = if (event.message == "unknown terminal session") {
+                    "this terminal ended when the guest daemon restarted; open a new one with +"
+                } else {
+                    "terminal error: ${event.message}"
+                }
+                session.emulator.writeInput("\r\n[$text]\r\n".toByteArray())
+            }
         }
     }
 

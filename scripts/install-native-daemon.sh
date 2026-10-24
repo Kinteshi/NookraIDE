@@ -101,29 +101,16 @@ fi
 # The app's terminal runs under the unit above, so it must not set NoNewPrivileges: sudo refuses to
 # run under it.
 
-# AVF guests: free-page reporting hands freed guest pages to Android. On the reference tablet,
-# guest memory got corrupted twice under host memory pressure (ext4 "Directory block failed
-# checksum", programs failing with EIO/SIGSEGV; the disk was fine after a reboot). Report only
-# completely free 4 MiB blocks (order 10, the most the kernel accepts) to cut that traffic down.
-# Don't unbind virtio_balloon instead: crosvm resets the VM when the guest does that, and Android
-# then stops it. Undo: sudo systemctl disable avf-page-reporting.service and reboot.
-reporting=/sys/module/page_reporting/parameters/page_reporting_order
-if ! $remote && [ -e "$reporting" ] && sudo -n true 2>/dev/null; then
-  sudo -n tee /etc/systemd/system/avf-page-reporting.service >/dev/null <<'REPORTING'
-[Unit]
-Description=Report only large free blocks to the AVF host (AVF Studio)
-ConditionPathExists=/sys/module/page_reporting/parameters/page_reporting_order
-
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-ExecStart=/bin/sh -c 'echo 10 > /sys/module/page_reporting/parameters/page_reporting_order'
-
-[Install]
-WantedBy=multi-user.target
-REPORTING
+# An earlier installer limited free-page reporting (page_reporting_order=10) after the guest's
+# memory got corrupted under host memory pressure. With less memory going back to Android the
+# tablet rebooted twice within half an hour, so restore the kernel default. Don't unbind
+# virtio_balloon either: crosvm resets the VM and Android stops it. The daemon reports disk errors
+# to the app instead, so a damaged guest is noticed early.
+if ! $remote && [ -e /etc/systemd/system/avf-page-reporting.service ] && sudo -n true 2>/dev/null; then
+  sudo -n systemctl disable avf-page-reporting.service 2>/dev/null || true
+  sudo -n rm -f /etc/systemd/system/avf-page-reporting.service
   sudo -n systemctl daemon-reload
-  sudo -n systemctl enable --now avf-page-reporting.service
+  echo 9 | sudo -n tee /sys/module/page_reporting/parameters/page_reporting_order >/dev/null 2>&1 || true
 fi
 
 # Earlier installers added root units that dropped the guest's caches and compacted memory. On AVF

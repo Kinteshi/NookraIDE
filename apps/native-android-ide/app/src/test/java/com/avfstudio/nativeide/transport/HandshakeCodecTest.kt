@@ -55,4 +55,20 @@ class HandshakeCodecTest {
         assertEquals("K7QM-2XPA", pair.getValue("code").asStringValue().asString().trim())
         assertEquals(2L, pair.getValue("protocol_version").asIntegerValue().asLong())
     }
+
+    @Test
+    fun decodesPongWithAndWithoutADiskProblem() {
+        fun pong(diskProblem: String?) = system("Pong") {
+            packMapHeader(4)
+            packString("timestamp"); packLong(7)
+            packString("mem_total_mb"); packLong(3908)
+            packString("mem_free_mb"); packLong(2000)
+            packString("disk_problem"); if (diskProblem == null) packNil() else packString(diskProblem)
+        }
+        val healthy = MessagePackVfsCodec.decode(pong(null)) as IncomingPacket.Stats
+        assertEquals(null, healthy.stats.diskProblem)
+        assertEquals(1908, healthy.stats.footprintMb)
+        val broken = MessagePackVfsCodec.decode(pong("The guest's disk went read-only after an error")) as IncomingPacket.Stats
+        assertEquals("The guest's disk went read-only after an error", broken.stats.diskProblem)
+    }
 }

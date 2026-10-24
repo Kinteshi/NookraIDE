@@ -228,6 +228,23 @@ stack, variables, debug console. Restore the F9 binding when it works.
     JSONObject"). Drafts are fsynced now, and an unreadable draft is dropped instead of failing.
   * After that reboot the app's settings were back to defaults (theme) and the open tabs were
     gone, which is consistent with the same unflushed writes.
+* Round 3:
+  * The user felt the tablet restarted too soon after the reporting change. The installer now
+    removes `avf-page-reporting.service` and restores order 9 (done by hand on the guest too).
+    Restart history (`persist.sys.boot.reason.history`): 10-23 18:09 and 23:02, 10-24 11:28,
+    11:50 and ~12:25. The three today each came within two minutes of an `adb install` while the
+    VM, the guest tools and the app were running (load average ~23); installs (dex2oat) under that
+    pressure are the likelier trigger. Packages and app data written just before were lost
+    (the app was missing after two of the restarts; settings were reset).
+  * New strategy: detect instead of tune. Pong carries `disk_problem` (root mounted read-only, or
+    an ext4 `last_error_time` since boot), and the app shows a banner with App info (Force stop
+    restarts the guest).
+  * Checked on the tablet: auto-reconnect after Open Terminal from the banner; the daemon swap
+    from the app terminal via `systemd-run`; no crash on select-all, delete and typing; Enter
+    indents after `def …:` (4) and `if …:` (8).
+  * Found: Copilot ghost text after an auto-indented Enter is drawn about 8 columns right of the
+    caret. The AVFCOP reply log now includes the range and text to find out why; not fixed yet.
+  * A terminal whose shell died with the daemon now says so instead of "unknown terminal session".
 * Still not checked on the tablet (the tablet dropped off wireless debugging twice in 25
   minutes, the first time because it rebooted): Enter indent after the crash fix, cell Tab/Enter,
   notebook Copilot, plotly, the kernel fallback.

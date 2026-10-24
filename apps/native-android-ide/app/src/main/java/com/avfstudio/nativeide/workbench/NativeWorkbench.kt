@@ -148,6 +148,7 @@ private fun WorkbenchLayout(controller: WorkbenchController) {
         Column(Modifier.fillMaxSize()) {
             TopBar(controller, expanded)
             GuestProblemBanner(controller)
+            GuestDiskBanner(controller)
             if (expanded) {
                 Row(Modifier.weight(1f).fillMaxWidth()) {
                     WorkbenchRail(controller)
@@ -437,6 +438,32 @@ private fun StatusItem(text: String, icon: ImageVector? = null, onClick: (() -> 
     ) {
         icon?.let { Icon(it, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant) }
         Text(text, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+    }
+}
+
+/**
+ * The daemon saw disk errors in the guest. On the tablet that followed Android running out of
+ * memory and meant corrupted memory in the guest, which only a VM restart clears.
+ */
+@Composable
+private fun GuestDiskBanner(controller: WorkbenchController) {
+    val problem = controller.guestStats?.diskProblem?.takeIf { controller.connected } ?: return
+    val colors = MaterialTheme.colorScheme
+    Surface(
+        color = colors.errorContainer,
+        contentColor = colors.onErrorContainer,
+        shape = MaterialTheme.shapes.medium,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+    ) {
+        Row(Modifier.padding(start = 16.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "$problem. Files saved now may be damaged. Copy out what you need, then restart the guest: " +
+                    "Force stop Linux Terminal and open it again.",
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f).padding(vertical = 10.dp),
+            )
+            TextButton(onClick = controller::openLinuxTerminalAppInfo) { Text("App info") }
+        }
     }
 }
 

@@ -726,6 +726,7 @@ async fn process_packet(
                             mem_free_mb: sample.mem_free_mb,
                             mem_cached_mb: sample.mem_cached_mb,
                             mem_balloon_mb: sample.mem_balloon_mb,
+                            disk_problem: sample.disk_problem,
                         }),
                     )
                     .await
@@ -2218,6 +2219,7 @@ struct SystemSample {
     mem_free_mb: u64,
     mem_cached_mb: u64,
     mem_balloon_mb: u64,
+    disk_problem: Option<String>,
 }
 
 impl Telemetry {
@@ -2260,6 +2262,7 @@ impl Telemetry {
             mem_cached_mb: memory.cached / mebibyte,
             // Pages are 4 KiB on the AVF guest; vmstat counts them, not bytes.
             mem_balloon_mb: balloon_pages * 4096 / mebibyte,
+            disk_problem: disk_problem().await,
         })
     }
 }
@@ -2303,6 +2306,46 @@ fn parse_meminfo(contents: &str) -> Option<MemInfo> {
     let available = kib("MemAvailable").or(kib("MemFree"))?.min(total);
     let cached = (kib("Cached").unwrap_or(0) + kib("Buffers").unwrap_or(0)).saturating_sub(kib("Shmem").unwrap_or(0));
     Some(MemInfo { total, available, free, cached })
+}
+
+/// Whether the guest's disk is in trouble: the root filesystem remounted read-only, or ext4 logged
+/// an error since this boot (`/sys/fs/ext4/<dev>/last_error_time`; fsck clears older ones).
+async fn disk_problem() -> Option<String> {
+    let mounts = tokio::fs::read_to_string("/proc/mounts").await.ok()?;
+    let boot_time = tokio::fs::read_to_string("/proc/stat")
+        .await
+        .ok()
+        .and_then(|stat| boot_time(&stat))
+        .unwrap_or(0);
+    let mut errors = Vec::new();
+    if let Ok(mut devices) = tokio::fs::read_dir("/sys/fs/ext4").await {
+        while let Ok(Some(device)) = devices.next_entry().await {
+            let read = |name: &str| tokio::fs::read_to_string(device.path().join(name));
+            let last = read("last_error_time").await.ok().and_then(|value| value.trim().parse::<u64>().ok());
+            let function = read("last_error_func").await.unwrap_or_default();
+            errors.push((device.file_name().to_string_lossy().into_owned(), last.unwrap_or(0), function.trim().to_owned()));
+        }
+    }
+    describe_disk_problem(&mounts, boot_time, &errors)
+}
+
+fn boot_time(stat: &str) -> Option<u64> {
+    stat.lines().find_map(|line| line.strip_prefix("btime ")?.trim().parse().ok())
+}
+
+/// [errors] holds (device, last error time, function) per ext4 device.
+fn describe_disk_problem(mounts: &str, boot_time: u64, errors: &[(String, u64, String)]) -> Option<String> {
+    let root_read_only = mounts.lines().any(|line| {
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        fields.get(1) == Some(&"/") && fields.get(3).is_some_and(|options| options.split(',').any(|option| option == "ro"))
+    });
+    if root_read_only {
+        return Some("The guest's disk went read-only after an error".to_owned());
+    }
+    errors
+        .iter()
+        .find(|(_, time, _)| *time > 0 && *time >= boot_time)
+        .map(|(device, _, function)| format!("The guest's disk ({device}) reported an error in {function}"))
 }
 
 /// Pages currently held by the virtio balloon (inflated minus deflated), from /proc/vmstat.
@@ -2449,6 +2492,18 @@ mod tests {
             ),
             Some(MemInfo { total: 4000 * 1024, available: 3000 * 1024, free: 1000 * 1024, cached: 1400 * 1024 })
         );
+    }
+
+    #[test]
+    fn disk_problems_are_read_only_roots_or_errors_since_boot() {
+        let healthy = "/dev/root / ext4 rw,relatime,discard 0 0\n";
+        let read_only = "/dev/root / ext4 ro,relatime 0 0\n";
+        let before_boot = [("vda1".to_owned(), 100, "htree_dirblock_to_tree".to_owned())];
+        let since_boot = [("vda1".to_owned(), 500, "htree_dirblock_to_tree".to_owned())];
+        assert_eq!(describe_disk_problem(healthy, 200, &before_boot), None);
+        assert!(describe_disk_problem(healthy, 200, &since_boot).unwrap().contains("htree_dirblock_to_tree"));
+        assert!(describe_disk_problem(read_only, 200, &[]).unwrap().contains("read-only"));
+        assert_eq!(boot_time("cpu 1 2\nbtime 1792850000\n"), Some(1792850000));
     }
 
     #[test]
