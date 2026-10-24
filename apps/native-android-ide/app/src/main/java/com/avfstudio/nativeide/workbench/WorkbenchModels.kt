@@ -70,7 +70,7 @@ sealed interface WorkbenchDialog {
 }
 
 sealed interface ChatEntry {
-    data class User(val text: String) : ChatEntry
+    data class User(val text: String, val references: List<com.avfstudio.nativeide.ai.ChatReference> = emptyList()) : ChatEntry
     data class Agent(val text: String) : ChatEntry
     data class Thought(val text: String) : ChatEntry
     data class Tool(val id: String, val title: String, val status: String?) : ChatEntry

@@ -38,6 +38,9 @@ class AcpClient(transport: GuestVfsClient, private val tool: String = COPILOT_AG
     @Volatile private var sessionId: String? = null
     @Volatile var authMethods: List<AcpAuthMethod> = emptyList()
         private set
+    /** Whether the agent accepts embedded `resource` blocks (ACP `promptCapabilities.embeddedContext`). */
+    @Volatile var embeddedContext: Boolean = false
+        private set
     @Volatile var eventListener: ((AcpEvent) -> Unit)? = null
     @Volatile var exitListener: ((String) -> Unit)? = null
     val isStarted: Boolean get() = connection.bridgeId != null
@@ -68,6 +71,10 @@ class AcpClient(transport: GuestVfsClient, private val tool: String = COPILOT_AG
             }, timeoutSeconds = 60)
         }.thenApply { result ->
             authMethods = parseAuthMethods(result)
+            embeddedContext = runCatching {
+                result.asJsonObject.getAsJsonObject("agentCapabilities")
+                    .getAsJsonObject("promptCapabilities").get("embeddedContext").asBoolean
+            }.getOrDefault(false)
         }
 
     fun newSession(cwd: String): CompletableFuture<Unit> =
@@ -82,17 +89,12 @@ class AcpClient(transport: GuestVfsClient, private val tool: String = COPILOT_AG
         connection.request("authenticate", JsonObject().apply { addProperty("methodId", methodId) }, null)
 
     /** Completes with the agent's stop reason once the whole turn has streamed. */
-    fun prompt(text: String): CompletableFuture<String> {
+    fun prompt(text: String, references: List<ChatReference> = emptyList()): CompletableFuture<String> {
         val session = sessionId
             ?: return CompletableFuture.failedFuture(IllegalStateException("No agent session is open"))
         return connection.request("session/prompt", JsonObject().apply {
             addProperty("sessionId", session)
-            add("prompt", JsonArray().apply {
-                add(JsonObject().apply {
-                    addProperty("type", "text")
-                    addProperty("text", text)
-                })
-            })
+            add("prompt", acpPromptBlocks(text, references, embeddedContext))
         }, timeoutSeconds = null).thenApply { result ->
             result.takeIf { it.isJsonObject }?.asJsonObject?.get("stopReason")?.asString ?: "end_turn"
         }

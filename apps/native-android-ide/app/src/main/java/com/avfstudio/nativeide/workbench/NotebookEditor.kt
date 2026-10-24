@@ -53,6 +53,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.focus.focusProperties
@@ -159,6 +160,14 @@ private fun ToolbarButton(icon: androidx.compose.ui.graphics.vector.ImageVector,
     IconButton(onClick = onClick, modifier = Modifier.noKeyFocus()) { Icon(icon, contentDescription = label) }
 }
 
+/** The cursor's visual row (wrapped rows count); falls back to logical lines before the first layout. */
+private fun visualRow(layout: TextLayoutResult?, text: String, offset: Int): Int =
+    layout?.takeIf { it.layoutInput.text.length == text.length }?.getLineForOffset(offset.coerceIn(0, text.length))
+        ?: text.substring(0, offset.coerceIn(0, text.length)).count { it == '\n' }
+
+private fun visualRowCount(layout: TextLayoutResult?, text: String): Int =
+    layout?.takeIf { it.layoutInput.text.length == text.length }?.lineCount ?: (text.count { it == '\n' } + 1)
+
 /** Notebook controls stay tappable but out of the arrow-key path, so Up/Down and Enter can't hit Delete. */
 private fun Modifier.noKeyFocus(): Modifier = focusProperties { canFocus = false }
 
@@ -248,6 +257,7 @@ private fun CellSourceEditor(
         if (cell.type == CellType.Code) PythonHighlighter(dark) else VisualTransformation.None
     }
     var field by remember(cell.id) { mutableStateOf(TextFieldValue(cell.source)) }
+    var layout by remember(cell.id) { mutableStateOf<TextLayoutResult?>(null) }
     // Selecting a cell (Shift+Enter, + Code, a tap) puts the keyboard in it, as in Jupyter's edit mode.
     LaunchedEffect(selected, session.focusRequest) {
         if (!selected) return@LaunchedEffect
@@ -275,22 +285,28 @@ private fun CellSourceEditor(
         ),
         cursorBrush = SolidColor(colors.primary),
         visualTransformation = highlighter,
+        onTextLayout = { layout = it },
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = 40.dp)
             .padding(12.dp)
             .focusRequester(focus)
             .onPreviewKeyEvent { event ->
-                // Up on the first line / Down on the last line moves between cells, as in Jupyter.
                 if (event.type != KeyEventType.KeyDown || event.isCtrlPressed || event.isAltPressed || event.isShiftPressed) {
                     return@onPreviewKeyEvent false
                 }
-                val cursor = field.selection.start
+                val selection = field.selection
                 when (event.key) {
-                    Key.DirectionUp -> field.text.lastIndexOf('\n', cursor - 1) < 0 &&
+                    // Up on the first visual row / Down on the last one moves between cells, as in Jupyter;
+                    // anywhere else the text field moves the cursor (wrapped rows included).
+                    Key.DirectionUp -> selection.collapsed && visualRow(layout, field.text, selection.start) == 0 &&
                         controller.selectAdjacentCell(session, cell, -1)
-                    Key.DirectionDown -> field.text.indexOf('\n', cursor) < 0 &&
+                    Key.DirectionDown -> selection.collapsed &&
+                        visualRow(layout, field.text, selection.end) == visualRowCount(layout, field.text) - 1 &&
                         controller.selectAdjacentCell(session, cell, 1)
+                    // At the edges Left/Right would hand focus to whatever is beside the cell; keep it here.
+                    Key.DirectionLeft -> selection.collapsed && selection.start == 0
+                    Key.DirectionRight -> selection.collapsed && selection.end == field.text.length
                     else -> false
                 }
             }

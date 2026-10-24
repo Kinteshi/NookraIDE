@@ -18,6 +18,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.InsertDriveFile
 import androidx.compose.material.icons.automirrored.outlined.NoteAdd
+import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.CreateNewFolder
 import androidx.compose.material.icons.outlined.Delete
@@ -121,6 +122,13 @@ fun ExplorerList(controller: WorkbenchController) {
                                 text = { Text("New file here") },
                                 leadingIcon = { Icon(Icons.AutoMirrored.Outlined.NoteAdd, contentDescription = null) },
                                 onClick = { menu = false; controller.beginNewEntry(folder = false, parent = entry.path) },
+                            )
+                        }
+                        if (!entry.isDirectory) {
+                            DropdownMenuItem(
+                                text = { Text("Add to Copilot chat") },
+                                leadingIcon = { Icon(Icons.Outlined.AutoAwesome, contentDescription = null) },
+                                onClick = { menu = false; controller.attachFileToChat(entry.path) },
                             )
                         }
                         DropdownMenuItem(

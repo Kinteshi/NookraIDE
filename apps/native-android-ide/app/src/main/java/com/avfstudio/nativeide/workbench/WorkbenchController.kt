@@ -22,6 +22,7 @@ import com.avfstudio.nativeide.GuestConnectionService
 import com.avfstudio.nativeide.ai.AcpAuthMethod
 import com.avfstudio.nativeide.ai.AcpClient
 import com.avfstudio.nativeide.ai.AcpEvent
+import com.avfstudio.nativeide.ai.ChatReference
 import com.avfstudio.nativeide.ai.COPILOT_LOGIN_COMMAND
 import com.avfstudio.nativeide.ai.parseDeviceCodePrompt
 import com.avfstudio.nativeide.assets.AssetPackGrammarLoader
@@ -237,6 +238,8 @@ class WorkbenchController(private val context: Context) {
     var chatBusy by mutableStateOf(false)
         private set
     var chatAuthMethods by mutableStateOf(emptyList<AcpAuthMethod>())
+    /** Files and excerpts attached to the next chat message. */
+    val chatAttachments = mutableStateListOf<ChatReference>()
     /** When set, Quick Open attaches the picked file to chat instead of opening it. */
     var quickOpenAttachesToChat by mutableStateOf(false)
     private var chatLoginTerminal: UUID? = null
@@ -1857,7 +1860,9 @@ class WorkbenchController(private val context: Context) {
             chatEntries.add(ChatEntry.Notice("Connect to a guest workspace first."))
             return
         }
-        chatEntries.add(ChatEntry.User(text))
+        val references = chatAttachments.toList()
+        chatAttachments.clear()
+        chatEntries.add(ChatEntry.User(text, references))
         chatBusy = true
         scheduledChatStop?.cancel(false)
         val ready = when {
@@ -1865,7 +1870,7 @@ class WorkbenchController(private val context: Context) {
             chatAgent.isStarted -> chatAgent.newSession(workspace)
             else -> chatAgent.start(workspace).thenCompose { chatAgent.newSession(workspace) }
         }
-        ready.thenCompose { chatAgent.prompt(text) }.whenComplete { stopReason, error ->
+        ready.thenCompose { chatAgent.prompt(text, references) }.whenComplete { stopReason, error ->
             post {
                 chatBusy = false
                 scheduleChatStop()
@@ -1909,6 +1914,63 @@ class WorkbenchController(private val context: Context) {
         chatAgent.stop()
         chatBusy = false
         chatEntries.add(ChatEntry.Notice("Agent session ended"))
+    }
+
+    // Chat context ------------------------------------------------------------------------------
+
+    private fun attach(reference: ChatReference) {
+        chatAttachments.removeAll { it.path == reference.path && it.startLine == reference.startLine && it.detail == reference.detail }
+        chatAttachments.add(reference)
+        chatVisible = true
+        status = "Added ${reference.label} to Copilot chat"
+    }
+
+    fun attachFileToChat(path: String? = activePath) {
+        if (path == null || path.startsWith("scratch:")) {
+            status = "Save the file to the guest before adding it to chat"
+            return
+        }
+        attach(ChatReference(path))
+    }
+
+    /** The editor selection (or the cursor's line), or the selected notebook cell, as an excerpt. */
+    fun attachSelectionToChat() {
+        val path = activePath?.takeUnless { it.startsWith("scratch:") } ?: run {
+            status = "Save the file to the guest before adding it to chat"
+            return
+        }
+        activeNotebook?.let { session ->
+            val index = session.notebook.cells.indexOfFirst { it.id == session.selectedCell }
+            val cell = session.notebook.cells.getOrNull(index) ?: return
+            attach(ChatReference(path, text = cell.source, detail = "cell ${index + 1}"))
+            return
+        }
+        val view = editorView ?: return
+        val range = view.cursorRange
+        val text = view.text.toString()
+        val hasSelection = range.startIndex != range.endIndex
+        val firstLine = range.start.line
+        val lastLine = if (hasSelection && range.end.line > firstLine && range.end.column == 0) range.end.line - 1 else range.end.line
+        val excerpt = if (hasSelection) {
+            text.substring(range.startIndex, range.endIndex)
+        } else {
+            view.text.getLineString(firstLine)
+        }
+        attach(ChatReference(path, firstLine + 1, lastLine + 1, excerpt))
+    }
+
+    fun pickFileForChat() {
+        if (!vfs.isConnected()) {
+            status = "Connect to a guest to attach files"
+            return
+        }
+        quickOpenFilter = ""
+        quickOpenAttachesToChat = true
+        dialog = WorkbenchDialog.QuickOpen
+    }
+
+    fun removeChatAttachment(reference: ChatReference) {
+        chatAttachments.remove(reference)
     }
 
     /** Copilot CLI keeps its own credentials, so chat sign-in runs `copilot login` in a terminal
@@ -2593,6 +2655,8 @@ class WorkbenchController(private val context: Context) {
                 status = if (copilotEnabled) "Copilot inline suggestions on" else "Copilot inline suggestions off"
             }
             "github.copilot.chat.signIn" -> signInChatInTerminal()
+            "github.copilot.chat.attachFile" -> attachFileToChat()
+            "github.copilot.chat.attachSelection" -> attachSelectionToChat()
             "notebook.cell.executeAndSelectBelow", "notebook.cell.execute", "notebook.cell.executeAndInsertBelow" ->
                 activeNotebook?.let { session ->
                     val cell = session.notebook.cells.firstOrNull { it.id == session.selectedCell } ?: return@let

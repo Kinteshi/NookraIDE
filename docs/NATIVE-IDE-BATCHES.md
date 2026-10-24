@@ -10,9 +10,9 @@ Status values: **done** (committed), **in progress**, **planned**.
 | # | Batch | Status | Commit |
 |---|-------|--------|--------|
 | 1 | Workbench rewrite: Material You, terminal, Jupyter, Copilot | done | `1f6c146` |
-| 2 | Keyboard routing, file operations, notebook keys, comments | done | this file's first commit |
-| 3 | Notebook arrow navigation; Copilot chat references | in progress | |
-| 4 | Setup from the app, pairing code, reset detection, resume session | planned | |
+| 2 | Keyboard routing, file operations, notebook keys, comments | done | `e35af13` |
+| 3 | Notebook arrow navigation; Copilot chat references | done (tablet check pending) | see `git log` |
+| 4 | Setup from the app, pairing code, reset detection, resume session | in progress | |
 | 5 | Search across files | planned | |
 | 6 | Git | planned | |
 | 7 | Debugging (DAP with debugpy) | planned | |
@@ -32,7 +32,7 @@ ty + ruff language servers. Details: handoff, sections "Done" and "Verified on t
 * Removed unimplemented bindings; added F8/Shift+F8, Ctrl+U, Shift+Alt+A, multi-line Ctrl+/.
 * Guest: Miniconda in `~/miniconda3`, ipykernel in base.
 
-## 3. Notebook arrows and chat references (in progress)
+## 3. Notebook arrows and chat references (done; tablet check pending)
 * **Bug:** arrow keys inside a cell jump to other cells instead of moving the cursor. Up/Down
   must move line by line (visual lines when wrapped) and only leave the cell from its first or
   last line; Left/Right must never move focus out of a cell.
@@ -42,8 +42,14 @@ ty + ruff language servers. Details: handoff, sections "Done" and "Verified on t
   Chips above the input; the Explorer menu has "Add to Copilot chat"; Ctrl+Alt+L adds the selection.
 * Accept: unit tests for the prompt blocks; on the tablet, a wrapped multi-line cell navigates
   line by line; attached chips appear and are sent.
+* Implemented: Up/Down use the text layout's visual rows (`visualRow`), Left/Right are consumed
+  at the cell edges. Chat: `ChatReference` + `acpPromptBlocks`, attach menu and chips in
+  `CopilotChatPane`, Quick Open "attach" mode, Explorer item, commands
+  `github.copilot.chat.attachFile` / `attachSelection` (Ctrl+Alt+L).
+* Still to check on the tablet (it went offline): the arrows test notebook
+  `~/Projects/avf-tests/arrows.ipynb` (a wrapped cell) and sending a message with chips.
 
-## 4. Setup and host reset (planned)
+## 4. Setup and host reset (in progress)
 * The APK ships the arm64 daemon and the installer; "Set up guest" writes them to shared
   Downloads and shows one command to run in Linux Terminal (copy + open Terminal buttons).
 * Pairing: the installer prints a short one-time code (expires, limited attempts); the app sends

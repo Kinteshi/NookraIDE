@@ -65,6 +65,8 @@ object EditorCommands {
     val copilot: List<EditorCommand> = listOf(
         command("editor.action.inlineSuggest.trigger", "Trigger Inline Suggestion", "Alt+\\"),
         command("workbench.action.chat.open", "Open Copilot Chat", "Ctrl+Alt+I"),
+        command("github.copilot.chat.attachSelection", "Copilot: Add Selection to Chat", "Ctrl+Alt+L"),
+        command("github.copilot.chat.attachFile", "Copilot: Add File to Chat", ""),
         command("github.copilot.signIn", "GitHub Copilot: Sign In", ""),
         command("github.copilot.signOut", "GitHub Copilot: Sign Out", ""),
         command("github.copilot.toggleInlineSuggestions", "GitHub Copilot: Toggle Inline Suggestions", ""),

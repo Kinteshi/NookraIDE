@@ -1,6 +1,16 @@
 package com.avfstudio.nativeide.workbench
 
 import androidx.compose.foundation.background
+import com.avfstudio.nativeide.ai.ChatReference
+import androidx.compose.material3.InputChip
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.ShortText
+import androidx.compose.material.icons.outlined.AttachFile
+import androidx.compose.material.icons.automirrored.outlined.InsertDriveFile
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -111,11 +121,50 @@ fun CopilotChatPane(controller: WorkbenchController, modifier: Modifier = Modifi
             }
             items(entries) { entry -> ChatEntryView(entry, controller) }
         }
+        if (controller.chatAttachments.isNotEmpty()) {
+            FlowRow(
+                Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                controller.chatAttachments.forEach { reference ->
+                    InputChip(
+                        selected = false,
+                        onClick = { controller.removeChatAttachment(reference) },
+                        label = { Text(reference.label, maxLines = 1) },
+                        leadingIcon = { Icon(referenceIcon(reference), contentDescription = null, modifier = Modifier.size(16.dp)) },
+                        trailingIcon = { Icon(Icons.Outlined.Close, contentDescription = "Remove ${reference.label}", modifier = Modifier.size(16.dp)) },
+                    )
+                }
+            }
+        }
         Row(
             Modifier.fillMaxWidth().padding(12.dp),
             verticalAlignment = Alignment.Bottom,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            var attachMenu by remember { mutableStateOf(false) }
+            Box {
+                IconButton(onClick = { attachMenu = true }) { Icon(Icons.Outlined.AttachFile, contentDescription = "Add context") }
+                DropdownMenu(expanded = attachMenu, onDismissRequest = { attachMenu = false }) {
+                    DropdownMenuItem(
+                        text = { Text("Active file") },
+                        leadingIcon = { Icon(Icons.AutoMirrored.Outlined.InsertDriveFile, contentDescription = null) },
+                        enabled = controller.activePath?.startsWith("scratch:") == false,
+                        onClick = { attachMenu = false; controller.attachFileToChat() },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(if (controller.activeNotebook != null) "Current cell" else "Selection or current line") },
+                        leadingIcon = { Icon(Icons.Outlined.ShortText, contentDescription = null) },
+                        enabled = controller.activePath?.startsWith("scratch:") == false,
+                        onClick = { attachMenu = false; controller.attachSelectionToChat() },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Choose file…") },
+                        leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
+                        onClick = { attachMenu = false; controller.pickFileForChat() },
+                    )
+                }
+            }
             OutlinedTextField(
                 value = draft,
                 onValueChange = { draft = it },
@@ -153,7 +202,7 @@ fun CopilotChatPane(controller: WorkbenchController, modifier: Modifier = Modifi
 private fun ChatEntryView(entry: ChatEntry, controller: WorkbenchController) {
     val colors = MaterialTheme.colorScheme
     when (entry) {
-        is ChatEntry.User -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+        is ChatEntry.User -> Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
             Surface(
                 color = colors.primaryContainer,
                 contentColor = colors.onPrimaryContainer,
@@ -161,6 +210,20 @@ private fun ChatEntryView(entry: ChatEntry, controller: WorkbenchController) {
                 modifier = Modifier.widthIn(max = 520.dp),
             ) {
                 SelectionContainer { Text(entry.text, modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) }
+            }
+            if (entry.references.isNotEmpty()) {
+                FlowRow(
+                    Modifier.widthIn(max = 520.dp).padding(top = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.End),
+                ) {
+                    entry.references.forEach { reference ->
+                        AssistChip(
+                            onClick = { controller.openPath(reference.path) },
+                            label = { Text(reference.label, maxLines = 1, style = MaterialTheme.typography.labelSmall) },
+                            leadingIcon = { Icon(referenceIcon(reference), contentDescription = null, modifier = Modifier.size(14.dp)) },
+                        )
+                    }
+                }
             }
         }
         is ChatEntry.Agent -> Surface(
@@ -258,3 +321,6 @@ private fun ChatMarkdown(text: String, modifier: Modifier = Modifier) {
         }
     }
 }
+
+private fun referenceIcon(reference: ChatReference) =
+    if (reference.isExcerpt) Icons.Outlined.ShortText else Icons.AutoMirrored.Outlined.InsertDriveFile

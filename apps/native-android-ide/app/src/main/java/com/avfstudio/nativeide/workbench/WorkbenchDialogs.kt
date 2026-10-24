@@ -79,17 +79,25 @@ fun WorkbenchDialogHost(controller: WorkbenchController) {
             LaunchedEffect(Unit) { controller.refreshQuickOpenIndex() }
             val root = controller.workspaceRoot.orEmpty().trimEnd('/')
             PaletteDialog(
-                placeholder = if (controller.quickOpenIndexing) "Indexing workspace…" else "Search files by name",
+                placeholder = when {
+                    controller.quickOpenIndexing -> "Indexing workspace…"
+                    controller.quickOpenAttachesToChat -> "Add a file to Copilot chat"
+                    else -> "Search files by name"
+                },
                 query = controller.quickOpenFilter,
                 onQuery = { controller.quickOpenFilter = it },
                 items = controller.quickOpenIndex
                     .filter { fuzzyMatch(controller.quickOpenFilter, it.path.removePrefix(root)) }
                     .sortedBy { if (it.name.startsWith(controller.quickOpenFilter, true)) 0 else 1 }
                     .take(200),
-                onDismiss = { controller.dialog = null },
+                onDismiss = {
+                    controller.dialog = null
+                    controller.quickOpenAttachesToChat = false
+                },
                 onPick = { entry ->
                     controller.dialog = null
-                    controller.openPath(entry.path)
+                    if (controller.quickOpenAttachesToChat) controller.attachFileToChat(entry.path) else controller.openPath(entry.path)
+                    controller.quickOpenAttachesToChat = false
                 },
             ) { entry ->
                 PaletteRow(entry.name, entry.path.removePrefix(root).removePrefix("/").substringBeforeLast('/', ""))
