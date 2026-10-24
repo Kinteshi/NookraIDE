@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
-# Installs the Track B native daemon in the AVF Debian guest, beside Track A's Supervisor.
-# Usage (inside the guest): bash install-native-daemon.sh [/path/to/avf-daemon] [workspace]
-# Without a path it uses the avf-native-daemon next to this script (as AVF Studio's
-# "Set up guest" places it). It ends by printing a one-time pairing code for the app.
-# The daemon listens on 127.0.0.1:19870 as the user unit avf-native.service; its session
-# token is in ~/.config/avf-native/env (mode 0600). Paste it into the app's Connect dialog.
-# Safe to rerun, including on a guest reset from Terminal → Settings → Recovery.
+# Installs the AVF Studio native daemon as a systemd user service.
+#
+#   AVF guest (Linux Terminal on the tablet):
+#     bash install-native-daemon.sh [/path/to/avf-daemon] [workspace]
+#   Linux computer or WSL distro on the network (see docs/HOSTING-THE-DAEMON.md):
+#     bash install-native-daemon.sh --remote [--port 19870] [--address HOST] [/path/to/avf-daemon] [workspace]
+#
+# Without a daemon path it uses the avf-native-daemon (or avf-daemon) next to this script, as
+# AVF Studio's "Set up guest" places it. It ends by printing a one-time pairing code (guest) or a
+# connection string (remote) for the app. The session token lives in ~/.config/avf-native/env
+# (mode 0600). Safe to rerun, including on a guest reset from Terminal → Settings → Recovery.
 set -euo pipefail
 
 # uv runs ty, ruff and the Jupyter bridge. Pinned and checksum-verified, like the tool catalog.
@@ -15,11 +19,44 @@ declare -A UV_SHA256=(
   [x86_64]=1468ebd5a5541121837c5a2817b9972ba6090fa6caa3d142620850a47fb75154
 )
 
-daemon_source=${1:-"$(dirname "$(readlink -f "$0")")/avf-native-daemon"}
-[[ -f "$daemon_source" ]] || { echo "usage: $0 [/path/to/avf-daemon] [workspace]" >&2; exit 2; }
-workspace=${2:-$HOME/Projects}
+usage() {
+  echo "usage: $0 [--remote [--port N] [--address HOST]] [/path/to/avf-daemon] [workspace]" >&2
+  exit 2
+}
+
+remote=false
+port=19870
+address=""
+positional=()
+while (($#)); do
+  case "$1" in
+    --remote) remote=true ;;
+    --port) port=${2:?}; shift ;;
+    --address) address=${2:?}; shift ;;
+    -h | --help) usage ;;
+    *) positional+=("$1") ;;
+  esac
+  shift
+done
+
+here="$(dirname "$(readlink -f "$0")")"
+default_daemon="$here/avf-native-daemon"
+[[ -f "$default_daemon" ]] || default_daemon="$here/avf-daemon"
+daemon_source=${positional[0]:-$default_daemon}
+[[ -f "$daemon_source" ]] || usage
+workspace=${positional[1]:-$HOME/Projects}
 config="$HOME/.config/avf-native"
 unit="$HOME/.config/systemd/user/avf-native.service"
+
+if $remote; then
+  # Beyond loopback the daemon requires TLS; it creates a self-signed certificate on first start
+  # and the connection string carries its fingerprint for the app to pin.
+  bind="0.0.0.0:$port"
+  tls_line="Environment=AVF_TLS=1"
+else
+  bind="127.0.0.1:19870"
+  tls_line=""
+fi
 
 install -D -m 755 "$daemon_source" "$HOME/.local/bin/avf-native-daemon.new"
 mv "$HOME/.local/bin/avf-native-daemon.new" "$HOME/.local/bin/avf-native-daemon"
@@ -31,7 +68,7 @@ fi
 
 cat >"$unit" <<UNIT
 [Unit]
-Description=AVF Studio native IDE daemon (Track B)
+Description=AVF Studio native IDE daemon
 
 [Service]
 Type=simple
@@ -39,7 +76,8 @@ ExecStart=%h/.local/bin/avf-native-daemon
 WorkingDirectory=$workspace
 EnvironmentFile=%h/.config/avf-native/env
 Environment=AVF_WORKSPACE_ROOTS=$workspace
-Environment=AVF_BIND_ADDR=127.0.0.1:19870
+Environment=AVF_BIND_ADDR=$bind
+$tls_line
 Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 Restart=on-failure
 RestartSec=2
@@ -56,11 +94,15 @@ systemctl --user enable avf-native.service
 systemctl --user stop avf-native.service || true
 sleep 3
 systemctl --user start avf-native.service
+if $remote; then
+  # Keep the service running without an open login session (allowed for your own user on most distros).
+  loginctl enable-linger "$USER" 2>/dev/null || echo "note: run 'sudo loginctl enable-linger $USER' to keep the daemon running after logout" >&2
+fi
 
 export PATH="$HOME/.local/bin:$PATH"
-# Source Control needs git; install it from Debian when sudo works without a password.
+# Source Control needs git; install it from the distribution when sudo works without a password.
 if ! command -v git >/dev/null; then
-  sudo -n apt-get install -y git >/dev/null 2>&1 || echo "warning: git is missing; install it with: sudo apt install git" >&2
+  sudo -n apt-get install -y git >/dev/null 2>&1 || echo "warning: git is missing; install it with your package manager" >&2
 fi
 if ! command -v uv >/dev/null; then
   arch=$(uname -m)
@@ -76,5 +118,17 @@ for tool in ty ruff ripgrep jupyter debugpy copilot-language-server copilot; do
 done
 avf-native-daemon tools list
 echo
-echo "If Android asks to open port 19870 (avf-native), accept it."
-avf-native-daemon pair
+if $remote; then
+  if [[ -z "$address" ]]; then
+    # The address other machines reach this one on (the source address of the default route).
+    address=$(ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p' | head -1)
+    address=${address:-$(hostname -I 2>/dev/null | awk '{print $1}')}
+  fi
+  echo "The daemon listens on port $port over TLS. Allow it through the firewall if one is active"
+  echo "(for example: sudo ufw allow $port/tcp). Run 'avf-native-daemon pair --remote $address:$port'"
+  echo "again whenever you need a new code."
+  avf-native-daemon pair --remote "${address:?could not detect the address of this machine, pass --address}:$port"
+else
+  echo "If Android asks to open port 19870 (avf-native), accept it."
+  avf-native-daemon pair
+fi

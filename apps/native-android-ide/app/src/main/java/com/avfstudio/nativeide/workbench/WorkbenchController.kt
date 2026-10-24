@@ -77,6 +77,7 @@ import com.avfstudio.nativeide.transport.GitOperation
 import com.avfstudio.nativeide.transport.GitResult
 import com.avfstudio.nativeide.transport.GitStatusEntry
 import com.avfstudio.nativeide.transport.PtyEvent
+import com.avfstudio.nativeide.transport.parseConnectionString
 import com.avfstudio.nativeide.transport.SearchQuery
 import com.avfstudio.nativeide.transport.SearchEvent
 import com.avfstudio.nativeide.transport.SharedPreferencesKeyValueStore
@@ -168,6 +169,8 @@ class WorkbenchController(private val context: Context) {
         private set
     var profileId by mutableStateOf<String?>(null)
     var profileName by mutableStateOf("")
+    /** The selected profile's pinned certificate (remote hosts paired with a connection string). */
+    private var profileFingerprint: String? = null
     /** Shown above the editor when the last connection attempt failed; null when connected. */
     var guestProblem by mutableStateOf<String?>(null)
         private set
@@ -493,6 +496,7 @@ class WorkbenchController(private val context: Context) {
         profileName = profile.name
         endpoint = profile.endpoint
         token = profileStore.token(profile.id).orEmpty()
+        profileFingerprint = profile.fingerprint
     }
 
     fun newProfile() {
@@ -500,6 +504,7 @@ class WorkbenchController(private val context: Context) {
         profileName = ""
         endpoint = ""
         token = ""
+        profileFingerprint = null
     }
 
     fun deleteProfile(id: String) {
@@ -526,7 +531,9 @@ class WorkbenchController(private val context: Context) {
             "Notification permission denied; Android may hide the background connection notification"
         }
         startKeepAlive("Connecting")
-        vfs.connect(endpoint.trim(), token).thenCompose { vfs.roots() }.whenComplete { guestRoots, error ->
+        // A paired remote host's pin only applies to the endpoint it was paired with.
+        val pin = profileFingerprint?.takeIf { endpoint.trim().startsWith("wss://") }
+        vfs.connect(endpoint.trim(), token, pin).thenCompose { vfs.roots() }.whenComplete { guestRoots, error ->
             post {
                 busy = false
                 if (error != null) {
@@ -539,7 +546,7 @@ class WorkbenchController(private val context: Context) {
                 roots = guestRoots
                 if (dialog == WorkbenchDialog.Connect) dialog = null
                 io.execute {
-                    val saved = profileStore.save(profileId, profileName, endpoint, token)
+                    val saved = profileStore.save(profileId, profileName, endpoint, token, pin)
                     post {
                         profileId = saved.id
                         profileName = saved.name
@@ -1226,6 +1233,45 @@ class WorkbenchController(private val context: Context) {
                 if (profileName.isBlank()) profileName = "Linux guest"
                 dialog = null
                 setupCommand = null
+                connectGuest()
+            }
+        }
+    }
+
+    /**
+     * Pairs with a Linux or WSL host from the string `avf-daemon pair --remote` printed: pins the
+     * host's certificate, trades the code for the token, saves a profile and connects.
+     */
+    fun pairWithConnectionString(text: String) {
+        val parsed = parseConnectionString(text) ?: run {
+            pairingError = "That isn't a connection string; it starts with avf:// and has fp= and code="
+            return
+        }
+        busy = true
+        pairingError = null
+        status = "Pairing with ${parsed.host}"
+        vfs.pair(parsed.endpoint, parsed.code, parsed.fingerprint).whenComplete { newToken, error ->
+            post {
+                busy = false
+                if (error != null) {
+                    val causes = generateSequence(error) { it.cause }.toList()
+                    pairingError = when {
+                        causes.any { it is java.security.cert.CertificateException } ->
+                            "The host's certificate doesn't match the connection string; run the pair command again"
+                        causes.any { it is java.net.ConnectException || it is java.net.SocketTimeoutException } ->
+                            "Can't reach ${parsed.host}:${parsed.port}. Same network? Firewall open for that port?"
+                        else -> (causes.firstOrNull { it is GuestRejectedException } ?: causes.last()).message ?: "Pairing failed"
+                    }
+                    status = pairingError!!
+                    return@post
+                }
+                val existing = profiles.firstOrNull { it.endpoint == parsed.endpoint }
+                profileId = existing?.id
+                profileName = existing?.name ?: parsed.host
+                endpoint = parsed.endpoint
+                token = newToken
+                profileFingerprint = parsed.fingerprint
+                dialog = null
                 connectGuest()
             }
         }

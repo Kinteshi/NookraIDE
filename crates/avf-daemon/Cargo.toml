@@ -16,6 +16,11 @@ futures-util.workspace = true
 notify.workspace = true
 portable-pty = "0.9"
 sha2 = "0.10"
+# TLS for daemons that listen beyond loopback (hosts on a LAN); ring avoids a CMake toolchain.
+axum-server = { version = "0.8", features = ["tls-rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+rustls-pki-types = "1"
+rcgen = { version = "0.14.9", default-features = false, features = ["crypto", "pem", "ring"] }
 serde.workspace = true
 serde_json.workspace = true
 subtle.workspace = true

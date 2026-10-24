@@ -4,6 +4,7 @@ mod git;
 mod lsp;
 mod ports;
 mod pairing;
+mod tls;
 mod pty;
 #[cfg(feature = "native-protocol")]
 mod rpc_stdio;
@@ -88,23 +89,49 @@ pub fn git_askpass_helper() -> Result<(), String> {
     git::run_askpass_helper()
 }
 
-/// `avf-daemon pair [--minutes N]`: issues a one-time code for the app's "Pair with code".
+/// `avf-daemon pair [--minutes N] [--remote HOST[:PORT]]`: issues a one-time code. With
+/// `--remote` (a TLS host on a LAN) it prints a connection string carrying the certificate
+/// fingerprint for the app's "Pair with a computer".
 pub fn print_pairing_code(args: &[String]) -> Result<(), String> {
-    let minutes = match args {
-        [] => pairing::PAIRING_TTL.as_secs() / 60,
-        [flag, value] if flag == "--minutes" => value
-            .parse::<u64>()
-            .ok()
-            .filter(|minutes| (1..=60).contains(minutes))
-            .ok_or("--minutes must be between 1 and 60")?,
-        _ => return Err("usage: avf-daemon pair [--minutes N]".to_owned()),
-    };
+    const USAGE: &str = "usage: avf-daemon pair [--minutes N] [--remote HOST[:PORT]]";
+    let mut minutes = pairing::PAIRING_TTL.as_secs() / 60;
+    let mut remote: Option<String> = None;
+    let mut rest = args.iter();
+    while let Some(flag) = rest.next() {
+        let value = rest.next().ok_or(USAGE)?;
+        match flag.as_str() {
+            "--minutes" => {
+                minutes = value
+                    .parse::<u64>()
+                    .ok()
+                    .filter(|minutes| (1..=60).contains(minutes))
+                    .ok_or("--minutes must be between 1 and 60")?
+            }
+            "--remote" => remote = Some(value.clone()),
+            _ => return Err(USAGE.to_owned()),
+        }
+    }
     let path = pairing::pairing_path()?;
     let code = pairing::create(&path, Duration::from_secs(minutes * 60))?;
     println!();
-    println!("    Pairing code:  {code}");
-    println!();
-    println!("In AVF Studio, open Connect and choose \"Pair with code\". The code works once,");
+    match remote {
+        None => {
+            println!("    Pairing code:  {code}");
+            println!();
+            println!("In AVF Studio, open Connect and choose \"Set up or pair\". The code works once,");
+        }
+        Some(host) => {
+            let (host, port) = match host.rsplit_once(':').filter(|(name, _)| !name.contains(':') || name.ends_with(']')) {
+                Some((name, port)) => (name.trim_matches(['[', ']']).to_owned(), port.parse::<u16>().map_err(|_| "invalid port in --remote")?),
+                None => (host.trim_matches(['[', ']']).to_owned(), 19870),
+            };
+            let material = tls::load_or_create(&pairing::config_dir()?)?;
+            println!("    {}", tls::connection_string(&host, port, &material.fingerprint, &code));
+            println!();
+            println!("In AVF Studio, open Connect, choose \"Set up or pair\" and paste this under");
+            println!("\"Pair with a computer\". The code in it works once,");
+        }
+    }
     println!("for {minutes} minutes, and allows {} wrong attempts.", pairing::MAX_ATTEMPTS);
     Ok(())
 }
@@ -118,6 +145,9 @@ pub struct AppConfig {
     pub lsp_hibernation_secs: u64,
     /// Where `avf-daemon pair` leaves the one-time pairing code; None disables pairing.
     pub pairing_file: Option<PathBuf>,
+    /// Serve TLS with the self-signed certificate in the config directory (`AVF_TLS=1`).
+    /// Required for any non-loopback bind address.
+    pub tls: bool,
 }
 
 impl AppConfig {
@@ -148,8 +178,9 @@ impl AppConfig {
         let bind_addr: SocketAddr = env::var("AVF_BIND_ADDR")
             .unwrap_or_else(|_| "127.0.0.1:19860".to_owned())
             .parse()?;
-        if !bind_addr.ip().is_loopback() {
-            return Err("AVF_BIND_ADDR must use a loopback address".into());
+        let tls = env::var("AVF_TLS").is_ok_and(|value| value == "1" || value.eq_ignore_ascii_case("true"));
+        if !bind_addr.ip().is_loopback() && !tls {
+            return Err("AVF_BIND_ADDR may only use a non-loopback address with AVF_TLS=1".into());
         }
         let allowed_origins = match env::var("AVF_ALLOWED_ORIGINS") {
             Ok(value) => value
@@ -179,6 +210,7 @@ impl AppConfig {
             workspace_roots: roots,
             lsp_hibernation_secs,
             pairing_file: pairing::pairing_path().ok(),
+            tls,
         })
     }
 }
@@ -246,10 +278,10 @@ struct HealthResponse {
 }
 
 pub async fn serve(config: AppConfig) -> io::Result<()> {
-    if !config.bind_addr.ip().is_loopback() {
+    if !config.bind_addr.ip().is_loopback() && !config.tls {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "AVF Studio daemon may only bind to a loopback address",
+            "AVF Studio daemon may only bind beyond loopback with TLS",
         ));
     }
     if !is_valid_token(&config.token) || config.allowed_origins.is_empty() {
@@ -268,6 +300,17 @@ pub async fn serve(config: AppConfig) -> io::Result<()> {
             io::ErrorKind::InvalidInput,
             "daemon configuration must contain absolute workspace directories",
         ));
+    }
+    if config.tls {
+        let material = pairing::config_dir()
+            .and_then(|dir| tls::load_or_create(&dir))
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let tls = axum_server::tls_rustls::RustlsConfig::from_pem(material.cert_pem.into_bytes(), material.key_pem.into_bytes()).await?;
+        info!(fingerprint = %material.fingerprint, "serving TLS");
+        let bind_addr = config.bind_addr;
+        let app = app(config)?;
+        return axum_server::bind_rustls(bind_addr, tls).serve(app.into_make_service()).await;
     }
     let listener = TcpListener::bind(config.bind_addr).await?;
     let app = app(config)?;
@@ -2388,6 +2431,7 @@ mod tests {
             workspace_roots: vec![project],
             lsp_hibernation_secs: 30 * 60,
             pairing_file: None,
+            tls: false,
         };
         let listener = TcpListener::bind(config.bind_addr).await.unwrap();
         let address = listener.local_addr().unwrap();
@@ -2423,6 +2467,7 @@ mod tests {
                 workspace_roots: vec![project.clone()],
                 lsp_hibernation_secs: 30 * 60,
                 pairing_file: None,
+            tls: false,
             }),
             vfs: Vfs::new(std::slice::from_ref(&project)).unwrap(),
             pty: PtyManager::default(),
@@ -2727,6 +2772,7 @@ mod tests {
             workspace_roots: vec![project.clone()],
             lsp_hibernation_secs: 30 * 60,
             pairing_file: None,
+            tls: false,
         };
         let listener = TcpListener::bind(config.bind_addr).await.unwrap();
         let address = listener.local_addr().unwrap();
@@ -3023,6 +3069,7 @@ mod tests {
             workspace_roots: vec![project.clone()],
             lsp_hibernation_secs: 30 * 60,
             pairing_file: None,
+            tls: false,
         };
         let listener = TcpListener::bind(config.bind_addr).await.unwrap();
         let address = listener.local_addr().unwrap();
@@ -3243,6 +3290,7 @@ mod tests {
             workspace_roots: vec![project],
             lsp_hibernation_secs: 30 * 60,
             pairing_file: Some(pairing_file),
+            tls: false,
         };
         let listener = TcpListener::bind(config.bind_addr).await.unwrap();
         let address = listener.local_addr().unwrap();
@@ -3313,6 +3361,7 @@ mod tests {
             workspace_roots: vec![project],
             lsp_hibernation_secs: 30 * 60,
             pairing_file: None,
+            tls: false,
         };
         let listener = TcpListener::bind(config.bind_addr).await.unwrap();
         let address = listener.local_addr().unwrap();

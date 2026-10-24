@@ -47,6 +47,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.background
@@ -536,6 +537,7 @@ private fun ConnectDialog(controller: WorkbenchController) {
 @Composable
 private fun GuestSetupDialog(controller: WorkbenchController, setup: WorkbenchDialog.GuestSetup) {
     var code by remember { mutableStateOf("") }
+    var connectionString by remember { mutableStateOf("") }
     val colors = MaterialTheme.colorScheme
     AlertDialog(
         onDismissRequest = { controller.dialog = null },
@@ -585,6 +587,28 @@ private fun GuestSetupDialog(controller: WorkbenchController, setup: WorkbenchDi
                     keyboardActions = KeyboardActions(onDone = { if (code.count(Char::isLetterOrDigit) == 8) controller.pairAndConnect(code) }),
                     modifier = Modifier.fillMaxWidth(),
                 )
+                HorizontalDivider()
+                Text("Or pair with a computer (Linux, or Windows through WSL)", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    "On the computer, install the daemon with scripts/install-host-daemon.sh (or the WSL script on " +
+                        "Windows); it prints a connection string starting with avf://. Paste it here.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = connectionString,
+                    onValueChange = { connectionString = it.trim() },
+                    label = { Text("Connection string") },
+                    placeholder = { Text("avf://192.168.1.10:19870?fp=…&code=…") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, imeAction = ImeAction.Go),
+                    keyboardActions = KeyboardActions(onGo = { controller.pairWithConnectionString(connectionString) }),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                FilledTonalButton(
+                    onClick = { controller.pairWithConnectionString(connectionString) },
+                    enabled = !controller.busy && connectionString.startsWith("avf://"),
+                ) { Text("Pair with computer") }
             }
         },
         confirmButton = {

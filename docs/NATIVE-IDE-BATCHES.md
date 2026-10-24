@@ -15,8 +15,8 @@ Status values: **done** (committed), **in progress**, **planned**.
 | 4 | Setup from the app, pairing code, reset detection, resume session | done (tablet check pending) | `a01e688` |
 | 5 | Search across files | done (tablet check pending) | `526768d` |
 | 6 | Git | done (tablet check pending) | `2566e2e` |
-| 7 | Debugging (DAP with debugpy) | done (tablet check pending) | see `git log` |
-| 8 | Daemon hosted on Windows and Linux machines, with a connection guide | in progress | |
+| 7 | Debugging (DAP with debugpy) | done (tablet check pending) | `2746b65` |
+| 8 | Daemon hosted on Linux and Windows (WSL2) machines, with a connection guide | done (host install not run) | see `git log` |
 
 ## 1. Workbench rewrite (done)
 Material You shell, settings page, VS Code shortcuts, ConnectBot terminal over daemon PTYs,
@@ -122,7 +122,7 @@ stack, variables, debug console. Restore the F9 binding when it works.
 * Not done: breakpoints don't move with edits; conditional breakpoints, watch expressions,
   `integratedTerminal` console (stdin for `input()`), launch.json configurations.
 
-## 8. Daemon on Windows and Linux hosts (in progress)
+## 8. Daemon on Linux and Windows hosts (done; host install not run)
 * Portability: the Git askpass helper (Unix sockets), home and token paths, default shell, tool
   catalog artifacts per OS, file permissions.
 * Remote access: loopback stays the default. Opting in to a LAN address requires TLS with a
@@ -131,6 +131,22 @@ stack, variables, debug console. Restore the F9 binding when it works.
 * Installers: a Linux systemd user unit and a Windows logon task; release builds for
   x86_64/aarch64 Linux and x86_64 Windows.
 * A guide: install, pair, connect over LAN or VPN, firewall notes.
+* Implemented:
+  * Daemon `tls.rs`: self-signed certificate (rcgen, ring) in `~/.config/avf-native/tls/`, served
+    with axum-server/rustls when `AVF_TLS=1`; non-loopback binds require it.
+    `avf-daemon pair --remote HOST[:PORT]` prints `avf://HOST:PORT?fp=<sha256>&code=<code>`.
+    Checked locally: the served certificate matches the printed fingerprint; `/health` over TLS.
+  * App: `PinnedTls.kt` (connection-string parser, a trust manager that accepts only the pinned
+    certificate), profiles store the pin, "Pair with a computer" in the setup dialog. The opt-in
+    `RemoteHostIntegrationTest` (env `AVF_TEST_CONNECTION`) passed against a live TLS daemon:
+    pairing, pinned connect and roots, and a wrong fingerprint refused.
+  * Installer `--remote [--port] [--address]` (TLS unit on `0.0.0.0`, lingering, prints the
+    connection string); `scripts/install-host-daemon-wsl.ps1` for Windows (WSL2 + systemd,
+    firewall, Hyper-V rule or port proxy, logon task); guide `docs/HOSTING-THE-DAEMON.md`.
+* Decision: Windows through WSL2, not a native port (POSIX paths in daemon and app, Unix-socket
+  askpass, Linux tool artifacts). A native Windows daemon would be its own batch.
+* Not run: the remote installer and the PowerShell script on a real host (they change services
+  and firewall rules); the PowerShell script was only parse-checked.
 
 ## Backlog
 * Finish Copilot chat sign-in on the tablet (needs the user's approval on GitHub).

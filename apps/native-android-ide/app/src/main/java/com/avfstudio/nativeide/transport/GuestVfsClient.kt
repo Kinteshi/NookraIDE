@@ -74,11 +74,11 @@ class GuestVfsClient(
      * Exchanges a one-time pairing code for the guest's session token over a short-lived
      * connection; the caller then connects normally with the token.
      */
-    fun pair(url: String, code: String): CompletableFuture<String> {
-        validateUrl(url)
+    fun pair(url: String, code: String, fingerprint: String? = null): CompletableFuture<String> {
+        validateUrl(url, fingerprint)
         val result = CompletableFuture<String>()
         val request = Request.Builder().url(url).header("Origin", NATIVE_APP_ORIGIN).build()
-        http.newWebSocket(
+        clientFor(fingerprint).newWebSocket(
             request,
             object : WebSocketListener() {
                 override fun onOpen(webSocket: WebSocket, response: Response) {
@@ -110,8 +110,12 @@ class GuestVfsClient(
         return result
     }
 
-    private fun validateUrl(url: String) {
+    /** The shared client, or one that trusts only [fingerprint]'s certificate (paired hosts). */
+    private fun clientFor(fingerprint: String?): OkHttpClient = fingerprint?.let(http::pinnedTo) ?: http
+
+    private fun validateUrl(url: String, fingerprint: String? = null) {
         require(url.startsWith("ws://") || url.startsWith("wss://")) { "Guest URL must use ws:// or wss://" }
+        require(fingerprint == null || url.startsWith("wss://")) { "A pinned certificate needs a wss:// URL" }
         if (url.startsWith("ws://")) {
             val host = java.net.URI(url).host?.lowercase()
             require(host in setOf("localhost", "127.0.0.1", "::1")) {
@@ -120,8 +124,11 @@ class GuestVfsClient(
         }
     }
 
-    override fun connect(url: String, token: String): CompletableFuture<Unit> {
-        validateUrl(url)
+    override fun connect(url: String, token: String): CompletableFuture<Unit> = connect(url, token, null)
+
+    /** Connects; with [fingerprint] the host's self-signed certificate must match it exactly. */
+    fun connect(url: String, token: String, fingerprint: String?): CompletableFuture<Unit> {
+        validateUrl(url, fingerprint)
         require(token.isNotBlank()) { "Guest session token is required" }
         socket?.close(1000, "reconnecting")
         failPending(IOException("Guest connection replaced"))
@@ -131,7 +138,7 @@ class GuestVfsClient(
             .url(url)
             .header("Origin", NATIVE_APP_ORIGIN)
             .build()
-        socket = http.newWebSocket(
+        socket = clientFor(fingerprint).newWebSocket(
             request,
             object : WebSocketListener() {
                 override fun onOpen(webSocket: WebSocket, response: Response) {

@@ -14,7 +14,14 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-data class ConnectionProfile(val id: String, val name: String, val endpoint: String, val hasToken: Boolean)
+/** [fingerprint] pins a remote host's self-signed TLS certificate (SHA-256 of its DER, hex). */
+data class ConnectionProfile(
+    val id: String,
+    val name: String,
+    val endpoint: String,
+    val hasToken: Boolean,
+    val fingerprint: String? = null,
+)
 
 interface SecretCipher {
     fun encrypt(plain: String): String
@@ -39,6 +46,7 @@ class ConnectionProfileStore(
             entry.get("name").asString,
             entry.get("endpoint").asString,
             entry.has("token"),
+            entry.get("fingerprint")?.takeIf { it.isJsonPrimitive }?.asString,
         )
     }
 
@@ -49,8 +57,11 @@ class ConnectionProfileStore(
         ?.get("token")?.asString
         ?.let(cipher::decrypt)
 
-    /** Creates or updates a profile; a blank token keeps the previously saved token. */
-    fun save(id: String?, name: String, endpoint: String, token: String): ConnectionProfile {
+    /**
+     * Creates or updates a profile; a blank token keeps the previously saved token. A null
+     * [fingerprint] keeps the saved pin unless the endpoint changed.
+     */
+    fun save(id: String?, name: String, endpoint: String, token: String, fingerprint: String? = null): ConnectionProfile {
         val entries = readEntries()
         val profileId = id?.takeIf { existing -> entries.any { it.get("id").asString == existing } }
             ?: UUID.randomUUID().toString()
@@ -63,6 +74,8 @@ class ConnectionProfileStore(
                 token.isNotEmpty() -> addProperty("token", cipher.encrypt(token))
                 previous?.has("token") == true -> add("token", previous.get("token"))
             }
+            val pin = fingerprint ?: previous?.takeIf { it.get("endpoint")?.asString == endpoint.trim() }?.get("fingerprint")?.asString
+            pin?.let { addProperty("fingerprint", it) }
         }
         val updated = JsonArray().apply {
             var replaced = false
