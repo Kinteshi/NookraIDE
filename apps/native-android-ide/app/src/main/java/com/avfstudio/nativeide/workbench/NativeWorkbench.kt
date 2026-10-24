@@ -257,6 +257,9 @@ private fun WorkbenchRail(controller: WorkbenchController) {
         RailItem(Icons.Outlined.Folder, "Explorer", controller.sidebar == SidebarView.Explorer) {
             controller.runCommand("workbench.view.explorer")
         }
+        RailItem(Icons.Outlined.Search, "Search", controller.sidebar == SidebarView.Search) {
+            controller.runCommand("workbench.view.search")
+        }
         RailItem(Icons.Outlined.AccountTree, "Outline", controller.sidebar == SidebarView.Outline) {
             controller.runCommand("workbench.action.gotoSymbol")
         }

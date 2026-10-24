@@ -76,6 +76,16 @@ pub struct DownloadSpec {
 pub struct DownloadArtifact {
     pub url: String,
     pub sha256: String,
+    /// Overrides the spec's `archive_member` when archives differ per architecture
+    /// (e.g. ripgrep's `ripgrep-<version>-<target>/rg`).
+    #[serde(default)]
+    pub archive_member: Option<String>,
+}
+
+impl DownloadSpec {
+    fn member_for<'a>(&'a self, artifact: &'a DownloadArtifact) -> &'a str {
+        artifact.archive_member.as_deref().unwrap_or(&self.archive_member)
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -295,21 +305,27 @@ fn validate_download_spec(name: &str, download: &DownloadSpec) -> Result<(), Str
             "Tool '{name}' download must install a bare executable name."
         ));
     }
-    let member = Path::new(&download.archive_member);
-    let member_is_safe = !download.archive_member.is_empty()
-        && !download.archive_member.contains('\0')
-        && member.is_relative()
-        && member
-            .components()
-            .all(|component| matches!(component, std::path::Component::Normal(_)))
-        && member
-            .file_name()
-            .is_some_and(|file| file == download.binary.as_str());
-    if !member_is_safe {
-        return Err(format!(
-            "Tool '{name}' download archive member must be a relative path to '{}'.",
-            download.binary
-        ));
+    let member_is_safe = |member_path: &str| {
+        let member = Path::new(member_path);
+        !member_path.is_empty()
+            && !member_path.contains('\0')
+            && member.is_relative()
+            && member
+                .components()
+                .all(|component| matches!(component, std::path::Component::Normal(_)))
+            && member
+                .file_name()
+                .is_some_and(|file| file == download.binary.as_str())
+    };
+    let members = std::iter::once(download.archive_member.as_str())
+        .chain(download.artifacts.values().filter_map(|artifact| artifact.archive_member.as_deref()));
+    for member in members {
+        if !member_is_safe(member) {
+            return Err(format!(
+                "Tool '{name}' download archive member must be a relative path to '{}'.",
+                download.binary
+            ));
+        }
     }
     if download.artifacts.is_empty() {
         return Err(format!("Tool '{name}' download declares no artifacts."));
@@ -662,14 +678,14 @@ fn install_downloaded_archive(
         .arg("--directory")
         .arg(&extract_dir)
         .arg("--")
-        .arg(&download.archive_member)
+        .arg(download.member_for(artifact))
         .stdin(Stdio::null())
         .status()
         .map_err(|error| format!("Could not start tar to unpack '{name}': {error}."))?;
     if !status.success() {
         return Err(format!("Unpacking '{name}' failed with {status}."));
     }
-    let extracted = extract_dir.join(&download.archive_member);
+    let extracted = extract_dir.join(download.member_for(artifact));
     let metadata = fs::symlink_metadata(&extracted)
         .map_err(|error| format!("The archive for '{name}' has no executable: {error}"))?;
     if !metadata.is_file() {
@@ -1055,6 +1071,7 @@ mod tests {
                 DownloadArtifact {
                     url: "https://example.invalid/sample.tgz".into(),
                     sha256: sha256.into(),
+                    archive_member: None,
                 },
             )]
             .into(),
@@ -1077,6 +1094,12 @@ mod tests {
         let mut wrong_file = valid.clone();
         wrong_file.archive_member = "package/other".into();
         assert!(validate_download_spec("sample", &wrong_file).is_err());
+
+        let mut per_arch = valid.clone();
+        per_arch.artifacts.get_mut("aarch64").unwrap().archive_member = Some("sample-aarch64/sample-tool".into());
+        assert!(validate_download_spec("sample", &per_arch).is_ok());
+        per_arch.artifacts.get_mut("aarch64").unwrap().archive_member = Some("../sample-tool".into());
+        assert!(validate_download_spec("sample", &per_arch).is_err());
 
         let mut path_binary = valid.clone();
         path_binary.binary = "bin/sample".into();

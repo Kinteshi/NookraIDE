@@ -79,6 +79,7 @@ object EditorCommands {
         command("workbench.action.toggleSidebarVisibility", "Toggle Primary Side Bar", "Ctrl+B"),
         command("workbench.action.togglePanel", "Toggle Panel", "Ctrl+J"),
         command("workbench.view.explorer", "Show Explorer", "Ctrl+Shift+E"),
+        command("workbench.view.search", "Search: Find in Files", "Ctrl+Shift+F"),
         command("workbench.actions.view.problems", "Show Problems", "Ctrl+Shift+M"),
         command("workbench.action.gotoSymbol", "Show Outline", "Ctrl+Shift+O"),
         command("workbench.action.output.toggleOutput", "Toggle Output", "Ctrl+Shift+U"),

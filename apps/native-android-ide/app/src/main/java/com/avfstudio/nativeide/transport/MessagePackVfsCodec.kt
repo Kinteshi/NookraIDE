@@ -20,6 +20,36 @@ internal object MessagePackVfsCodec {
         stringField("client_name", "avf-native-android-ide")
     }
 
+    fun searchStart(requestId: Long, search: SearchQuery): ByteArray = packet("Search", "StartReq") {
+        packMapHeader(10)
+        stringField("req_id", requestId)
+        packString("roots")
+        packStrings(search.roots)
+        stringField("query", search.query)
+        packString("regex")
+        packBoolean(search.regex)
+        packString("case_sensitive")
+        packBoolean(search.caseSensitive)
+        packString("whole_word")
+        packBoolean(search.wholeWord)
+        packString("include")
+        packStrings(search.include)
+        packString("exclude")
+        packStrings(search.exclude)
+        stringField("max_results", search.maxResults)
+        stringField("context_lines", search.contextLines)
+    }
+
+    fun searchCancel(requestId: Long): ByteArray = packet("Search", "Cancel") {
+        packMapHeader(1)
+        stringField("req_id", requestId)
+    }
+
+    private fun org.msgpack.core.MessagePacker.packStrings(values: List<String>) {
+        packArrayHeader(values.size)
+        values.forEach(::packString)
+    }
+
     fun request(kind: String, requestId: Long, fields: Map<String, Any?> = emptyMap()): ByteArray =
         packet("Vfs", kind) {
             packMapHeader(fields.size + 1)
@@ -108,6 +138,41 @@ internal object MessagePackVfsCodec {
 
     fun decode(bytes: ByteArray): IncomingPacket {
         val packet = MessagePack.newDefaultUnpacker(bytes).use { it.unpackValue() }
+        packet.mapStringValue("Search")?.let { group ->
+            val variant = group.singleEntry()
+            val fields = variant.value.asMapValue().map().mapKeys { it.key.asString() }
+            val requestId = fields["req_id"]?.asLong() ?: -1L
+            return when (variant.key.asString()) {
+                "Match" -> {
+                    // The daemon reports byte offsets into the UTF-8 line; convert them to chars.
+                    val preview = fields.getValue("preview").asString()
+                    val bytes = preview.toByteArray(Charsets.UTF_8)
+                    val startByte = fields.getValue("col").asLong().toInt().coerceIn(0, bytes.size)
+                    val endByte = (startByte + fields.getValue("len").asLong().toInt()).coerceIn(startByte, bytes.size)
+                    val column = String(bytes, 0, startByte, Charsets.UTF_8).length
+                    IncomingPacket.Search(
+                        SearchEvent.Match(
+                            requestId = requestId,
+                            path = fields.getValue("path").asString(),
+                            line = fields.getValue("line").asLong().toInt(),
+                            column = column,
+                            length = String(bytes, startByte, endByte - startByte, Charsets.UTF_8).length,
+                            preview = preview,
+                        ),
+                    )
+                }
+                "Done" -> IncomingPacket.Search(
+                    SearchEvent.Done(
+                        requestId,
+                        fields.getValue("total").asLong().toInt(),
+                        fields.getValue("truncated").asBoolean(),
+                        fields.getValue("elapsed_ms").asLong().toInt(),
+                    ),
+                )
+                "Error" -> IncomingPacket.Search(SearchEvent.Error(requestId, fields.getValue("message").asString()))
+                else -> IncomingPacket.Ignored
+            }
+        }
         val group = packet.mapStringValue("Vfs")
         if (group != null) {
             val variant = group.singleEntry()
@@ -304,6 +369,7 @@ sealed interface IncomingPacket {
     data class Welcome(val protocolVersion: Int, val ptySessions: List<PtySessionInfo> = emptyList()) : IncomingPacket
     data class Rejected(val reason: String, val attemptsLeft: Int? = null) : IncomingPacket
     data class Paired(val token: String) : IncomingPacket
+    data class Search(val event: SearchEvent) : IncomingPacket
     data class ReadFile(
         val requestId: Long,
         val content: ByteArray,

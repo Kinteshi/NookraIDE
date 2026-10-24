@@ -52,6 +52,7 @@ class GuestVfsClient(
     private val pendingRpcStarts = ConcurrentHashMap<UUID, CompletableFuture<RpcEvent.Started>>()
     private val rpcEventListeners = ConcurrentHashMap<UUID, (RpcEvent) -> Unit>()
     private val ptyListeners = ConcurrentHashMap<UUID, (PtyEvent) -> Unit>()
+    private val searchListeners = ConcurrentHashMap<Long, (SearchEvent) -> Unit>()
     /** Terminal sessions the guest still runs, from the latest handshake; reattach to keep them. */
     @Volatile var guestPtySessions: List<PtySessionInfo> = emptyList()
         private set
@@ -169,6 +170,7 @@ class GuestVfsClient(
                         is IncomingPacket.Error ->
                             completeExceptionally(packet.requestId, GuestVfsException(packet.code, packet.message))
                         is IncomingPacket.Rpc -> handleRpcEvent(packet.event)
+                        is IncomingPacket.Search -> searchListeners[packet.event.requestId]?.invoke(packet.event)
                         is IncomingPacket.Pty -> ptyListeners[packet.event.sessionId]?.invoke(packet.event)
                         is IncomingPacket.Unexpected ->
                             handshake.completeExceptionally(IOException(packet.message))
@@ -329,6 +331,28 @@ class GuestVfsClient(
 
     fun ptyKill(sessionId: UUID): Boolean = sendFrame(MessagePackVfsCodec.ptyCommand(sessionId, "Kill"))
 
+    /**
+     * Starts a ripgrep search in the guest; [listener] gets matches as they stream, then Done or
+     * Error (after which it is removed). Returns the request id for [cancelSearch], or null offline.
+     */
+    fun search(query: SearchQuery, listener: (SearchEvent) -> Unit): Long? {
+        val requestId = requestIds.incrementAndGet()
+        searchListeners[requestId] = { event ->
+            if (event !is SearchEvent.Match) searchListeners.remove(requestId)
+            listener(event)
+        }
+        if (!sendFrame(MessagePackVfsCodec.searchStart(requestId, query))) {
+            searchListeners.remove(requestId)
+            return null
+        }
+        return requestId
+    }
+
+    fun cancelSearch(requestId: Long) {
+        searchListeners.remove(requestId)
+        sendFrame(MessagePackVfsCodec.searchCancel(requestId))
+    }
+
     private fun sendFrame(frame: ByteArray): Boolean = connectedSocket()?.send(ByteString.of(*frame)) == true
 
     override fun isConnected(): Boolean = connected.isDone && !connected.isCompletedExceptionally && socket != null
@@ -388,6 +412,10 @@ class GuestVfsClient(
         pending.clear()
         pendingRpcStarts.values.forEach { it.completeExceptionally(error) }
         pendingRpcStarts.clear()
+        searchListeners.entries.toList().forEach { (requestId, listener) ->
+            listener(SearchEvent.Error(requestId, error.message ?: "Guest connection lost"))
+        }
+        searchListeners.clear()
     }
 
     override fun close() {

@@ -1,6 +1,7 @@
 package com.avfstudio.nativeide.workbench
 
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.avfstudio.nativeide.ai.AcpPermissionOption
@@ -14,6 +15,7 @@ import java.util.UUID
 
 enum class SidebarView(val title: String) {
     Explorer("Explorer"),
+    Search("Search"),
     Outline("Outline"),
     Problems("Problems"),
     References("References"),
@@ -109,4 +111,10 @@ class NotebookSession(
     var focusRequest by mutableStateOf(0)
     /** Where the cursor lands in the next focused cell: true = end (arrived from below), false = start. */
     var caretAtEnd: Boolean? = null
+}
+
+/** One file's matches in the Search view. */
+class SearchFileResult(val path: String) {
+    val matches = mutableStateListOf<com.avfstudio.nativeide.transport.SearchEvent.Match>()
+    var expanded by mutableStateOf(true)
 }

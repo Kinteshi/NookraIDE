@@ -146,6 +146,34 @@
       "settingsSection": "python",
       "env_allowlist": [],
       "initializationOptions": {}
+    },
+    {
+      "name": "ripgrep",
+      "version": "15.2.0",
+      "kind": "cli",
+      "languages": ["*"],
+      "command": ["rg"],
+      "install": {
+        "download": {
+          "binary": "rg",
+          "archive_member": "rg",
+          "artifacts": {
+            "aarch64": {
+              "url": "https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-aarch64-unknown-linux-gnu.tar.gz",
+              "sha256": "a740b91c82eaf9914cfedd353572f2791cbe0162c84101ee0951058f4dcbc90d",
+              "archive_member": "ripgrep-15.2.0-aarch64-unknown-linux-gnu/rg"
+            },
+            "x86_64": {
+              "url": "https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-x86_64-unknown-linux-musl.tar.gz",
+              "sha256": "33e15bcf1624b25cdd2a55813a47a2f95dbe126268203e76aa6a585d1e7b149c",
+              "archive_member": "ripgrep-15.2.0-x86_64-unknown-linux-musl/rg"
+            }
+          }
+        }
+      },
+      "settingsSection": "search",
+      "env_allowlist": [],
+      "initializationOptions": {}
     }
   ]
 }

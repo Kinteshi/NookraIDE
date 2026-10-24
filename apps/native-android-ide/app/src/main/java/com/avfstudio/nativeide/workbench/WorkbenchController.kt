@@ -60,6 +60,8 @@ import com.avfstudio.nativeide.transport.GuestVfsException
 import com.avfstudio.nativeide.transport.GuestRejectedException
 import com.avfstudio.nativeide.transport.KeystoreSecretCipher
 import com.avfstudio.nativeide.transport.PtyEvent
+import com.avfstudio.nativeide.transport.SearchQuery
+import com.avfstudio.nativeide.transport.SearchEvent
 import com.avfstudio.nativeide.transport.SharedPreferencesKeyValueStore
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
@@ -535,6 +537,128 @@ class WorkbenchController(private val context: Context) {
                 documents.filter { it.dirty && !it.path.startsWith("scratch:") }.forEach(::reconcileDocument)
             }
         }
+    }
+
+    // Search ------------------------------------------------------------------------------------
+
+    var searchText by mutableStateOf("")
+    var searchRegex by mutableStateOf(false)
+    var searchCaseSensitive by mutableStateOf(false)
+    var searchWholeWord by mutableStateOf(false)
+    var searchInclude by mutableStateOf("")
+    var searchExclude by mutableStateOf("")
+    val searchResults = mutableStateListOf<SearchFileResult>()
+    var searchSummary by mutableStateOf<String?>(null)
+        private set
+    var searchRunning by mutableStateOf(false)
+        private set
+    /** Bumped to put the keyboard in the search field (Ctrl+Shift+F). */
+    var searchFocusRequest by mutableStateOf(0)
+        private set
+    private var activeSearch: Long? = null
+    private var scheduledSearch: ScheduledFuture<*>? = null
+
+    /** Ctrl+Shift+F: show Search, seeded with the editor selection as VS Code does. */
+    fun showSearch() {
+        editorView?.takeIf { focusArea == FocusArea.Editor }?.let { view ->
+            val range = view.cursorRange
+            if (range.startIndex != range.endIndex && range.start.line == range.end.line) {
+                searchText = view.text.toString().substring(range.startIndex, range.endIndex)
+                scheduleSearch(0)
+            }
+        }
+        sidebar = SidebarView.Search
+        compactDestination = CompactDestination.Files
+        searchFocusRequest++
+    }
+
+    /** Re-runs the search shortly after typing stops; each run cancels the previous one. */
+    fun scheduleSearch(delayMs: Long = 350) {
+        scheduledSearch?.cancel(false)
+        scheduledSearch = timer.schedule({ post { runSearch() } }, delayMs, TimeUnit.MILLISECONDS)
+    }
+
+    fun runSearch() {
+        scheduledSearch?.cancel(false)
+        activeSearch?.let(vfs::cancelSearch)
+        activeSearch = null
+        searchResults.clear()
+        val text = searchText
+        if (text.isEmpty()) {
+            searchRunning = false
+            searchSummary = null
+            return
+        }
+        val root = workspaceRoot
+        if (root == null || !vfs.isConnected()) {
+            searchRunning = false
+            searchSummary = "Connect to a guest to search"
+            return
+        }
+        fun globs(value: String) = value.split(',').map(String::trim).filter(String::isNotEmpty)
+        val query = SearchQuery(
+            query = text,
+            roots = listOf(root),
+            regex = searchRegex,
+            caseSensitive = searchCaseSensitive,
+            wholeWord = searchWholeWord,
+            include = globs(searchInclude),
+            exclude = globs(searchExclude),
+        )
+        val files = HashMap<String, SearchFileResult>()
+        searchRunning = true
+        searchSummary = "Searching…"
+        var requestId: Long? = null
+        requestId = vfs.search(query) { event ->
+            post {
+                if (activeSearch != requestId) return@post
+                when (event) {
+                    is SearchEvent.Match -> files.getOrPut(event.path) {
+                        SearchFileResult(event.path).also(searchResults::add)
+                    }.matches.add(event)
+                    is SearchEvent.Done -> {
+                        searchRunning = false
+                        activeSearch = null
+                        searchSummary = when {
+                            event.total == 0 -> "No results"
+                            else -> "${event.total} result${if (event.total == 1) "" else "s"} in ${searchResults.size} " +
+                                "file${if (searchResults.size == 1) "" else "s"}" +
+                                if (event.truncated) " (stopped at ${query.maxResults}; refine the search)" else ""
+                        }
+                    }
+                    is SearchEvent.Error -> {
+                        searchRunning = false
+                        activeSearch = null
+                        searchSummary = if ("Could not start ripgrep" in event.message) {
+                            "ripgrep is missing in the guest; install it with `avf-native-daemon tools install ripgrep`"
+                        } else {
+                            event.message
+                        }
+                    }
+                }
+            }
+        }
+        activeSearch = requestId
+        if (requestId == null) {
+            searchRunning = false
+            searchSummary = "Connect to a guest to search"
+        }
+    }
+
+    fun openSearchMatch(match: SearchEvent.Match) {
+        val position = JsonObject().apply {
+            addProperty("line", match.line - 1)
+            addProperty("character", match.column)
+        }
+        val end = JsonObject().apply {
+            addProperty("line", match.line - 1)
+            addProperty("character", match.column + match.length)
+        }
+        val range = JsonObject().apply {
+            add("start", position)
+            add("end", end)
+        }
+        navigateToLocation(LanguageLocation(java.net.URI("file", "", match.path, null).toASCIIString(), range))
     }
 
     // Guest setup, pairing and reset detection ----------------------------------------------
@@ -2700,6 +2824,7 @@ class WorkbenchController(private val context: Context) {
             "workbench.action.files.save" -> saveActiveDocument()
             "workbench.action.files.newUntitledFile" -> newUntitledFile()
             "workbench.action.files.saveAs" -> beginSaveAs()
+            "workbench.view.search" -> if (sidebar == SidebarView.Search && focusArea == FocusArea.Other) sidebar = null else showSearch()
             "explorer.newFile" -> beginNewEntry(folder = false)
             "explorer.newFolder" -> beginNewEntry(folder = true)
             "renameFile" -> beginRenameEntry()

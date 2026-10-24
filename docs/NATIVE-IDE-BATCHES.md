@@ -12,9 +12,9 @@ Status values: **done** (committed), **in progress**, **planned**.
 | 1 | Workbench rewrite: Material You, terminal, Jupyter, Copilot | done | `1f6c146` |
 | 2 | Keyboard routing, file operations, notebook keys, comments | done | `e35af13` |
 | 3 | Notebook arrow navigation; Copilot chat references | done (tablet check pending) | `c3903da` |
-| 4 | Setup from the app, pairing code, reset detection, resume session | done (tablet check pending) | see `git log` |
-| 5 | Search across files | in progress | |
-| 6 | Git | planned | |
+| 4 | Setup from the app, pairing code, reset detection, resume session | done (tablet check pending) | `a01e688` |
+| 5 | Search across files | done (tablet check pending) | see `git log` |
+| 6 | Git | in progress | |
 | 7 | Debugging (DAP with debugpy) | planned | |
 | 8 | Daemon hosted on Windows and Linux machines, with a connection guide | planned | |
 
@@ -75,12 +75,18 @@ ty + ruff language servers. Details: handoff, sections "Done" and "Verified on t
 * Still to check on the tablet: the full flow on a reset guest (or with `avf-native-daemon pair`
   on the current one), the banner when Linux Terminal is closed, and restart → reconnect → tabs.
 
-## 5. Search (in progress)
+## 5. Search (done; tablet check pending)
 The daemon already implements `SearchMessage` (`search.rs`). Build the app codec, a Search side
 view (query, regex/case/word, include/exclude globs), streamed results grouped by file, opening
 at the match, and Ctrl+Shift+F.
+* Implemented: ripgrep 15.2.0 joins the tool catalog (pinned per-arch downloads; catalog
+  artifacts may now override `archive_member`) and the installer. App: `SearchQuery`/`SearchEvent`,
+  codec (UTF-8 byte columns converted to chars), `GuestVfsClient.search`/`cancelSearch`, the
+  Search view (debounced as you type, toggles, globs, grouped results, highlight) and rail entry.
+* On the current tablet guest run `avf-native-daemon tools install ripgrep` (the daemon there
+  predates the catalog entry, so reinstall the daemon first via "Set up or pair…").
 
-## 6. Git (planned)
+## 6. Git (in progress)
 The daemon already implements `GitMessage`/`GitOp` (`git.rs`). Build a Source Control view: status
 with stage/unstage/discard, commit message and commit, branch picker and checkout, pull/push/fetch
 with credential prompts (askpass), a diff view, and gutter change markers. Ctrl+Shift+G.
