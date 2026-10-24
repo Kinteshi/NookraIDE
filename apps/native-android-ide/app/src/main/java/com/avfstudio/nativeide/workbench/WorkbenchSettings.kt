@@ -35,6 +35,7 @@ data class WorkbenchSettings(
     val chatIdleMinutes: Int = 5,
     val jupyterDefaultKernel: String = "",
     val autoConnect: Boolean = true,
+    val pythonInterpreter: String = "",
     val restoreSession: Boolean = true,
 ) {
     companion object {
@@ -57,6 +58,7 @@ data class WorkbenchSettings(
         const val CHAT_IDLE_MINUTES = "avf.copilot.chatIdleMinutes"
         const val JUPYTER_DEFAULT_KERNEL = "avf.jupyter.defaultKernel"
         const val AUTO_CONNECT = "avf.connection.autoConnect"
+        const val PYTHON_INTERPRETER = "python.defaultInterpreterPath"
         const val RESTORE_SESSION = "avf.session.restore"
 
         fun from(settings: JsonObject): WorkbenchSettings {
@@ -90,6 +92,7 @@ data class WorkbenchSettings(
                 chatIdleMinutes = number(CHAT_IDLE_MINUTES)?.toInt()?.coerceIn(1, 120) ?: defaults.chatIdleMinutes,
                 jupyterDefaultKernel = string(JUPYTER_DEFAULT_KERNEL) ?: defaults.jupyterDefaultKernel,
                 autoConnect = bool(AUTO_CONNECT, defaults.autoConnect),
+                pythonInterpreter = string(PYTHON_INTERPRETER)?.trim() ?: defaults.pythonInterpreter,
                 restoreSession = bool(RESTORE_SESSION, defaults.restoreSession),
             )
         }

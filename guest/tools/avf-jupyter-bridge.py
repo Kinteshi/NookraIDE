@@ -154,10 +154,13 @@ class Bridge:
         result = []
         for name, entry in sorted(self.specs.get_all_specs().items()):
             spec = entry.get("spec", {})
+            argv = spec.get("argv") or []
             result.append({
                 "name": name,
                 "display_name": spec.get("display_name", name),
                 "language": spec.get("language", ""),
+                # The interpreter, so the app can offer the same environments for debugging.
+                "python": argv[0] if argv and "python" in os.path.basename(argv[0]) else None,
             })
         return {"kernelspecs": result, "installable": missing}
 

@@ -9,10 +9,13 @@ use std::{
 
 const CATALOG_JSON: &str = include_str!("../../../guest/tools/catalog.json");
 /// Scripts the daemon ships itself, installed by the `script` method.
-const BUNDLED_SCRIPTS: &[(&str, &str)] = &[(
-    "avf-jupyter-bridge.py",
-    include_str!("../../../guest/tools/avf-jupyter-bridge.py"),
-)];
+const BUNDLED_SCRIPTS: &[(&str, &str)] = &[
+    (
+        "avf-jupyter-bridge.py",
+        include_str!("../../../guest/tools/avf-jupyter-bridge.py"),
+    ),
+    ("avf-debugpy.py", include_str!("../../../guest/tools/avf-debugpy.py")),
+];
 const UV_INSTALL_GUIDANCE: &str =
     "Install uv (https://docs.astral.sh/uv/getting-started/installation/) and rerun `avf-daemon tools install";
 static TEMP_FILE_SEQUENCE: AtomicU64 = AtomicU64::new(0);

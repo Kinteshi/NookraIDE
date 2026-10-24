@@ -71,7 +71,7 @@ if ! command -v uv >/dev/null; then
   tar -xzf "$archive" -C "$HOME/.local/bin" --strip-components=1 "uv-$arch-unknown-linux-gnu/uv" "uv-$arch-unknown-linux-gnu/uvx"
   rm -f "$archive"
 fi
-for tool in ty ruff ripgrep jupyter copilot-language-server copilot; do
+for tool in ty ruff ripgrep jupyter debugpy copilot-language-server copilot; do
   avf-native-daemon tools install "$tool" || echo "warning: could not install $tool" >&2
 done
 avf-native-daemon tools list

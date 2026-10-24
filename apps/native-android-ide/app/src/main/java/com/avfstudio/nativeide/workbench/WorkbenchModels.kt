@@ -24,6 +24,7 @@ enum class SidebarView(val title: String) {
 
 enum class PanelTab(val title: String) {
     Terminal("Terminal"),
+    Debug("Debug"),
     Problems("Problems"),
     Output("Output"),
 }
@@ -69,6 +70,8 @@ sealed interface WorkbenchDialog {
     data class GitBranches(val branches: List<com.avfstudio.nativeide.transport.GitBranch>) : WorkbenchDialog
     data class GitConfirmDiscard(val paths: List<String>, val untracked: Int) : WorkbenchDialog
     data object GitClone : WorkbenchDialog
+    /** Python environments found in the guest; [then] runs after one is chosen (e.g. start debugging). */
+    data class InterpreterPicker(val options: List<Pair<String, String>>, val then: (() -> Unit)?) : WorkbenchDialog
     /** Set up (or re-pair) the Linux guest; [reason] says why it opened, e.g. a rejected token. */
     data class GuestSetup(val reason: String? = null) : WorkbenchDialog
     data class CopilotSignInCode(val signIn: CopilotSignIn) : WorkbenchDialog

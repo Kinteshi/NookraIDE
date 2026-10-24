@@ -30,6 +30,18 @@ import com.avfstudio.nativeide.assets.AssetPackInstaller
 import com.avfstudio.nativeide.assets.ImportedTheme
 import com.avfstudio.nativeide.assets.InstalledAssetPack
 import com.avfstudio.nativeide.assets.VsCodeThemeImporter
+import com.avfstudio.nativeide.debug.DapClient
+import com.avfstudio.nativeide.debug.DebugConsoleLine
+import com.avfstudio.nativeide.debug.DebugFrame
+import com.avfstudio.nativeide.debug.DebugState
+import com.avfstudio.nativeide.debug.DebugVariable
+import com.avfstudio.nativeide.debug.dapInitializeArguments
+import com.avfstudio.nativeide.debug.parseScopes
+import com.avfstudio.nativeide.debug.parseStackFrames
+import com.avfstudio.nativeide.debug.parseVariables
+import com.avfstudio.nativeide.debug.pythonLaunchArguments
+import com.avfstudio.nativeide.debug.setBreakpointsArguments
+import androidx.compose.runtime.mutableStateMapOf
 import com.avfstudio.nativeide.document.DocumentRepository
 import com.avfstudio.nativeide.document.DocumentSession
 import com.avfstudio.nativeide.document.EncryptedDocumentCache
@@ -71,6 +83,9 @@ import com.avfstudio.nativeide.transport.SharedPreferencesKeyValueStore
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
+import io.github.rosemoe.sora.lang.styling.line.LineSideIcon
+import io.github.rosemoe.sora.lang.styling.line.LineBackground
+import io.github.rosemoe.sora.lang.styling.color.ConstColor
 import io.github.rosemoe.sora.widget.CodeEditor
 import org.connectbot.terminal.TerminalEmulatorFactory
 import java.io.File
@@ -664,6 +679,298 @@ class WorkbenchController(private val context: Context) {
             add("end", end)
         }
         navigateToLocation(LanguageLocation(java.net.URI("file", "", match.path, null).toASCIIString(), range))
+    }
+
+    // Debugging ---------------------------------------------------------------------------------
+
+    private val debugger = DapClient(vfs)
+    /** 1-based breakpoint lines per guest file, kept across launches. */
+    val breakpoints = mutableStateMapOf<String, Set<Int>>().apply {
+        runCatching {
+            val saved = com.google.gson.JsonParser.parseString(preferences.getString("breakpoints", "{}")).asJsonObject
+            saved.entrySet().forEach { (path, lines) -> put(path, lines.asJsonArray.map { it.asInt }.toSet()) }
+        }
+    }
+    var debugState by mutableStateOf<DebugState>(DebugState.Idle)
+        private set
+    val debugFrames = mutableStateListOf<DebugFrame>()
+    var selectedFrameId by mutableStateOf<Int?>(null)
+        private set
+    val debugVariables = mutableStateListOf<DebugVariable>()
+    val debugConsole = mutableStateListOf<DebugConsoleLine>()
+    /** Where execution is paused (path, 1-based line), drawn in the editor. */
+    var executionPoint by mutableStateOf<Pair<String, Int>?>(null)
+        private set
+
+    fun toggleBreakpoint(path: String? = activePath, line: Int? = editorView?.cursor?.leftLine?.plus(1)) {
+        if (path == null || line == null || path.startsWith("scratch:")) return
+        val lines = breakpoints[path].orEmpty()
+        val updated = if (line in lines) lines - line else lines + line
+        if (updated.isEmpty()) breakpoints.remove(path) else breakpoints[path] = updated
+        preferences.edit().putString(
+            "breakpoints",
+            com.google.gson.Gson().toJson(breakpoints.mapValues { it.value.sorted() }),
+        ).apply()
+        if (debugger.isStarted) debugger.request("setBreakpoints", setBreakpointsArguments(path, updated))
+    }
+
+    /** F5: continue when paused, otherwise launch the active Python file under debugpy. */
+    fun startOrContinueDebugging() {
+        when (val state = debugState) {
+            is DebugState.Stopped -> {
+                debugger.request("continue", JsonObject().apply { addProperty("threadId", state.threadId) })
+                return
+            }
+            DebugState.Running, DebugState.Starting -> return
+            DebugState.Idle -> Unit
+        }
+        val document = activeDocument
+        val workspace = workspaceRoot
+        if (document == null || workspace == null || !vfs.isConnected()) {
+            status = "Connect to a guest and open a Python file to debug"
+            return
+        }
+        if (document.path.startsWith("scratch:") || document.languageId != "py") {
+            status = "Debugging runs saved Python files; open a .py file in the workspace"
+            return
+        }
+        val python = settings.pythonInterpreter.ifEmpty {
+            chooseInterpreter(then = ::startOrContinueDebugging)
+            return
+        }
+        if (document.dirty) saveActiveDocument()
+        val program = document.path
+        val cwd = program.substringBeforeLast('/')
+        debugState = DebugState.Starting
+        debugConsole.clear()
+        debugConsole.add(DebugConsoleLine("Launching ${program.substringAfterLast('/')} with $python", DebugConsoleLine.Kind.Info))
+        panelVisible = true
+        panelTab = PanelTab.Debug
+        debugger.eventListener = { event, body -> post { onDebugEvent(event, body) } }
+        debugger.exitListener = { message -> post { if (debugState != DebugState.Idle) endDebugSession(message) } }
+        debugger.start(cwd)
+            .thenCompose { debugger.request("initialize", dapInitializeArguments()) }
+            .thenCompose {
+                // debugpy answers `launch` only after configurationDone, which `initialized` triggers.
+                debugger.request("launch", pythonLaunchArguments(program, cwd, python), timeoutSeconds = null)
+            }
+            .whenComplete { _, error ->
+                post {
+                    if (error != null && debugState != DebugState.Idle) {
+                        endDebugSession("Launch failed: ${generateSequence(error) { it.cause }.last().message}")
+                    } else if (debugState == DebugState.Starting) {
+                        debugState = DebugState.Running
+                    }
+                }
+            }
+    }
+
+    private fun onDebugEvent(event: String, body: JsonObject) {
+        when (event) {
+            "initialized" -> {
+                val files = breakpoints.toMap()
+                CompletableFuture.allOf(*files.map { (path, lines) -> debugger.request("setBreakpoints", setBreakpointsArguments(path, lines)) }.toTypedArray())
+                    .thenCompose {
+                        debugger.request("setExceptionBreakpoints", JsonObject().apply {
+                            add("filters", com.google.gson.JsonArray().apply { add("uncaught") })
+                        })
+                    }
+                    .thenCompose { debugger.request("configurationDone") }
+                    .whenComplete { _, error -> if (error != null) post { endDebugSession("Debugger setup failed: ${error.message}") } }
+            }
+            "stopped" -> {
+                val threadId = body.get("threadId")?.asInt ?: return
+                debugState = DebugState.Stopped(threadId, body.get("reason")?.asString ?: "pause", body.get("description")?.asString)
+                loadStack(threadId)
+            }
+            "continued" -> clearPausedState(DebugState.Running)
+            "output" -> {
+                val category = body.get("category")?.asString ?: "console"
+                if (category == "telemetry") return
+                val text = body.get("output")?.asString?.trimEnd('\n') ?: return
+                debugConsole.add(DebugConsoleLine(text, if (category == "stderr") DebugConsoleLine.Kind.Error else DebugConsoleLine.Kind.Output))
+                if (debugConsole.size > 2_000) debugConsole.removeRange(0, debugConsole.size - 2_000)
+            }
+            "exited" -> debugConsole.add(DebugConsoleLine("Process exited with code ${body.get("exitCode")?.asInt ?: "?"}", DebugConsoleLine.Kind.Info))
+            "terminated" -> endDebugSession(null)
+        }
+    }
+
+    private fun loadStack(threadId: Int) {
+        debugger.request("stackTrace", JsonObject().apply {
+            addProperty("threadId", threadId)
+            addProperty("startFrame", 0)
+            addProperty("levels", 50)
+        }).whenComplete { body, error ->
+            post {
+                if (error != null) {
+                    status = "Debugger: ${error.message}"
+                    return@post
+                }
+                debugFrames.clear()
+                debugFrames.addAll(parseStackFrames(body))
+                debugFrames.firstOrNull { it.path != null }?.let(::selectFrame)
+            }
+        }
+    }
+
+    fun selectFrame(frame: DebugFrame) {
+        selectedFrameId = frame.id
+        frame.path?.let { path ->
+            executionPoint = path to frame.line
+            navigateToLocation(LanguageLocation(java.net.URI("file", "", path, null).toASCIIString(), lspRange(frame.line - 1, (frame.column - 1).coerceAtLeast(0))))
+        }
+        debugger.request("scopes", JsonObject().apply { addProperty("frameId", frame.id) }).whenComplete { body, error ->
+            post {
+                debugVariables.clear()
+                if (error != null) return@post
+                val scopes = parseScopes(body)
+                debugVariables.addAll(scopes)
+                // Locals open by default, as in VS Code.
+                scopes.firstOrNull()?.let(::toggleVariable)
+            }
+        }
+    }
+
+    /** Expands or collapses a scope or variable, loading its children the first time. */
+    fun toggleVariable(variable: DebugVariable) {
+        if (variable.reference <= 0) return
+        variable.expanded = !variable.expanded
+        if (!variable.expanded || variable.children.isNotEmpty()) return
+        debugger.request("variables", JsonObject().apply { addProperty("variablesReference", variable.reference) }).whenComplete { body, error ->
+            post { if (error == null) variable.children.addAll(parseVariables(body, variable.depth + 1)) }
+        }
+    }
+
+    /** Debug console input: evaluated in the selected frame (or globally while running). */
+    fun evaluateInDebugConsole(expression: String) {
+        if (expression.isBlank()) return
+        debugConsole.add(DebugConsoleLine("> $expression", DebugConsoleLine.Kind.Input))
+        if (!debugger.isStarted) {
+            debugConsole.add(DebugConsoleLine("Start debugging (F5) to evaluate expressions", DebugConsoleLine.Kind.Info))
+            return
+        }
+        debugger.request("evaluate", JsonObject().apply {
+            addProperty("expression", expression)
+            selectedFrameId?.let { addProperty("frameId", it) }
+            addProperty("context", "repl")
+        }).whenComplete { body, error ->
+            post {
+                debugConsole.add(
+                    if (error != null) {
+                        DebugConsoleLine(error.cause?.message ?: error.message ?: "Evaluation failed", DebugConsoleLine.Kind.Error)
+                    } else {
+                        DebugConsoleLine(body.get("result")?.asString.orEmpty(), DebugConsoleLine.Kind.Result)
+                    },
+                )
+            }
+        }
+    }
+
+    fun debugStep(command: String) {
+        val stopped = debugState as? DebugState.Stopped ?: return
+        debugger.request(command, JsonObject().apply { addProperty("threadId", stopped.threadId) })
+    }
+
+    fun pauseDebugging() {
+        if (debugState != DebugState.Running) return
+        debugger.request("pause", JsonObject().apply { addProperty("threadId", 0) })
+    }
+
+    fun stopDebugging() {
+        if (debugState == DebugState.Idle) return
+        debugger.request("disconnect", JsonObject().apply { addProperty("terminateDebuggee", true) }, timeoutSeconds = 5)
+            .whenComplete { _, _ -> post { endDebugSession(null) } }
+    }
+
+    fun restartDebugging() {
+        if (debugState == DebugState.Idle) {
+            startOrContinueDebugging()
+            return
+        }
+        debugger.request("disconnect", JsonObject().apply { addProperty("terminateDebuggee", true) }, timeoutSeconds = 5)
+            .whenComplete { _, _ ->
+                post {
+                    endDebugSession(null)
+                    startOrContinueDebugging()
+                }
+            }
+    }
+
+    private fun clearPausedState(next: DebugState) {
+        debugState = next
+        debugFrames.clear()
+        debugVariables.clear()
+        selectedFrameId = null
+        executionPoint = null
+    }
+
+    private fun endDebugSession(message: String?) {
+        message?.let { debugConsole.add(DebugConsoleLine(it, DebugConsoleLine.Kind.Error)) }
+        clearPausedState(DebugState.Idle)
+        debugger.stop()
+        debugConsole.add(DebugConsoleLine("Debug session ended", DebugConsoleLine.Kind.Info))
+    }
+
+    /** Lists guest Python environments (via the Jupyter bridge's discovery) and saves the choice. */
+    fun chooseInterpreter(then: (() -> Unit)? = null) {
+        val workspace = workspaceRoot ?: run {
+            status = "Connect to a guest to choose a Python interpreter"
+            return
+        }
+        status = "Looking for Python environments…"
+        val discovery = KernelClient(vfs)
+        discovery.launch(workspace).thenCompose { discovery.kernelSpecs() }.whenComplete { found, error ->
+            discovery.stop()
+            post {
+                val options = buildList {
+                    found?.specs?.forEach { spec -> spec.python?.let { add("${spec.displayName} (${it})" to it) } }
+                    found?.installable?.forEach { add("${it.label} (${it.python})" to it.python) }
+                    add("python3 on the daemon's PATH" to "python3")
+                }.distinctBy { it.second }
+                if (error != null) status = "Python discovery failed (${error.message}); pick python3 or set python.defaultInterpreterPath"
+                dialog = WorkbenchDialog.InterpreterPicker(options, then)
+            }
+        }
+    }
+
+    fun selectInterpreter(path: String, then: (() -> Unit)?) {
+        dialog = null
+        updateSetting(WorkbenchSettings.PYTHON_INTERPRETER, path)
+        status = "Python interpreter: $path"
+        then?.invoke()
+    }
+
+    /** Draws breakpoints (gutter dots) and the paused line for [path]; called after each style publish. */
+    fun decorateEditorLines(view: CodeEditor, path: String) {
+        val styles = view.styles ?: return
+        styles.eraseAllLineStyles()
+        breakpoints[path]?.forEach { line ->
+            styles.addLineStyle(LineSideIcon(line - 1, breakpointIcon))
+        }
+        executionPoint?.takeIf { it.first == path }?.let { (_, line) ->
+            styles.addLineStyle(
+                LineBackground(line - 1, ConstColor(0x40FFCC00)),
+            )
+        }
+        view.invalidate()
+    }
+
+    private val breakpointIcon by lazy {
+        android.graphics.drawable.GradientDrawable().apply {
+            shape = android.graphics.drawable.GradientDrawable.OVAL
+            setColor(0xFFE51400.toInt())
+            setSize(24, 24)
+        }
+    }
+
+    private fun lspRange(line: Int, character: Int) = JsonObject().apply {
+        val position = JsonObject().apply {
+            addProperty("line", line)
+            addProperty("character", character)
+        }
+        add("start", position)
+        add("end", position)
     }
 
     // Source control ----------------------------------------------------------------------------
@@ -2993,6 +3300,15 @@ class WorkbenchController(private val context: Context) {
             "workbench.action.files.save" -> saveActiveDocument()
             "workbench.action.files.newUntitledFile" -> newUntitledFile()
             "workbench.action.files.saveAs" -> beginSaveAs()
+            "workbench.action.debug.start" -> startOrContinueDebugging()
+            "workbench.action.debug.stop" -> stopDebugging()
+            "workbench.action.debug.restart" -> restartDebugging()
+            "workbench.action.debug.pause" -> pauseDebugging()
+            "workbench.action.debug.stepOver" -> debugStep("next")
+            "workbench.action.debug.stepInto" -> debugStep("stepIn")
+            "workbench.action.debug.stepOut" -> debugStep("stepOut")
+            "editor.debug.action.toggleBreakpoint" -> toggleBreakpoint()
+            "python.setInterpreter" -> chooseInterpreter()
             "workbench.view.scm" -> {
                 sidebar = if (sidebar == SidebarView.SourceControl) null else SidebarView.SourceControl
                 if (sidebar == SidebarView.SourceControl) refreshGitStatus()

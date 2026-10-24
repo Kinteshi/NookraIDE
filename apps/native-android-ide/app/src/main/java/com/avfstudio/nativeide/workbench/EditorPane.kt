@@ -277,7 +277,18 @@ private fun NativeEditorView(controller: WorkbenchController, document: Document
                 setEditorLanguage(language)
                 props.symbolPairAutoCompletion = false
                 val bracketColorizer = SoraBracketColorizer(this, document.languageId)
-                onStylesPublished = bracketColorizer::update
+                onStylesPublished = {
+                    bracketColorizer.update()
+                    controller.decorateEditorLines(this, document.path)
+                }
+                // A tap in the line-number gutter toggles a breakpoint, as in VS Code.
+                subscribeAlways(io.github.rosemoe.sora.event.ClickEvent::class.java) { event ->
+                    if (event.motionRegion == io.github.rosemoe.sora.event.EditorMotionEvent.REGION_LINE_NUMBER ||
+                        event.motionRegion == io.github.rosemoe.sora.event.EditorMotionEvent.REGION_SIDE_ICON
+                    ) {
+                        controller.toggleBreakpoint(document.path, event.line + 1)
+                    }
+                }
                 setText(document.text)
                 controller.editorHost.open(document, SoraEditorSurface(this, bracketColorizer))
                 startSelectionTracking()
@@ -309,6 +320,10 @@ private fun NativeEditorView(controller: WorkbenchController, document: Document
         },
         update = { view ->
             if (view.text.toString() != document.text) view.setText(document.text)
+            // Reading these here re-runs `update` when breakpoints or the paused line change.
+            controller.breakpoints[document.path]
+            controller.executionPoint
+            controller.decorateEditorLines(view, document.path)
             controller.applyEditorSettings(view)
             view.setEditable(true)
             (view as NativeCodeEditor).hasInlineSuggestion = controller.inlineSuggestion != null

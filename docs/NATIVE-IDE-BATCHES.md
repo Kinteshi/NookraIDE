@@ -14,9 +14,9 @@ Status values: **done** (committed), **in progress**, **planned**.
 | 3 | Notebook arrow navigation; Copilot chat references | done (tablet check pending) | `c3903da` |
 | 4 | Setup from the app, pairing code, reset detection, resume session | done (tablet check pending) | `a01e688` |
 | 5 | Search across files | done (tablet check pending) | `526768d` |
-| 6 | Git | done (tablet check pending) | see `git log` |
-| 7 | Debugging (DAP with debugpy) | in progress | |
-| 8 | Daemon hosted on Windows and Linux machines, with a connection guide | planned | |
+| 6 | Git | done (tablet check pending) | `2566e2e` |
+| 7 | Debugging (DAP with debugpy) | done (tablet check pending) | see `git log` |
+| 8 | Daemon hosted on Windows and Linux machines, with a connection guide | in progress | |
 
 ## 1. Workbench rewrite (done)
 Material You shell, settings page, VS Code shortcuts, ConnectBot terminal over daemon PTYs,
@@ -103,12 +103,26 @@ with credential prompts (askpass), a diff view, and gutter change markers. Ctrl+
 * The installer installs git with `sudo -n apt-get` when it is missing.
 * Not done: editor gutter change markers, a log/history view, stash and merge-conflict tools.
 
-## 7. Debugging (in progress)
+## 7. Debugging (done; tablet check pending)
 DAP over the daemon's `Dap` bridge with debugpy (in the tool catalog): launch the active Python
 file, breakpoints in the gutter (F9), continue/step/stop (F5, F10, F11, Shift+F11, Shift+F5), call
 stack, variables, debug console. Restore the F9 binding when it works.
+* Adapter: `guest/tools/avf-debugpy.py`, a `uv run --script` wrapper pinning debugpy 1.8.22 (no
+  apt/sudo); catalog tool `debugpy` now installs it as `avf-debugpy`. Verified on this machine with
+  a scripted DAP session (initialize → launch → initialized → setBreakpoints →
+  configurationDone → stopped → stackTrace/scopes/variables/evaluate → continue → terminated).
+  debugpy answers `launch` only after `configurationDone`; the adapter needs its bridge stopped.
+* App: `debug/DapClient.kt` (seq/request_seq, events, refuses reverse requests),
+  `debug/DebugModels.kt` (+ tests from recorded debugpy payloads), controller session logic,
+  Debug panel tab (`DebugPanel.kt`: controls, call stack, lazy variables tree, console with
+  evaluate), gutter breakpoints (tap the line numbers or F9; red dots via `LineSideIcon`), paused
+  line highlight (`LineBackground`), breakpoints persisted. Interpreter: `python.defaultInterpreterPath`,
+  chosen with "Python: Select Interpreter" from the Jupyter bridge's discovery (which now reports
+  each kernel's interpreter); F5 asks the first time.
+* Not done: breakpoints don't move with edits; conditional breakpoints, watch expressions,
+  `integratedTerminal` console (stdin for `input()`), launch.json configurations.
 
-## 8. Daemon on Windows and Linux hosts (planned)
+## 8. Daemon on Windows and Linux hosts (in progress)
 * Portability: the Git askpass helper (Unix sockets), home and token paths, default shell, tool
   catalog artifacts per OS, file permissions.
 * Remote access: loopback stays the default. Opting in to a LAN address requires TLS with a

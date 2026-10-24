@@ -199,6 +199,14 @@ fun WorkbenchDialogHost(controller: WorkbenchController) {
             dismissButton = { TextButton(onClick = { controller.dialog = null }) { Text("Cancel") } },
         )
         WorkbenchDialog.GitClone -> GitCloneDialog(controller)
+        is WorkbenchDialog.InterpreterPicker -> PaletteDialog(
+            placeholder = "Select a Python interpreter",
+            query = controller.commandFilter,
+            onQuery = { controller.commandFilter = it },
+            items = dialog.options.filter { fuzzyMatch(controller.commandFilter, it.first) },
+            onDismiss = { controller.dialog = null },
+            onPick = { (_, path) -> controller.selectInterpreter(path, dialog.then) },
+        ) { (label, path) -> PaletteRow(label.substringBefore(" ("), path) }
         is WorkbenchDialog.ConfirmDelete -> AlertDialog(
             onDismissRequest = { controller.dialog = null },
             title = { Text(if (dialog.isDirectory) "Delete folder?" else "Delete file?") },

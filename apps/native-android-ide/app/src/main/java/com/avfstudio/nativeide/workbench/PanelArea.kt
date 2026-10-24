@@ -96,6 +96,7 @@ fun PanelArea(controller: WorkbenchController, modifier: Modifier = Modifier) {
                 PanelTab.Terminal -> TerminalView(controller)
                 PanelTab.Problems -> ProblemsList(controller)
                 PanelTab.Output -> OutputLog(controller)
+                PanelTab.Debug -> DebugPanel(controller)
             }
         }
     }

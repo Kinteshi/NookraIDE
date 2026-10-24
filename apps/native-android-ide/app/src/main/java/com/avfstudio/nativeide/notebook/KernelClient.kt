@@ -8,7 +8,7 @@ import java.util.concurrent.CompletableFuture
 
 const val JUPYTER_BRIDGE_TOOL = "jupyter"
 
-data class KernelSpec(val name: String, val displayName: String, val language: String)
+data class KernelSpec(val name: String, val displayName: String, val language: String, val python: String? = null)
 data class ExecuteReply(val status: String, val executionCount: Int?)
 
 /** A Python interpreter the bridge found that could run notebooks once ipykernel is installed. */
@@ -61,6 +61,7 @@ class KernelClient(transport: GuestVfsClient) {
                         spec.get("name").asString,
                         spec.get("display_name")?.asString ?: spec.get("name").asString,
                         spec.get("language")?.asString.orEmpty(),
+                        spec.get("python")?.takeUnless { it.isJsonNull }?.asString,
                     )
                 }.orEmpty(),
                 installable = body.getAsJsonArray("installable")?.map { element ->

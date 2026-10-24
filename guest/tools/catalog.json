@@ -136,12 +136,12 @@
     },
     {
       "name": "debugpy",
-      "version": "system",
+      "version": "1.8.22",
       "kind": "dap",
       "languages": ["python"],
-      "command": ["python3", "-m", "debugpy.adapter"],
+      "command": ["avf-debugpy"],
       "install": {
-        "apt": ["python3-debugpy"]
+        "script": {"binary": "avf-debugpy", "asset": "avf-debugpy.py"}
       },
       "settingsSection": "python",
       "env_allowlist": [],
