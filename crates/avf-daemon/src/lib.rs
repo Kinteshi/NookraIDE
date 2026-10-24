@@ -3,6 +3,7 @@ mod git;
 #[cfg(feature = "native-protocol")]
 mod lsp;
 mod ports;
+mod pairing;
 mod pty;
 #[cfg(feature = "native-protocol")]
 mod rpc_stdio;
@@ -61,7 +62,7 @@ use tokio::{
     sync::{mpsc, oneshot, Mutex},
     time::{interval, timeout},
 };
-use tracing::{debug, error, warn};
+use tracing::{debug, error, info, warn};
 use vfs::{Vfs, VfsFailure};
 
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -87,6 +88,27 @@ pub fn git_askpass_helper() -> Result<(), String> {
     git::run_askpass_helper()
 }
 
+/// `avf-daemon pair [--minutes N]`: issues a one-time code for the app's "Pair with code".
+pub fn print_pairing_code(args: &[String]) -> Result<(), String> {
+    let minutes = match args {
+        [] => pairing::PAIRING_TTL.as_secs() / 60,
+        [flag, value] if flag == "--minutes" => value
+            .parse::<u64>()
+            .ok()
+            .filter(|minutes| (1..=60).contains(minutes))
+            .ok_or("--minutes must be between 1 and 60")?,
+        _ => return Err("usage: avf-daemon pair [--minutes N]".to_owned()),
+    };
+    let path = pairing::pairing_path()?;
+    let code = pairing::create(&path, Duration::from_secs(minutes * 60))?;
+    println!();
+    println!("    Pairing code:  {code}");
+    println!();
+    println!("In AVF Studio, open Connect and choose \"Pair with code\". The code works once,");
+    println!("for {minutes} minutes, and allows {} wrong attempts.", pairing::MAX_ATTEMPTS);
+    Ok(())
+}
+
 #[derive(Clone)]
 pub struct AppConfig {
     pub bind_addr: SocketAddr,
@@ -94,6 +116,8 @@ pub struct AppConfig {
     pub allowed_origins: HashSet<String>,
     pub workspace_roots: Vec<PathBuf>,
     pub lsp_hibernation_secs: u64,
+    /// Where `avf-daemon pair` leaves the one-time pairing code; None disables pairing.
+    pub pairing_file: Option<PathBuf>,
 }
 
 impl AppConfig {
@@ -154,6 +178,7 @@ impl AppConfig {
             allowed_origins,
             workspace_roots: roots,
             lsp_hibernation_secs,
+            pairing_file: pairing::pairing_path().ok(),
         })
     }
 }
@@ -301,6 +326,52 @@ async fn websocket(
         .on_upgrade(move |socket| handle_socket(socket, state))
 }
 
+/// Trades a one-time pairing code for the session token, then closes the connection.
+async fn pair_client(socket: &mut WebSocket, state: &AppState, protocol_version: u32, code: &str) {
+    if protocol_version != PROTOCOL_VERSION {
+        reject(
+            socket,
+            RejectReason::VersionMismatch {
+                daemon_version: PROTOCOL_VERSION,
+            },
+            "protocol version mismatch",
+        )
+        .await;
+        return;
+    }
+    let Some(path) = state.config.pairing_file.clone() else {
+        reject(socket, RejectReason::PairingUnavailable, "pairing is disabled").await;
+        return;
+    };
+    let code = code.to_owned();
+    let outcome = tokio::task::spawn_blocking(move || pairing::redeem(&path, &code))
+        .await
+        .unwrap_or_else(|error| Err(pairing::PairingError::Io(error.to_string())));
+    match outcome {
+        Ok(()) => {
+            info!("a client paired with a one-time code");
+            let _ = send_packet(
+                socket,
+                &MultiplexedPacket::System(SystemMessage::Paired {
+                    token: state.config.token.clone(),
+                }),
+            )
+            .await;
+            let _ = socket.send(Message::Close(None)).await;
+        }
+        Err(pairing::PairingError::WrongCode { attempts_left }) => {
+            reject(socket, RejectReason::PairingFailed { attempts_left }, "wrong pairing code").await;
+        }
+        Err(pairing::PairingError::Unavailable) => {
+            reject(socket, RejectReason::PairingUnavailable, "no pairing code is active").await;
+        }
+        Err(pairing::PairingError::Io(error)) => {
+            error!(%error, "pairing record could not be read");
+            reject(socket, RejectReason::PairingUnavailable, "pairing is unavailable").await;
+        }
+    }
+}
+
 async fn handle_socket(mut socket: WebSocket, state: AppState) {
     let first_message = match timeout(HANDSHAKE_TIMEOUT, socket.recv()).await {
         Err(_) => {
@@ -334,14 +405,22 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
             return;
         }
     };
-    let MultiplexedPacket::System(SystemMessage::Hello {
-        protocol_version,
-        auth_token,
-        ..
-    }) = packet
-    else {
-        send_protocol_error(&mut socket, "Hello must be the first packet").await;
-        return;
+    let (protocol_version, auth_token) = match packet {
+        MultiplexedPacket::System(SystemMessage::Hello {
+            protocol_version,
+            auth_token,
+            ..
+        }) => (protocol_version, auth_token),
+        MultiplexedPacket::System(SystemMessage::Pair {
+            protocol_version, code, ..
+        }) => {
+            pair_client(&mut socket, &state, protocol_version, &code).await;
+            return;
+        }
+        _ => {
+            send_protocol_error(&mut socket, "Hello must be the first packet").await;
+            return;
+        }
     };
 
     if !is_valid_token(&auth_token)
@@ -2308,6 +2387,7 @@ mod tests {
             allowed_origins: HashSet::new(),
             workspace_roots: vec![project],
             lsp_hibernation_secs: 30 * 60,
+            pairing_file: None,
         };
         let listener = TcpListener::bind(config.bind_addr).await.unwrap();
         let address = listener.local_addr().unwrap();
@@ -2342,6 +2422,7 @@ mod tests {
                 allowed_origins: HashSet::new(),
                 workspace_roots: vec![project.clone()],
                 lsp_hibernation_secs: 30 * 60,
+                pairing_file: None,
             }),
             vfs: Vfs::new(std::slice::from_ref(&project)).unwrap(),
             pty: PtyManager::default(),
@@ -2645,6 +2726,7 @@ mod tests {
             allowed_origins: HashSet::from(["http://localhost:5173".to_owned()]),
             workspace_roots: vec![project.clone()],
             lsp_hibernation_secs: 30 * 60,
+            pairing_file: None,
         };
         let listener = TcpListener::bind(config.bind_addr).await.unwrap();
         let address = listener.local_addr().unwrap();
@@ -2940,6 +3022,7 @@ mod tests {
             allowed_origins: HashSet::from(["http://localhost:5173".to_owned()]),
             workspace_roots: vec![project.clone()],
             lsp_hibernation_secs: 30 * 60,
+            pairing_file: None,
         };
         let listener = TcpListener::bind(config.bind_addr).await.unwrap();
         let address = listener.local_addr().unwrap();
@@ -3147,6 +3230,75 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn pairing_code_trades_for_the_token_once() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path().join("project");
+        std::fs::create_dir(&project).unwrap();
+        let pairing_file = temp.path().join("pairing.json");
+        let code = pairing::create(&pairing_file, pairing::PAIRING_TTL).unwrap();
+        let config = AppConfig {
+            bind_addr: "127.0.0.1:0".parse().unwrap(),
+            token: "c".repeat(64),
+            allowed_origins: HashSet::from(["avf-native-android://localhost".to_owned()]),
+            workspace_roots: vec![project],
+            lsp_hibernation_secs: 30 * 60,
+            pairing_file: Some(pairing_file),
+        };
+        let listener = TcpListener::bind(config.bind_addr).await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app(config).unwrap()).await.unwrap();
+        });
+        let exchange = |first: SystemMessage| async move {
+            let mut request = format!("ws://{address}/ws").into_client_request().unwrap();
+            request
+                .headers_mut()
+                .insert(WS_ORIGIN, HeaderValue::from_static("avf-native-android://localhost"));
+            let (mut socket, _) = tokio_tungstenite::connect_async(request).await.unwrap();
+            socket
+                .send(WsMessage::Binary(encode(&MultiplexedPacket::System(first)).into()))
+                .await
+                .unwrap();
+            let WsMessage::Binary(bytes) = socket.next().await.unwrap().unwrap() else {
+                panic!("expected a binary reply");
+            };
+            decode(&bytes).unwrap()
+        };
+        let pair = |code: &str| SystemMessage::Pair {
+            protocol_version: PROTOCOL_VERSION,
+            code: code.to_owned(),
+            client_name: "test".into(),
+        };
+
+        assert!(matches!(
+            exchange(pair("AAAA-AAAA")).await,
+            MultiplexedPacket::System(SystemMessage::Rejected {
+                reason: RejectReason::PairingFailed { attempts_left: 4 }
+            })
+        ));
+        let MultiplexedPacket::System(SystemMessage::Paired { token }) = exchange(pair(&code)).await else {
+            panic!("the right code should pair");
+        };
+        assert_eq!(token, "c".repeat(64));
+        assert!(matches!(
+            exchange(pair(&code)).await,
+            MultiplexedPacket::System(SystemMessage::Rejected {
+                reason: RejectReason::PairingUnavailable
+            })
+        ));
+        assert!(matches!(
+            exchange(SystemMessage::Hello {
+                protocol_version: PROTOCOL_VERSION,
+                auth_token: token,
+                client_name: "test".into(),
+            })
+            .await,
+            MultiplexedPacket::System(SystemMessage::Welcome { .. })
+        ));
+        server.abort();
+    }
+
+    #[tokio::test]
     async fn websocket_rejects_bad_token_and_disallowed_origin() {
         let temp = tempfile::tempdir().unwrap();
         let project = temp.path().join("project");
@@ -3160,6 +3312,7 @@ mod tests {
             ]),
             workspace_roots: vec![project],
             lsp_hibernation_secs: 30 * 60,
+            pairing_file: None,
         };
         let listener = TcpListener::bind(config.bind_addr).await.unwrap();
         let address = listener.local_addr().unwrap();

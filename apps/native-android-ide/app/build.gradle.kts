@@ -25,6 +25,40 @@ android {
     }
 }
 
+// "Set up guest" ships the arm64 daemon and its installer; build the daemon first with
+// scripts/build-guest-bundle.sh (without it the app explains that the bundle is missing).
+abstract class GuestBundleTask : DefaultTask() {
+    @get:InputFiles
+    abstract val sources: ConfigurableFileCollection
+
+    @get:OutputDirectory
+    abstract val outputDir: DirectoryProperty
+
+    @TaskAction
+    fun copy() {
+        val target = outputDir.get().dir("guest").asFile
+        target.deleteRecursively()
+        target.mkdirs()
+        sources.files.filter { it.isFile }.forEach { source ->
+            val name = if (source.name == "avf-daemon") "avf-native-daemon" else source.name
+            source.copyTo(target.resolve(name), overwrite = true)
+        }
+    }
+}
+
+val guestBundle = tasks.register<GuestBundleTask>("guestBundle") {
+    sources.from(
+        rootProject.file("../../target/aarch64-unknown-linux-gnu/release/avf-daemon"),
+        rootProject.file("../../scripts/install-native-daemon.sh"),
+    )
+}
+
+androidComponents {
+    onVariants { variant ->
+        variant.sources.assets?.addGeneratedSourceDirectory(guestBundle, GuestBundleTask::outputDir)
+    }
+}
+
 dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2026.09.00")
     implementation(composeBom)

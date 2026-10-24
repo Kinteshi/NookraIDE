@@ -12,6 +12,14 @@ internal object MessagePackVfsCodec {
         stringField("client_name", "avf-native-android-ide")
     }
 
+    /** First packet of a pairing connection: trades a one-time code for the session token. */
+    fun pair(code: String): ByteArray = packet("System", "Pair") {
+        packMapHeader(3)
+        stringField("protocol_version", 2)
+        stringField("code", code)
+        stringField("client_name", "avf-native-android-ide")
+    }
+
     fun request(kind: String, requestId: Long, fields: Map<String, Any?> = emptyMap()): ByteArray =
         packet("Vfs", kind) {
             packMapHeader(fields.size + 1)
@@ -221,7 +229,20 @@ internal object MessagePackVfsCodec {
                         }.orEmpty(),
                 )
             }
-            "Rejected" -> IncomingPacket.Rejected(variant.value.toString())
+            "Rejected" -> {
+                // Unit reasons arrive as a bare string, struct reasons as { Name: { fields } }.
+                val reason = variant.value.asMapValue().map().entries.first { it.key.asString() == "reason" }.value
+                if (reason.isStringValue) {
+                    IncomingPacket.Rejected(reason.asString())
+                } else {
+                    val entry = reason.singleEntry()
+                    val fields = entry.value.asMapValue().map().mapKeys { it.key.asString() }
+                    IncomingPacket.Rejected(entry.key.asString(), fields["attempts_left"]?.asLong()?.toInt())
+                }
+            }
+            "Paired" -> IncomingPacket.Paired(
+                variant.value.asMapValue().map().entries.first { it.key.asString() == "token" }.value.asString(),
+            )
             "ProtocolError" -> IncomingPacket.Unexpected(variant.value.toString())
             else -> IncomingPacket.Ignored
         }
@@ -281,7 +302,8 @@ internal object MessagePackVfsCodec {
 
 sealed interface IncomingPacket {
     data class Welcome(val protocolVersion: Int, val ptySessions: List<PtySessionInfo> = emptyList()) : IncomingPacket
-    data class Rejected(val reason: String) : IncomingPacket
+    data class Rejected(val reason: String, val attemptsLeft: Int? = null) : IncomingPacket
+    data class Paired(val token: String) : IncomingPacket
     data class ReadFile(
         val requestId: Long,
         val content: ByteArray,

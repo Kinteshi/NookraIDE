@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Installs the Track B native daemon in the AVF Debian guest, beside Track A's Supervisor.
-# Usage (inside the guest): bash install-native-daemon.sh /path/to/avf-daemon [workspace]
+# Usage (inside the guest): bash install-native-daemon.sh [/path/to/avf-daemon] [workspace]
+# Without a path it uses the avf-native-daemon next to this script (as AVF Studio's
+# "Set up guest" places it). It ends by printing a one-time pairing code for the app.
 # The daemon listens on 127.0.0.1:19870 as the user unit avf-native.service; its session
 # token is in ~/.config/avf-native/env (mode 0600). Paste it into the app's Connect dialog.
 # Safe to rerun, including on a guest reset from Terminal → Settings → Recovery.
@@ -13,7 +15,8 @@ declare -A UV_SHA256=(
   [x86_64]=1468ebd5a5541121837c5a2817b9972ba6090fa6caa3d142620850a47fb75154
 )
 
-daemon_source=${1:?"usage: $0 /path/to/avf-daemon [workspace]"}
+daemon_source=${1:-"$(dirname "$(readlink -f "$0")")/avf-native-daemon"}
+[[ -f "$daemon_source" ]] || { echo "usage: $0 [/path/to/avf-daemon] [workspace]" >&2; exit 2; }
 workspace=${2:-$HOME/Projects}
 config="$HOME/.config/avf-native"
 unit="$HOME/.config/systemd/user/avf-native.service"
@@ -68,4 +71,6 @@ for tool in ty ruff jupyter copilot-language-server copilot; do
   avf-native-daemon tools install "$tool" || echo "warning: could not install $tool" >&2
 done
 avf-native-daemon tools list
-echo "Token: $config/env (accept port 19870 in the Linux Terminal notification if asked)"
+echo
+echo "If Android asks to open port 19870 (avf-native), accept it."
+avf-native-daemon pair

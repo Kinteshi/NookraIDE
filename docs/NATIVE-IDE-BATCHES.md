@@ -11,9 +11,9 @@ Status values: **done** (committed), **in progress**, **planned**.
 |---|-------|--------|--------|
 | 1 | Workbench rewrite: Material You, terminal, Jupyter, Copilot | done | `1f6c146` |
 | 2 | Keyboard routing, file operations, notebook keys, comments | done | `e35af13` |
-| 3 | Notebook arrow navigation; Copilot chat references | done (tablet check pending) | see `git log` |
-| 4 | Setup from the app, pairing code, reset detection, resume session | in progress | |
-| 5 | Search across files | planned | |
+| 3 | Notebook arrow navigation; Copilot chat references | done (tablet check pending) | `c3903da` |
+| 4 | Setup from the app, pairing code, reset detection, resume session | done (tablet check pending) | see `git log` |
+| 5 | Search across files | in progress | |
 | 6 | Git | planned | |
 | 7 | Debugging (DAP with debugpy) | planned | |
 | 8 | Daemon hosted on Windows and Linux machines, with a connection guide | planned | |
@@ -49,7 +49,7 @@ ty + ruff language servers. Details: handoff, sections "Done" and "Verified on t
 * Still to check on the tablet (it went offline): the arrows test notebook
   `~/Projects/avf-tests/arrows.ipynb` (a wrapped cell) and sending a message with chips.
 
-## 4. Setup and host reset (in progress)
+## 4. Setup and host reset (done; tablet check pending)
 * The APK ships the arm64 daemon and the installer; "Set up guest" writes them to shared
   Downloads and shows one command to run in Linux Terminal (copy + open Terminal buttons).
 * Pairing: the installer prints a short one-time code (expires, limited attempts); the app sends
@@ -58,8 +58,24 @@ ty + ruff language servers. Details: handoff, sections "Done" and "Verified on t
 * Resume: reconnect on launch with the saved profile; reopen the tabs and Explorer folder.
 * Accept: a reset guest is back in use with the command plus the code; app restart reconnects and
   restores tabs.
+* Implemented:
+  * Daemon: `pairing.rs` (code record with SHA-256, 10-minute expiry, 5 attempts, 0600, in
+    `~/.config/avf-native/pairing.json` or `%APPDATA%\avf-native`), `avf-daemon pair [--minutes N]`,
+    protocol `SystemMessage::Pair`/`Paired`, `RejectReason::PairingUnavailable`/`PairingFailed`.
+    Tests: 4 unit + 1 end-to-end over WebSocket.
+  * Installer: finds the daemon next to itself and ends with `avf-native-daemon pair`.
+  * App: Gradle task `guestBundle` packs `target/aarch64-unknown-linux-gnu/release/avf-daemon` and
+    the installer into `assets/guest/` (build the daemon with `scripts/build-guest-bundle.sh`).
+    `GuestSetup.kt` exports them to `Download/avf-studio/setup-<time>/` and builds the command;
+    the "Set up the Linux guest" dialog has Copy, Open Linux Terminal and the pairing code field.
+    `GuestRejectedException` separates a rejected token (opens setup with an explanation) from an
+    unreachable guest (banner: Open Terminal, Retry, Set up again).
+  * Resume: settings `avf.connection.autoConnect` and `avf.session.restore` (both on) reconnect
+    at launch and reopen the saved tabs and Explorer folder.
+* Still to check on the tablet: the full flow on a reset guest (or with `avf-native-daemon pair`
+  on the current one), the banner when Linux Terminal is closed, and restart → reconnect → tabs.
 
-## 5. Search (planned)
+## 5. Search (in progress)
 The daemon already implements `SearchMessage` (`search.rs`). Build the app codec, a Search side
 view (query, regex/case/word, include/exclude globs), streamed results grouped by file, opening
 at the match, and Ctrl+Shift+F.

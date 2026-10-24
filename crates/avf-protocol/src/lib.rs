@@ -106,6 +106,16 @@ pub enum SystemMessage {
     Rejected {
         reason: RejectReason,
     },
+    /// First packet instead of Hello: trade a one-time pairing code for the session token.
+    Pair {
+        protocol_version: u32,
+        code: String,
+        client_name: String,
+    },
+    /// Reply to Pair; the daemon closes the connection and the client reconnects with Hello.
+    Paired {
+        token: String,
+    },
     Ping {
         timestamp: u64,
     },
@@ -132,6 +142,9 @@ pub enum SystemMessage {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum RejectReason {
     InvalidToken,
+    /// No pairing code is active (never issued, expired, or out of attempts).
+    PairingUnavailable,
+    PairingFailed { attempts_left: u32 },
     VersionMismatch { daemon_version: u32 },
     HandshakeTimeout,
 }

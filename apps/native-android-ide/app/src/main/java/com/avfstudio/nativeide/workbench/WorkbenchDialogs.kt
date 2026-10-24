@@ -47,6 +47,10 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.material3.LocalTextStyle
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -165,6 +169,7 @@ fun WorkbenchDialogHost(controller: WorkbenchController) {
             }
         }
         is WorkbenchDialog.PathPrompt -> PathPromptDialog(controller, dialog)
+        is WorkbenchDialog.GuestSetup -> GuestSetupDialog(controller, dialog)
         is WorkbenchDialog.ConfirmDelete -> AlertDialog(
             onDismissRequest = { controller.dialog = null },
             title = { Text(if (dialog.isDirectory) "Delete folder?" else "Delete file?") },
@@ -482,7 +487,76 @@ private fun ConnectDialog(controller: WorkbenchController) {
             }
         },
         confirmButton = { TextButton(onClick = controller::requestGuestConnection, enabled = !controller.busy) { Text(if (controller.busy) "Connecting…" else "Connect") } },
-        dismissButton = { TextButton(onClick = { controller.dialog = null }) { Text("Cancel") } },
+        dismissButton = {
+            Row {
+                TextButton(onClick = { controller.beginGuestSetup() }) { Text("Set up or pair…") }
+                TextButton(onClick = { controller.dialog = null }) { Text("Cancel") }
+            }
+        },
+    )
+}
+
+@Composable
+private fun GuestSetupDialog(controller: WorkbenchController, setup: WorkbenchDialog.GuestSetup) {
+    var code by remember { mutableStateOf("") }
+    val colors = MaterialTheme.colorScheme
+    AlertDialog(
+        onDismissRequest = { controller.dialog = null },
+        title = { Text("Set up the Linux guest") },
+        text = {
+            Column(
+                Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                setup.reason?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = colors.error) }
+                Text("1. Run this in Linux Terminal. It installs the AVF Studio daemon and its tools, then prints a pairing code.", style = MaterialTheme.typography.bodyMedium)
+                when {
+                    controller.setupError != null -> Text(controller.setupError!!, style = MaterialTheme.typography.bodySmall, color = colors.error)
+                    controller.setupCommand == null -> Text("Preparing the setup files…", style = MaterialTheme.typography.bodySmall)
+                    else -> Surface(color = colors.surfaceContainerHighest, shape = MaterialTheme.shapes.small) {
+                        SelectionContainer {
+                            Text(
+                                controller.setupCommand!!,
+                                fontFamily = FontFamily.Monospace,
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.padding(10.dp),
+                            )
+                        }
+                    }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilledTonalButton(onClick = controller::copySetupCommand, enabled = controller.setupCommand != null) { Text("Copy command") }
+                    OutlinedButton(onClick = controller::openLinuxTerminal) { Text("Open Linux Terminal") }
+                }
+                Text(
+                    "If Android asks to open port 19870 (avf-native), accept it. Already installed? Run " +
+                        "`avf-native-daemon pair` in Linux Terminal for a new code.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.onSurfaceVariant,
+                )
+                Text("2. Enter the pairing code.", style = MaterialTheme.typography.bodyMedium)
+                OutlinedTextField(
+                    value = code,
+                    onValueChange = { code = it.uppercase().filter { ch -> ch.isLetterOrDigit() || ch == '-' }.take(9) },
+                    label = { Text("Pairing code") },
+                    placeholder = { Text("XXXX-XXXX") },
+                    singleLine = true,
+                    isError = controller.pairingError != null,
+                    supportingText = controller.pairingError?.let { error -> { Text(error) } },
+                    textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace),
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Characters, autoCorrectEnabled = false, imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { if (code.count(Char::isLetterOrDigit) == 8) controller.pairAndConnect(code) }),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { controller.pairAndConnect(code) },
+                enabled = !controller.busy && code.count(Char::isLetterOrDigit) == 8,
+            ) { Text(if (controller.busy) "Pairing…" else "Pair and connect") }
+        },
+        dismissButton = { TextButton(onClick = { controller.dialog = null }) { Text("Close") } },
     )
 }
 

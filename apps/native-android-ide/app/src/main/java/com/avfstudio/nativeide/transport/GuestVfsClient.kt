@@ -29,6 +29,16 @@ interface GuestVfs {
 
 class GuestVfsException(val code: String, message: String) : IOException(message)
 
+/** The guest refused the handshake: `InvalidToken` usually means it was reset or re-installed. */
+class GuestRejectedException(val reason: String, val attemptsLeft: Int? = null) : IOException(
+    when (reason) {
+        "InvalidToken" -> "The guest rejected the saved token"
+        "PairingUnavailable" -> "No pairing code is active on the guest; run the installer or `avf-native-daemon pair` again"
+        "PairingFailed" -> "Wrong pairing code" + (attemptsLeft?.let { "; $it attempts left" } ?: "")
+        else -> "Guest rejected connection: $reason"
+    },
+)
+
 private const val NATIVE_APP_ORIGIN = "avf-native-android://localhost"
 
 class GuestVfsClient(
@@ -58,7 +68,47 @@ class GuestVfsClient(
         rpcEventListeners.remove(bridgeId)
     }
 
-    override fun connect(url: String, token: String): CompletableFuture<Unit> {
+    /**
+     * Exchanges a one-time pairing code for the guest's session token over a short-lived
+     * connection; the caller then connects normally with the token.
+     */
+    fun pair(url: String, code: String): CompletableFuture<String> {
+        validateUrl(url)
+        val result = CompletableFuture<String>()
+        val request = Request.Builder().url(url).header("Origin", NATIVE_APP_ORIGIN).build()
+        http.newWebSocket(
+            request,
+            object : WebSocketListener() {
+                override fun onOpen(webSocket: WebSocket, response: Response) {
+                    if (!webSocket.send(ByteString.of(*MessagePackVfsCodec.pair(code.trim())))) {
+                        result.completeExceptionally(IOException("Could not send the pairing request"))
+                    }
+                }
+
+                override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+                    when (val packet = runCatching { MessagePackVfsCodec.decode(bytes.toByteArray()) }.getOrNull()) {
+                        is IncomingPacket.Paired -> result.complete(packet.token)
+                        is IncomingPacket.Rejected -> result.completeExceptionally(GuestRejectedException(packet.reason, packet.attemptsLeft))
+                        else -> result.completeExceptionally(IOException("Unexpected reply to the pairing request"))
+                    }
+                    webSocket.close(1000, null)
+                }
+
+                override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                    result.completeExceptionally(IOException("Could not reach the guest", t))
+                }
+
+                override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                    webSocket.close(1000, null)
+                    result.completeExceptionally(IOException("The guest closed the pairing connection"))
+                }
+            },
+        )
+        scheduler.schedule({ result.completeExceptionally(IOException("Pairing timed out")) }, 10, TimeUnit.SECONDS)
+        return result
+    }
+
+    private fun validateUrl(url: String) {
         require(url.startsWith("ws://") || url.startsWith("wss://")) { "Guest URL must use ws:// or wss://" }
         if (url.startsWith("ws://")) {
             val host = java.net.URI(url).host?.lowercase()
@@ -66,6 +116,10 @@ class GuestVfsClient(
                 "Unencrypted WebSocket connections are limited to loopback; use wss:// for remote guests"
             }
         }
+    }
+
+    override fun connect(url: String, token: String): CompletableFuture<Unit> {
+        validateUrl(url)
         require(token.isNotBlank()) { "Guest session token is required" }
         socket?.close(1000, "reconnecting")
         failPending(IOException("Guest connection replaced"))
@@ -105,7 +159,8 @@ class GuestVfsClient(
                             }
                         }
                         is IncomingPacket.Rejected ->
-                            handshake.completeExceptionally(IOException("Guest rejected connection: ${packet.reason}"))
+                            handshake.completeExceptionally(GuestRejectedException(packet.reason, packet.attemptsLeft))
+                        is IncomingPacket.Paired -> Unit
                         is IncomingPacket.ReadFile -> complete(packet.requestId, packet)
                         is IncomingPacket.Ack -> complete(packet.requestId, packet)
                         is IncomingPacket.ListDir -> complete(packet.requestId, packet)

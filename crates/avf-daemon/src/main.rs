@@ -31,6 +31,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
         .init();
 
+    if args.first().is_some_and(|arg| arg == "pair") {
+        if let Err(error) = avf_daemon::print_pairing_code(&args[1..]) {
+            eprintln!("avf-daemon: {error}");
+            std::process::exit(2);
+        }
+        return Ok(());
+    }
     if args.first().is_some_and(|arg| arg == "tools") {
         if let Err(error) = tools::run_cli(&args[1..]) {
             eprintln!("avf-daemon: {error}");

@@ -59,6 +59,7 @@ import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -131,6 +132,7 @@ private fun WorkbenchLayout(controller: WorkbenchController) {
         val roomy = maxWidth >= 1200.dp
         Column(Modifier.fillMaxSize()) {
             TopBar(controller, expanded)
+            GuestProblemBanner(controller)
             if (expanded) {
                 Row(Modifier.weight(1f).fillMaxWidth()) {
                     WorkbenchRail(controller)
@@ -381,5 +383,26 @@ private fun StatusItem(text: String, icon: ImageVector? = null, onClick: (() -> 
     ) {
         icon?.let { Icon(it, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant) }
         Text(text, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+    }
+}
+
+/** Shown while disconnected after a failed attempt, with the ways out. */
+@Composable
+private fun GuestProblemBanner(controller: WorkbenchController) {
+    val problem = controller.guestProblem ?: return
+    if (controller.connected) return
+    val colors = MaterialTheme.colorScheme
+    Surface(
+        color = colors.errorContainer,
+        contentColor = colors.onErrorContainer,
+        shape = MaterialTheme.shapes.medium,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+    ) {
+        Row(Modifier.padding(start = 16.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(problem, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f).padding(vertical = 10.dp))
+            TextButton(onClick = controller::openLinuxTerminal) { Text("Open Terminal") }
+            TextButton(onClick = controller::connectGuest, enabled = !controller.busy) { Text("Retry") }
+            TextButton(onClick = { controller.beginGuestSetup() }) { Text("Set up again") }
+        }
     }
 }

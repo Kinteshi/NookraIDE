@@ -57,6 +57,7 @@ import com.avfstudio.nativeide.transport.ConnectionProfileStore
 import com.avfstudio.nativeide.transport.FileEntry
 import com.avfstudio.nativeide.transport.GuestVfsClient
 import com.avfstudio.nativeide.transport.GuestVfsException
+import com.avfstudio.nativeide.transport.GuestRejectedException
 import com.avfstudio.nativeide.transport.KeystoreSecretCipher
 import com.avfstudio.nativeide.transport.PtyEvent
 import com.avfstudio.nativeide.transport.SharedPreferencesKeyValueStore
@@ -145,6 +146,17 @@ class WorkbenchController(private val context: Context) {
         private set
     var profileId by mutableStateOf<String?>(null)
     var profileName by mutableStateOf("")
+    /** Shown above the editor when the last connection attempt failed; null when connected. */
+    var guestProblem by mutableStateOf<String?>(null)
+        private set
+    var setupCommand by mutableStateOf<String?>(null)
+        private set
+    var setupError by mutableStateOf<String?>(null)
+        private set
+    var pairingError by mutableStateOf<String?>(null)
+        private set
+    private var autoConnecting = false
+    private var sessionRestored = false
     /** Set by the UI: asks Android for notification permission, then calls [connectGuest]. */
     var requestNotificationPermission: (() -> Unit)? = null
 
@@ -268,6 +280,11 @@ class WorkbenchController(private val context: Context) {
         preferences.getString("grammar-load-errors", null)
             ?.takeIf(String::isNotBlank)?.let { status = "Asset-pack grammar load failed: $it" }
         bindListeners()
+        // Pick up where the last session left off: reconnect, then reopen its tabs (onWorkspaceConnected).
+        if (settings.autoConnect && endpoint.isNotBlank() && token.isNotBlank()) {
+            autoConnecting = true
+            connectGuest()
+        }
     }
 
     fun post(action: () -> Unit) {
@@ -478,6 +495,7 @@ class WorkbenchController(private val context: Context) {
 
     fun connectGuest() {
         busy = true
+        guestProblem = null
         status = "Connecting to guest"
         languageServerIssues = emptyList()
         val notificationsAllowed = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
@@ -492,7 +510,7 @@ class WorkbenchController(private val context: Context) {
                 if (error != null) {
                     connected = false
                     GuestConnectionService.stop(context)
-                    status = "Connection failed: ${error.cause?.message ?: error.message}"
+                    onConnectFailed(error)
                     return@post
                 }
                 connected = true
@@ -519,6 +537,131 @@ class WorkbenchController(private val context: Context) {
         }
     }
 
+    // Guest setup, pairing and reset detection ----------------------------------------------
+
+
+    private fun onConnectFailed(error: Throwable) {
+        val causes = generateSequence(error) { it.cause }.toList()
+        val rejected = causes.filterIsInstance<GuestRejectedException>().firstOrNull()
+        val unreachable = causes.any { it is java.net.ConnectException || it is java.net.SocketTimeoutException }
+        val wasAutomatic = autoConnecting
+        autoConnecting = false
+        when {
+            rejected?.reason == "InvalidToken" -> {
+                guestProblem = "The guest no longer accepts this device's token. Was Linux Terminal reset?"
+                status = guestProblem!!
+                beginGuestSetup(
+                    "The guest rejected the saved token, which happens after Linux Terminal is reset or the " +
+                        "daemon is reinstalled. Set it up again, or if it is still installed, run " +
+                        "`avf-native-daemon pair` in Linux Terminal and enter the new code.",
+                )
+            }
+            unreachable -> {
+                guestProblem = "Can't reach the guest daemon. Open Linux Terminal so the guest starts; " +
+                    "if it was reset, set it up again."
+                status = guestProblem!!
+                if (!wasAutomatic && dialog == WorkbenchDialog.Connect) dialog = null
+            }
+            else -> {
+                guestProblem = "Connection failed: ${rejected?.message ?: error.cause?.message ?: error.message}"
+                status = guestProblem!!
+            }
+        }
+    }
+
+    fun beginGuestSetup(reason: String? = null) {
+        pairingError = null
+        dialog = WorkbenchDialog.GuestSetup(reason)
+        if (setupCommand == null) prepareGuestSetup()
+    }
+
+    /** Copies the bundled daemon and installer to Downloads and builds the Linux Terminal command. */
+    fun prepareGuestSetup() {
+        setupError = null
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            setupError = "Setting up the guest from the app needs Android 10 or later"
+            return
+        }
+        io.execute {
+            val result = runCatching { exportGuestBundle(context) }
+            post {
+                result.onSuccess { setupCommand = it }
+                result.onFailure { setupError = it.message ?: "Could not write the setup files" }
+            }
+        }
+    }
+
+    fun copySetupCommand() {
+        val command = setupCommand ?: return
+        context.getSystemService(ClipboardManager::class.java)?.setPrimaryClip(ClipData.newPlainText("Setup command", command))
+        status = "Command copied; paste it in Linux Terminal"
+    }
+
+    fun openLinuxTerminal() {
+        val intent = Intent(Intent.ACTION_MAIN)
+            .setClassName("com.android.virtualization.terminal", "com.android.virtualization.terminal.MainActivity")
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (runCatching { context.startActivity(intent) }.isFailure) {
+            status = "Linux Terminal isn't installed; enable it in Developer options"
+        }
+    }
+
+    /** Trades the code the installer printed for the token, saves it in the profile and connects. */
+    fun pairAndConnect(code: String) {
+        val target = endpoint.trim().ifEmpty { GUEST_DAEMON_ENDPOINT }
+        busy = true
+        pairingError = null
+        status = "Pairing with the guest"
+        vfs.pair(target, code).whenComplete { newToken, error ->
+            post {
+                busy = false
+                if (error != null) {
+                    val cause = generateSequence(error) { it.cause }.firstOrNull { it is GuestRejectedException } ?: error.cause ?: error
+                    pairingError = if (cause is java.net.ConnectException) {
+                        "Can't reach the guest. Is the installer finished, and was port 19870 accepted?"
+                    } else {
+                        cause.message ?: "Pairing failed"
+                    }
+                    status = pairingError!!
+                    return@post
+                }
+                endpoint = target
+                token = newToken
+                if (profileName.isBlank()) profileName = "Linux guest"
+                dialog = null
+                setupCommand = null
+                connectGuest()
+            }
+        }
+    }
+
+    // Session restore ------------------------------------------------------------------------
+
+    /** Remembers open guest files, the active one and the Explorer folder for the next launch. */
+    private fun persistSession() {
+        if (!sessionRestored && !connected) return
+        val open = documents.map { it.path }.filterNot { it.startsWith("scratch:") }
+        preferences.edit()
+            .putString("session-open", com.google.gson.Gson().toJson(open))
+            .putString("session-active", activePath?.takeUnless { it.startsWith("scratch:") })
+            .putString("session-directory", currentDirectory.ifEmpty { null })
+            .apply()
+    }
+
+    private fun restoreSession(workspace: String) {
+        if (sessionRestored) return
+        sessionRestored = true
+        if (!settings.restoreSession) return
+        val open = runCatching {
+            com.google.gson.Gson().fromJson(preferences.getString("session-open", "[]"), Array<String>::class.java).toList()
+        }.getOrDefault(emptyList()).filter { it.startsWith(workspace) }
+        val active = preferences.getString("session-active", null)
+        open.sortedBy { it == active }.forEach(::openPath)
+        preferences.getString("session-directory", null)
+            ?.takeIf { it.startsWith(workspace) && it != workspace }
+            ?.let(::loadDirectory)
+    }
+
     private fun startKeepAlive(state: String) {
         try {
             GuestConnectionService.start(context, endpoint.trim(), state)
@@ -530,7 +673,9 @@ class WorkbenchController(private val context: Context) {
     }
 
     private fun onWorkspaceConnected(workspace: String) {
+        autoConnecting = false
         loadDirectory(workspace)
+        restoreSession(workspace)
         loadWorkspaceSettings(workspace).whenComplete { loaded, settingsError ->
             post {
                 if (settingsError != null) {
@@ -583,6 +728,7 @@ class WorkbenchController(private val context: Context) {
                 } else {
                     currentDirectory = path
                     entries = result.sortedWith(compareByDescending<FileEntry> { it.isDirectory }.thenBy { it.name })
+                    persistSession()
                 }
             }
         }
@@ -662,6 +808,7 @@ class WorkbenchController(private val context: Context) {
 
     fun selectDocument(path: String) {
         activePath = path
+        persistSession()
         pagedDocument = null
         compactDestination = CompactDestination.Editor
     }
@@ -681,6 +828,7 @@ class WorkbenchController(private val context: Context) {
         notebooks.remove(path)?.kernel?.stop()
         documents.removeAll { it.path == path }
         if (activePath == path) activePath = documents.lastOrNull()?.path
+        persistSession()
         scheduleIdleServerStop()
     }
 

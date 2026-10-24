@@ -61,6 +61,8 @@ sealed interface WorkbenchDialog {
     /** Asks for a file or folder name; [error] explains why the last attempt failed. */
     data class PathPrompt(val action: PathAction, val initial: String, val error: String? = null) : WorkbenchDialog
     data class ConfirmDelete(val path: String, val isDirectory: Boolean) : WorkbenchDialog
+    /** Set up (or re-pair) the Linux guest; [reason] says why it opened, e.g. a rejected token. */
+    data class GuestSetup(val reason: String? = null) : WorkbenchDialog
     data class CopilotSignInCode(val signIn: CopilotSignIn) : WorkbenchDialog
     data class KernelPicker(
         val path: String,
