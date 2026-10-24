@@ -59,6 +59,11 @@ import com.avfstudio.nativeide.transport.GuestVfsClient
 import com.avfstudio.nativeide.transport.GuestVfsException
 import com.avfstudio.nativeide.transport.GuestRejectedException
 import com.avfstudio.nativeide.transport.KeystoreSecretCipher
+import com.avfstudio.nativeide.transport.GitEvent
+import com.avfstudio.nativeide.transport.GitFileStatus
+import com.avfstudio.nativeide.transport.GitOperation
+import com.avfstudio.nativeide.transport.GitResult
+import com.avfstudio.nativeide.transport.GitStatusEntry
 import com.avfstudio.nativeide.transport.PtyEvent
 import com.avfstudio.nativeide.transport.SearchQuery
 import com.avfstudio.nativeide.transport.SearchEvent
@@ -661,6 +666,166 @@ class WorkbenchController(private val context: Context) {
         navigateToLocation(LanguageLocation(java.net.URI("file", "", match.path, null).toASCIIString(), range))
     }
 
+    // Source control ----------------------------------------------------------------------------
+
+    var gitStatus by mutableStateOf<GitResult.Status?>(null)
+        private set
+    /** Set when the workspace isn't a repository (offer Init/Clone) or Git failed to run. */
+    var gitProblem by mutableStateOf<String?>(null)
+        private set
+    var gitNotARepository by mutableStateOf(false)
+        private set
+    /** Label of the Git operation in flight, shown in the view. */
+    var gitBusy by mutableStateOf<String?>(null)
+        private set
+    var commitMessage by mutableStateOf("")
+
+    private fun runGit(label: String?, operation: GitOperation, then: (GitResult) -> Unit = {}) {
+        val repo = workspaceRoot
+        if (repo == null || !vfs.isConnected()) {
+            status = "Connect to a guest to use Git"
+            return
+        }
+        if (label != null) gitBusy = label
+        vfs.git(repo, operation) { event ->
+            post {
+                when (event) {
+                    is GitEvent.Progress -> status = listOfNotNull(label, event.phase, event.percent?.let { "$it%" }).joinToString(" · ")
+                    is GitEvent.Prompt -> dialog = WorkbenchDialog.GitPrompt(event)
+                    else -> Unit
+                }
+            }
+        }.whenComplete { result, error ->
+            post {
+                if (label != null) gitBusy = null
+                if (dialog is WorkbenchDialog.GitPrompt) dialog = null
+                if (error != null) {
+                    val message = generateSequence(error) { it.cause }.last().message ?: "Git failed"
+                    if (operation is GitOperation.Status) {
+                        gitStatus = null
+                        gitNotARepository = "not a git repository" in message.lowercase()
+                        gitProblem = if (gitNotARepository) null else message
+                    } else {
+                        status = "Git: $message"
+                    }
+                    return@post
+                }
+                then(result)
+                if (operation !is GitOperation.Status && operation !is GitOperation.DiffFile && operation !is GitOperation.Branches) {
+                    refreshGitStatus()
+                }
+            }
+        }
+    }
+
+    fun refreshGitStatus() = runGit(null, GitOperation.Status) { result ->
+        gitStatus = result as? GitResult.Status
+        gitNotARepository = false
+        gitProblem = null
+    }
+
+    fun stageFiles(paths: List<String>) {
+        if (paths.isNotEmpty()) runGit("Staging", GitOperation.Stage(paths))
+    }
+
+    fun unstageFiles(paths: List<String>) {
+        if (paths.isNotEmpty()) runGit("Unstaging", GitOperation.Unstage(paths))
+    }
+
+    /** Discarding is destructive (untracked files are deleted), so it is confirmed first. */
+    fun requestDiscard(entries: List<GitStatusEntry>) {
+        if (entries.isEmpty()) return
+        dialog = WorkbenchDialog.GitConfirmDiscard(entries.map { it.path }, entries.count { it.status == GitFileStatus.Untracked })
+    }
+
+    fun discardFiles(paths: List<String>) {
+        dialog = null
+        runGit("Discarding", GitOperation.Discard(paths)) { status = "Discarded ${paths.size} file${if (paths.size == 1) "" else "s"}" }
+    }
+
+    /** Commits what is staged; with nothing staged it stages every change first (VS Code's smart commit). */
+    fun commit() {
+        val message = commitMessage.trim()
+        val current = gitStatus ?: return
+        if (message.isEmpty()) {
+            status = "Write a commit message first"
+            return
+        }
+        val doCommit = {
+            runGit("Committing", GitOperation.Commit(message)) {
+                commitMessage = ""
+                status = "Committed: ${message.lineSequence().first()}"
+            }
+        }
+        if (current.entries.none { it.staged }) {
+            val all = current.entries.filter { it.unstaged }.map { it.path }
+            if (all.isEmpty()) {
+                status = "Nothing to commit"
+                return
+            }
+            runGit("Staging", GitOperation.Stage(all)) { doCommit() }
+        } else {
+            doCommit()
+        }
+    }
+
+    fun showGitDiff(entry: GitStatusEntry, staged: Boolean) {
+        if (entry.status == GitFileStatus.Untracked) {
+            workspaceRoot?.let { openPath("${it.trimEnd('/')}/${entry.path}") }
+            return
+        }
+        runGit(null, GitOperation.DiffFile(entry.path, staged)) { result ->
+            val diff = result as? GitResult.Diff ?: return@runGit
+            dialog = WorkbenchDialog.GitDiff(
+                "${entry.path.substringAfterLast('/')} (${if (staged) "staged" else "working tree"})",
+                diff.patch.ifBlank { "No textual changes." },
+            )
+        }
+    }
+
+    fun answerGitPrompt(prompt: GitEvent.Prompt, answer: String?) {
+        dialog = null
+        // An empty answer makes Git fail the credential request instead of hanging.
+        vfs.answerGitPrompt(prompt.requestId, prompt.promptId, answer.orEmpty())
+    }
+
+    fun showBranches() = runGit(null, GitOperation.Branches) { result ->
+        (result as? GitResult.Branches)?.let { dialog = WorkbenchDialog.GitBranches(it.branches) }
+    }
+
+    fun checkoutBranch(name: String, create: Boolean) {
+        dialog = null
+        runGit(if (create) "Creating branch" else "Switching branch", GitOperation.Checkout(name, create)) {
+            status = "On branch $name"
+        }
+    }
+
+    fun gitFetch() = runGit("Fetching", GitOperation.Fetch) { status = "Fetched" }
+
+    fun gitPull() = runGit("Pulling", GitOperation.Pull()) { status = "Pulled" }
+
+    /** Pushes, publishing the branch (set upstream) when it has no upstream yet. */
+    fun gitPush() {
+        val publish = gitStatus?.upstream == null
+        runGit(if (publish) "Publishing branch" else "Pushing", GitOperation.Push(setUpstream = publish)) {
+            status = if (publish) "Branch published" else "Pushed"
+        }
+    }
+
+    /** VS Code's Sync: pull, then push. */
+    fun gitSync() = runGit("Pulling", GitOperation.Pull()) { gitPush() }
+
+    fun gitInit() = runGit("Initializing", GitOperation.Init) { status = "Initialized a Git repository" }
+
+    fun gitClone(url: String, folder: String) {
+        val root = workspaceRoot ?: return
+        dialog = null
+        runGit("Cloning", GitOperation.Clone(url.trim(), "${root.trimEnd('/')}/${folder.trim()}")) {
+            status = "Cloned into ${folder.trim()}"
+            loadDirectory(root)
+        }
+    }
+
     // Guest setup, pairing and reset detection ----------------------------------------------
 
 
@@ -800,6 +965,7 @@ class WorkbenchController(private val context: Context) {
         autoConnecting = false
         loadDirectory(workspace)
         restoreSession(workspace)
+        refreshGitStatus()
         loadWorkspaceSettings(workspace).whenComplete { loaded, settingsError ->
             post {
                 if (settingsError != null) {
@@ -1015,7 +1181,10 @@ class WorkbenchController(private val context: Context) {
                     return@post
                 }
                 when (result) {
-                    is SaveResult.Saved -> status = "Saved ${document.path}"
+                    is SaveResult.Saved -> {
+                        status = "Saved ${document.path}"
+                        refreshGitStatus()
+                    }
                     SaveResult.QueuedOffline -> status = "Saved locally; queued until guest reconnects"
                     is SaveResult.Conflict -> {
                         dialog = WorkbenchDialog.Conflict(document)
@@ -2824,6 +2993,19 @@ class WorkbenchController(private val context: Context) {
             "workbench.action.files.save" -> saveActiveDocument()
             "workbench.action.files.newUntitledFile" -> newUntitledFile()
             "workbench.action.files.saveAs" -> beginSaveAs()
+            "workbench.view.scm" -> {
+                sidebar = if (sidebar == SidebarView.SourceControl) null else SidebarView.SourceControl
+                if (sidebar == SidebarView.SourceControl) refreshGitStatus()
+            }
+            "git.refresh" -> refreshGitStatus()
+            "git.commit" -> commit()
+            "git.checkout" -> showBranches()
+            "git.pull" -> gitPull()
+            "git.push" -> gitPush()
+            "git.sync" -> gitSync()
+            "git.fetch" -> gitFetch()
+            "git.clone" -> dialog = WorkbenchDialog.GitClone
+            "git.init" -> gitInit()
             "workbench.view.search" -> if (sidebar == SidebarView.Search && focusArea == FocusArea.Other) sidebar = null else showSearch()
             "explorer.newFile" -> beginNewEntry(folder = false)
             "explorer.newFolder" -> beginNewEntry(folder = true)

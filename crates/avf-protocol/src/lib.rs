@@ -548,6 +548,110 @@ pub struct GitRemote {
 
 #[cfg(test)]
 mod tests {
+    fn daemon_fixture_packets() -> Vec<(&'static str, MultiplexedPacket)> {
+        vec![
+            (
+                "GIT_STATUS_RESULT",
+                MultiplexedPacket::Git(GitMessage::Res {
+                    req_id: 1,
+                    result: GitResult::Status {
+                        branch: Some("main".into()),
+                        upstream: None,
+                        ahead: 1,
+                        behind: 0,
+                        entries: vec![GitStatusEntry {
+                            path: "src/a.py".into(),
+                            original_path: None,
+                            index_status: "M".into(),
+                            worktree_status: ".".into(),
+                            status: GitFileStatus::Modified,
+                        }],
+                    },
+                }),
+            ),
+            ("GIT_SUCCESS", MultiplexedPacket::Git(GitMessage::Res { req_id: 2, result: GitResult::Success })),
+            (
+                "GIT_PROMPT",
+                MultiplexedPacket::Git(GitMessage::Prompt {
+                    req_id: 3,
+                    prompt_id: 9,
+                    text: "Password for 'https://github.com': ".into(),
+                    secret: true,
+                }),
+            ),
+            (
+                "SEARCH_MATCH",
+                MultiplexedPacket::Search(SearchMessage::Match {
+                    req_id: 4,
+                    path: "/w/a.py".into(),
+                    line: 3,
+                    col: 2,
+                    len: 4,
+                    preview: "x todo".into(),
+                    context_before: vec![],
+                    context_after: vec![],
+                }),
+            ),
+        ]
+    }
+
+    /// The daemon's encodings of replies the app decodes (pinned by its WireFixturesTest).
+    #[test]
+    fn daemon_encoded_replies_are_stable() {
+        let expected = [
+            ("GIT_STATUS_RESULT", "81a347697481a352657382a67265715f696401a6726573756c7481a653746174757385a66272616e6368a46d61696ea8757073747265616dc0a5616865616401a6626568696e6400a7656e74726965739185a470617468a87372632f612e7079ad6f726967696e616c5f70617468c0ac696e6465785f737461747573a14daf776f726b747265655f737461747573a12ea6737461747573a84d6f646966696564"),
+            ("GIT_SUCCESS", "81a347697481a352657382a67265715f696402a6726573756c74a753756363657373"),
+            ("GIT_PROMPT", "81a347697481a650726f6d707484a67265715f696403a970726f6d70745f696409a474657874d92350617373776f726420666f72202768747470733a2f2f6769746875622e636f6d273a20a6736563726574c3"),
+            ("SEARCH_MATCH", "81a653656172636881a54d6174636888a67265715f696404a470617468a72f772f612e7079a46c696e6503a3636f6c02a36c656e04a770726576696577a67820746f646fae636f6e746578745f6265666f726590ad636f6e746578745f616674657290"),
+        ];
+        for ((name, packet), (expected_name, expected_hex)) in daemon_fixture_packets().into_iter().zip(expected) {
+            let hex: String = encode(&packet).iter().map(|byte| format!("{byte:02x}")).collect();
+            assert_eq!(name, expected_name);
+            assert_eq!(hex, expected_hex, "{name} changed on the wire; update the app's WireFixturesTest too");
+        }
+    }
+
+    /// Bytes the Android app sends (pinned by its WireFixturesTest); the daemon must decode them.
+    #[test]
+    fn app_encoded_requests_decode() {
+        fn bytes(hex: &str) -> Vec<u8> {
+            (0..hex.len()).step_by(2).map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap()).collect()
+        }
+        let git = |hex: &str| match decode(&bytes(hex)).unwrap() {
+            MultiplexedPacket::Git(GitMessage::Req { repo, op, .. }) => {
+                assert_eq!(repo, "/w");
+                op
+            }
+            other => panic!("expected a Git request, got {other:?}"),
+        };
+        assert_eq!(git("81a347697481a352657183a67265715f696401a47265706fa22f77a26f70a6537461747573"), GitOp::Status);
+        assert_eq!(git("81a347697481a352657183a67265715f696402a47265706fa22f77a26f7081a5537461676591a4612e7079"), GitOp::Stage(vec!["a.py".into()]));
+        assert_eq!(
+            git("81a347697481a352657183a67265715f696403a47265706fa22f77a26f7081a6436f6d6d697483a76d657373616765a36d7367a5616d656e64c2a77369676e6f6666c2"),
+            GitOp::Commit { message: "msg".into(), amend: false, signoff: false }
+        );
+        assert_eq!(
+            git("81a347697481a352657183a67265715f696404a47265706fa22f77a26f7081a45075736882ac7365745f757073747265616dc3b0666f7263655f776974685f6c65617365c2"),
+            GitOp::Push { set_upstream: true, force_with_lease: false }
+        );
+        assert_eq!(git("81a347697481a352657183a67265715f696405a47265706fa22f77a26f7081a34c6f6783a3726576c0a56c696d69740aa470617468c0"), GitOp::Log { rev: None, limit: 10, path: None });
+        match decode(&bytes("81a653656172636881a853746172745265718aa67265715f696406a5726f6f747391a22f77a57175657279a4746f646fa57265676578c2ae636173655f73656e736974697665c2aa77686f6c655f776f7264c2a7696e636c75646591a42a2e7079a76578636c75646590ab6d61785f726573756c7473cd07d0ad636f6e746578745f6c696e657300")).unwrap() {
+            MultiplexedPacket::Search(SearchMessage::StartReq { query, include, max_results, .. }) => {
+                assert_eq!(query, "todo");
+                assert_eq!(include, vec!["*.py".to_owned()]);
+                assert_eq!(max_results, 2000);
+            }
+            other => panic!("expected a search request, got {other:?}"),
+        }
+        match decode(&bytes("81a653797374656d81a45061697283b070726f746f636f6c5f76657273696f6e02a4636f6465a9414243442d45464748ab636c69656e745f6e616d65b66176662d6e61746976652d616e64726f69642d696465")).unwrap() {
+            MultiplexedPacket::System(SystemMessage::Pair { code, protocol_version, .. }) => {
+                assert_eq!(code, "ABCD-EFGH");
+                assert_eq!(protocol_version, PROTOCOL_VERSION);
+            }
+            other => panic!("expected Pair, got {other:?}"),
+        }
+    }
+
     use super::*;
 
     fn packet_variants() -> Vec<MultiplexedPacket> {

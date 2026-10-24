@@ -53,6 +53,7 @@ class GuestVfsClient(
     private val rpcEventListeners = ConcurrentHashMap<UUID, (RpcEvent) -> Unit>()
     private val ptyListeners = ConcurrentHashMap<UUID, (PtyEvent) -> Unit>()
     private val searchListeners = ConcurrentHashMap<Long, (SearchEvent) -> Unit>()
+    private val gitListeners = ConcurrentHashMap<Long, (GitEvent) -> Unit>()
     /** Terminal sessions the guest still runs, from the latest handshake; reattach to keep them. */
     @Volatile var guestPtySessions: List<PtySessionInfo> = emptyList()
         private set
@@ -171,6 +172,7 @@ class GuestVfsClient(
                             completeExceptionally(packet.requestId, GuestVfsException(packet.code, packet.message))
                         is IncomingPacket.Rpc -> handleRpcEvent(packet.event)
                         is IncomingPacket.Search -> searchListeners[packet.event.requestId]?.invoke(packet.event)
+                        is IncomingPacket.Git -> gitListeners[packet.event.requestId]?.invoke(packet.event)
                         is IncomingPacket.Pty -> ptyListeners[packet.event.sessionId]?.invoke(packet.event)
                         is IncomingPacket.Unexpected ->
                             handshake.completeExceptionally(IOException(packet.message))
@@ -348,6 +350,37 @@ class GuestVfsClient(
         return requestId
     }
 
+    /**
+     * Runs a Git operation in [repo]. [onEvent] sees progress and credential prompts (answer with
+     * [answerGitPrompt]); the future completes with the result or fails with the Git error.
+     */
+    fun git(repo: String, operation: GitOperation, onEvent: (GitEvent) -> Unit = {}): CompletableFuture<GitResult> {
+        val requestId = requestIds.incrementAndGet()
+        val result = CompletableFuture<GitResult>()
+        gitListeners[requestId] = { event ->
+            when (event) {
+                is GitEvent.Result -> {
+                    gitListeners.remove(requestId)
+                    result.complete(event.result)
+                }
+                is GitEvent.Error -> {
+                    gitListeners.remove(requestId)
+                    result.completeExceptionally(IOException(event.message))
+                }
+                else -> onEvent(event)
+            }
+        }
+        if (!sendFrame(MessagePackVfsCodec.gitRequest(requestId, repo, operation))) {
+            gitListeners.remove(requestId)
+            result.completeExceptionally(IOException("Guest is not connected"))
+        }
+        return result
+    }
+
+    fun answerGitPrompt(requestId: Long, promptId: Long, answer: String) {
+        sendFrame(MessagePackVfsCodec.gitPromptAnswer(requestId, promptId, answer))
+    }
+
     fun cancelSearch(requestId: Long) {
         searchListeners.remove(requestId)
         sendFrame(MessagePackVfsCodec.searchCancel(requestId))
@@ -416,6 +449,10 @@ class GuestVfsClient(
             listener(SearchEvent.Error(requestId, error.message ?: "Guest connection lost"))
         }
         searchListeners.clear()
+        gitListeners.entries.toList().forEach { (requestId, listener) ->
+            listener(GitEvent.Error(requestId, error.message ?: "Guest connection lost"))
+        }
+        gitListeners.clear()
     }
 
     override fun close() {

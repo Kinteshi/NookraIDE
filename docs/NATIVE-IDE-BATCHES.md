@@ -13,9 +13,9 @@ Status values: **done** (committed), **in progress**, **planned**.
 | 2 | Keyboard routing, file operations, notebook keys, comments | done | `e35af13` |
 | 3 | Notebook arrow navigation; Copilot chat references | done (tablet check pending) | `c3903da` |
 | 4 | Setup from the app, pairing code, reset detection, resume session | done (tablet check pending) | `a01e688` |
-| 5 | Search across files | done (tablet check pending) | see `git log` |
-| 6 | Git | in progress | |
-| 7 | Debugging (DAP with debugpy) | planned | |
+| 5 | Search across files | done (tablet check pending) | `526768d` |
+| 6 | Git | done (tablet check pending) | see `git log` |
+| 7 | Debugging (DAP with debugpy) | in progress | |
 | 8 | Daemon hosted on Windows and Linux machines, with a connection guide | planned | |
 
 ## 1. Workbench rewrite (done)
@@ -86,12 +86,24 @@ at the match, and Ctrl+Shift+F.
 * On the current tablet guest run `avf-native-daemon tools install ripgrep` (the daemon there
   predates the catalog entry, so reinstall the daemon first via "Set up or pair…").
 
-## 6. Git (in progress)
+## 6. Git (done; tablet check pending)
 The daemon already implements `GitMessage`/`GitOp` (`git.rs`). Build a Source Control view: status
 with stage/unstage/discard, commit message and commit, branch picker and checkout, pull/push/fetch
 with credential prompts (askpass), a diff view, and gutter change markers. Ctrl+Shift+G.
+* Implemented: `GitModels.kt` (operations, results, events; externally tagged MessagePack),
+  `GuestVfsClient.git`/`answerGitPrompt`, Source Control view (`SourceControlPane.kt`): branch
+  button → branch picker with "create branch", Publish/Sync, Pull/Push/Fetch/Clone menu, commit box
+  (Ctrl+Enter; "Commit all" when nothing is staged), staged and changed sections with stage,
+  unstage and confirmed discard, diff dialog; credential prompt dialog; Init/Clone when the
+  workspace isn't a repository; rail badge with the change count; `git.*` palette commands.
+  Status refreshes on connect, after saves and after each operation.
+* Wire compatibility is pinned both ways: the app's `WireFixturesTest` and the protocol's
+  `app_encoded_requests_decode` / `daemon_encoded_replies_are_stable` share hex fixtures
+  (Git, search, pairing).
+* The installer installs git with `sudo -n apt-get` when it is missing.
+* Not done: editor gutter change markers, a log/history view, stash and merge-conflict tools.
 
-## 7. Debugging (planned)
+## 7. Debugging (in progress)
 DAP over the daemon's `Dap` bridge with debugpy (in the tool catalog): launch the active Python
 file, breakpoints in the gutter (F9), continue/step/stop (F5, F10, F11, Shift+F11, Shift+F5), call
 stack, variables, debug console. Restore the F9 binding when it works.

@@ -58,6 +58,10 @@ sleep 3
 systemctl --user start avf-native.service
 
 export PATH="$HOME/.local/bin:$PATH"
+# Source Control needs git; install it from Debian when sudo works without a password.
+if ! command -v git >/dev/null; then
+  sudo -n apt-get install -y git >/dev/null 2>&1 || echo "warning: git is missing; install it with: sudo apt install git" >&2
+fi
 if ! command -v uv >/dev/null; then
   arch=$(uname -m)
   archive=$(mktemp)

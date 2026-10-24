@@ -39,6 +39,7 @@ import androidx.compose.material.icons.outlined.Keyboard
 import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.NoteAdd
+import androidx.compose.material.icons.automirrored.outlined.CallSplit
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Terminal
@@ -260,6 +261,17 @@ private fun WorkbenchRail(controller: WorkbenchController) {
         RailItem(Icons.Outlined.Search, "Search", controller.sidebar == SidebarView.Search) {
             controller.runCommand("workbench.view.search")
         }
+        NavigationRailItem(
+            selected = controller.sidebar == SidebarView.SourceControl,
+            onClick = { controller.runCommand("workbench.view.scm") },
+            icon = {
+                val changes = controller.gitStatus?.entries?.size ?: 0
+                BadgedBox(badge = { if (changes > 0) Badge { Text("$changes") } }) {
+                    Icon(Icons.AutoMirrored.Outlined.CallSplit, contentDescription = null)
+                }
+            },
+            label = { Text("Git") },
+        )
         RailItem(Icons.Outlined.AccountTree, "Outline", controller.sidebar == SidebarView.Outline) {
             controller.runCommand("workbench.action.gotoSymbol")
         }

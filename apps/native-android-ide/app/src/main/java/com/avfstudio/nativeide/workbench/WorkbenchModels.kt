@@ -16,6 +16,7 @@ import java.util.UUID
 enum class SidebarView(val title: String) {
     Explorer("Explorer"),
     Search("Search"),
+    SourceControl("Source Control"),
     Outline("Outline"),
     Problems("Problems"),
     References("References"),
@@ -63,6 +64,11 @@ sealed interface WorkbenchDialog {
     /** Asks for a file or folder name; [error] explains why the last attempt failed. */
     data class PathPrompt(val action: PathAction, val initial: String, val error: String? = null) : WorkbenchDialog
     data class ConfirmDelete(val path: String, val isDirectory: Boolean) : WorkbenchDialog
+    data class GitPrompt(val prompt: com.avfstudio.nativeide.transport.GitEvent.Prompt) : WorkbenchDialog
+    data class GitDiff(val title: String, val patch: String) : WorkbenchDialog
+    data class GitBranches(val branches: List<com.avfstudio.nativeide.transport.GitBranch>) : WorkbenchDialog
+    data class GitConfirmDiscard(val paths: List<String>, val untracked: Int) : WorkbenchDialog
+    data object GitClone : WorkbenchDialog
     /** Set up (or re-pair) the Linux guest; [reason] says why it opened, e.g. a rejected token. */
     data class GuestSetup(val reason: String? = null) : WorkbenchDialog
     data class CopilotSignInCode(val signIn: CopilotSignIn) : WorkbenchDialog

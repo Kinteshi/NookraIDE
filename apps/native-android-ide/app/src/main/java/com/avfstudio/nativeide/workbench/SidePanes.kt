@@ -95,6 +95,7 @@ fun SidebarContent(controller: WorkbenchController, view: SidebarView, modifier:
         when (view) {
             SidebarView.Explorer -> ExplorerList(controller)
             SidebarView.Search -> SearchView(controller)
+            SidebarView.SourceControl -> SourceControlView(controller)
             SidebarView.Outline -> OutlineList(controller)
             SidebarView.Problems -> ProblemsList(controller)
             SidebarView.References -> ReferencesList(controller)

@@ -40,6 +40,21 @@ internal object MessagePackVfsCodec {
         stringField("context_lines", search.contextLines)
     }
 
+    fun gitRequest(requestId: Long, repo: String, operation: GitOperation): ByteArray = packet("Git", "Req") {
+        packMapHeader(3)
+        stringField("req_id", requestId)
+        stringField("repo", repo)
+        packString("op")
+        operation.pack(this)
+    }
+
+    fun gitPromptAnswer(requestId: Long, promptId: Long, answer: String): ByteArray = packet("Git", "PromptAnswer") {
+        packMapHeader(3)
+        stringField("req_id", requestId)
+        stringField("prompt_id", promptId)
+        stringField("answer", answer)
+    }
+
     fun searchCancel(requestId: Long): ByteArray = packet("Search", "Cancel") {
         packMapHeader(1)
         stringField("req_id", requestId)
@@ -138,6 +153,32 @@ internal object MessagePackVfsCodec {
 
     fun decode(bytes: ByteArray): IncomingPacket {
         val packet = MessagePack.newDefaultUnpacker(bytes).use { it.unpackValue() }
+        packet.mapStringValue("Git")?.let { group ->
+            val variant = group.singleEntry()
+            val fields = variant.value.asMapValue().map().mapKeys { it.key.asString() }
+            val requestId = fields["req_id"]?.asLong() ?: -1L
+            return when (variant.key.asString()) {
+                "Res" -> IncomingPacket.Git(GitEvent.Result(requestId, decodeGitResult(fields.getValue("result"))))
+                "Progress" -> IncomingPacket.Git(
+                    GitEvent.Progress(
+                        requestId,
+                        fields.getValue("phase").asString(),
+                        fields["percent"]?.takeUnless { it.isNilValue }?.asLong()?.toInt(),
+                        fields.getValue("detail").asString(),
+                    ),
+                )
+                "Prompt" -> IncomingPacket.Git(
+                    GitEvent.Prompt(
+                        requestId,
+                        fields.getValue("prompt_id").asLong(),
+                        fields.getValue("text").asString(),
+                        fields.getValue("secret").asBoolean(),
+                    ),
+                )
+                "Error" -> IncomingPacket.Git(GitEvent.Error(requestId, fields.getValue("message").asString()))
+                else -> IncomingPacket.Ignored
+            }
+        }
         packet.mapStringValue("Search")?.let { group ->
             val variant = group.singleEntry()
             val fields = variant.value.asMapValue().map().mapKeys { it.key.asString() }
@@ -370,6 +411,7 @@ sealed interface IncomingPacket {
     data class Rejected(val reason: String, val attemptsLeft: Int? = null) : IncomingPacket
     data class Paired(val token: String) : IncomingPacket
     data class Search(val event: SearchEvent) : IncomingPacket
+    data class Git(val event: GitEvent) : IncomingPacket
     data class ReadFile(
         val requestId: Long,
         val content: ByteArray,

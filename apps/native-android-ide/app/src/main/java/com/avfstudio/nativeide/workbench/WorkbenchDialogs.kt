@@ -47,6 +47,9 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.background
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.OutlinedButton
@@ -170,6 +173,32 @@ fun WorkbenchDialogHost(controller: WorkbenchController) {
         }
         is WorkbenchDialog.PathPrompt -> PathPromptDialog(controller, dialog)
         is WorkbenchDialog.GuestSetup -> GuestSetupDialog(controller, dialog)
+        is WorkbenchDialog.GitPrompt -> GitPromptDialog(controller, dialog)
+        is WorkbenchDialog.GitDiff -> AlertDialog(
+            onDismissRequest = { controller.dialog = null },
+            properties = DialogProperties(usePlatformDefaultWidth = false),
+            modifier = Modifier.padding(24.dp),
+            title = { Text(dialog.title) },
+            text = { DiffText(dialog.patch) },
+            confirmButton = { TextButton(onClick = { controller.dialog = null }) { Text("Close") } },
+        )
+        is WorkbenchDialog.GitBranches -> GitBranchesDialog(controller, dialog)
+        is WorkbenchDialog.GitConfirmDiscard -> AlertDialog(
+            onDismissRequest = { controller.dialog = null },
+            title = { Text(if (dialog.paths.size == 1) "Discard changes?" else "Discard ${dialog.paths.size} files' changes?") },
+            text = {
+                Text(
+                    buildString {
+                        append(if (dialog.paths.size == 1) dialog.paths.first() else "${dialog.paths.size} files")
+                        append(" will lose their uncommitted changes. This can't be undone.")
+                        if (dialog.untracked > 0) append(" ${dialog.untracked} untracked file${if (dialog.untracked == 1) " is" else "s are"} deleted.")
+                    },
+                )
+            },
+            confirmButton = { TextButton(onClick = { controller.discardFiles(dialog.paths) }) { Text("Discard", color = MaterialTheme.colorScheme.error) } },
+            dismissButton = { TextButton(onClick = { controller.dialog = null }) { Text("Cancel") } },
+        )
+        WorkbenchDialog.GitClone -> GitCloneDialog(controller)
         is WorkbenchDialog.ConfirmDelete -> AlertDialog(
             onDismissRequest = { controller.dialog = null },
             title = { Text(if (dialog.isDirectory) "Delete folder?" else "Delete file?") },
@@ -613,4 +642,138 @@ private fun PathPromptDialog(controller: WorkbenchController, prompt: WorkbenchD
         confirmButton = { TextButton(onClick = { controller.submitPathPrompt(prompt, value.text) }) { Text(confirm) } },
         dismissButton = { TextButton(onClick = { controller.dialog = null }) { Text("Cancel") } },
     )
+}
+
+@Composable
+private fun GitPromptDialog(controller: WorkbenchController, dialog: WorkbenchDialog.GitPrompt) {
+    var answer by remember { mutableStateOf("") }
+    val focus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { focus.requestFocus() }
+    AlertDialog(
+        onDismissRequest = { controller.answerGitPrompt(dialog.prompt, null) },
+        title = { Text("Git needs credentials") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(dialog.prompt.text.trim(), style = MaterialTheme.typography.bodyMedium)
+                OutlinedTextField(
+                    value = answer,
+                    onValueChange = { answer = it },
+                    singleLine = true,
+                    visualTransformation = if (dialog.prompt.secret) PasswordVisualTransformation() else VisualTransformation.None,
+                    keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { controller.answerGitPrompt(dialog.prompt, answer) }),
+                    modifier = Modifier.fillMaxWidth().focusRequester(focus),
+                )
+                if (dialog.prompt.secret) {
+                    Text(
+                        "For GitHub, use a personal access token as the password. It goes to Git in the guest and isn't stored by the app.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { controller.answerGitPrompt(dialog.prompt, answer) }) { Text("OK") } },
+        dismissButton = { TextButton(onClick = { controller.answerGitPrompt(dialog.prompt, null) }) { Text("Cancel") } },
+    )
+}
+
+@Composable
+private fun GitBranchesDialog(controller: WorkbenchController, dialog: WorkbenchDialog.GitBranches) {
+    var newBranch by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = { controller.dialog = null },
+        title = { Text("Checkout to…") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = newBranch,
+                    onValueChange = { newBranch = it.replace(' ', '-') },
+                    label = { Text("New branch from current") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { if (newBranch.isNotBlank()) controller.checkoutBranch(newBranch.trim(), create = true) }),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                LazyColumn(Modifier.heightIn(max = 320.dp)) {
+                    items(dialog.branches) { branch ->
+                        ListItem(
+                            headlineContent = { Text(branch.name, fontWeight = if (branch.isCurrent) FontWeight.Bold else null) },
+                            supportingContent = branch.upstream?.let { upstream -> { Text(upstream) } },
+                            modifier = Modifier.clickable(enabled = !branch.isCurrent) { controller.checkoutBranch(branch.name, create = false) },
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { controller.checkoutBranch(newBranch.trim(), create = true) }, enabled = newBranch.isNotBlank()) {
+                Text("Create branch")
+            }
+        },
+        dismissButton = { TextButton(onClick = { controller.dialog = null }) { Text("Cancel") } },
+    )
+}
+
+@Composable
+private fun GitCloneDialog(controller: WorkbenchController) {
+    var url by remember { mutableStateOf("") }
+    var folder by remember { mutableStateOf("") }
+    val suggested = url.trim().trimEnd('/').substringAfterLast('/').removeSuffix(".git")
+    AlertDialog(
+        onDismissRequest = { controller.dialog = null },
+        title = { Text("Clone repository") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = url,
+                    onValueChange = { url = it },
+                    label = { Text("Repository URL") },
+                    placeholder = { Text("https://github.com/owner/repo.git") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = folder,
+                    onValueChange = { folder = it },
+                    label = { Text("Folder in the workspace") },
+                    placeholder = { Text(suggested.ifEmpty { "repo" }) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { controller.gitClone(url, folder.ifBlank { suggested }) },
+                enabled = url.isNotBlank() && (folder.isNotBlank() || suggested.isNotEmpty()),
+            ) { Text("Clone") }
+        },
+        dismissButton = { TextButton(onClick = { controller.dialog = null }) { Text("Cancel") } },
+    )
+}
+
+/** A unified diff with added, removed and hunk lines coloured. */
+@Composable
+private fun DiffText(patch: String) {
+    val colors = MaterialTheme.colorScheme
+    val lines = remember(patch) { patch.lines().dropWhile { !it.startsWith("@@") }.ifEmpty { patch.lines() } }
+    LazyColumn(Modifier.heightIn(max = 560.dp)) {
+        items(lines) { line ->
+            val (background, foreground) = when {
+                line.startsWith("@@") -> colors.secondaryContainer to colors.onSecondaryContainer
+                line.startsWith("+") -> androidx.compose.ui.graphics.Color(0x3348B04F) to colors.onSurface
+                line.startsWith("-") -> colors.errorContainer.copy(alpha = 0.5f) to colors.onSurface
+                else -> androidx.compose.ui.graphics.Color.Transparent to colors.onSurfaceVariant
+            }
+            Text(
+                line.ifEmpty { " " },
+                fontFamily = FontFamily.Monospace,
+                style = MaterialTheme.typography.bodySmall,
+                color = foreground,
+                modifier = Modifier.fillMaxWidth().background(background).padding(horizontal = 6.dp),
+            )
+        }
+    }
 }
