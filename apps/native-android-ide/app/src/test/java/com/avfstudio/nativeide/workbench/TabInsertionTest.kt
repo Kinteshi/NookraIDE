@@ -16,4 +16,12 @@ class TabInsertionTest {
     fun tabsWhenSpacesAreOff() {
         assertEquals("\t", tabInsertion("abc", 4, insertSpaces = false))
     }
+
+    @Test
+    fun enterKeepsIndentationAndOpensBlocks() {
+        assertEquals("\n    ", newlineIndentation("    x = 1", 4, insertSpaces = true))
+        assertEquals("\n        ", newlineIndentation("    def f(n):", 4, insertSpaces = true))
+        assertEquals("\n\t", newlineIndentation("items = [", 4, insertSpaces = false))
+        assertEquals("\n", newlineIndentation("", 4, insertSpaces = true))
+    }
 }

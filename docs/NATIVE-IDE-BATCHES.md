@@ -211,8 +211,26 @@ stack, variables, debug console. Restore the F9 binding when it works.
   `application/vnd.plotly.v1+json` in a sandboxed WebView with plotly.js 4.1.1 (what plotly.py 7.1
   bundles) from cdn.plot.ly; the first plot needs a connection.
 * Status bar: padded above Android's bottom gesture zone, where taps were lost.
-* Not checked on the tablet yet (wireless debugging dropped): editor Tab, cell Tab/Enter, notebook
-  Copilot, plotly, the kernel fallback, the status bar padding, the installer's reporting unit.
+* Checked on the tablet (round 2): the installer adds the reporting unit (`page_reporting_order`
+  reads 10 after a reboot) and bridge-2; `sudo whoami` in the app terminal prints root; editor Tab
+  (Col 1→5, `ab` then Tab → Col 9), Tab/Shift+Tab on a two-line selection; the status bar sits
+  above the gesture zone; Copilot in the main editor (AVFCOP log: request, reply, ghost text).
+* Fixed in round 2:
+  * Enter in the editor didn't indent (the TextMate grammar has no indentation rules): it now
+    keeps the line's indentation, one level more after `:` or an open bracket, unless the
+    completion popup is open.
+  * The editor crashed (sora `LineBreakLayout.afterInsert`, ArrayIndexOutOfBounds) when the
+    keyboard committed text right after select-all + delete: every recomposition re-applied the
+    text size and tab width, and sora rebuilds and re-measures its layout in the background even
+    for unchanged values. Settings are now applied only when they differ.
+  * The draft cache wasn't flushed before its rename; after the tablet rebooted mid-write a draft
+    came back empty and opening failed ("Value of type String cannot be converted to
+    JSONObject"). Drafts are fsynced now, and an unreadable draft is dropped instead of failing.
+  * After that reboot the app's settings were back to defaults (theme) and the open tabs were
+    gone, which is consistent with the same unflushed writes.
+* Still not checked on the tablet (the tablet dropped off wireless debugging twice in 25
+  minutes, the first time because it rebooted): Enter indent after the crash fix, cell Tab/Enter,
+  notebook Copilot, plotly, the kernel fallback.
 
 ## Backlog
 * Finish Copilot chat sign-in on the tablet (needs the user's approval on GitHub).

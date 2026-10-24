@@ -129,3 +129,14 @@ internal fun indentOrInsertTab(editor: CodeEditor, tabSize: Int, insertSpaces: B
         endColumn + if (endLine in indented) unit.length else 0,
     )
 }
+
+/**
+ * What Enter inserts after [linePrefix] (the line up to the cursor): a newline with the line's
+ * indentation, one level deeper after a block opener (`:` in Python, or an open bracket).
+ */
+internal fun newlineIndentation(linePrefix: String, tabSize: Int, insertSpaces: Boolean): String {
+    var indent = linePrefix.takeWhile { it == ' ' || it == '\t' }
+    val last = linePrefix.trimEnd().lastOrNull()
+    if (last == ':' || last == '{' || last == '[' || last == '(') indent += if (insertSpaces) " ".repeat(tabSize) else "\t"
+    return "\n" + indent
+}

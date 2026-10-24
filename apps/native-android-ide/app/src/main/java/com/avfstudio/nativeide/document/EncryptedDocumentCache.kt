@@ -22,6 +22,18 @@ class EncryptedDocumentCache(context: Context) : DocumentCache {
     override fun load(path: String): DocumentSnapshot? {
         val file = cacheFile(path)
         if (!file.exists()) return null
+        // A draft cut short (the tablet rebooted mid-write) is lost either way; don't let it
+        // block opening the file from the guest.
+        return try {
+            decode(file, path)
+        } catch (error: Exception) {
+            android.util.Log.w("AVFCache", "Dropping unreadable draft for $path: ${error.message}")
+            file.delete()
+            null
+        }
+    }
+
+    private fun decode(file: File, path: String): DocumentSnapshot {
         val envelope = JSONObject(file.readText(StandardCharsets.UTF_8))
         val iv = android.util.Base64.decode(envelope.getString("iv"), android.util.Base64.NO_WRAP)
         val ciphertext = android.util.Base64.decode(
@@ -67,7 +79,11 @@ class EncryptedDocumentCache(context: Context) : DocumentCache {
             .toString()
         val target = cacheFile(snapshot.path)
         val temporary = File(directory, "${target.name}.tmp")
-        temporary.writeText(envelope, StandardCharsets.UTF_8)
+        // Flush before the rename, or a power loss can leave the new name with empty contents.
+        java.io.FileOutputStream(temporary).use { stream ->
+            stream.write(envelope.toByteArray(StandardCharsets.UTF_8))
+            stream.fd.sync()
+        }
         if (!temporary.renameTo(target)) {
             temporary.delete()
             error("Could not atomically persist the document cache")

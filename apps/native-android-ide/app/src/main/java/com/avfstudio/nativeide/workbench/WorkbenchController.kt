@@ -453,12 +453,22 @@ class WorkbenchController(private val context: Context) {
         }
     }
 
+    /**
+     * Runs on every recomposition of the editor (each edit), so it only touches what changed:
+     * sora rebuilds its layout on setTextSize/setTabWidth even for the same value, and measures
+     * the new one in the background; typing into it before that finished crashed sora
+     * (LineBreakLayout.afterInsert, ArrayIndexOutOfBounds).
+     */
     fun applyEditorSettings(view: CodeEditor) {
         val current = settings
-        view.setTextSize(current.editorFontSize)
-        view.setTabWidth(current.tabSize)
+        val sizePx = android.util.TypedValue.applyDimension(
+            android.util.TypedValue.COMPLEX_UNIT_SP, current.editorFontSize, view.resources.displayMetrics,
+        )
+        if (view.textSizePx != sizePx) view.setTextSize(current.editorFontSize)
+        if (view.tabWidth != current.tabSize) view.setTabWidth(current.tabSize)
+        (view as? NativeCodeEditor)?.insertSpaces = current.insertSpaces
         if (view.isWordwrap != current.wordWrap) view.setWordwrap(current.wordWrap)
-        view.setLineNumberEnabled(current.lineNumbers)
+        if (view.isLineNumberEnabled != current.lineNumbers) view.setLineNumberEnabled(current.lineNumbers)
     }
 
     private fun updateLanguageSettings() {

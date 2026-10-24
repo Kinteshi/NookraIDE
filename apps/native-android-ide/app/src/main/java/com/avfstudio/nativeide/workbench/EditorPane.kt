@@ -408,6 +408,8 @@ internal class NativeCodeEditor(
     /** Runs on the UI thread each time the analyzer publishes spans, so overlays (bracket pairs,
      *  semantic tokens) are re-applied to the fresh spans before the next frame. */
     var onStylesPublished: (() -> Unit)? = null
+    /** `editor.insertSpaces`; the tab size is the editor's tab width. */
+    var insertSpaces = true
 
     override fun setStyles(styles: Styles?) {
         super.setStyles(styles)
@@ -482,6 +484,17 @@ internal class NativeCodeEditor(
             }
         }
         if (event.action == AndroidKeyEvent.ACTION_DOWN && event.repeatCount == 0 && onKey(event)) return true
+        // Enter keeps the indentation (the TextMate grammar has no indentation rules), unless the
+        // completion popup is open and Enter picks an item.
+        if (event.action == AndroidKeyEvent.ACTION_DOWN && event.keyCode == AndroidKeyEvent.KEYCODE_ENTER &&
+            event.hasNoModifiers() && isEditable &&
+            !getComponent(io.github.rosemoe.sora.widget.component.EditorAutoCompletion::class.java).isShowing
+        ) {
+            val cursor = cursor
+            val prefix = text.getLineString(cursor.leftLine).substring(0, cursor.leftColumn)
+            commitText(newlineIndentation(prefix, tabWidth, insertSpaces))
+            return true
+        }
         return super.dispatchKeyEvent(event)
     }
 }

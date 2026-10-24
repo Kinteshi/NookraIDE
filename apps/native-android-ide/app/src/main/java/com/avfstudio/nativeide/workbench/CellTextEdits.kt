@@ -32,10 +32,7 @@ internal object CellTextEdits {
     fun newline(value: TextFieldValue, tabSize: Int, insertSpaces: Boolean): TextFieldValue {
         val text = value.text
         val start = value.selection.min
-        val before = text.substring(lineStart(text, start), start)
-        var indent = before.takeWhile { it == ' ' || it == '\t' }
-        if (before.trimEnd().endsWith(":")) indent += if (insertSpaces) " ".repeat(tabSize) else "\t"
-        val insertion = "\n" + indent
+        val insertion = newlineIndentation(text.substring(lineStart(text, start), start), tabSize, insertSpaces)
         val updated = text.substring(0, start) + insertion + text.substring(value.selection.max)
         return TextFieldValue(updated, TextRange(start + insertion.length))
     }
