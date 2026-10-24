@@ -9,10 +9,16 @@ import org.junit.Test
 
 class EditorCommandsTest {
     @Test
-    fun exposesFiftyDistinctVsCodeEditorCommands() {
-        assertEquals(50, EditorCommands.top50.size)
-        assertEquals(50, EditorCommands.top50.map(EditorCommand::id).distinct().size)
-        assertTrue(EditorCommands.top50.any { it.id == "editor.action.goToDefinition" && it.keybinding == "F12" })
+    fun exposesDistinctVsCodeEditorCommands() {
+        assertEquals(EditorCommands.all.size, EditorCommands.all.map(EditorCommand::id).distinct().size)
+        // Each dispatcher context (code editor; notebooks and other panes) needs unambiguous keys.
+        val editorContext = EditorCommands.core + EditorCommands.language + EditorCommands.copilot + EditorCommands.workbench
+        val notebookContext = EditorCommands.global + EditorCommands.notebook
+        listOf(editorContext, notebookContext).forEach { context ->
+            val keys = context.distinctBy(EditorCommand::id).map(EditorCommand::keybinding).filter(String::isNotEmpty)
+            assertEquals(keys.size, keys.distinct().size)
+        }
+        assertTrue(EditorCommands.core.any { it.id == "editor.action.goToDefinition" && it.keybinding == "F12" })
     }
 
     @Test
@@ -22,15 +28,15 @@ class EditorCommandsTest {
         assertEquals("workbench.action.files.save", dispatcher.dispatch(KeyStroke.parse("Ctrl+S")))
         assertNull(dispatcher.dispatch(KeyStroke.parse("Ctrl+K")))
         assertTrue(dispatcher.isAwaitingChord)
-        assertEquals("editor.foldAll", dispatcher.dispatch(KeyStroke.parse("Ctrl+0")))
+        assertEquals("editor.action.showHover", dispatcher.dispatch(KeyStroke.parse("Ctrl+I")))
         assertFalse(dispatcher.isAwaitingChord)
         assertNull(dispatcher.dispatch(KeyStroke.parse("Ctrl+K")))
         assertEquals("workbench.action.closeOtherEditors", dispatcher.dispatch(KeyStroke.parse("W")))
     }
 
     @Test
-    fun everyTopFiftyBindingResolvesToItsCommand() {
-        EditorCommands.top50.forEach { command ->
+    fun everyCoreBindingResolvesToItsCommand() {
+        EditorCommands.core.forEach { command ->
             val dispatcher = EditorKeybindingDispatcher()
             val result = command.keybinding.split(' ')
                 .map(KeyStroke::parse)
@@ -41,7 +47,7 @@ class EditorCommandsTest {
     }
 
     @Test
-    fun everyTopFiftyKeystrokeMapsFromAndroidHardwareKeyCodes() {
+    fun everyCoreKeystrokeMapsFromAndroidHardwareKeyCodes() {
         val keyCodes = mapOf(
             "UP" to KeyEvent.KEYCODE_DPAD_UP,
             "DOWN" to KeyEvent.KEYCODE_DPAD_DOWN,
@@ -80,7 +86,7 @@ class EditorCommandsTest {
             "F12" to KeyEvent.KEYCODE_F12,
         )
 
-        EditorCommands.top50.forEach { command ->
+        EditorCommands.core.forEach { command ->
             command.keybinding.split(' ').forEachIndexed { index, binding ->
                 val expected = KeyStroke.parse(binding)
                 val keyCode = requireNotNull(keyCodes[expected.key]) { "No Android key code for ${expected.key}" }

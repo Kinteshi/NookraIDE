@@ -33,7 +33,15 @@ enum class CompactDestination(val title: String) {
     More("More"),
 }
 
-enum class FocusArea { Editor, Terminal, Other }
+enum class FocusArea { Editor, Terminal, Notebook, Chat, Other }
+
+/** What a [WorkbenchDialog.PathPrompt] does with the name the user types. */
+sealed interface PathAction {
+    data class NewFile(val parent: String) : PathAction
+    data class NewFolder(val parent: String) : PathAction
+    data class Rename(val path: String) : PathAction
+    data class SaveAs(val documentPath: String) : PathAction
+}
 
 sealed interface WorkbenchDialog {
     data object Connect : WorkbenchDialog
@@ -50,6 +58,9 @@ sealed interface WorkbenchDialog {
     data class CodeActions(val choices: List<CodeActionChoice>) : WorkbenchDialog
     data class Hover(val text: String) : WorkbenchDialog
     data class Conflict(val document: DocumentSession) : WorkbenchDialog
+    /** Asks for a file or folder name; [error] explains why the last attempt failed. */
+    data class PathPrompt(val action: PathAction, val initial: String, val error: String? = null) : WorkbenchDialog
+    data class ConfirmDelete(val path: String, val isDirectory: Boolean) : WorkbenchDialog
     data class CopilotSignInCode(val signIn: CopilotSignIn) : WorkbenchDialog
     data class KernelPicker(
         val path: String,
@@ -92,4 +103,8 @@ class NotebookSession(
     var kernelState by mutableStateOf("No kernel")
     var busy by mutableStateOf(false)
     var selectedCell by mutableStateOf(notebook.cells.firstOrNull()?.id)
+    /** Bumped to put the keyboard back into the selected cell (e.g. after a kernel starts). */
+    var focusRequest by mutableStateOf(0)
+    /** Where the cursor lands in the next focused cell: true = end (arrived from below), false = start. */
+    var caretAtEnd: Boolean? = null
 }

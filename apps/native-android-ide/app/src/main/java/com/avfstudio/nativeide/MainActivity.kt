@@ -7,6 +7,10 @@ import android.os.SystemClock
 import android.view.ViewTreeObserver
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import com.avfstudio.nativeide.workbench.KeyRouter
+import androidx.compose.ui.platform.ComposeView
+import android.widget.FrameLayout
+import android.view.KeyEvent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -50,8 +54,15 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        setContent { NativeWorkbench() }
+        val root = object : FrameLayout(this) {
+            override fun dispatchKeyEventPreIme(event: KeyEvent): Boolean =
+                KeyRouter.route(event) || super.dispatchKeyEventPreIme(event)
+        }
+        root.addView(ComposeView(this).apply { setContent { NativeWorkbench() } })
+        setContentView(root)
     }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean = KeyRouter.route(event) || super.dispatchKeyEvent(event)
 }
 
 @Composable

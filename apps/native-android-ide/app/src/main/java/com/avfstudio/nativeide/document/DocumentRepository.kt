@@ -238,6 +238,11 @@ class DocumentRepository(
             }
     }
 
+    /** Drops the cached draft for a document that was renamed, deleted or saved elsewhere. */
+    fun forget(path: String) {
+        cache.delete(path)
+    }
+
     fun persistDraft(document: DocumentSession) {
         cache.save(
             DocumentSnapshot(

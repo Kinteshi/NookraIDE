@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -49,6 +50,12 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.runtime.remember
@@ -94,6 +101,7 @@ fun NotebookEditor(controller: WorkbenchController, session: NotebookSession) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             AssistChip(
+                modifier = Modifier.noKeyFocus(),
                 onClick = { controller.chooseKernel(session) },
                 label = { Text(session.kernelName ?: "Select kernel") },
                 leadingIcon = { Icon(Icons.Outlined.Memory, contentDescription = null, modifier = Modifier.size(18.dp)) },
@@ -112,8 +120,18 @@ fun NotebookEditor(controller: WorkbenchController, session: NotebookSession) {
             ToolbarButton(Icons.Outlined.ClearAll, "Clear outputs") { controller.clearAllOutputs(session) }
             ToolbarButton(Icons.Outlined.Save, "Save") { controller.saveNotebook(session) }
         }
+        val listState = rememberLazyListState()
+        // Keep the selected cell composed and on screen so it can take focus (Shift+Enter moves on).
+        LaunchedEffect(session.selectedCell) {
+            val index = session.notebook.cells.indexOfFirst { it.id == session.selectedCell }
+            val visible = listState.layoutInfo.visibleItemsInfo
+            if (index >= 0 && (visible.none { it.index == index } || visible.last().index == index)) {
+                listState.animateScrollToItem(index)
+            }
+        }
         LazyColumn(
             Modifier.fillMaxSize(),
+            state = listState,
             contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
@@ -122,11 +140,11 @@ fun NotebookEditor(controller: WorkbenchController, session: NotebookSession) {
             }
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(16.dp)) {
-                    TextButton(onClick = { controller.addCell(session, session.notebook.cells.lastOrNull()) }) {
+                    TextButton(modifier = Modifier.noKeyFocus(), onClick = { controller.addCell(session, session.notebook.cells.lastOrNull()) }) {
                         Icon(Icons.Outlined.Add, contentDescription = null)
                         Text(" Code")
                     }
-                    TextButton(onClick = { controller.addCell(session, session.notebook.cells.lastOrNull(), CellType.Markdown) }) {
+                    TextButton(modifier = Modifier.noKeyFocus(), onClick = { controller.addCell(session, session.notebook.cells.lastOrNull(), CellType.Markdown) }) {
                         Icon(Icons.Outlined.TextFields, contentDescription = null)
                         Text(" Markdown")
                     }
@@ -138,8 +156,11 @@ fun NotebookEditor(controller: WorkbenchController, session: NotebookSession) {
 
 @Composable
 private fun ToolbarButton(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
-    IconButton(onClick = onClick) { Icon(icon, contentDescription = label) }
+    IconButton(onClick = onClick, modifier = Modifier.noKeyFocus()) { Icon(icon, contentDescription = label) }
 }
+
+/** Notebook controls stay tappable but out of the arrow-key path, so Up/Down and Enter can't hit Delete. */
+private fun Modifier.noKeyFocus(): Modifier = focusProperties { canFocus = false }
 
 @Composable
 private fun NotebookCellView(controller: WorkbenchController, session: NotebookSession, cell: NotebookCell) {
@@ -164,7 +185,7 @@ private fun NotebookCellView(controller: WorkbenchController, session: NotebookS
                     style = MaterialTheme.typography.labelMedium,
                     color = colors.primary,
                 )
-                selected -> IconButton(onClick = { controller.runCell(session, cell) }, modifier = Modifier.size(32.dp)) {
+                selected -> IconButton(onClick = { controller.runCell(session, cell) }, modifier = Modifier.size(32.dp).noKeyFocus()) {
                     Icon(Icons.Outlined.PlayArrow, contentDescription = "Run cell", tint = colors.primary)
                 }
                 else -> Text(
@@ -186,6 +207,7 @@ private fun NotebookCellView(controller: WorkbenchController, session: NotebookS
                         color = if (selected) colors.primary else colors.outlineVariant.copy(alpha = 0.5f),
                         shape = RoundedCornerShape(12.dp),
                     )
+                    .noKeyFocus()
                     .clickable { session.selectedCell = cell.id },
             ) {
                 if (cell.type == CellType.Markdown && !selected) {
@@ -195,16 +217,16 @@ private fun NotebookCellView(controller: WorkbenchController, session: NotebookS
                 }
             }
             if (selected) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.noKeyFocus()) {
+                    TextButton(modifier = Modifier.noKeyFocus(), onClick = {
                         cell.type = if (cell.type == CellType.Code) CellType.Markdown else CellType.Code
                         controller.onCellEdited(session)
                     }) { Text(if (cell.type == CellType.Code) "Markdown" else "Code") }
                     Spacer(Modifier.weight(1f))
-                    IconButton(onClick = { controller.moveCell(session, cell, -1) }) { Icon(Icons.Outlined.ArrowUpward, "Move up") }
-                    IconButton(onClick = { controller.moveCell(session, cell, 1) }) { Icon(Icons.Outlined.ArrowDownward, "Move down") }
-                    IconButton(onClick = { controller.addCell(session, cell) }) { Icon(Icons.Outlined.Add, "Insert cell below") }
-                    IconButton(onClick = { controller.deleteCell(session, cell) }) { Icon(Icons.Outlined.Delete, "Delete cell") }
+                    IconButton(onClick = { controller.moveCell(session, cell, -1) }, modifier = Modifier.noKeyFocus()) { Icon(Icons.Outlined.ArrowUpward, "Move up") }
+                    IconButton(onClick = { controller.moveCell(session, cell, 1) }, modifier = Modifier.noKeyFocus()) { Icon(Icons.Outlined.ArrowDownward, "Move down") }
+                    IconButton(onClick = { controller.addCell(session, cell) }, modifier = Modifier.noKeyFocus()) { Icon(Icons.Outlined.Add, "Insert cell below") }
+                    IconButton(onClick = { controller.deleteCell(session, cell) }, modifier = Modifier.noKeyFocus()) { Icon(Icons.Outlined.Delete, "Delete cell") }
                 }
             }
             cell.outputs.forEach { output -> CellOutput(output) }
@@ -222,16 +244,29 @@ private fun CellSourceEditor(
 ) {
     val colors = MaterialTheme.colorScheme
     val focus = remember { FocusRequester() }
-    // Selecting a cell (Shift+Enter, + Code, a tap) puts the keyboard in it, as in Jupyter's edit mode.
-    LaunchedEffect(selected) { if (selected) runCatching { focus.requestFocus() } }
     val highlighter = remember(dark, cell.type) {
         if (cell.type == CellType.Code) PythonHighlighter(dark) else VisualTransformation.None
     }
+    var field by remember(cell.id) { mutableStateOf(TextFieldValue(cell.source)) }
+    // Selecting a cell (Shift+Enter, + Code, a tap) puts the keyboard in it, as in Jupyter's edit mode.
+    LaunchedEffect(selected, session.focusRequest) {
+        if (!selected) return@LaunchedEffect
+        session.caretAtEnd?.let { atEnd ->
+            field = field.copy(selection = TextRange(if (atEnd) field.text.length else 0))
+            session.caretAtEnd = null
+        }
+        runCatching { focus.requestFocus() }
+    }
+    // Follow changes made elsewhere (cell type toggles, reloads) without losing the cursor.
+    if (field.text != cell.source) field = TextFieldValue(cell.source, TextRange(minOf(field.selection.end, cell.source.length)))
     BasicTextField(
-        value = cell.source,
+        value = field,
         onValueChange = {
-            cell.source = it
-            controller.onCellEdited(session)
+            field = it
+            if (it.text != cell.source) {
+                cell.source = it.text
+                controller.onCellEdited(session)
+            }
         },
         textStyle = TextStyle(
             fontFamily = FontFamily.Monospace,
@@ -245,19 +280,27 @@ private fun CellSourceEditor(
             .heightIn(min = 40.dp)
             .padding(12.dp)
             .focusRequester(focus)
-            .onFocusChanged { if (it.isFocused) session.selectedCell = cell.id }
             .onPreviewKeyEvent { event ->
-                if (event.type != KeyEventType.KeyDown || event.key != Key.Enter) return@onPreviewKeyEvent false
-                when {
-                    event.isShiftPressed -> controller.runCell(session, cell, advance = true)
-                    event.isCtrlPressed -> controller.runCell(session, cell)
-                    event.isAltPressed -> {
-                        controller.runCell(session, cell)
-                        controller.addCell(session, cell)
-                    }
-                    else -> return@onPreviewKeyEvent false
+                // Up on the first line / Down on the last line moves between cells, as in Jupyter.
+                if (event.type != KeyEventType.KeyDown || event.isCtrlPressed || event.isAltPressed || event.isShiftPressed) {
+                    return@onPreviewKeyEvent false
                 }
-                true
+                val cursor = field.selection.start
+                when (event.key) {
+                    Key.DirectionUp -> field.text.lastIndexOf('\n', cursor - 1) < 0 &&
+                        controller.selectAdjacentCell(session, cell, -1)
+                    Key.DirectionDown -> field.text.indexOf('\n', cursor) < 0 &&
+                        controller.selectAdjacentCell(session, cell, 1)
+                    else -> false
+                }
+            }
+            .onFocusChanged { state ->
+                if (state.isFocused) {
+                    session.selectedCell = cell.id
+                    controller.focusArea = FocusArea.Notebook
+                } else if (controller.focusArea == FocusArea.Notebook) {
+                    controller.focusArea = FocusArea.Other
+                }
             },
     )
 }

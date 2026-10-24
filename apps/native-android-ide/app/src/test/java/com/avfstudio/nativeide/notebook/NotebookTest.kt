@@ -70,4 +70,11 @@ class NotebookTest {
             assertEquals("3\n", output.get("text").asString)
         }
     }
+
+    @Test
+    fun generatedKernelNamesMatchTheBridge() {
+        // avf-jupyter-bridge.py: "avf-" + label.lower() with non-alphanumerics replaced by "-".
+        org.junit.Assert.assertEquals("avf-miniconda3", generatedKernelName("miniconda3"))
+        org.junit.Assert.assertEquals("avf-conda--data-env", generatedKernelName("conda: Data env"))
+    }
 }

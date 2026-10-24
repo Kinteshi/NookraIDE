@@ -15,6 +15,10 @@ data class ExecuteReply(val status: String, val executionCount: Int?)
 data class InstallableKernel(val python: String, val label: String)
 data class KernelDiscovery(val specs: List<KernelSpec>, val installable: List<InstallableKernel>)
 
+/** The kernelspec name the bridge generates for an environment labelled [label] (see `avf-jupyter-bridge.py`). */
+fun generatedKernelName(label: String): String =
+    "avf-" + label.lowercase().map { if (it.isLetterOrDigit()) it else '-' }.joinToString("")
+
 /**
  * Client for the guest's `avf-jupyter-bridge` (guest/tools/avf-jupyter-bridge.py): one bridge
  * process and one kernel per open notebook, spoken to as newline-delimited JSON-RPC.

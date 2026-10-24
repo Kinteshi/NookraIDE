@@ -49,6 +49,7 @@ import com.avfstudio.nativeide.language.LanguageDiagnostic
 import com.avfstudio.nativeide.language.SettingsResolver
 import com.avfstudio.nativeide.notebook.CellType
 import com.avfstudio.nativeide.notebook.KernelClient
+import com.avfstudio.nativeide.notebook.generatedKernelName
 import com.avfstudio.nativeide.notebook.NotebookCell
 import com.avfstudio.nativeide.notebook.NotebookDocument
 import com.avfstudio.nativeide.transport.ConnectionProfileStore
@@ -109,6 +110,8 @@ class WorkbenchController(private val context: Context) {
     private val profileStore = ConnectionProfileStore(SharedPreferencesKeyValueStore(context), KeystoreSecretCipher())
     private val editorDispatcher = EditorKeybindingDispatcher(EditorCommands.all)
     private val globalDispatcher = EditorKeybindingDispatcher(EditorCommands.global)
+    private val notebookDispatcher = EditorKeybindingDispatcher(EditorCommands.global + EditorCommands.notebook)
+    private val consumedKeyDowns = mutableSetOf<Int>()
     private var lastHandledKey: Pair<Long, Int>? = null
     private val scheduledDraftWrites = mutableMapOf<String, ScheduledFuture<*>>()
     private val scheduledOutlineRefreshes = mutableMapOf<String, ScheduledFuture<*>>()
@@ -184,6 +187,8 @@ class WorkbenchController(private val context: Context) {
     var inlineSuggestion by mutableStateOf<Pair<String, CopilotSuggestion>?>(null)
         private set
     var cursorPosition by mutableStateOf<LspPosition?>(null)
+    private val cursorHistory = ArrayDeque<Pair<String, LspPosition?>>()
+    private var restoringCursor = false
         private set
     /** Bumped when the editor scrolls so the inline suggestion follows the cursor. */
     var editorViewportTick by mutableIntStateOf(0)
@@ -232,6 +237,8 @@ class WorkbenchController(private val context: Context) {
     var chatBusy by mutableStateOf(false)
         private set
     var chatAuthMethods by mutableStateOf(emptyList<AcpAuthMethod>())
+    /** When set, Quick Open attaches the picked file to chat instead of opening it. */
+    var quickOpenAttachesToChat by mutableStateOf(false)
     private var chatLoginTerminal: UUID? = null
         private set
 
@@ -706,10 +713,14 @@ class WorkbenchController(private val context: Context) {
         }
         val document = activeDocument ?: return
         if (document.path.startsWith("scratch:")) {
+            if (vfs.isConnected()) {
+                beginSaveAs(document)
+                return
+            }
             document.dirty = false
             repository.persistDraft(document)
             documentRevision++
-            status = "Saved locally"
+            status = "Saved locally; connect to save it to the guest"
             return
         }
         if (settings.formatOnSave && formattingClientFor(document.path)?.isReady == true) {
@@ -761,11 +772,165 @@ class WorkbenchController(private val context: Context) {
         }
     }
 
+    /** Ctrl+N: a plain-text scratch editor; saving it asks where to put it. */
     fun newUntitledFile() {
-        val document = DocumentSession("scratch:/Untitled-${documents.size}.py", "", baseModifiedTs = null, dirty = false)
+        val name = nextUntitledName(documents.map { it.path })
+        val document = DocumentSession("scratch:/$name", "", baseModifiedTs = null, dirty = false)
         documents.add(document)
         selectDocument(document.path)
-        status = "Created untitled file"
+        status = "Created $name"
+    }
+
+    // File operations -------------------------------------------------------------------------
+
+    /** Folder that New File/Folder and Save As start from: the Explorer's, else the workspace. */
+    private fun explorerParent(): String? = currentDirectory.ifEmpty { null } ?: workspaceRoot
+
+    fun beginNewEntry(folder: Boolean, parent: String? = explorerParent()) {
+        if (!vfs.isConnected() || parent == null) {
+            status = "Connect to a guest to create files"
+            return
+        }
+        dialog = WorkbenchDialog.PathPrompt(if (folder) PathAction.NewFolder(parent) else PathAction.NewFile(parent), "")
+    }
+
+    fun beginRenameEntry(path: String? = activePath) {
+        if (path == null || path.startsWith("scratch:")) {
+            status = "Open or select a saved file to rename"
+            return
+        }
+        dialog = WorkbenchDialog.PathPrompt(PathAction.Rename(path), path.substringAfterLast('/'))
+    }
+
+    fun beginDeleteEntry(path: String? = activePath, isDirectory: Boolean = false) {
+        if (path == null || path.startsWith("scratch:")) {
+            status = "Open or select a saved file to delete"
+            return
+        }
+        dialog = WorkbenchDialog.ConfirmDelete(path, isDirectory)
+    }
+
+    fun beginSaveAs(document: DocumentSession? = activeDocument) {
+        val parent = explorerParent()
+        if (document == null || !vfs.isConnected() || parent == null) {
+            status = "Connect to a guest to save files"
+            return
+        }
+        dialog = WorkbenchDialog.PathPrompt(
+            PathAction.SaveAs(document.path),
+            resolveEntryPath(parent, document.path.removePrefix("scratch:/").substringAfterLast('/')),
+        )
+    }
+
+    fun submitPathPrompt(prompt: WorkbenchDialog.PathPrompt, value: String) {
+        val action = prompt.action
+        val name = if (action is PathAction.SaveAs) value.trim() else value
+        entryNameProblem(name, allowSubpath = action !is PathAction.Rename)?.let { problem ->
+            dialog = prompt.copy(error = problem)
+            return
+        }
+        fun fail(error: Throwable) = post { dialog = prompt.copy(error = failureMessage(error)) }
+        when (action) {
+            is PathAction.NewFile, is PathAction.NewFolder -> {
+                val parent = (action as? PathAction.NewFile)?.parent ?: (action as PathAction.NewFolder).parent
+                val folder = action is PathAction.NewFolder
+                val target = resolveEntryPath(parent, name)
+                val targetParent = target.substringBeforeLast('/')
+                val parentReady = if (folder || targetParent == parent.trimEnd('/')) {
+                    CompletableFuture.completedFuture(Unit)
+                } else {
+                    vfs.create(targetParent, directory = true).thenApply { }
+                }
+                parentReady.thenCompose { vfs.create(target, folder) }.whenComplete { _, error ->
+                    if (error != null) return@whenComplete fail(error)
+                    post {
+                        dialog = null
+                        afterFileSystemChange()
+                        if (folder) status = "Created ${target.substringAfterLast('/')}" else openPath(target)
+                    }
+                }
+            }
+            is PathAction.Rename -> renameEntry(action.path, resolveEntryPath(action.path.substringBeforeLast('/'), name), ::fail)
+            is PathAction.SaveAs -> saveDocumentAs(action.documentPath, resolveEntryPath(explorerParent() ?: "/", name), ::fail)
+        }
+    }
+
+    private fun renameEntry(from: String, to: String, fail: (Throwable) -> Unit) {
+        val affected = documents.filter { renamedPath(it.path, from, to) != null }
+        affected.firstOrNull { it.dirty }?.let { document ->
+            fail(IllegalStateException("Save ${document.path.substringAfterLast('/')} before renaming"))
+            return
+        }
+        vfs.rename(from, to).whenComplete { _, error ->
+            if (error != null) return@whenComplete fail(error)
+            post {
+                dialog = null
+                val wasActive = activePath
+                affected.forEach { document ->
+                    closeDocument(document.path)
+                    repository.forget(document.path)
+                }
+                // Reopen what was open under the old name; the previously active file last, so it stays in front.
+                affected.sortedBy { it.path == wasActive }.forEach { document ->
+                    renamedPath(document.path, from, to)?.let(::openPath)
+                }
+                afterFileSystemChange()
+                status = "Renamed to ${to.substringAfterLast('/')}"
+            }
+        }
+    }
+
+    fun deleteEntry(path: String) {
+        dialog = null
+        vfs.delete(path).whenComplete { _, error ->
+            post {
+                if (error != null) {
+                    status = "Delete failed: ${failureMessage(error)}"
+                    return@post
+                }
+                documents.filter { renamedPath(it.path, path, path) != null }.forEach { document ->
+                    closeDocument(document.path)
+                    repository.forget(document.path)
+                }
+                afterFileSystemChange()
+                status = "Moved ${path.substringAfterLast('/')} to the trash"
+            }
+        }
+    }
+
+    /** Writes [sourcePath]'s text to a new file [target] (never overwriting) and switches to it. */
+    private fun saveDocumentAs(sourcePath: String, target: String, fail: (Throwable) -> Unit) {
+        val source = documents.firstOrNull { it.path == sourcePath } ?: return
+        val copy = DocumentSession(target, source.text, baseModifiedTs = null, dirty = true, encoding = source.encoding, eol = source.eol)
+        vfs.create(target, directory = false)
+            .thenCompose { repository.save(copy) }
+            .whenComplete { result, error ->
+                if (error != null) return@whenComplete fail(error)
+                if (result !is SaveResult.Saved) return@whenComplete fail(IllegalStateException("The guest did not confirm the save"))
+                post {
+                    dialog = null
+                    closeDocument(sourcePath)
+                    if (sourcePath.startsWith("scratch:")) repository.forget(sourcePath)
+                    afterFileSystemChange()
+                    openPath(target)
+                }
+            }
+    }
+
+    private fun afterFileSystemChange() {
+        currentDirectory.takeIf(String::isNotEmpty)?.let(::loadDirectory)
+        quickOpenIndex = emptyList()
+        refreshQuickOpenIndex()
+    }
+
+    private fun failureMessage(error: Throwable): String {
+        val cause = generateSequence(error) { it.cause }.last()
+        return when ((cause as? GuestVfsException)?.code) {
+            "AlreadyExists" -> "That name is already taken"
+            "NotFound" -> "The file no longer exists"
+            "PermissionDenied" -> "Permission denied"
+            else -> cause.message ?: error.message ?: "Request failed"
+        }
     }
 
     // Editor binding ----------------------------------------------------------------------------
@@ -785,7 +950,14 @@ class WorkbenchController(private val context: Context) {
     private fun onEditorEvent(event: EditorEvent) {
         when (event) {
             is EditorEvent.SelectionChanged -> post {
-                if (event.uri == activePath) cursorPosition = event.selection.active
+                if (event.uri == activePath) {
+                    if (!restoringCursor && cursorPosition != null && cursorPosition != event.selection.active) {
+                        cursorHistory.addLast(event.uri to cursorPosition)
+                        if (cursorHistory.size > 64) cursorHistory.removeFirst()
+                    }
+                    restoringCursor = false
+                    cursorPosition = event.selection.active
+                }
                 val shown = inlineSuggestion
                 if (shown != null && (shown.first != event.uri || event.selection.active != shown.second.range.end &&
                         !cursorWithinSuggestion(shown.second, event.selection.active))
@@ -1298,23 +1470,86 @@ class WorkbenchController(private val context: Context) {
 
     // Editor text commands --------------------------------------------------------------------
 
+    /** Ctrl+/ over every selected line (a selection ending at column 0 excludes that line, as in VS Code). */
     private fun toggleLineComment() {
         val document = activeDocument ?: return
         val view = editorView ?: return
-        val cursorLine = view.cursor.leftLine
-        val line = view.text.getLineString(cursorLine)
-        val comment = when (document.languageId) {
-            "py", "sh", "yaml", "yml", "toml", "r" -> "#"
-            "sql", "lua" -> "--"
-            else -> "//"
+        val token = commentTokens(document.languageId).line ?: run {
+            toggleBlockComment()
+            return
         }
-        val start = line.indexOfFirst { !it.isWhitespace() }.let { if (it < 0) 0 else it }
-        if (line.startsWith(comment, start)) {
-            val length = comment.length + if (line.getOrNull(start + comment.length) == ' ') 1 else 0
-            view.text.delete(cursorLine, start, cursorLine, start + length)
+        val range = view.cursorRange
+        val first = range.start.line
+        val last = if (range.end.line > first && range.end.column == 0) range.end.line - 1 else range.end.line
+        val lines = view.text.toString().split('\n')
+        val toggled = toggleLineComments(lines.subList(first, last + 1), token)
+        val updated = (lines.subList(0, first) + toggled + lines.subList(last + 1, lines.size)).joinToString("\n")
+        val offsetOf = { line: Int, column: Int -> (0 until line).sumOf { lines.getOrElse(it) { "" }.length + 1 } + column }
+        val shift = { line: Int, column: Int ->
+            val delta = toggled.getOrNull(line - first)?.let { it.length - lines[line].length } ?: 0
+            offsetOf(line, maxOf(0, column + delta)) + (first until line).sumOf { toggled[it - first].length - lines[it].length }
+        }
+        replaceEditorText(view, updated, shift(range.start.line, range.start.column), shift(range.end.line, range.end.column))
+    }
+
+    private fun toggleBlockComment() {
+        val document = activeDocument ?: return
+        val view = editorView ?: return
+        val (open, close) = commentTokens(document.languageId).block ?: run {
+            status = "No block comment syntax for this file type"
+            return
+        }
+        val range = view.cursorRange
+        val edit = toggleBlockComment(view.text.toString(), range.startIndex, range.endIndex, open, close)
+        replaceEditorText(view, edit.text, edit.selectionStart, edit.selectionEnd)
+    }
+
+    /** Applies [updated] as one minimal replacement so undo and incremental highlighting keep working. */
+    private fun replaceEditorText(view: CodeEditor, updated: String, selectionStart: Int, selectionEnd: Int) {
+        val span = changedSpan(view.text.toString(), updated)
+        val from = view.text.indexer.getCharPosition(span.start)
+        val to = view.text.indexer.getCharPosition(span.oldEnd)
+        view.text.replace(from.line, from.column, to.line, to.column, updated.substring(span.start, span.newEnd))
+        val start = view.text.indexer.getCharPosition(selectionStart.coerceIn(0, updated.length))
+        val end = view.text.indexer.getCharPosition(selectionEnd.coerceIn(0, updated.length))
+        view.setSelectionRegion(start.line, start.column, end.line, end.column)
+    }
+
+    /** F8 / Shift+F8: the next or previous diagnostic in the active file, wrapping around. */
+    private fun goToProblem(forward: Boolean) {
+        val document = activeDocument ?: return
+        val cursor = cursorPosition ?: LspPosition(0, 0)
+        fun position(diagnostic: LanguageDiagnostic): LspPosition {
+            val start = diagnostic.range.getAsJsonObject("start")
+            return LspPosition(start?.get("line")?.asInt ?: 0, start?.get("character")?.asInt ?: 0)
+        }
+        val order = compareBy<LspPosition>({ it.line }, { it.character })
+        val problems = diagnostics
+            .filter { runCatching { java.net.URI(it.uri).path }.getOrNull() == document.path }
+            .sortedWith(compareBy(order) { position(it) })
+        if (problems.isEmpty()) {
+            status = "No problems in this file"
+            return
+        }
+        val target = if (forward) {
+            problems.firstOrNull { order.compare(position(it), cursor) > 0 } ?: problems.first()
         } else {
-            view.text.insert(cursorLine, start, "$comment ")
+            problems.lastOrNull { order.compare(position(it), cursor) < 0 } ?: problems.last()
         }
+        navigateToLocation(LanguageLocation(target.uri, target.range))
+        status = target.message.lineSequence().first()
+    }
+
+    /** Ctrl+U: back to where the cursor was before its last move in this file. */
+    private fun undoCursorMove() {
+        val path = activePath ?: return
+        val view = editorView ?: return
+        while (cursorHistory.isNotEmpty() && cursorHistory.last() == path to cursorPosition) cursorHistory.removeLast()
+        val (historyPath, position) = cursorHistory.removeLastOrNull() ?: return
+        if (historyPath != path || position == null) return
+        restoringCursor = true
+        view.setSelection(position.line, position.character)
+        view.ensureSelectionVisible()
     }
 
     private fun copySelection(cut: Boolean) {
@@ -1913,7 +2148,8 @@ class WorkbenchController(private val context: Context) {
     }
 
     /** Lists kernels from the guest (conda, venvs, system Python with ipykernel) and asks which to use. */
-    fun chooseKernel(session: NotebookSession) {
+    /** Finds kernels; starts [preferredSpec] (or the notebook's own kernel) directly when it exists. */
+    fun chooseKernel(session: NotebookSession, preferredSpec: String? = null) {
         val directory = session.document.path.substringBeforeLast('/')
         session.kernelState = "Finding kernels…"
         val launched = if (session.kernel.isStarted) CompletableFuture.completedFuture(Unit) else session.kernel.launch(directory)
@@ -1931,7 +2167,7 @@ class WorkbenchController(private val context: Context) {
                     return@post
                 }
                 session.kernelState = if (specs.isEmpty()) "No kernels yet" else "No kernel"
-                val preferred = session.notebook.kernelName ?: settings.jupyterDefaultKernel
+                val preferred = preferredSpec ?: session.notebook.kernelName ?: settings.jupyterDefaultKernel
                 val match = specs.firstOrNull { it.name == preferred }
                 if (match != null && session.kernelName == null) startKernel(session, match) else {
                     dialog = WorkbenchDialog.KernelPicker(session.document.path, specs, discovery.installable)
@@ -1960,6 +2196,7 @@ class WorkbenchController(private val context: Context) {
                 } else {
                     session.kernelName = spec.displayName
                     session.kernelState = "Idle"
+                    session.focusRequest++
                     if (session.notebook.kernelName != spec.name) session.notebook.setKernel(spec.name, spec.displayName, spec.language)
                     documentRevision++
                     pendingExecution.remove(session.document.path)?.forEach { pendingCell ->
@@ -1973,14 +2210,26 @@ class WorkbenchController(private val context: Context) {
 
     private val pendingExecution = mutableMapOf<String, MutableList<NotebookCell>>()
 
-    /** Installs ipykernel into a guest environment in a visible terminal, so nothing changes silently. */
+    /**
+     * Installs ipykernel into a guest environment in a visible terminal, so nothing changes
+     * silently. When pip succeeds the terminal closes its shell and the new kernel starts.
+     */
     fun installKernelPackage(session: NotebookSession, candidate: com.avfstudio.nativeide.notebook.InstallableKernel) {
         dialog = null
         session.notebook.cells.forEach { it.queued = false }
         pendingExecution.remove(session.document.path)
-        newTerminal("'${candidate.python}' -m pip install ipykernel")
+        newTerminal("'${candidate.python}' -m pip install ipykernel && exit", onExit = { code ->
+            post {
+                if (code == 0) {
+                    chooseKernel(session, generatedKernelName(candidate.label))
+                } else {
+                    session.kernelState = "ipykernel install failed"
+                    status = "pip could not install ipykernel into ${candidate.label}; the terminal shows why"
+                }
+            }
+        })
         session.kernelState = "Installing ipykernel…"
-        status = "Installing ipykernel into ${candidate.label}; select the kernel again when the terminal finishes"
+        status = "Installing ipykernel into ${candidate.label}…"
     }
 
     fun runCell(session: NotebookSession, cell: NotebookCell, advance: Boolean = false) {
@@ -2053,6 +2302,16 @@ class WorkbenchController(private val context: Context) {
         session.selectedCell = session.notebook.cells.getOrNull(index.coerceAtMost(session.notebook.cells.lastIndex))?.id
         session.notebook.dirty = true
         documentRevision++
+    }
+
+    /** Selects and focuses the cell [delta] away from [cell]; false at either end of the notebook. */
+    fun selectAdjacentCell(session: NotebookSession, cell: NotebookCell, delta: Int): Boolean {
+        val cells = session.notebook.cells
+        val target = cells.getOrNull(cells.indexOf(cell) + delta) ?: return false
+        session.selectedCell = target.id
+        session.caretAtEnd = delta < 0
+        session.focusRequest++
+        return true
     }
 
     fun moveCell(session: NotebookSession, cell: NotebookCell, delta: Int) {
@@ -2162,11 +2421,51 @@ class WorkbenchController(private val context: Context) {
      * Handles a hardware key press. Both the root composable and the code editor call this, so a
      * key seen twice (same down time and key code) is consumed but not run again.
      */
+    /**
+     * Window-level entry point (see [KeyRouter]): runs before the IME and regardless of which view
+     * has focus. In the code editor, plain Tab/Enter/Escape stay with the editor (completion
+     * popup, inline suggestions); in a terminal, unbound Ctrl+letter goes to the shell as a
+     * control byte so an IME can't swallow Ctrl+C.
+     */
+    fun routeHardwareKey(event: AndroidKeyEvent): Boolean {
+        if (dialog != null) return false
+        if (event.action == AndroidKeyEvent.ACTION_UP) return consumedKeyDowns.remove(event.keyCode)
+        if (event.action != AndroidKeyEvent.ACTION_DOWN) return false
+        val modified = event.isCtrlPressed || event.isAltPressed
+        if (focusArea == FocusArea.Editor && !modified &&
+            event.keyCode in setOf(AndroidKeyEvent.KEYCODE_TAB, AndroidKeyEvent.KEYCODE_ENTER, AndroidKeyEvent.KEYCODE_ESCAPE)
+        ) {
+            return false
+        }
+        val handled = handleKeyDown(event) || sendTerminalControlKey(event)
+        if (handled) consumedKeyDowns += event.keyCode
+        if (modified) android.util.Log.d("AVFKEY", "route ${AndroidKeyEvent.keyCodeToString(event.keyCode)} meta=${event.metaState} dev=${event.deviceId} focus=$focusArea handled=$handled")
+        return handled
+    }
+
+    private fun sendTerminalControlKey(event: AndroidKeyEvent): Boolean {
+        if (focusArea != FocusArea.Terminal || !event.isCtrlPressed || event.isAltPressed || event.isShiftPressed) return false
+        val code = when (event.keyCode) {
+            in AndroidKeyEvent.KEYCODE_A..AndroidKeyEvent.KEYCODE_Z -> event.keyCode - AndroidKeyEvent.KEYCODE_A + 1
+            AndroidKeyEvent.KEYCODE_LEFT_BRACKET -> 27
+            AndroidKeyEvent.KEYCODE_BACKSLASH -> 28
+            AndroidKeyEvent.KEYCODE_RIGHT_BRACKET -> 29
+            else -> return false
+        }
+        val terminal = terminals.firstOrNull { it.id == activeTerminalId && !it.exited } ?: return false
+        if (event.repeatCount == 0 || code != 3) vfs.ptyInput(terminal.id, byteArrayOf(code.toByte()))
+        return true
+    }
+
     fun handleKeyDown(event: AndroidKeyEvent): Boolean {
         if (event.action != AndroidKeyEvent.ACTION_DOWN) return false
         val identity = event.downTime to event.keyCode
         if (identity == lastHandledKey) return true
-        val dispatcher = if (focusArea == FocusArea.Editor) editorDispatcher else globalDispatcher
+        val dispatcher = when {
+            focusArea == FocusArea.Editor -> editorDispatcher
+            activeNotebook != null && focusArea in setOf(FocusArea.Notebook, FocusArea.Other) -> notebookDispatcher
+            else -> globalDispatcher
+        }
         val stroke = editorKeyStroke(
             event.keyCode,
             event.isCtrlPressed,
@@ -2190,7 +2489,12 @@ class WorkbenchController(private val context: Context) {
         when (commandId) {
             "workbench.action.files.save" -> saveActiveDocument()
             "workbench.action.files.newUntitledFile" -> newUntitledFile()
-            "workbench.action.files.openFile", "workbench.action.quickOpen", "workbench.action.files.saveAs" -> {
+            "workbench.action.files.saveAs" -> beginSaveAs()
+            "explorer.newFile" -> beginNewEntry(folder = false)
+            "explorer.newFolder" -> beginNewEntry(folder = true)
+            "renameFile" -> beginRenameEntry()
+            "deleteFile" -> beginDeleteEntry()
+            "workbench.action.files.openFile", "workbench.action.quickOpen" -> {
                 quickOpenFilter = ""
                 dialog = WorkbenchDialog.QuickOpen
             }
@@ -2248,6 +2552,10 @@ class WorkbenchController(private val context: Context) {
             "editor.action.indentLines" -> view?.indentSelection()
             "editor.action.outdentLines" -> view?.unindentSelection()
             "editor.action.commentLine" -> toggleLineComment()
+            "editor.action.blockComment" -> toggleBlockComment()
+            "editor.action.marker.next" -> goToProblem(forward = true)
+            "editor.action.marker.prev" -> goToProblem(forward = false)
+            "cursorUndo" -> undoCursorMove()
             "editor.action.moveLinesUpAction",
             "editor.action.moveLinesDownAction",
             "editor.action.copyLinesUpAction",
@@ -2285,6 +2593,25 @@ class WorkbenchController(private val context: Context) {
                 status = if (copilotEnabled) "Copilot inline suggestions on" else "Copilot inline suggestions off"
             }
             "github.copilot.chat.signIn" -> signInChatInTerminal()
+            "notebook.cell.executeAndSelectBelow", "notebook.cell.execute", "notebook.cell.executeAndInsertBelow" ->
+                activeNotebook?.let { session ->
+                    val cell = session.notebook.cells.firstOrNull { it.id == session.selectedCell } ?: return@let
+                    when (commandId) {
+                        "notebook.cell.executeAndSelectBelow" -> runCell(session, cell, advance = true)
+                        "notebook.cell.execute" -> runCell(session, cell)
+                        else -> {
+                            runCell(session, cell)
+                            addCell(session, cell)
+                        }
+                    }
+                }
+            "notebook.cell.insertCodeCellBelow" -> activeNotebook?.let { session ->
+                addCell(session, session.notebook.cells.firstOrNull { it.id == session.selectedCell })
+            }
+            "notebook.focusPreviousEditor", "notebook.focusNextEditor" -> activeNotebook?.let { session ->
+                val cell = session.notebook.cells.firstOrNull { it.id == session.selectedCell } ?: return@let
+                selectAdjacentCell(session, cell, if (commandId == "notebook.focusNextEditor") 1 else -1)
+            }
             "jupyter.selectKernel" -> activeNotebook?.let(::chooseKernel)
             "jupyter.runAll" -> activeNotebook?.let(::runAllCells)
             "jupyter.restartKernel" -> activeNotebook?.let(::restartKernel)

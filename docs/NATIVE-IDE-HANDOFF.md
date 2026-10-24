@@ -1,11 +1,11 @@
 # Native IDE (Track B) — handoff
 
-Last updated: 2026-10-23, 16:15 (UTC−3). Read this first when resuming. Scope decisions are in
+Last updated: 2026-10-23, 17:10 (UTC−3). Read this first when resuming. The batch plan and its status are in [NATIVE-IDE-BATCHES.md](NATIVE-IDE-BATCHES.md). Scope decisions are in
 [NATIVE-ANDROID-IDE-SPEC.md](NATIVE-ANDROID-IDE-SPEC.md) under "Scope reset (2026-10-23)".
 
 ## Where things are
 
-* **Branch:** `agents/reset-and-implement-native-android-ide`. The work below is committed as `Native IDE: Material You workbench, terminal, Jupyter, Copilot` (not pushed). The untracked top-level `android/` folder holds build leftovers from the Track A branch, so ignore it.
+* **Branch:** `agents/reset-and-implement-native-android-ide`. Work is committed batch by batch (see the batch plan); nothing is pushed. The untracked top-level `android/` folder holds build leftovers from the Track A branch, so ignore it.
 * **App:** `apps/native-android-ide`, package `com.avfstudio.nativeide`.
 * **Guest daemon:** `crates/avf-daemon` with protocol `crates/avf-protocol`. The guest tool catalog is `guest/tools/catalog.json`, and the Jupyter bridge is `guest/tools/avf-jupyter-bridge.py`; the daemon embeds both.
 * **Guest install script:** `scripts/install-native-daemon.sh`.
@@ -20,7 +20,7 @@ cargo test -p avf-daemon -p avf-protocol
 PATH=$HOME/.cargo/bin:$PATH cargo zigbuild --release -p avf-daemon --target aarch64-unknown-linux-gnu.2.28
 ```
 
-At last run: the app had 65 unit tests and the daemon 66 + 18, all passing; clippy was clean.
+At last run: the app had 76 unit tests and the daemon 66 + 18, all passing; clippy was clean.
 
 ## Reference tablet (Galaxy Tab S11 Ultra, SM-X930)
 
@@ -79,6 +79,17 @@ At last run: the app had 65 unit tests and the daemon 66 + 18, all passing; clip
   * close codes 1005/1006 handled
   * semantic-token ContentModified errors silenced
 
+### Keyboard and files (round 2)
+* **Shortcuts route at the window level.** They used to depend on Compose focus (a root `onPreviewKeyEvent`), so after launch, a dialog, or a notebook run nothing reached them. `MainActivity` now wraps the content in a layout whose `dispatchKeyEventPreIme` calls `KeyRouter` (before Gboard, which manages the Book Cover's BR layout), with `Activity.dispatchKeyEvent` as the fallback; `WorkbenchController.routeHardwareKey` dedupes. In the code editor, plain Tab/Enter/Escape stay with sora (completion popup, Copilot ghost text).
+* **Terminal:** unbound Ctrl+letter is written to the PTY as a control byte (Ctrl+C = 0x03), so the IME can't swallow it.
+* **Notebooks:** Shift/Ctrl/Alt+Enter and Ctrl+Shift+Enter are keybindings (`EditorCommands.notebook`); the list scrolls to the selected cell, which takes focus (also after a kernel starts). Up on a cell's first line / Down on its last moves between cells; notebook buttons are out of the arrow-key path (`noKeyFocus`) so Enter can't hit Delete. "Install ipykernel" runs `pip … && exit` and starts the new kernel when pip succeeds.
+* **Focus areas:** Editor, Terminal, Notebook, Chat, Other decide which bindings apply (Shift+Enter in chat stays a newline).
+* **Removed unimplemented bindings** (breakpoint, folding) and implemented Next/Previous Problem (F8), Undo Cursor Move (Ctrl+U), Block Comment (Shift+Alt+A); Ctrl+/ now toggles every selected line. ABNT2's `/` key (`KEYCODE_RO`) also counts as `/`.
+* **Files:** Explorer header has New File / New Folder (one tap; names used as typed, `dir/name` creates folders); long-press or right-click an entry for Rename / Delete (to the daemon's trash). Open files follow a rename. Ctrl+N makes a plain `Untitled-N`; Save on it, and Save As (Ctrl+Shift+S), ask for a guest path and never overwrite. `GuestVfsClient` gained `create`, `rename`, `delete`.
+* **Debug logging:** `routeHardwareKey` still logs routed Ctrl/Alt keys under the `AVFKEY` tag, to confirm the Book Cover keyboard; remove it once confirmed.
+* **Guest:** Miniconda `py313_26.9.3` (checksum-verified) in `~/miniconda3`, `conda init bash` (terminals start in `(base)`), ipykernel installed into base by the app's install flow. Anaconda's channel Terms of Service were not accepted.
+* **Testing keys like a real keyboard:** Android's `hid` tool registers a USB HID keyboard through `/dev/uhid` (`adb shell hid file.jsonl`); `sendevent` to the Book Cover is denied. Under the BR layout the HID `/` key types `;`.
+
 ### Verified on the tablet
 * Connect, Explorer, open files, ty and Ruff diagnostics, and the servers stopping when idle.
 * Terminal: commands, colours, resize.
@@ -99,10 +110,11 @@ At last run: the app had 65 unit tests and the daemon 66 + 18, all passing; clip
    - Kernel completion isn't wired: `KernelClient.complete` exists but no UI uses it.
    - `NotebookCell` autofocus (added at the end, not yet seen on device).
    - The reset guest has no Python with ipykernel; check the kernel picker's "Install ipykernel" flow on a fresh guest (Debian's system pip is externally managed).
-5. **Not built yet:** customisable keybindings (`keybindings.json`), TypeScript 7 `tsc --lsp` measurement (Node isn't in the guest), and a phone-width check of the compact layout.
-6. **Decide later whether to merge daemon changes with Track A's Supervisor branch.** The two branches' `lib.rs` have diverged. Track A's guest install was also lost in the reset.
+5. **Initial setup / host reset:** the current recovery is manual (push daemon, run the installer, type a 64-character token in 4-character chunks, accept the port). Also: the app neither reconnects on launch nor restores open tabs.
+6. **Not built yet:** customisable keybindings (`keybindings.json`), TypeScript 7 `tsc --lsp` measurement (Node isn't in the guest), and a phone-width check of the compact layout.
+7. **Decide later whether to merge daemon changes with Track A's Supervisor branch.** The two branches' `lib.rs` have diverged. Track A's guest install was also lost in the reset.
 
 ## Device leftovers to clean up
 
 The 13:46 guest reset removed the earlier test files. Current leftovers:
-* `~/Projects/hl_test.py` (highlighting test file). The app also keeps an unsaved draft of it with test edits, and test lines in the `welcome.py` scratch file; close both without saving.
+* `~/Projects/hl_test.py` (highlighting test file; the user also edited it), `~/Projects/notes` (empty, from the rename test), and `~/Projects/avf-tests/` (`keys.ipynb`, `comments.py`, `Untitled-1`, plus a `welcome.py` the user saved there with Ctrl+S). The app also keeps an unsaved draft of it with test edits, and test lines in the `welcome.py` scratch file; close both without saving.

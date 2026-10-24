@@ -99,7 +99,9 @@ fun NativeWorkbench() {
         }
         val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_STOP) controller.persistDrafts() }
         lifecycleOwner.lifecycle.addObserver(observer)
+        KeyRouter.handler = controller::routeHardwareKey
         onDispose {
+            KeyRouter.handler = null
             lifecycleOwner.lifecycle.removeObserver(observer)
             controller.dispose()
         }
@@ -113,11 +115,7 @@ fun NativeWorkbench() {
                 Modifier
                     .fillMaxSize()
                     .windowInsetsPadding(WindowInsets.safeDrawing)
-                    .imePadding()
-                    .onPreviewKeyEvent { event ->
-                        event.type == KeyEventType.KeyDown && controller.dialog == null &&
-                            controller.handleKeyDown(event.nativeKeyEvent)
-                    },
+                    .imePadding(),
             ) {
                 if (controller.settingsVisible) SettingsScreen(controller) else WorkbenchLayout(controller)
             }
@@ -231,6 +229,7 @@ private fun TopBar(controller: WorkbenchController, expanded: Boolean) {
             IconButton(onClick = { menu = true }) { Icon(Icons.Outlined.MoreVert, contentDescription = "More") }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                 MenuItem("Command palette", "Ctrl+Shift+P", Icons.Outlined.Widgets) { menu = false; controller.runCommand("workbench.action.showCommands") }
+                MenuItem("New file…", "", Icons.Outlined.NoteAdd) { menu = false; controller.beginNewEntry(folder = false) }
                 MenuItem("New untitled file", "Ctrl+N", Icons.Outlined.NoteAdd) { menu = false; controller.newUntitledFile() }
                 MenuItem("New terminal", "Ctrl+Shift+`", Icons.Outlined.Terminal) { menu = false; controller.newTerminal() }
                 MenuItem("Keyboard shortcuts", "Ctrl+K Ctrl+S", Icons.Outlined.Keyboard) { menu = false; controller.dialog = WorkbenchDialog.Keybindings }

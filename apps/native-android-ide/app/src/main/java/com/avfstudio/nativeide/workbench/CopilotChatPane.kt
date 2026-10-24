@@ -41,6 +41,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isShiftPressed
@@ -121,6 +122,10 @@ fun CopilotChatPane(controller: WorkbenchController, modifier: Modifier = Modifi
                 modifier = Modifier
                     .weight(1f)
                     .heightIn(max = 180.dp)
+                    .onFocusChanged { state ->
+                        if (state.isFocused) controller.focusArea = FocusArea.Chat
+                        else if (controller.focusArea == FocusArea.Chat) controller.focusArea = FocusArea.Other
+                    }
                     .onPreviewKeyEvent { event ->
                         // Enter sends, Shift+Enter keeps typing on a new line.
                         if (event.type == KeyEventType.KeyDown && event.key == Key.Enter && !event.isShiftPressed) {

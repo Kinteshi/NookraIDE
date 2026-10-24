@@ -47,6 +47,11 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -151,6 +156,14 @@ fun WorkbenchDialogHost(controller: WorkbenchController) {
                 controller.dialog = null
             }
         }
+        is WorkbenchDialog.PathPrompt -> PathPromptDialog(controller, dialog)
+        is WorkbenchDialog.ConfirmDelete -> AlertDialog(
+            onDismissRequest = { controller.dialog = null },
+            title = { Text(if (dialog.isDirectory) "Delete folder?" else "Delete file?") },
+            text = { Text("${dialog.path.substringAfterLast('/')} will be moved to the guest's trash.") },
+            confirmButton = { TextButton(onClick = { controller.deleteEntry(dialog.path) }) { Text("Delete") } },
+            dismissButton = { TextButton(onClick = { controller.dialog = null }) { Text("Cancel") } },
+        )
         WorkbenchDialog.Rename -> AlertDialog(
             onDismissRequest = { controller.dialog = null },
             title = { Text("Rename symbol") },
@@ -473,4 +486,49 @@ internal fun fuzzyMatch(query: String, candidate: String): Boolean {
         if (char.equals(query[index], ignoreCase = true) && ++index == query.length) return true
     }
     return false
+}
+
+@Composable
+private fun PathPromptDialog(controller: WorkbenchController, prompt: WorkbenchDialog.PathPrompt) {
+    val (title, label, confirm) = when (prompt.action) {
+        is PathAction.NewFile -> Triple("New file", "Name (folders allowed: src/main.c)", "Create")
+        is PathAction.NewFolder -> Triple("New folder", "Name", "Create")
+        is PathAction.Rename -> Triple("Rename", "New name", "Rename")
+        is PathAction.SaveAs -> Triple("Save as", "Path", "Save")
+    }
+    var value by remember(prompt.action) {
+        // Select the name but not its extension, like VS Code, so typing replaces just the name.
+        val start = prompt.initial.lastIndexOf('/') + 1
+        val dot = prompt.initial.lastIndexOf('.').takeIf { it > start } ?: prompt.initial.length
+        mutableStateOf(TextFieldValue(prompt.initial, TextRange(start, dot)))
+    }
+    val focusRequester = remember { FocusRequester() }
+    LaunchedEffect(prompt.action) { focusRequester.requestFocus() }
+    val parent = when (val action = prompt.action) {
+        is PathAction.NewFile -> action.parent
+        is PathAction.NewFolder -> action.parent
+        else -> null
+    }
+    AlertDialog(
+        onDismissRequest = { controller.dialog = null },
+        title = { Text(title) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                parent?.let { Text("In $it", style = MaterialTheme.typography.bodySmall) }
+                OutlinedTextField(
+                    value = value,
+                    onValueChange = { value = it },
+                    label = { Text(label) },
+                    singleLine = true,
+                    isError = prompt.error != null,
+                    supportingText = prompt.error?.let { error -> { Text(error) } },
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done, autoCorrectEnabled = false),
+                    keyboardActions = KeyboardActions(onDone = { controller.submitPathPrompt(prompt, value.text) }),
+                    modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = { controller.submitPathPrompt(prompt, value.text) }) { Text(confirm) } },
+        dismissButton = { TextButton(onClick = { controller.dialog = null }) { Text("Cancel") } },
+    )
 }

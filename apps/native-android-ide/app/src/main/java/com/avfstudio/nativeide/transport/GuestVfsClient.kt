@@ -197,6 +197,20 @@ class GuestVfsClient(
     override fun flush(path: String): CompletableFuture<IncomingPacket.Ack> =
         request("FlushReq", mapOf("path" to path)).thenApply { it as IncomingPacket.Ack }
 
+    /** Creates an empty file (failing if it exists) or a directory with its parents. */
+    fun create(path: String, directory: Boolean): CompletableFuture<IncomingPacket.Ack> =
+        request("CreateReq", mapOf("path" to path, "kind" to if (directory) "Dir" else "File"))
+            .thenApply { it as IncomingPacket.Ack }
+
+    fun rename(from: String, to: String): CompletableFuture<IncomingPacket.Ack> =
+        request("RenameReq", mapOf("from" to from, "to" to to, "overwrite" to false))
+            .thenApply { it as IncomingPacket.Ack }
+
+    /** Moves [path] to the daemon's trash (restorable), recursively for directories. */
+    fun delete(path: String): CompletableFuture<IncomingPacket.Ack> =
+        request("DeleteReq", mapOf("path" to path, "recursive" to true, "to_trash" to true))
+            .thenApply { it as IncomingPacket.Ack }
+
     fun startLanguageServer(tool: String, cwd: String, args: List<String> = emptyList()): CompletableFuture<UUID> =
         startRpc(tool, cwd, "Lsp", args)
 

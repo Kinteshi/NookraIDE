@@ -2,6 +2,8 @@ package com.avfstudio.nativeide.workbench
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -15,7 +17,11 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.InsertDriveFile
+import androidx.compose.material.icons.automirrored.outlined.NoteAdd
 import androidx.compose.material.icons.outlined.Code
+import androidx.compose.material.icons.outlined.CreateNewFolder
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.DriveFileRenameOutline
 import androidx.compose.material.icons.outlined.DataObject
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.Folder
@@ -23,15 +29,23 @@ import androidx.compose.material.icons.outlined.Functions
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.WarningAmber
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.isSecondaryPressed
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -45,6 +59,14 @@ fun SidebarContent(controller: WorkbenchController, view: SidebarView, modifier:
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(view.title, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+            if (view == SidebarView.Explorer && controller.connected) {
+                IconButton(onClick = { controller.beginNewEntry(folder = false) }) {
+                    Icon(Icons.AutoMirrored.Outlined.NoteAdd, contentDescription = "New file")
+                }
+                IconButton(onClick = { controller.beginNewEntry(folder = true) }) {
+                    Icon(Icons.Outlined.CreateNewFolder, contentDescription = "New folder")
+                }
+            }
             if (view == SidebarView.Explorer) {
                 IconButton(onClick = { controller.currentDirectory.takeIf(String::isNotEmpty)?.let(controller::loadDirectory) }) {
                     Icon(Icons.Outlined.Refresh, contentDescription = "Refresh")
@@ -79,16 +101,39 @@ fun ExplorerList(controller: WorkbenchController) {
                 }
             }
             items(controller.entries, key = { it.path }) { entry ->
-                PaneRow(
-                    when {
-                        entry.isDirectory -> Icons.Outlined.Folder
-                        entry.name.endsWith(".ipynb") -> Icons.Outlined.Code
-                        else -> Icons.AutoMirrored.Outlined.InsertDriveFile
-                    },
-                    entry.name,
-                    selected = entry.path == controller.activePath,
-                ) {
-                    if (entry.isDirectory) controller.loadDirectory(entry.path) else controller.openPath(entry.path)
+                var menu by remember { mutableStateOf(false) }
+                Box {
+                    PaneRow(
+                        when {
+                            entry.isDirectory -> Icons.Outlined.Folder
+                            entry.name.endsWith(".ipynb") -> Icons.Outlined.Code
+                            else -> Icons.AutoMirrored.Outlined.InsertDriveFile
+                        },
+                        entry.name,
+                        selected = entry.path == controller.activePath,
+                        onLongClick = { menu = true },
+                    ) {
+                        if (entry.isDirectory) controller.loadDirectory(entry.path) else controller.openPath(entry.path)
+                    }
+                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                        if (entry.isDirectory) {
+                            DropdownMenuItem(
+                                text = { Text("New file here") },
+                                leadingIcon = { Icon(Icons.AutoMirrored.Outlined.NoteAdd, contentDescription = null) },
+                                onClick = { menu = false; controller.beginNewEntry(folder = false, parent = entry.path) },
+                            )
+                        }
+                        DropdownMenuItem(
+                            text = { Text("Rename") },
+                            leadingIcon = { Icon(Icons.Outlined.DriveFileRenameOutline, contentDescription = null) },
+                            onClick = { menu = false; controller.beginRenameEntry(entry.path) },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Delete") },
+                            leadingIcon = { Icon(Icons.Outlined.Delete, contentDescription = null) },
+                            onClick = { menu = false; controller.beginDeleteEntry(entry.path, entry.isDirectory) },
+                        )
+                    }
                 }
             }
         }
@@ -209,6 +254,7 @@ fun PaneRow(
     muted: Boolean = false,
     selected: Boolean = false,
     indent: Int = 0,
+    onLongClick: (() -> Unit)? = null,
     onClick: () -> Unit,
 ) {
     val colors = MaterialTheme.colorScheme
@@ -217,7 +263,8 @@ fun PaneRow(
             .fillMaxWidth()
             .padding(horizontal = 6.dp)
             .background(if (selected) colors.secondaryContainer else androidx.compose.ui.graphics.Color.Transparent, MaterialTheme.shapes.small)
-            .clickable(onClick = onClick)
+            .then(if (onLongClick != null) Modifier.onSecondaryClick(onLongClick) else Modifier)
+            .combinedClickable(onLongClick = onLongClick, onClick = onClick)
             .padding(start = (10 + indent * 14).dp, end = 10.dp, top = 7.dp, bottom = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -265,3 +312,16 @@ internal fun flattenOutline(symbols: List<OutlineSymbol>): List<Pair<OutlineSymb
         }
         append(symbols, 0)
     }
+
+/** Right-click (touchpad or mouse) opens the same menu as a long press. */
+private fun Modifier.onSecondaryClick(action: () -> Unit): Modifier = pointerInput(action) {
+    awaitPointerEventScope {
+        while (true) {
+            val event = awaitPointerEvent()
+            if (event.type == PointerEventType.Press && event.buttons.isSecondaryPressed) {
+                event.changes.forEach { it.consume() }
+                action()
+            }
+        }
+    }
+}

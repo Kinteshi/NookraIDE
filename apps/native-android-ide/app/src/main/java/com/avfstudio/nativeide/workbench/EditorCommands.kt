@@ -7,7 +7,7 @@ data class EditorCommand(
 )
 
 object EditorCommands {
-    val top50: List<EditorCommand> = listOf(
+    val core: List<EditorCommand> = listOf(
         command("workbench.action.files.save", "Save", "Ctrl+S"),
         command("workbench.action.files.saveAs", "Save As", "Ctrl+Shift+S"),
         command("workbench.action.files.openFile", "Open File", "Ctrl+O"),
@@ -48,13 +48,8 @@ object EditorCommands {
         command("editor.action.rename", "Rename Symbol", "F2"),
         command("editor.action.marker.next", "Next Problem", "F8"),
         command("editor.action.marker.prev", "Previous Problem", "Shift+F8"),
-        command("editor.debug.action.toggleBreakpoint", "Toggle Breakpoint", "F9"),
         command("editor.action.toggleWordWrap", "Toggle Word Wrap", "Alt+Z"),
         command("editor.action.jumpToBracket", "Go to Bracket", "Ctrl+Shift+\\"),
-        command("editor.fold", "Fold", "Ctrl+Shift+["),
-        command("editor.unfold", "Unfold", "Ctrl+Shift+]"),
-        command("editor.foldAll", "Fold All", "Ctrl+K Ctrl+0"),
-        command("editor.unfoldAll", "Unfold All", "Ctrl+K Ctrl+J"),
         command("workbench.action.closeOtherEditors", "Close Other Editors", "Ctrl+K W"),
         command("workbench.action.reopenClosedEditor", "Reopen Closed Editor", "Ctrl+Shift+T"),
         command("workbench.action.quickSwitchEditor", "Quick Switch Editor", "Ctrl+Tab"),
@@ -93,6 +88,10 @@ object EditorCommands {
         command("editor.action.fontZoomOut", "Editor Font Zoom Out", "Ctrl+-"),
         command("workbench.action.openSettingsJson", "Open User Settings (JSON)", ""),
         command("workbench.action.connect", "Connect to Guest", ""),
+        command("explorer.newFile", "File: New File...", ""),
+        command("explorer.newFolder", "File: New Folder...", ""),
+        command("renameFile", "File: Rename...", ""),
+        command("deleteFile", "File: Delete", ""),
         command("jupyter.selectKernel", "Notebook: Select Kernel", ""),
         command("jupyter.runAll", "Notebook: Run All Cells", ""),
         command("jupyter.interruptKernel", "Notebook: Interrupt Kernel", ""),
@@ -100,7 +99,17 @@ object EditorCommands {
         command("github.copilot.chat.signIn", "GitHub Copilot: Sign In to Chat (Terminal)", ""),
     )
 
-    val all: List<EditorCommand> get() = top50 + language + copilot + workbench
+    /** Jupyter-style cell keys; honoured while a notebook is the active editor. */
+    val notebook: List<EditorCommand> = listOf(
+        command("notebook.cell.executeAndSelectBelow", "Notebook: Run Cell and Select Below", "Shift+Enter"),
+        command("notebook.cell.execute", "Notebook: Run Cell", "Ctrl+Enter"),
+        command("notebook.cell.executeAndInsertBelow", "Notebook: Run Cell and Insert Below", "Alt+Enter"),
+        command("notebook.cell.insertCodeCellBelow", "Notebook: Insert Code Cell Below", "Ctrl+Shift+Enter"),
+        command("notebook.focusPreviousEditor", "Notebook: Focus Previous Cell", "Ctrl+Up"),
+        command("notebook.focusNextEditor", "Notebook: Focus Next Cell", "Ctrl+Down"),
+    )
+
+    val all: List<EditorCommand> get() = core + language + copilot + workbench + notebook
 
     private val globalIds = setOf(
         "workbench.action.files.save",
@@ -115,6 +124,7 @@ object EditorCommands {
         "workbench.action.quickSwitchEditor",
         "workbench.action.openSettings",
         "workbench.action.chat.open",
+        "github.copilot.chat.attachSelection",
     )
 
     /** Bindings honoured when focus is outside the code editor (terminal, chat, notebooks, dialogs). */
@@ -201,6 +211,8 @@ private val namedKeys = mapOf(
     android.view.KeyEvent.KEYCODE_ESCAPE to "ESCAPE",
     android.view.KeyEvent.KEYCODE_GRAVE to "`",
     android.view.KeyEvent.KEYCODE_SLASH to "/",
+    // ABNT2 (Brazilian) keyboards print "/" on the extra key beside right Shift; accept it too.
+    android.view.KeyEvent.KEYCODE_RO to "/",
     android.view.KeyEvent.KEYCODE_BACKSLASH to "\\",
     android.view.KeyEvent.KEYCODE_LEFT_BRACKET to "[",
     android.view.KeyEvent.KEYCODE_RIGHT_BRACKET to "]",
