@@ -245,6 +245,26 @@ stack, variables, debug console. Restore the F9 binding when it works.
   * Found: Copilot ghost text after an auto-indented Enter is drawn about 8 columns right of the
     caret. The AVFCOP reply log now includes the range and text to find out why; not fixed yet.
   * A terminal whose shell died with the daemon now says so instead of "unknown terminal session".
+* Round 4 (port 41991):
+  * Checked on the tablet: Tab/Shift+Tab (+4/−4) and Enter (after `if x:` → 4 spaces) in cells;
+    Copilot in a cell (mirror request/reply mapped, ghost text, Tab accepts); a notebook naming
+    `python3` starts that kernel now (bridge-2); the picker switches to `Python (fourteen)`; a
+    plotly bar chart renders interactively in the cell.
+  * Fixed: Copilot ghost text after Enter. The log showed the request at column 12, not 8: sora's
+    `commitText` applied its own auto-indent on top of ours (now `commitText(text, false)`), and
+    Copilot's reply replaced columns 0–12 with 8 spaces + code, which the ghost drew whole. When
+    only indentation is typed, the ghost now shows the code part (`ghostAfterTyped`).
+  * Fixed: Up/Down in cells now go by visual row toward a sticky column kept across short lines,
+    empty cells and Markdown cells (before, the column fell to 0 after an empty cell). Cells
+    without a layout yet fall back to logical lines.
+  * Fixed: opening the kernel picker no longer shows "No kernel" while one runs.
+  * Fixed: unsaved notebook edits had no draft (only Save updated the document text), so a
+    restart lost them; cell edits now write a draft after 500 ms, and a restored draft shows as
+    unsaved.
+  * The tablet restarted again (~12:55) with no install in progress, while the VM and the app
+    were running; load sits around 23 even before the VM starts. Next: read the restart reason
+    from `adb shell dumpsys dropbox` (SYSTEM_RESTART, watchdog, kernel panic entries).
+  * Not yet checked on the tablet: the ghost fix, the sticky column, notebook drafts.
 * Still not checked on the tablet (the tablet dropped off wireless debugging twice in 25
   minutes, the first time because it rebooted): Enter indent after the crash fix, cell Tab/Enter,
   notebook Copilot, plotly, the kernel fallback.

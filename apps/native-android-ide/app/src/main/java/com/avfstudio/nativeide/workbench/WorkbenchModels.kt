@@ -123,6 +123,8 @@ class NotebookSession(
     var caretAtEnd: Boolean? = null
     /** With [caretAtEnd], the horizontal position (px) to keep on the target row, as Up/Down do within a cell. */
     var caretGoalX: Float? = null
+    /** The column Up/Down aim for (px), kept across short lines and cells; cleared by any other input. */
+    var stickyGoalX: Float? = null
     /** Copilot's suggestion for the focused cell, drawn as ghost text there. */
     internal var cellSuggestion by mutableStateOf<CellSuggestion?>(null)
 }

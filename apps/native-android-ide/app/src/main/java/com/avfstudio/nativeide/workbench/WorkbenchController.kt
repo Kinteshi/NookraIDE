@@ -2752,7 +2752,7 @@ class WorkbenchController(private val context: Context) {
         if (cursor.leftLine != suggestion.range.start.line) return suggestion.insertText
         val typed = view.text.getLineString(cursor.leftLine)
             .substring(suggestion.range.start.character.coerceAtMost(cursor.leftColumn), cursor.leftColumn)
-        return if (suggestion.insertText.startsWith(typed)) suggestion.insertText.substring(typed.length) else suggestion.insertText
+        return ghostAfterTyped(typed, suggestion.insertText) ?: suggestion.insertText
     }
 
     private fun acceptInlineSuggestion() {
@@ -3132,6 +3132,8 @@ class WorkbenchController(private val context: Context) {
             status = "Could not open notebook: ${error.message}"
             return false
         }
+        // A restored draft has unsaved cells.
+        notebook.dirty = document.dirty
         val kernel = KernelClient(vfs)
         val session = NotebookSession(document, notebook, kernel)
         kernel.outputListener = { cellId, output -> post { appendCellOutput(session, cellId, output) } }
@@ -3171,7 +3173,9 @@ class WorkbenchController(private val context: Context) {
     /** Finds kernels; starts [preferredSpec] (or the notebook's own kernel) directly when it exists. */
     fun chooseKernel(session: NotebookSession, preferredSpec: String? = null) {
         val directory = session.document.path.substringBeforeLast('/')
-        session.kernelState = "Finding kernels…"
+        // Opening the picker while a kernel runs must not make it look stopped.
+        val running = session.kernelName != null
+        if (!running) session.kernelState = "Finding kernels…"
         val launched = if (session.kernel.isStarted) CompletableFuture.completedFuture(Unit) else session.kernel.launch(directory)
         launched.thenCompose { session.kernel.kernelSpecs() }.whenComplete { discovery, error ->
             post {
@@ -3186,7 +3190,7 @@ class WorkbenchController(private val context: Context) {
                     status = "No Python environment with ipykernel was found in the guest"
                     return@post
                 }
-                session.kernelState = if (specs.isEmpty()) "No kernels yet" else "No kernel"
+                if (!running) session.kernelState = if (specs.isEmpty()) "No kernels yet" else "No kernel"
                 val preferred = preferredSpec ?: session.notebook.kernelName ?: settings.jupyterDefaultKernel
                 val match = specs.firstOrNull { it.name == preferred }
                 if (match != null && session.kernelName == null) {
@@ -3365,6 +3369,24 @@ class WorkbenchController(private val context: Context) {
     fun onCellEdited(session: NotebookSession) {
         session.notebook.dirty = true
         documentRevision++
+        // Keep a draft like text files do, so a restart (the tablet has rebooted mid-session)
+        // doesn't lose unsaved cells.
+        val path = session.document.path
+        synchronized(scheduledDraftWrites) {
+            scheduledDraftWrites.remove(path)?.cancel(false)
+            scheduledDraftWrites[path] = timer.schedule(
+                {
+                    post {
+                        if (notebooks[path] !== session || !session.notebook.dirty) return@post
+                        session.document.updateText(session.notebook.toJson())
+                        io.execute { repository.persistDraft(session.document) }
+                    }
+                    synchronized(scheduledDraftWrites) { scheduledDraftWrites.remove(path) }
+                },
+                500,
+                TimeUnit.MILLISECONDS,
+            )
+        }
     }
 
     // Copilot in notebooks ----------------------------------------------------------------------

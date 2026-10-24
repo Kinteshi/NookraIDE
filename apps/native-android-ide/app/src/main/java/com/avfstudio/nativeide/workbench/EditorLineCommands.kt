@@ -140,3 +140,14 @@ internal fun newlineIndentation(linePrefix: String, tabSize: Int, insertSpaces: 
     if (last == ':' || last == '{' || last == '[' || last == '(') indent += if (insertSpaces) " ".repeat(tabSize) else "\t"
     return "\n" + indent
 }
+
+/**
+ * The ghost text for a suggestion that replaces [typed] (the line from the suggestion's start to
+ * the cursor) with [insertText]: what follows what is already typed. When only indentation is
+ * typed, Copilot may indent differently (accepting replaces the whole range); show the code part.
+ */
+internal fun ghostAfterTyped(typed: String, insertText: String): String? = when {
+    insertText.startsWith(typed) -> insertText.substring(typed.length)
+    typed.isBlank() -> insertText.trimStart(' ', '\t')
+    else -> null
+}

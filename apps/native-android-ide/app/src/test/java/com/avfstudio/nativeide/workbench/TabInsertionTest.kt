@@ -24,4 +24,12 @@ class TabInsertionTest {
         assertEquals("\n\t", newlineIndentation("items = [", 4, insertSpaces = false))
         assertEquals("\n", newlineIndentation("", 4, insertSpaces = true))
     }
+
+    @Test
+    fun ghostTextFollowsWhatIsTyped() {
+        assertEquals("rn n", ghostAfterTyped("        retu", "        return n"))
+        // Seen on the tablet: 12 spaces typed, Copilot re-indents the line to 8.
+        assertEquals("return n", ghostAfterTyped(" ".repeat(12), "        return n"))
+        assertEquals(null, ghostAfterTyped("x = ", "y = 2"))
+    }
 }

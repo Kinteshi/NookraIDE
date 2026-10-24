@@ -61,9 +61,7 @@ internal fun cellSuggestion(cell: NotebookCell, startLine: Int, suggestion: Copi
 /** What to draw after the caret: the suggestion minus what is already typed, or null if it no longer fits. */
 internal fun cellGhostText(source: String, caret: Int, suggestion: CellSuggestion): String? {
     if (caret < suggestion.start || caret > source.length) return null
-    val typed = source.substring(suggestion.start, caret)
-    if (!suggestion.text.startsWith(typed)) return null
-    return suggestion.text.substring(typed.length).takeIf { it.isNotEmpty() }
+    return ghostAfterTyped(source.substring(suggestion.start, caret), suggestion.text)?.takeIf { it.isNotEmpty() }
 }
 
 /** Draws [ghost] after [caret] in [color] without changing the text the field edits. */

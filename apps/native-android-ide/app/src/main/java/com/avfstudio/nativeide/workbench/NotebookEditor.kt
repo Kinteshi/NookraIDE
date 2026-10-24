@@ -277,6 +277,7 @@ private fun CellSourceEditor(
                 val row = if (atEnd) current.lineCount - 1 else 0
                 current.getOffsetForPosition(Offset(goalX, (current.getLineTop(row) + current.getLineBottom(row)) / 2))
             } else if (atEnd) field.text.length else 0
+            // Set directly rather than through apply(), so the sticky column survives the move.
             field = field.copy(selection = TextRange(offset))
             session.caretAtEnd = null
             session.caretGoalX = null
@@ -290,6 +291,7 @@ private fun CellSourceEditor(
         }
     }
     fun apply(value: TextFieldValue) {
+        session.stickyGoalX = null
         val textChanged = value.text != cell.source
         field = value
         if (textChanged) {
@@ -347,18 +349,34 @@ private fun CellSourceEditor(
                 }
                 if (event.isShiftPressed) return@onPreviewKeyEvent false
                 val selection = field.selection
-                val goalX = layout?.takeIf { it.layoutInput.text.length == field.text.length }
-                    ?.getHorizontalPosition(selection.end, usePrimaryDirection = true)
+                val current = layout?.takeIf { it.layoutInput.text.length == field.text.length }
+                val goalX = session.stickyGoalX ?: current?.getHorizontalPosition(selection.end, usePrimaryDirection = true)
+                // Up/Down by visual row aiming at the sticky column, as in VS Code; past the first or
+                // last row they move to the neighbouring cell (Jupyter), still aiming at that column.
+                fun moveVertically(delta: Int): Boolean {
+                    if (!selection.collapsed) return false
+                    if (current == null || goalX == null) {
+                        // No layout yet (an empty cell, a Markdown cell just opened): go by lines.
+                        val row = field.text.substring(0, selection.end).count { it == '\n' }
+                        val rows = field.text.count { it == '\n' } + 1
+                        return row + delta !in 0 until rows && controller.selectAdjacentCell(session, cell, delta, goalX)
+                    }
+                    val target = current.getLineForOffset(selection.end) + delta
+                    if (target !in 0 until current.lineCount) {
+                        val moved = controller.selectAdjacentCell(session, cell, delta, goalX)
+                        if (moved) session.stickyGoalX = goalX
+                        return moved
+                    }
+                    val y = (current.getLineTop(target) + current.getLineBottom(target)) / 2
+                    field = field.copy(selection = TextRange(current.getOffsetForPosition(Offset(goalX, y))))
+                    session.stickyGoalX = goalX
+                    return true
+                }
                 when (event.key) {
                     Key.Enter, Key.NumPadEnter -> cell.type == CellType.Code &&
                         true.also { apply(CellTextEdits.newline(field, settings.tabSize, settings.insertSpaces)) }
-                    // Up on the first visual row / Down on the last one moves between cells, as in Jupyter;
-                    // anywhere else the text field moves the cursor (wrapped rows included).
-                    Key.DirectionUp -> selection.collapsed && visualRow(layout, field.text, selection.start) == 0 &&
-                        controller.selectAdjacentCell(session, cell, -1, goalX)
-                    Key.DirectionDown -> selection.collapsed &&
-                        visualRow(layout, field.text, selection.end) == visualRowCount(layout, field.text) - 1 &&
-                        controller.selectAdjacentCell(session, cell, 1, goalX)
+                    Key.DirectionUp -> moveVertically(-1)
+                    Key.DirectionDown -> moveVertically(1)
                     // At the edges Left/Right would hand focus to whatever is beside the cell; keep it here.
                     Key.DirectionLeft -> selection.collapsed && selection.start == 0
                     Key.DirectionRight -> selection.collapsed && selection.end == field.text.length

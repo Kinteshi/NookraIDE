@@ -492,7 +492,8 @@ internal class NativeCodeEditor(
         ) {
             val cursor = cursor
             val prefix = text.getLineString(cursor.leftLine).substring(0, cursor.leftColumn)
-            commitText(newlineIndentation(prefix, tabWidth, insertSpaces))
+            // false: sora's own auto-indent would add the line's indentation a second time.
+            commitText(newlineIndentation(prefix, tabWidth, insertSpaces), false)
             return true
         }
         return super.dispatchKeyEvent(event)
