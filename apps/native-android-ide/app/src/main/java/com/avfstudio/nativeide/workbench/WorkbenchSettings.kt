@@ -37,6 +37,12 @@ data class WorkbenchSettings(
     val autoConnect: Boolean = true,
     val pythonInterpreter: String = "",
     val restoreSession: Boolean = true,
+    /** Enter keeps the indentation (one level more after a block opener). */
+    val autoIndent: Boolean = true,
+    val notebookCopilot: Boolean = true,
+    /** Draw Plotly figures; needs plotly.js from cdn.plot.ly the first time. */
+    val renderPlotly: Boolean = true,
+    val statusBarGuestResources: Boolean = true,
 ) {
     companion object {
         const val THEME_MODE = "avf.theme.mode"
@@ -60,6 +66,11 @@ data class WorkbenchSettings(
         const val AUTO_CONNECT = "avf.connection.autoConnect"
         const val PYTHON_INTERPRETER = "python.defaultInterpreterPath"
         const val RESTORE_SESSION = "avf.session.restore"
+        /** VS Code's enum (none/keep/brackets/advanced/full); anything but "none" is on here. */
+        const val AUTO_INDENT = "editor.autoIndent"
+        const val NOTEBOOK_COPILOT = "avf.copilot.notebooks"
+        const val RENDER_PLOTLY = "avf.notebook.plotly"
+        const val STATUS_BAR_GUEST = "avf.statusBar.guestResources"
 
         fun from(settings: JsonObject): WorkbenchSettings {
             val defaults = WorkbenchSettings()
@@ -94,6 +105,10 @@ data class WorkbenchSettings(
                 autoConnect = bool(AUTO_CONNECT, defaults.autoConnect),
                 pythonInterpreter = string(PYTHON_INTERPRETER)?.trim() ?: defaults.pythonInterpreter,
                 restoreSession = bool(RESTORE_SESSION, defaults.restoreSession),
+                autoIndent = string(AUTO_INDENT)?.let { it != "none" } ?: defaults.autoIndent,
+                notebookCopilot = bool(NOTEBOOK_COPILOT, defaults.notebookCopilot),
+                renderPlotly = bool(RENDER_PLOTLY, defaults.renderPlotly),
+                statusBarGuestResources = bool(STATUS_BAR_GUEST, defaults.statusBarGuestResources),
             )
         }
     }

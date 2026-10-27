@@ -25,6 +25,19 @@ class WorkbenchSettingsTest {
     }
 
     @Test
+    fun newFeatureSettingsDefaultOnAndFollowVsCodeValues() {
+        val defaults = WorkbenchSettings.from(JsonParser.parseString("{}").asJsonObject)
+        assertEquals(listOf(true, true, true, true), listOf(defaults.autoIndent, defaults.notebookCopilot, defaults.renderPlotly, defaults.statusBarGuestResources))
+        val off = WorkbenchSettings.from(
+            JsonParser.parseString(
+                """{"editor.autoIndent":"none","avf.copilot.notebooks":false,"avf":{"notebook":{"plotly":false}},"avf.statusBar.guestResources":false}""",
+            ).asJsonObject,
+        )
+        assertEquals(listOf(false, false, false, false), listOf(off.autoIndent, off.notebookCopilot, off.renderPlotly, off.statusBarGuestResources))
+        assertEquals(true, WorkbenchSettings.from(JsonParser.parseString("""{"editor.autoIndent":"advanced"}""").asJsonObject).autoIndent)
+    }
+
+    @Test
     fun workbenchShortcutsFollowVsCodeDefaults() {
         val stroke = editorKeyStroke(KeyEvent.KEYCODE_GRAVE, ctrl = true, shift = false, alt = false)
         assertEquals("workbench.action.terminal.toggleTerminal", EditorKeybindingDispatcher(EditorCommands.global).dispatch(stroke!!))

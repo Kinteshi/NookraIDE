@@ -466,7 +466,10 @@ class WorkbenchController(private val context: Context) {
         )
         if (view.textSizePx != sizePx) view.setTextSize(current.editorFontSize)
         if (view.tabWidth != current.tabSize) view.setTabWidth(current.tabSize)
-        (view as? NativeCodeEditor)?.insertSpaces = current.insertSpaces
+        (view as? NativeCodeEditor)?.let {
+            it.insertSpaces = current.insertSpaces
+            it.autoIndent = current.autoIndent
+        }
         if (view.isWordwrap != current.wordWrap) view.setWordwrap(current.wordWrap)
         if (view.isLineNumberEnabled != current.lineNumbers) view.setLineNumberEnabled(current.lineNumbers)
     }
@@ -3425,7 +3428,9 @@ class WorkbenchController(private val context: Context) {
         }
         if (!textChanged) return
         scheduledCellRequest?.cancel(false)
-        if (!copilotEnabled || !copilot.language.isReady || cell.type != CellType.Code || !value.selection.collapsed) return
+        if (!copilotEnabled || !settings.notebookCopilot || !copilot.language.isReady || cell.type != CellType.Code ||
+            !value.selection.collapsed
+        ) return
         val caret = value.selection.start
         val source = value.text
         scheduledCellRequest = timer.schedule(

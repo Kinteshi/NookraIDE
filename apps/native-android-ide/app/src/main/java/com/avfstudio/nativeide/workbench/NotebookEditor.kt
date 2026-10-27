@@ -75,6 +75,7 @@ import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.AnnotatedString
@@ -171,6 +172,9 @@ private fun visualRow(layout: TextLayoutResult?, text: String, offset: Int): Int
 private fun visualRowCount(layout: TextLayoutResult?, text: String): Int =
     layout?.takeIf { it.layoutInput.text.length == text.length }?.lineCount ?: (text.count { it == '\n' } + 1)
 
+/** Keys that must never move focus out of a cell. */
+private val cellKeepsKeys = setOf(Key.DirectionLeft, Key.DirectionRight, Key.DirectionUp, Key.DirectionDown, Key.Tab)
+
 /** `adb shell setprop log.tag.AVFNB DEBUG` logs every cell cursor move (for key navigation tests). */
 private const val NOTEBOOK_LOG_TAG = "AVFNB"
 
@@ -244,7 +248,7 @@ private fun NotebookCellView(controller: WorkbenchController, session: NotebookS
                     IconButton(onClick = { controller.deleteCell(session, cell) }, modifier = Modifier.noKeyFocus()) { Icon(Icons.Outlined.Delete, "Delete cell") }
                 }
             }
-            cell.outputs.forEach { output -> CellOutput(output) }
+            cell.outputs.forEach { output -> CellOutput(output, controller.settings.renderPlotly) }
         }
     }
 }
@@ -373,7 +377,7 @@ private fun CellSourceEditor(
                     return true
                 }
                 when (event.key) {
-                    Key.Enter, Key.NumPadEnter -> cell.type == CellType.Code &&
+                    Key.Enter, Key.NumPadEnter -> cell.type == CellType.Code && settings.autoIndent &&
                         true.also { apply(CellTextEdits.newline(field, settings.tabSize, settings.insertSpaces)) }
                     Key.DirectionUp -> moveVertically(-1)
                     Key.DirectionDown -> moveVertically(1)
@@ -382,6 +386,11 @@ private fun CellSourceEditor(
                     Key.DirectionRight -> selection.collapsed && selection.end == field.text.length
                     else -> false
                 }
+            }
+            // Keys the text field didn't use bubble up here; without this, an arrow at an edge (or
+            // with a modifier the handlers above skip) moved Compose focus out of the notebook.
+            .onKeyEvent { event ->
+                event.type == KeyEventType.KeyDown && event.key in cellKeepsKeys
             }
             .onFocusChanged { state ->
                 if (state.isFocused) {
@@ -395,7 +404,7 @@ private fun CellSourceEditor(
 }
 
 @Composable
-private fun CellOutput(output: JsonObject) {
+private fun CellOutput(output: JsonObject, renderPlotly: Boolean) {
     val colors = MaterialTheme.colorScheme
     val type = output.get("output_type")?.asString
     val modifier = Modifier.fillMaxWidth().padding(top = 6.dp, start = 4.dp)
@@ -430,7 +439,7 @@ private fun CellOutput(output: JsonObject) {
                 }
             }
             when {
-                data.get(PLOTLY_MIME)?.isJsonObject == true ->
+                renderPlotly && data.get(PLOTLY_MIME)?.isJsonObject == true ->
                     PlotlyOutput(data.getAsJsonObject(PLOTLY_MIME), LocalDarkTheme.current, modifier)
                 bitmap != null -> Image(
                     bitmap,

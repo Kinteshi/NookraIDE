@@ -410,6 +410,8 @@ internal class NativeCodeEditor(
     var onStylesPublished: (() -> Unit)? = null
     /** `editor.insertSpaces`; the tab size is the editor's tab width. */
     var insertSpaces = true
+    /** `editor.autoIndent`; off leaves Enter to sora (a plain newline). */
+    var autoIndent = true
 
     override fun setStyles(styles: Styles?) {
         super.setStyles(styles)
@@ -487,7 +489,7 @@ internal class NativeCodeEditor(
         // Enter keeps the indentation (the TextMate grammar has no indentation rules), unless the
         // completion popup is open and Enter picks an item.
         if (event.action == AndroidKeyEvent.ACTION_DOWN && event.keyCode == AndroidKeyEvent.KEYCODE_ENTER &&
-            event.hasNoModifiers() && isEditable &&
+            event.hasNoModifiers() && isEditable && autoIndent &&
             !getComponent(io.github.rosemoe.sora.widget.component.EditorAutoCompletion::class.java).isShowing
         ) {
             val cursor = cursor

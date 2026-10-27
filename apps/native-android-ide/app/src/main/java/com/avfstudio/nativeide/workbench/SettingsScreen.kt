@@ -102,6 +102,11 @@ fun SettingsScreen(controller: WorkbenchController) {
                     SliderRow("Tab size", settings.tabSize.toFloat(), 1f..8f, "%.0f", steps = 6) { set(WorkbenchSettings.TAB_SIZE, it.roundToInt()) }
                 }
                 item { SwitchRow("Insert spaces", "Indent with spaces instead of tabs", settings.insertSpaces) { set(WorkbenchSettings.INSERT_SPACES, it) } }
+                item {
+                    SwitchRow("Auto-indent", "Enter keeps the indentation, one level more after : or an open bracket", settings.autoIndent) {
+                        set(WorkbenchSettings.AUTO_INDENT, if (it) "full" else "none")
+                    }
+                }
                 item { SwitchRow("Word wrap", "Wrap long lines at the edge of the editor", settings.wordWrap) { set(WorkbenchSettings.WORD_WRAP, if (it) "on" else "off") } }
                 item { SwitchRow("Line numbers", null, settings.lineNumbers) { set(WorkbenchSettings.LINE_NUMBERS, if (it) "on" else "off") } }
                 item {
@@ -112,6 +117,11 @@ fun SettingsScreen(controller: WorkbenchController) {
                 item { SwitchRow("Format on save", "Ruff for Python, the language server otherwise", settings.formatOnSave) { set(WorkbenchSettings.FORMAT_ON_SAVE, it) } }
                 item { SwitchRow("Auto save", "Save to the guest shortly after you stop typing", settings.autoSave) { set(WorkbenchSettings.AUTO_SAVE, if (it) "afterDelay" else "off") } }
 
+                item {
+                    SwitchRow("Guest memory in the status bar", "What the Linux guest costs the tablet, and its CPU", settings.statusBarGuestResources) {
+                        set(WorkbenchSettings.STATUS_BAR_GUEST, it)
+                    }
+                }
                 item { Section("Language servers") }
                 item {
                     SettingRow("Python language server", "ty uses about a fifth of basedpyright's memory") {
@@ -150,6 +160,11 @@ fun SettingsScreen(controller: WorkbenchController) {
                         set(WorkbenchSettings.CHAT_IDLE_MINUTES, it.roundToInt())
                     }
                 }
+                item {
+                    SwitchRow("Suggestions in notebooks", "Copilot sees all cells of the notebook as context", settings.notebookCopilot) {
+                        set(WorkbenchSettings.NOTEBOOK_COPILOT, it)
+                    }
+                }
                 item { ActionRow("Sign in to chat", "Runs `copilot login` in a terminal") { controller.signInChatInTerminal(); controller.settingsVisible = false } }
                 item { ActionRow("Sign out of inline suggestions", null) { controller.runCommand("github.copilot.signOut") } }
 
@@ -166,6 +181,11 @@ fun SettingsScreen(controller: WorkbenchController) {
                     ) { set(WorkbenchSettings.JUPYTER_DEFAULT_KERNEL, null) }
                 }
 
+                item {
+                    SwitchRow("Draw Plotly figures", "Interactive charts in cell outputs; loads plotly.js from cdn.plot.ly the first time", settings.renderPlotly) {
+                        set(WorkbenchSettings.RENDER_PLOTLY, it)
+                    }
+                }
                 item { Section("Keyboard and advanced") }
                 item { ActionRow("Keyboard shortcuts", "VS Code defaults · Ctrl+K Ctrl+S") { controller.dialog = WorkbenchDialog.Keybindings } }
                 item { ActionRow("Edit settings.json", "Every setting, in VS Code's format") { controller.openSettingsJson() } }

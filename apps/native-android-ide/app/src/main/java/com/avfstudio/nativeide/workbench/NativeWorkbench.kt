@@ -396,7 +396,7 @@ private fun StatusBar(controller: WorkbenchController) {
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f).clickable { controller.runCommand("workbench.action.output.toggleOutput") },
         )
-        controller.guestStats?.takeIf { controller.connected }?.let { stats ->
+        controller.guestStats?.takeIf { controller.connected && controller.settings.statusBarGuestResources }?.let { stats ->
             val pressure = stats.totalMb > 0 && stats.footprintMb * 100 / stats.totalMb >= 80
             Row(
                 Modifier.clickable { controller.dialog = WorkbenchDialog.GuestResources },

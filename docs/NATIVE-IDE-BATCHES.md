@@ -270,6 +270,16 @@ stack, variables, debug console. Restore the F9 binding when it works.
     12:22, 12:54), then "cold,powerkey" (10-27 15:00, before this session). The dropbox kept only
     today's entries; its SYSTEM_LAST_KMSG is the new boot's log (`reset_reason = 9`, Samsung code,
     meaning unknown). No crash or watchdog record survived, so the cause is still unproven.
+  * The guest was reset and set up again between sessions (`~/Projects` holds only the user's
+    `main.ipynb`; Copilot is signed out). Test files go in `~/Projects/avf-tests/` and are removed
+    at the end.
+  * Left/Right focus loss: not reproduced on the installed build with plain, Shift and Ctrl arrows
+    at both cell edges, Shift/Ctrl+Up/Down, or a 60 ms burst crossing cells. Guard added anyway:
+    a cell consumes any arrow or Tab its text field leaves unhandled (`onKeyEvent`), so Compose
+    focus navigation can't move focus out of the notebook.
+  * Settings for this batch's features: `editor.autoIndent` (Auto-indent; "none" turns it off),
+    `avf.copilot.notebooks`, `avf.notebook.plotly` (Draw Plotly figures; off shows the text
+    fallback), `avf.statusBar.guestResources`. The disk-problem banner has no toggle (data safety).
 * Still not checked on the tablet (the tablet dropped off wireless debugging twice in 25
   minutes, the first time because it rebooted): Enter indent after the crash fix, cell Tab/Enter,
   notebook Copilot, plotly, the kernel fallback.
