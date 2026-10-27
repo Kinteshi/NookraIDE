@@ -383,6 +383,7 @@ class WorkbenchController(private val context: Context) {
             post {
                 copilotStatus = copilotState.message.ifEmpty { copilotState.kind }
                 copilotStatusKind = copilotState.kind
+                onCopilotSignInState(copilotState)
                 if (copilotState.kind == "Error" || copilotState.kind == "Warning") {
                     status = "Copilot: ${copilotState.message.ifEmpty { copilotState.kind }}"
                 } else if (copilotState.kind == "Normal" && dialog is WorkbenchDialog.CopilotSignInCode) {
@@ -2682,9 +2683,42 @@ class WorkbenchController(private val context: Context) {
 
     // Copilot -----------------------------------------------------------------------------------
 
+    /** Signed out, the language server only costs memory (~280 MB in the guest). */
+    private var copilotSignedOut: Boolean
+        get() = preferences.getBoolean("copilot-signed-out", false)
+        set(value) = preferences.edit().putBoolean("copilot-signed-out", value).apply()
+    private var scheduledCopilotStop: ScheduledFuture<*>? = null
+
+    private fun onCopilotSignInState(state: com.avfstudio.nativeide.language.CopilotStatus) {
+        val signedOut = state.message.contains("not signed", ignoreCase = true) || state.kind == "NotSignedIn"
+        if (state.kind == "Normal" || state.kind == "InProgress") {
+            copilotSignedOut = false
+            scheduledCopilotStop?.cancel(false)
+            return
+        }
+        if (!signedOut) return
+        copilotSignedOut = true
+        scheduledCopilotStop?.cancel(false)
+        scheduledCopilotStop = timer.schedule({
+            post {
+                if (copilotSignedOut && dialog !is WorkbenchDialog.CopilotSignInCode && copilot.language.isStarted) {
+                    copilot.language.close()
+                    copilotStatus = "Signed out"
+                    copilotStatusKind = "SignedOut"
+                }
+            }
+        }, 30, TimeUnit.SECONDS)
+    }
+
     private fun startCopilot(retry: Boolean = true) {
         val workspace = workspaceRoot ?: return
         if (!copilotEnabled || copilot.language.isStarted || !vfs.isConnected()) return
+        if (copilotSignedOut) {
+            // Started by "Sign in" (beginCopilotSignIn) instead, so a signed-out guest doesn't pay for it.
+            copilotStatus = "Signed out"
+            copilotStatusKind = "SignedOut"
+            return
+        }
         copilotStatus = "Starting"
         copilot.start(workspace).whenComplete { _, error ->
             post {

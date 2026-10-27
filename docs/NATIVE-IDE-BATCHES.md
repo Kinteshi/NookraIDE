@@ -367,6 +367,9 @@ stack, variables, debug console. Restore the F9 binding when it works.
   `gh auth setup-git`, then Git user.name/email from the account when unset (noreply address).
   Copilot chat uses gh's token through its documented fallback. `copilot login` stays as the
   palette command "Copilot: Sign In to Chat with copilot login".
+* Copilot memory: when the language server reports "not signed in", the app remembers it and
+  stops the server after 30 s (~280 MB in the guest); later launches don't start it, the status
+  bar says "Copilot · Signed out", and tapping it starts the server and signs in.
 
 ## Mapped for later (user, 10-27)
 * Model picker and adjustments (e.g. reasoning effort) for the chat UI.
