@@ -265,6 +265,11 @@ stack, variables, debug console. Restore the F9 binding when it works.
     were running; load sits around 23 even before the VM starts. Next: read the restart reason
     from `adb shell dumpsys dropbox` (SYSTEM_RESTART, watchdog, kernel panic entries).
   * Not yet checked on the tablet: the ghost fix, the sticky column, notebook drafts.
+* Round 5 (10-27, port 36033):
+  * Restart reasons: `persist.sys.boot.reason.history` only says "reboot" (10-24 11:28, 11:50,
+    12:22, 12:54), then "cold,powerkey" (10-27 15:00, before this session). The dropbox kept only
+    today's entries; its SYSTEM_LAST_KMSG is the new boot's log (`reset_reason = 9`, Samsung code,
+    meaning unknown). No crash or watchdog record survived, so the cause is still unproven.
 * Still not checked on the tablet (the tablet dropped off wireless debugging twice in 25
   minutes, the first time because it rebooted): Enter indent after the crash fix, cell Tab/Enter,
   notebook Copilot, plotly, the kernel fallback.
