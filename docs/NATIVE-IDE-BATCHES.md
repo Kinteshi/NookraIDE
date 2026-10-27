@@ -339,6 +339,20 @@ stack, variables, debug console. Restore the F9 binding when it works.
   * Close Other Editors goes through the same Save / Don't save / Cancel prompt, one unsaved tab
     at a time; Cancel stops.
   * The `AVFKEY` routing log is gone (`AVFKEYS` covers it, gated by setprop).
+* Research (probe of the guest, read-only, no token values printed):
+  * Chat agent (Copilot CLI 1.0.104, ACP v1): `session/new` returns `configOptions` (select):
+    `mode` (Agent / Plan / Autopilot), `model` (here only "Auto"), `allow_all` (tool approvals),
+    plus the older `models`/`modes`. ACP v1 changes them with `session/set_config_option`
+    {sessionId, configId, value} and returns the updated options; clients should prefer
+    configOptions over modes. `authMethods` is only `copilot-login` (run `copilot login`).
+  * Auth stores: the language server keeps its login in `~/.config/github-copilot/auth.db`;
+    `~/.copilot/config.json` is empty; no `gh`, no git credential helper.
+  * Copilot CLI token order (GitHub Docs): COPILOT_GITHUB_TOKEN, GH_TOKEN, GITHUB_TOKEN, stored
+    login, then `gh auth token`; OAuth `gho_` and fine-grained PATs work, classic PATs don't.
+  * Plan from that: one "Sign in to GitHub" through `gh auth login` covers chat (CLI falls back to
+    gh's token) and Git (`gh auth setup-git`, user.name/email from the account). The inline
+    language server documents no way to take a token, so it keeps its own sign-in: two flows
+    instead of three. Sharing one token with the language server is listed for later.
 
 ## Mapped for later (user, 10-27)
 * Model picker and adjustments (e.g. reasoning effort) for the chat UI.
