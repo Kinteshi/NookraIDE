@@ -399,7 +399,7 @@ private fun CellSourceEditor(
                         return@onPreviewKeyEvent true
                     }
                     // Jupyter: Tab after a name or a dot completes (with a kernel running); elsewhere it indents.
-                    if (event.key == Key.Tab && !event.isShiftPressed && cell.type == CellType.Code &&
+                    if (event.key == Key.Tab && !event.isShiftPressed && cell.type == CellType.Code && settings.notebookTabCompletion &&
                         session.kernelName != null && tabCompletes(field)
                     ) {
                         controller.requestCellCompletion(session, cell, field)
