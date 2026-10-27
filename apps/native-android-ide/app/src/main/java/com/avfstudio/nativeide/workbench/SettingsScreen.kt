@@ -207,6 +207,11 @@ fun SettingsScreen(controller: WorkbenchController) {
                         set(WorkbenchSettings.RENDER_HTML, it)
                     }
                 }
+                item {
+                    SwitchRow("Tab completes in notebooks", "After a name or a dot, Tab asks the kernel (as in Jupyter); Ctrl+Space always does", settings.notebookTabCompletion) {
+                        set(WorkbenchSettings.NOTEBOOK_TAB_COMPLETION, it)
+                    }
+                }
                 item { Section("Keyboard and advanced") }
                 item { ActionRow("Keyboard shortcuts", "VS Code defaults · Ctrl+K Ctrl+S") { controller.dialog = WorkbenchDialog.Keybindings } }
                 item { ActionRow("Edit settings.json", "Every setting, in VS Code's format") { controller.openSettingsJson() } }

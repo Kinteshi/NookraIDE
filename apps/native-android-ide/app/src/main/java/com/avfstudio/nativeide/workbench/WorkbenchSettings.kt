@@ -45,6 +45,8 @@ data class WorkbenchSettings(
     val statusBarGuestResources: Boolean = true,
     /** Script-free `text/html` outputs (pandas tables) as HTML rather than their text form. */
     val renderHtmlOutputs: Boolean = true,
+    /** Jupyter-style Tab after a name or dot asks the kernel for completions (Ctrl+Space always does). */
+    val notebookTabCompletion: Boolean = true,
 ) {
     companion object {
         const val THEME_MODE = "avf.theme.mode"
@@ -74,6 +76,7 @@ data class WorkbenchSettings(
         const val RENDER_PLOTLY = "avf.notebook.plotly"
         const val STATUS_BAR_GUEST = "avf.statusBar.guestResources"
         const val RENDER_HTML = "avf.notebook.htmlOutputs"
+        const val NOTEBOOK_TAB_COMPLETION = "avf.notebook.tabCompletion"
 
         fun from(settings: JsonObject): WorkbenchSettings {
             val defaults = WorkbenchSettings()
@@ -113,6 +116,7 @@ data class WorkbenchSettings(
                 renderPlotly = bool(RENDER_PLOTLY, defaults.renderPlotly),
                 statusBarGuestResources = bool(STATUS_BAR_GUEST, defaults.statusBarGuestResources),
                 renderHtmlOutputs = bool(RENDER_HTML, defaults.renderHtmlOutputs),
+                notebookTabCompletion = bool(NOTEBOOK_TAB_COMPLETION, defaults.notebookTabCompletion),
             )
         }
     }

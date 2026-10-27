@@ -374,6 +374,10 @@ stack, variables, debug console. Restore the F9 binding when it works.
   readable in dark mode), JavaScript and network loads off; outputs containing `<script>` show
   their text form instead. Setting `avf.notebook.htmlOutputs` ("HTML outputs"). Gap: script-based
   outputs (widgets, bokeh, altair) still don't render.
+* Kernel completions in cells: Ctrl+Space, or Tab right after a name or a dot (Jupyter's rule,
+  setting `avf.notebook.tabCompletion`), asks the running kernel (`complete` now returns
+  cursor_start/end); a non-focusable popup under the cell lists matches, typing narrows them,
+  Up/Down choose, Enter/Tab accept, Esc closes. Without a kernel, Tab indents.
 
 ## Mapped for later (user, 10-27)
 * Model picker and adjustments (e.g. reasoning effort) for the chat UI.

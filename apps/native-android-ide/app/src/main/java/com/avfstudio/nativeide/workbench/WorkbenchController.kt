@@ -3647,7 +3647,30 @@ class WorkbenchController(private val context: Context) {
     }
 
     /** Every cell edit or caret move: drop a suggestion that no longer fits and ask again after typing. */
+    /** Ctrl+Space, or Tab after a name: asks the running kernel what could come next. */
+    fun requestCellCompletion(session: NotebookSession, cell: NotebookCell, value: TextFieldValue) {
+        if (session.kernelName == null || !session.kernel.isStarted) {
+            status = "Start a kernel to get completions (run a cell or pick one)"
+            return
+        }
+        val code = value.text
+        val caret = value.selection.start
+        session.kernel.complete(code, caret).whenComplete { result, error ->
+            post {
+                when {
+                    error != null -> status = "Completion failed: ${error.cause?.message ?: error.message}"
+                    cell.source != code -> Unit
+                    result.matches.isEmpty() -> status = "No completions here"
+                    else -> session.cellCompletion = CellCompletion(cell.id, result.start.coerceIn(0, caret), result.matches)
+                }
+            }
+        }
+    }
+
     fun onCellInput(session: NotebookSession, cell: NotebookCell, value: TextFieldValue, textChanged: Boolean) {
+        session.cellCompletion?.let { completion ->
+            if (completion.cellId != cell.id || completion.visibleItems(value) == null) session.cellCompletion = null
+        }
         val shown = session.cellSuggestion
         if (shown != null && (shown.cellId != cell.id || !value.selection.collapsed ||
                 cellGhostText(value.text, value.selection.start, shown) == null)

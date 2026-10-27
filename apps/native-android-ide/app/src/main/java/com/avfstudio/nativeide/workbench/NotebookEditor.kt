@@ -41,6 +41,11 @@ import androidx.compose.material.icons.outlined.Stop
 import androidx.compose.material.icons.outlined.TextFields
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.ui.window.PopupProperties
+import androidx.compose.ui.unit.DpOffset
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -324,109 +329,177 @@ private fun CellSourceEditor(
     }
     // Follow changes made elsewhere (cell type toggles, reloads) without losing the cursor.
     if (field.text != cell.source) field = TextFieldValue(cell.source, TextRange(minOf(field.selection.end, cell.source.length)))
-    BasicTextField(
-        value = field,
-        onValueChange = ::apply,
-        textStyle = TextStyle(
-            fontFamily = FontFamily.Monospace,
-            fontSize = controller.settings.editorFontSize.sp,
-            color = colors.onSurface,
-        ),
-        cursorBrush = SolidColor(colors.primary),
-        visualTransformation = shownTransformation,
-        onTextLayout = { layout = it },
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(min = 40.dp)
-            .padding(12.dp)
-            .focusRequester(focus)
-            .onPreviewKeyEvent { event ->
-                if (event.type == KeyEventType.KeyDown && Log.isLoggable(NOTEBOOK_LOG_TAG, Log.DEBUG)) {
-                    Log.d(
-                        NOTEBOOK_LOG_TAG,
-                        "cell=${session.notebook.cells.indexOf(cell)} key ${event.key} shift=${event.isShiftPressed} " +
-                            "ctrl=${event.isCtrlPressed} alt=${event.isAltPressed} sel=${field.selection.start}-${field.selection.end}",
-                    )
-                }
-                if (event.type != KeyEventType.KeyDown || event.isCtrlPressed || event.isAltPressed) {
-                    return@onPreviewKeyEvent false
-                }
-                val settings = controller.settings
-                if (event.key == Key.Tab && !event.isShiftPressed) {
-                    controller.acceptCellSuggestion(session, cell, field)?.let { accepted ->
-                        apply(accepted)
+    Box {
+        BasicTextField(
+            value = field,
+            onValueChange = ::apply,
+            textStyle = TextStyle(
+                fontFamily = FontFamily.Monospace,
+                fontSize = controller.settings.editorFontSize.sp,
+                color = colors.onSurface,
+            ),
+            cursorBrush = SolidColor(colors.primary),
+            visualTransformation = shownTransformation,
+            onTextLayout = { layout = it },
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 40.dp)
+                .padding(12.dp)
+                .focusRequester(focus)
+                .onPreviewKeyEvent { event ->
+                    if (event.type == KeyEventType.KeyDown && Log.isLoggable(NOTEBOOK_LOG_TAG, Log.DEBUG)) {
+                        Log.d(
+                            NOTEBOOK_LOG_TAG,
+                            "cell=${session.notebook.cells.indexOf(cell)} key ${event.key} shift=${event.isShiftPressed} " +
+                                "ctrl=${event.isCtrlPressed} alt=${event.isAltPressed} sel=${field.selection.start}-${field.selection.end}",
+                        )
+                    }
+                    if (event.type == KeyEventType.KeyDown) {
+                        // The completion popup takes Up/Down/Enter/Tab/Esc while it is open.
+                        val completion = session.cellCompletion?.takeIf { it.cellId == cell.id }
+                        val visible = completion?.visibleItems(field)
+                        if (completion != null && visible != null && !event.isCtrlPressed && !event.isAltPressed) {
+                            when (event.key) {
+                                Key.DirectionDown -> {
+                                    session.cellCompletion = completion.copy(selected = (completion.selected.coerceIn(visible.indices) + 1) % visible.size)
+                                    return@onPreviewKeyEvent true
+                                }
+                                Key.DirectionUp -> {
+                                    session.cellCompletion = completion.copy(selected = (completion.selected.coerceIn(visible.indices) - 1 + visible.size) % visible.size)
+                                    return@onPreviewKeyEvent true
+                                }
+                                Key.Enter, Key.NumPadEnter, Key.Tab -> {
+                                    completion.accept(field)?.let(::apply)
+                                    session.cellCompletion = null
+                                    return@onPreviewKeyEvent true
+                                }
+                                Key.Escape -> {
+                                    session.cellCompletion = null
+                                    return@onPreviewKeyEvent true
+                                }
+                            }
+                        }
+                        if (event.key == Key.Spacebar && event.isCtrlPressed && cell.type == CellType.Code) {
+                            controller.requestCellCompletion(session, cell, field)
+                            return@onPreviewKeyEvent true
+                        }
+                    }
+                    if (event.type != KeyEventType.KeyDown || event.isCtrlPressed || event.isAltPressed) {
+                        return@onPreviewKeyEvent false
+                    }
+                    val settings = controller.settings
+                    if (event.key == Key.Tab && !event.isShiftPressed) {
+                        controller.acceptCellSuggestion(session, cell, field)?.let { accepted ->
+                            apply(accepted)
+                            return@onPreviewKeyEvent true
+                        }
+                    }
+                    if (event.key == Key.Escape && session.cellSuggestion?.cellId == cell.id) {
+                        session.cellSuggestion = null
                         return@onPreviewKeyEvent true
                     }
+                    // Jupyter: Tab after a name or a dot completes (with a kernel running); elsewhere it indents.
+                    if (event.key == Key.Tab && !event.isShiftPressed && cell.type == CellType.Code &&
+                        session.kernelName != null && tabCompletes(field)
+                    ) {
+                        controller.requestCellCompletion(session, cell, field)
+                        return@onPreviewKeyEvent true
+                    }
+                    if (event.key == Key.Tab) {
+                        apply(
+                            if (event.isShiftPressed) CellTextEdits.outdent(field, settings.tabSize)
+                            else CellTextEdits.indent(field, settings.tabSize, settings.insertSpaces),
+                        )
+                        return@onPreviewKeyEvent true
+                    }
+                    if (event.isShiftPressed) return@onPreviewKeyEvent false
+                    val selection = field.selection
+                    val current = layout?.takeIf { it.layoutInput.text.length == field.text.length }
+                    val goalX = session.stickyGoalX ?: current?.getHorizontalPosition(selection.end, usePrimaryDirection = true)
+                    // Up/Down by visual row aiming at the sticky column, as in VS Code; past the first or
+                    // last row they move to the neighbouring cell (Jupyter), still aiming at that column.
+                    fun moveVertically(delta: Int): Boolean {
+                        if (!selection.collapsed) return false
+                        if (current == null || goalX == null) {
+                            // No layout yet (an empty cell, a Markdown cell just opened): go by lines.
+                            val row = field.text.substring(0, selection.end).count { it == '\n' }
+                            val rows = field.text.count { it == '\n' } + 1
+                            return row + delta !in 0 until rows && controller.selectAdjacentCell(session, cell, delta, goalX)
+                        }
+                        val target = current.getLineForOffset(selection.end) + delta
+                        if (target !in 0 until current.lineCount) {
+                            val moved = controller.selectAdjacentCell(session, cell, delta, goalX)
+                            if (moved) session.stickyGoalX = goalX
+                            return moved
+                        }
+                        val y = (current.getLineTop(target) + current.getLineBottom(target)) / 2
+                        field = field.copy(selection = TextRange(current.getOffsetForPosition(Offset(goalX, y))))
+                        session.stickyGoalX = goalX
+                        return true
+                    }
+                    when (event.key) {
+                        Key.Enter, Key.NumPadEnter -> cell.type == CellType.Code && settings.autoIndent &&
+                            true.also { apply(CellTextEdits.newline(field, settings.tabSize, settings.insertSpaces)) }
+                        Key.DirectionUp -> moveVertically(-1)
+                        Key.DirectionDown -> moveVertically(1)
+                        // At the edges Left/Right would hand focus to whatever is beside the cell; keep it here.
+                        Key.DirectionLeft -> selection.collapsed && selection.start == 0
+                        Key.DirectionRight -> selection.collapsed && selection.end == field.text.length
+                        else -> false
+                    }
                 }
-                if (event.key == Key.Escape && session.cellSuggestion?.cellId == cell.id) {
-                    session.cellSuggestion = null
-                    return@onPreviewKeyEvent true
+                // Keys the text field didn't use bubble up here; without this, an arrow at an edge (or
+                // with a modifier the handlers above skip) moved Compose focus out of the notebook.
+                .onKeyEvent { event ->
+                    val kept = event.type == KeyEventType.KeyDown && event.key in cellKeepsKeys
+                    if (kept && Log.isLoggable(NOTEBOOK_LOG_TAG, Log.DEBUG)) {
+                        Log.d(NOTEBOOK_LOG_TAG, "cell=${session.notebook.cells.indexOf(cell)} kept unhandled ${event.key}")
+                    }
+                    kept
                 }
-                if (event.key == Key.Tab) {
-                    apply(
-                        if (event.isShiftPressed) CellTextEdits.outdent(field, settings.tabSize)
-                        else CellTextEdits.indent(field, settings.tabSize, settings.insertSpaces),
+                .onFocusChanged { state ->
+                    if (state.isFocused != focused && Log.isLoggable(NOTEBOOK_LOG_TAG, Log.DEBUG)) {
+                        Log.d(NOTEBOOK_LOG_TAG, "cell=${session.notebook.cells.indexOf(cell)} focus=${state.isFocused}")
+                    }
+                    focused = state.isFocused
+                    if (state.isFocused) {
+                        session.selectedCell = cell.id
+                        controller.focusArea = FocusArea.Notebook
+                    } else if (controller.focusArea == FocusArea.Notebook) {
+                        controller.focusArea = FocusArea.Other
+                    }
+                },
+        )
+        val completion = session.cellCompletion?.takeIf { it.cellId == cell.id }
+        val items = completion?.visibleItems(field)
+        if (completion != null && items != null) {
+            val density = LocalDensity.current
+            // Under the cell, at the caret's column; it never takes focus, so typing goes on in the cell.
+            val caretX = layout?.takeIf { it.layoutInput.text.length == field.text.length }
+                ?.getCursorRect(field.selection.start.coerceIn(0, field.text.length))?.left ?: 0f
+            DropdownMenu(
+                expanded = true,
+                onDismissRequest = { session.cellCompletion = null },
+                offset = DpOffset(with(density) { caretX.toDp() } + 12.dp, 0.dp),
+                properties = PopupProperties(focusable = false),
+                modifier = Modifier.heightIn(max = 280.dp),
+            ) {
+                items.forEachIndexed { index, item ->
+                    DropdownMenuItem(
+                        text = { Text(item, fontFamily = FontFamily.Monospace, maxLines = 1) },
+                        onClick = {
+                            completion.accept(field, index)?.let(::apply)
+                            session.cellCompletion = null
+                            runCatching { focus.requestFocus() }
+                        },
+                        modifier = if (index == completion.selected.coerceIn(items.indices)) {
+                            Modifier.background(MaterialTheme.colorScheme.secondaryContainer)
+                        } else Modifier,
                     )
-                    return@onPreviewKeyEvent true
-                }
-                if (event.isShiftPressed) return@onPreviewKeyEvent false
-                val selection = field.selection
-                val current = layout?.takeIf { it.layoutInput.text.length == field.text.length }
-                val goalX = session.stickyGoalX ?: current?.getHorizontalPosition(selection.end, usePrimaryDirection = true)
-                // Up/Down by visual row aiming at the sticky column, as in VS Code; past the first or
-                // last row they move to the neighbouring cell (Jupyter), still aiming at that column.
-                fun moveVertically(delta: Int): Boolean {
-                    if (!selection.collapsed) return false
-                    if (current == null || goalX == null) {
-                        // No layout yet (an empty cell, a Markdown cell just opened): go by lines.
-                        val row = field.text.substring(0, selection.end).count { it == '\n' }
-                        val rows = field.text.count { it == '\n' } + 1
-                        return row + delta !in 0 until rows && controller.selectAdjacentCell(session, cell, delta, goalX)
-                    }
-                    val target = current.getLineForOffset(selection.end) + delta
-                    if (target !in 0 until current.lineCount) {
-                        val moved = controller.selectAdjacentCell(session, cell, delta, goalX)
-                        if (moved) session.stickyGoalX = goalX
-                        return moved
-                    }
-                    val y = (current.getLineTop(target) + current.getLineBottom(target)) / 2
-                    field = field.copy(selection = TextRange(current.getOffsetForPosition(Offset(goalX, y))))
-                    session.stickyGoalX = goalX
-                    return true
-                }
-                when (event.key) {
-                    Key.Enter, Key.NumPadEnter -> cell.type == CellType.Code && settings.autoIndent &&
-                        true.also { apply(CellTextEdits.newline(field, settings.tabSize, settings.insertSpaces)) }
-                    Key.DirectionUp -> moveVertically(-1)
-                    Key.DirectionDown -> moveVertically(1)
-                    // At the edges Left/Right would hand focus to whatever is beside the cell; keep it here.
-                    Key.DirectionLeft -> selection.collapsed && selection.start == 0
-                    Key.DirectionRight -> selection.collapsed && selection.end == field.text.length
-                    else -> false
                 }
             }
-            // Keys the text field didn't use bubble up here; without this, an arrow at an edge (or
-            // with a modifier the handlers above skip) moved Compose focus out of the notebook.
-            .onKeyEvent { event ->
-                val kept = event.type == KeyEventType.KeyDown && event.key in cellKeepsKeys
-                if (kept && Log.isLoggable(NOTEBOOK_LOG_TAG, Log.DEBUG)) {
-                    Log.d(NOTEBOOK_LOG_TAG, "cell=${session.notebook.cells.indexOf(cell)} kept unhandled ${event.key}")
-                }
-                kept
-            }
-            .onFocusChanged { state ->
-                if (state.isFocused != focused && Log.isLoggable(NOTEBOOK_LOG_TAG, Log.DEBUG)) {
-                    Log.d(NOTEBOOK_LOG_TAG, "cell=${session.notebook.cells.indexOf(cell)} focus=${state.isFocused}")
-                }
-                focused = state.isFocused
-                if (state.isFocused) {
-                    session.selectedCell = cell.id
-                    controller.focusArea = FocusArea.Notebook
-                } else if (controller.focusArea == FocusArea.Notebook) {
-                    controller.focusArea = FocusArea.Other
-                }
-            },
-    )
+        }
+    }
 }
 
 @Composable

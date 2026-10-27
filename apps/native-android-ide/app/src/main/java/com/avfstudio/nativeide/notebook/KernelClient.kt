@@ -23,6 +23,8 @@ fun generatedKernelName(label: String): String =
  * Client for the guest's `avf-jupyter-bridge` (guest/tools/avf-jupyter-bridge.py): one bridge
  * process and one kernel per open notebook, spoken to as newline-delimited JSON-RPC.
  */
+data class KernelCompletions(val matches: List<String>, val start: Int, val end: Int)
+
 class KernelClient(transport: GuestVfsClient) {
     private val connection = JsonRpcConnection(transport, "Kernel")
     @Volatile var outputListener: ((String, JsonObject) -> Unit)? = null
@@ -89,12 +91,19 @@ class KernelClient(transport: GuestVfsClient) {
             )
         }
 
-    fun complete(code: String, cursor: Int): CompletableFuture<List<String>> =
+    /** Kernel completions at [cursor]; [KernelCompletions.start]..[KernelCompletions.end] is the text they replace. */
+    fun complete(code: String, cursor: Int): CompletableFuture<KernelCompletions> =
         connection.request("complete", JsonObject().apply {
             addProperty("code", code)
             addProperty("cursor_pos", cursor)
         }).thenApply { result ->
-            result.asJsonObject.getAsJsonArray("matches")?.map { it.asString }.orEmpty()
+            val reply = result.asJsonObject
+            fun position(name: String) = reply.get(name)?.takeIf { it.isJsonPrimitive }?.asInt
+            KernelCompletions(
+                matches = reply.getAsJsonArray("matches")?.map { it.asString }.orEmpty(),
+                start = position("cursor_start") ?: cursor,
+                end = position("cursor_end") ?: cursor,
+            )
         }
 
     fun interrupt(): CompletableFuture<Unit> = connection.request("interrupt", JsonNull.INSTANCE).thenApply { }
