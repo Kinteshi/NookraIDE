@@ -367,6 +367,17 @@ stack, variables, debug console. Restore the F9 binding when it works.
   `gh auth setup-git`, then Git user.name/email from the account when unset (noreply address).
   Copilot chat uses gh's token through its documented fallback. `copilot login` stays as the
   palette command "Copilot: Sign In to Chat with copilot login".
+  * Tablet: `gh` installed through the daemon, but `gh auth login` failed ("error connecting to
+    github.com"): Go's resolver timed out (`lookup github.com: i/o timeout`). The guest image
+    ships `/etc/resolv.conf` from its build machine (nameserver 169.254.169.254, Google Cloud
+    search domains), which doesn't answer; glibc works through systemd-resolved (nss `resolve`,
+    a second link with 10.16.230.177), but Go reads the file directly. Not EDNS0
+    (`GODEBUG=netedns0=0`), post-quantum TLS (`tlsmlkem=0`), HTTP/2, or parallel A/AAAA
+    (`single-request`, tested with the file restored afterwards).
+  * Fix, with the user's OK: `/etc/resolv.conf` → `/run/systemd/resolve/stub-resolv.conf`
+    (backup `/etc/resolv.conf.avf-backup`); gh then gets a device code at once. The installer
+    does the same on AVF guests with systemd-resolved running and a plain resolv.conf. The app
+    also answers gh's "Authenticate Git with your GitHub credentials?" with its default (Yes).
 * Copilot memory: when the language server reports "not signed in", the app remembers it and
   stops the server after 30 s (~280 MB in the guest); later launches don't start it, the status
   bar says "Copilot · Signed out", and tapping it starts the server and signs in.

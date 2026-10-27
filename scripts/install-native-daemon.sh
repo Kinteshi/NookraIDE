@@ -113,6 +113,16 @@ if ! $remote && [ -e /etc/systemd/system/avf-page-reporting.service ] && sudo -n
   echo 9 | sudo -n tee /sys/module/page_reporting/parameters/page_reporting_order >/dev/null 2>&1 || true
 fi
 
+# The AVF Debian image ships /etc/resolv.conf from its build machine (a cloud resolver that doesn't
+# answer here). glibc goes through systemd-resolved and works, but programs that read the file
+# directly (Go tools such as the GitHub CLI) time out on every lookup. Point the file at
+# resolved's stub, as Debian does with systemd-resolved; the old file stays as a backup.
+if ! $remote && [ -f /etc/resolv.conf ] && [ ! -L /etc/resolv.conf ] && [ -f /run/systemd/resolve/stub-resolv.conf ] &&
+  systemctl is-active --quiet systemd-resolved && sudo -n true 2>/dev/null; then
+  [ -e /etc/resolv.conf.avf-backup ] || sudo -n cp -p /etc/resolv.conf /etc/resolv.conf.avf-backup
+  sudo -n ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
+fi
+
 # Earlier installers added root units that dropped the guest's caches and compacted memory. On AVF
 # that corrupted file pages (programs crashed, ext4 reported I/O errors), so remove them.
 if ! $remote && [ -e /etc/systemd/system/avf-trim-memory.service ] && sudo -n true 2>/dev/null; then

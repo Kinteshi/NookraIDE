@@ -3147,6 +3147,7 @@ class WorkbenchController(private val context: Context) {
         val output = StringBuilder()
         var prompted = false
         var enterSent = false
+        var gitAnswered = false
         var terminal: UUID? = null
         terminal = newTerminal(
             GITHUB_SIGN_IN_COMMAND,
@@ -3155,6 +3156,11 @@ class WorkbenchController(private val context: Context) {
                 output.append(text)
                 if (output.length > 16_384) output.delete(0, output.length - 4_096)
                 val seen = output.toString()
+                // gh asks before the code; its default (Yes) is what this flow is for.
+                if (!gitAnswered && stripAnsi(seen).contains("Authenticate Git with your GitHub credentials")) {
+                    gitAnswered = true
+                    terminal?.let { vfs.ptyInput(it, "\r".toByteArray()) }
+                }
                 if (!prompted) {
                     parseDeviceCodePrompt(seen)?.let { prompt ->
                         prompted = true
