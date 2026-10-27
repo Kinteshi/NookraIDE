@@ -71,6 +71,8 @@ sealed interface WorkbenchDialog {
     data class GitConfirmDiscard(val paths: List<String>, val untracked: Int) : WorkbenchDialog
     data object GitClone : WorkbenchDialog
     data object GuestResources : WorkbenchDialog
+    /** Closing a tab with unsaved changes, as VS Code asks. */
+    data class ConfirmClose(val path: String) : WorkbenchDialog
     /** Python environments found in the guest; [then] runs after one is chosen (e.g. start debugging). */
     data class InterpreterPicker(val options: List<Pair<String, String>>, val then: (() -> Unit)?) : WorkbenchDialog
     /** Set up (or re-pair) the Linux guest; [reason] says why it opened, e.g. a rejected token. */

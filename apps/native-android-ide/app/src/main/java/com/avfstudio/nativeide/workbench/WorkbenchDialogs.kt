@@ -188,6 +188,18 @@ fun WorkbenchDialogHost(controller: WorkbenchController) {
             confirmButton = { TextButton(onClick = { controller.dialog = null }) { Text("Close") } },
         )
         is WorkbenchDialog.GitBranches -> GitBranchesDialog(controller, dialog)
+        is WorkbenchDialog.ConfirmClose -> AlertDialog(
+            onDismissRequest = { controller.dialog = null },
+            title = { Text("Save changes to ${dialog.path.substringAfterLast('/')}?") },
+            text = { Text("Your changes will be lost if you don't save them.") },
+            confirmButton = { TextButton(onClick = { controller.saveAndClose(dialog.path) }) { Text("Save") } },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = { controller.closeDiscarding(dialog.path) }) { Text("Don't save", color = MaterialTheme.colorScheme.error) }
+                    TextButton(onClick = { controller.dialog = null }) { Text("Cancel") }
+                }
+            },
+        )
         is WorkbenchDialog.GitConfirmDiscard -> AlertDialog(
             onDismissRequest = { controller.dialog = null },
             title = { Text(if (dialog.paths.size == 1) "Discard changes?" else "Discard ${dialog.paths.size} files' changes?") },

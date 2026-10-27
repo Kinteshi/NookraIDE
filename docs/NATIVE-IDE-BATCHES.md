@@ -288,6 +288,12 @@ stack, variables, debug console. Restore the F9 binding when it works.
   * Checked after the fix: the same Down/Up walk hands focus cell to cell (`focus=false` then
     `focus=true`) with the sticky column (5 → 13 → empty → 5 → 11 → 16 and back); a 60 ms burst of
     19 keys mixing crossings and Left/Right kept focus in the cells throughout.
+  * Checked: a notebook edit survives a force-stop (draft restored: `a = 1 + 2`); the four new
+    Settings rows are present.
+  * Found and fixed: closing a tab with unsaved changes (X or Ctrl+W) closed it silently, keeping
+    a stale draft. It now asks Save / Don't save / Cancel as VS Code does; Save closes once the
+    save (or the offline queue) went through, Don't save drops the draft. "Close other editors"
+    still closes without asking.
 * Still not checked on the tablet (the tablet dropped off wireless debugging twice in 25
   minutes, the first time because it rebooted): Enter indent after the crash fix, cell Tab/Enter,
   notebook Copilot, plotly, the kernel fallback.

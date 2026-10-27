@@ -1609,6 +1609,34 @@ class WorkbenchController(private val context: Context) {
         }
     }
 
+    /** Tabs closed by "Save" once their save completes. */
+    private val closeAfterSave = mutableSetOf<String>()
+
+    private fun hasUnsavedChanges(path: String): Boolean =
+        notebooks[path]?.notebook?.dirty ?: (documents.firstOrNull { it.path == path }?.dirty == true)
+
+    /** The tab's close button and Ctrl+W: asks first when the tab has unsaved changes. */
+    fun requestCloseDocument(path: String) {
+        if (hasUnsavedChanges(path)) dialog = WorkbenchDialog.ConfirmClose(path) else closeDocument(path)
+    }
+
+    fun saveAndClose(path: String) {
+        dialog = null
+        activePath = path
+        closeAfterSave += path
+        saveActiveDocument()
+    }
+
+    fun closeDiscarding(path: String) {
+        dialog = null
+        closeDocument(path)
+        repository.forget(path)
+    }
+
+    private fun closeIfPendingAfterSave(path: String) {
+        if (closeAfterSave.remove(path)) closeDocument(path)
+    }
+
     fun closeDocument(path: String) {
         documents.firstOrNull { it.path == path }?.let(closedDocuments::add)
         notifyDocumentClosed(path)
@@ -1682,9 +1710,14 @@ class WorkbenchController(private val context: Context) {
                     is SaveResult.Saved -> {
                         status = "Saved ${document.path}"
                         refreshGitStatus()
+                        closeIfPendingAfterSave(document.path)
                     }
-                    SaveResult.QueuedOffline -> status = "Saved locally; queued until guest reconnects"
+                    SaveResult.QueuedOffline -> {
+                        status = "Saved locally; queued until guest reconnects"
+                        closeIfPendingAfterSave(document.path)
+                    }
                     is SaveResult.Conflict -> {
+                        closeAfterSave.remove(document.path)
                         dialog = WorkbenchDialog.Conflict(document)
                         status = "Save conflict: remote file changed"
                     }
@@ -3498,8 +3531,12 @@ class WorkbenchController(private val context: Context) {
                     result is SaveResult.Saved -> {
                         session.notebook.dirty = false
                         status = "Saved ${session.document.path}"
+                        closeIfPendingAfterSave(session.document.path)
                     }
-                    result is SaveResult.QueuedOffline -> status = "Saved locally; queued until guest reconnects"
+                    result is SaveResult.QueuedOffline -> {
+                        status = "Saved locally; queued until guest reconnects"
+                        closeIfPendingAfterSave(session.document.path)
+                    }
                     result is SaveResult.Conflict -> {
                         dialog = WorkbenchDialog.Conflict(session.document)
                         status = "Save conflict: remote notebook changed"
@@ -3675,7 +3712,7 @@ class WorkbenchController(private val context: Context) {
                 commandFilter = ""
                 dialog = WorkbenchDialog.Commands
             }
-            "workbench.action.closeActiveEditor" -> activePath?.let(::closeDocument)
+            "workbench.action.closeActiveEditor" -> activePath?.let(::requestCloseDocument)
             "workbench.action.closeOtherEditors" -> activePath?.let { path ->
                 documents.filter { it.path != path }.map { it.path }.forEach(::closeDocument)
             }

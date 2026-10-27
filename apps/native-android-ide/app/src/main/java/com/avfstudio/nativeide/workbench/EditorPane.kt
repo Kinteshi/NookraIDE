@@ -126,7 +126,7 @@ private fun EditorTabs(controller: WorkbenchController) {
                         maxLines = 1,
                     )
                     Box(
-                        Modifier.size(26.dp).clip(RoundedCornerShape(13.dp)).clickable { controller.closeDocument(document.path) },
+                        Modifier.size(26.dp).clip(RoundedCornerShape(13.dp)).clickable { controller.requestCloseDocument(document.path) },
                         contentAlignment = Alignment.Center,
                     ) {
                         if (dirty) {
