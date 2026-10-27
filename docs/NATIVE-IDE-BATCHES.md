@@ -353,6 +353,13 @@ stack, variables, debug console. Restore the F9 binding when it works.
     gh's token) and Git (`gh auth setup-git`, user.name/email from the account). The inline
     language server documents no way to take a token, so it keeps its own sign-in: two flows
     instead of three. Sharing one token with the language server is listed for later.
+* Chat option picker (code, unit test; tablet check pending): `AcpClient` reads `configOptions`
+  (select type; duplicate choices folded), sets them with `session/set_config_option`, follows
+  `config_option_update`/`current_mode_update`, and clears them when the agent stops. The chat
+  pane shows a chip per option (Model, Mode, Allow All) above the input; before any session the
+  chips show the remembered choice and a tap opens a session to list them. Model and mode are
+  remembered and re-applied to new sessions (Autopilot is not); "Allow all" asks first and is
+  never remembered. No Settings row: the list comes from the agent, the chips are the picker.
 
 ## Mapped for later (user, 10-27)
 * Model picker and adjustments (e.g. reasoning effort) for the chat UI.

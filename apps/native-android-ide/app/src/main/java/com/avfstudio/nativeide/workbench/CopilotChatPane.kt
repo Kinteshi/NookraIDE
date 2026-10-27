@@ -8,6 +8,11 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.ShortText
 import androidx.compose.material.icons.outlined.AttachFile
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.ArrowDropDown
 import androidx.compose.material.icons.automirrored.outlined.InsertDriveFile
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Box
@@ -137,6 +142,7 @@ fun CopilotChatPane(controller: WorkbenchController, modifier: Modifier = Modifi
                 }
             }
         }
+        ChatOptionsRow(controller)
         Row(
             Modifier.fillMaxWidth().padding(12.dp),
             verticalAlignment = Alignment.Bottom,
@@ -324,3 +330,73 @@ private fun ChatMarkdown(text: String, modifier: Modifier = Modifier) {
 
 private fun referenceIcon(reference: ChatReference) =
     if (reference.isExcerpt) Icons.Outlined.ShortText else Icons.AutoMirrored.Outlined.InsertDriveFile
+
+/**
+ * The agent's session options (model, mode, tool approvals) as chips above the input. Before a
+ * session exists they show the remembered choice; the first tap opens a session to list them.
+ */
+@Composable
+private fun ChatOptionsRow(controller: WorkbenchController) {
+    val options = controller.chatConfigOptions
+    var confirmAllowAll by remember { mutableStateOf<Pair<com.avfstudio.nativeide.ai.AcpConfigOption, String>?>(null) }
+    FlowRow(
+        Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        if (options.isEmpty()) {
+            listOf("model" to "Model", "mode" to "Mode").forEach { (id, name) ->
+                AssistChip(
+                    onClick = controller::loadChatOptions,
+                    label = { Text("$name: ${controller.rememberedChatChoice(id) ?: "Default"}", maxLines = 1) },
+                    trailingIcon = {
+                        if (controller.chatOptionsLoading) CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                        else Icon(Icons.Outlined.ArrowDropDown, contentDescription = null, modifier = Modifier.size(18.dp))
+                    },
+                )
+            }
+        }
+        options.forEach { option ->
+            var open by remember(option.id) { mutableStateOf(false) }
+            Box {
+                AssistChip(
+                    onClick = { open = true },
+                    label = { Text("${option.name}: ${option.choices.firstOrNull { it.value == option.current }?.name ?: option.current}", maxLines = 1) },
+                    trailingIcon = { Icon(Icons.Outlined.ArrowDropDown, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                )
+                DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                    option.choices.forEach { choice ->
+                        DropdownMenuItem(
+                            text = {
+                                Column {
+                                    Text(choice.name)
+                                    choice.description?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                                }
+                            },
+                            leadingIcon = if (choice.value == option.current) {
+                                { Icon(Icons.Outlined.Check, contentDescription = "Selected") }
+                            } else null,
+                            onClick = {
+                                open = false
+                                if (option.category == "permissions" && choice.value == "on") {
+                                    confirmAllowAll = option to choice.value
+                                } else {
+                                    controller.rememberChatChoiceName(option, choice.name)
+                                    controller.setChatOption(option, choice.value)
+                                }
+                            },
+                        )
+                    }
+                }
+            }
+        }
+    }
+    confirmAllowAll?.let { (option, value) ->
+        AlertDialog(
+            onDismissRequest = { confirmAllowAll = null },
+            title = { Text("Let Copilot act without asking?") },
+            text = { Text("Copilot will run commands, edit files and fetch URLs in the guest without asking first, for this session.") },
+            confirmButton = { TextButton(onClick = { confirmAllowAll = null; controller.setChatOption(option, value) }) { Text("Allow all") } },
+            dismissButton = { TextButton(onClick = { confirmAllowAll = null }) { Text("Cancel") } },
+        )
+    }
+}

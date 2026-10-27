@@ -13,6 +13,46 @@ private const val ACP_PROTOCOL_VERSION = 1
 data class AcpAuthMethod(val id: String, val name: String, val description: String?)
 data class AcpPermissionOption(val id: String, val name: String, val kind: String)
 
+/** One choice of a session config option. */
+data class AcpChoice(val value: String, val name: String, val description: String?)
+
+/** A select-type session config option (ACP `configOptions`): the mode, the model, tool approvals. */
+data class AcpConfigOption(
+    val id: String,
+    val name: String,
+    val category: String?,
+    val description: String?,
+    val current: String,
+    val choices: List<AcpChoice>,
+)
+
+/**
+ * Reads `configOptions` from a session/new or set_config_option result (or a config update).
+ * Only "select" options are kept; choices repeated with the same value (Copilot lists "Auto"
+ * twice) appear once.
+ */
+internal fun parseConfigOptions(result: JsonObject?): List<AcpConfigOption>? {
+    val options = result?.getAsJsonArray("configOptions") ?: return null
+    return options.mapNotNull { element ->
+        val option = element.takeIf { it.isJsonObject }?.asJsonObject ?: return@mapNotNull null
+        if (option.get("type")?.asString != "select") return@mapNotNull null
+        val id = (option.get("id") ?: option.get("configId"))?.asString ?: return@mapNotNull null
+        val choices = option.getAsJsonArray("options")?.mapNotNull { choice ->
+            val item = choice.takeIf { it.isJsonObject }?.asJsonObject ?: return@mapNotNull null
+            val value = item.get("value")?.asString ?: return@mapNotNull null
+            AcpChoice(value, item.get("name")?.asString ?: value, item.get("description")?.takeIf { it.isJsonPrimitive }?.asString)
+        }.orEmpty().distinctBy { it.value }
+        AcpConfigOption(
+            id = id,
+            name = option.get("name")?.asString ?: id,
+            category = option.get("category")?.takeIf { it.isJsonPrimitive }?.asString,
+            description = option.get("description")?.takeIf { it.isJsonPrimitive }?.asString,
+            current = option.get("currentValue")?.asString ?: choices.firstOrNull()?.value.orEmpty(),
+            choices = choices,
+        )
+    }
+}
+
 sealed interface AcpEvent {
     data class MessageChunk(val text: String) : AcpEvent
     data class ThoughtChunk(val text: String) : AcpEvent
@@ -42,6 +82,10 @@ class AcpClient(transport: GuestVfsClient, private val tool: String = COPILOT_AG
     @Volatile var embeddedContext: Boolean = false
         private set
     @Volatile var eventListener: ((AcpEvent) -> Unit)? = null
+    /** The session's mode, model and similar options, as the agent last reported them. */
+    @Volatile var configOptions: List<AcpConfigOption> = emptyList()
+        private set
+    @Volatile var configListener: ((List<AcpConfigOption>) -> Unit)? = null
     @Volatile var exitListener: ((String) -> Unit)? = null
     val isStarted: Boolean get() = connection.bridgeId != null
     val hasSession: Boolean get() = sessionId != null
@@ -51,6 +95,7 @@ class AcpClient(transport: GuestVfsClient, private val tool: String = COPILOT_AG
         connection.requestHandler = ::handleRequest
         connection.exitListener = { code ->
             sessionId = null
+            updateConfig(emptyList())
             exitListener?.invoke("Agent exited (${code ?: "unknown"})")
         }
         connection.errorListener = { message -> exitListener?.invoke(message) }
@@ -83,7 +128,28 @@ class AcpClient(transport: GuestVfsClient, private val tool: String = COPILOT_AG
             add("mcpServers", JsonArray())
         }, timeoutSeconds = 60).thenApply { result ->
             sessionId = result.asJsonObject.get("sessionId").asString
+            updateConfig(parseConfigOptions(result.asJsonObject) ?: emptyList())
         }
+
+    /** ACP v1 `session/set_config_option`; the agent answers with the full, updated option list. */
+    fun setConfigOption(configId: String, value: String): CompletableFuture<Unit> {
+        val session = sessionId ?: return CompletableFuture.failedFuture(IllegalStateException("No agent session is open"))
+        return connection.request("session/set_config_option", JsonObject().apply {
+            addProperty("sessionId", session)
+            addProperty("configId", configId)
+            addProperty("value", value)
+        }, timeoutSeconds = 30).thenApply { result ->
+            updateConfig(
+                parseConfigOptions(result.takeIf { it.isJsonObject }?.asJsonObject)
+                    ?: configOptions.map { if (it.id == configId) it.copy(current = value) else it },
+            )
+        }
+    }
+
+    private fun updateConfig(options: List<AcpConfigOption>) {
+        configOptions = options
+        configListener?.invoke(options)
+    }
 
     fun authenticate(methodId: String): CompletableFuture<JsonElement> =
         connection.request("authenticate", JsonObject().apply { addProperty("methodId", methodId) }, null)
@@ -107,18 +173,27 @@ class AcpClient(transport: GuestVfsClient, private val tool: String = COPILOT_AG
 
     fun stop() {
         sessionId = null
+        updateConfig(emptyList())
         connection.stop()
     }
 
     fun onDisconnected() {
         sessionId = null
+        updateConfig(emptyList())
         connection.detach(java.io.IOException("Guest connection was lost"))
     }
 
     private fun handleNotification(method: String, params: JsonObject) {
         if (method != "session/update") return
         val update = params.getAsJsonObject("update") ?: return
-        parseSessionUpdate(update)?.let { event -> eventListener?.invoke(event) }
+        when (update.get("sessionUpdate")?.asString) {
+            // The agent changed an option itself (e.g. Autopilot turning on allow-all).
+            "config_option_update" -> parseConfigOptions(update)?.let(::updateConfig)
+            "current_mode_update" -> update.get("currentModeId")?.asString?.let { mode ->
+                updateConfig(configOptions.map { if (it.category == "mode") it.copy(current = mode) else it })
+            }
+            else -> parseSessionUpdate(update)?.let { event -> eventListener?.invoke(event) }
+        }
     }
 
     private fun handleRequest(method: String, params: JsonObject): CompletableFuture<JsonElement>? {

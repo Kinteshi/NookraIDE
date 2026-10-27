@@ -106,6 +106,8 @@ private const val SCRATCH_WELCOME_PATH = "scratch:/welcome.py"
 private const val MAX_IMPORTED_THEME_BYTES = 8 * 1024 * 1024
 private const val MAX_OUTPUT_LINES = 500
 private const val MAX_QUICK_OPEN_FILES = 5000
+/** Chat options remembered across sessions; approvals ("permissions") never are. */
+private val rememberedChatCategories = setOf("model", "mode")
 private const val LINUX_TERMINAL_PACKAGE = "com.android.virtualization.terminal"
 private val skippedDirectories = setOf(
     ".git", "node_modules", "__pycache__", ".venv", "venv", ".mypy_cache", ".ruff_cache", ".pytest_cache",
@@ -389,6 +391,7 @@ class WorkbenchController(private val context: Context) {
             }
         }
         chatAgent.eventListener = { event -> post { appendChat(event) } }
+        chatAgent.configListener = { options -> post { chatConfigOptions = options } }
         chatAgent.exitListener = { message ->
             post {
                 chatBusy = false
@@ -2909,12 +2912,7 @@ class WorkbenchController(private val context: Context) {
         chatEntries.add(ChatEntry.User(text, references))
         chatBusy = true
         scheduledChatStop?.cancel(false)
-        val ready = when {
-            chatAgent.hasSession -> CompletableFuture.completedFuture(Unit)
-            chatAgent.isStarted -> chatAgent.newSession(workspace)
-            else -> chatAgent.start(workspace).thenCompose { chatAgent.newSession(workspace) }
-        }
-        ready.thenCompose { chatAgent.prompt(text, references) }.whenComplete { stopReason, error ->
+        ensureChatSession(workspace).thenCompose { chatAgent.prompt(text, references) }.whenComplete { stopReason, error ->
             post {
                 chatBusy = false
                 scheduleChatStop()
@@ -2932,6 +2930,62 @@ class WorkbenchController(private val context: Context) {
                 }
             }
         }
+    }
+
+    // Chat options (model, mode, approvals) ------------------------------------------------
+
+    /** The open session's options as the agent reports them; empty until a session exists. */
+    var chatConfigOptions by mutableStateOf<List<com.avfstudio.nativeide.ai.AcpConfigOption>>(emptyList())
+        private set
+    var chatOptionsLoading by mutableStateOf(false)
+        private set
+
+    private fun ensureChatSession(workspace: String): CompletableFuture<Unit> = when {
+        chatAgent.hasSession -> CompletableFuture.completedFuture(Unit)
+        chatAgent.isStarted -> chatAgent.newSession(workspace).thenCompose { applyRememberedChatOptions() }
+        else -> chatAgent.start(workspace).thenCompose { chatAgent.newSession(workspace) }.thenCompose { applyRememberedChatOptions() }
+    }
+
+    /** Re-applies the model (and a non-autonomous mode) chosen earlier; approvals always start at the agent's default. */
+    private fun applyRememberedChatOptions(): CompletableFuture<Unit> {
+        var chain = CompletableFuture.completedFuture(Unit)
+        chatAgent.configOptions.filter { it.category in rememberedChatCategories }.forEach { option ->
+            val saved = preferences.getString("chat-option-${option.id}", null)
+            if (saved != null && saved != option.current && option.choices.any { it.value == saved }) {
+                chain = chain.thenCompose { chatAgent.setConfigOption(option.id, saved) }.exceptionally { }
+            }
+        }
+        return chain
+    }
+
+    /** The picker's first tap before any message: opens a session so the agent lists its options. */
+    fun loadChatOptions() {
+        val workspace = workspaceRoot
+        if (workspace == null || !vfs.isConnected() || chatOptionsLoading) return
+        chatOptionsLoading = true
+        ensureChatSession(workspace).whenComplete { _, error ->
+            post {
+                chatOptionsLoading = false
+                scheduleChatStop()
+                if (error != null) status = "Copilot chat: ${(error.cause ?: error).message}"
+            }
+        }
+    }
+
+    fun setChatOption(option: com.avfstudio.nativeide.ai.AcpConfigOption, value: String) {
+        if (option.category in rememberedChatCategories && !value.endsWith("#autopilot")) {
+            preferences.edit().putString("chat-option-${option.id}", value).apply()
+        }
+        chatAgent.setConfigOption(option.id, value).whenComplete { _, error ->
+            post { if (error != null) status = "Could not change ${option.name}: ${(error.cause ?: error).message}" }
+        }
+    }
+
+    /** What the picker shows before a session exists: the remembered choice's name, if any. */
+    fun rememberedChatChoice(id: String): String? = preferences.getString("chat-option-$id-name", null)
+
+    fun rememberChatChoiceName(option: com.avfstudio.nativeide.ai.AcpConfigOption, name: String) {
+        if (option.category in rememberedChatCategories) preferences.edit().putString("chat-option-${option.id}-name", name).apply()
     }
 
     /** The agent holds about 300 MB in the guest; end it after the configured idle time. */
