@@ -8,6 +8,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.ShortText
 import androidx.compose.material.icons.outlined.AttachFile
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -372,9 +373,11 @@ private fun ChatOptionsRow(controller: WorkbenchController) {
                                     choice.description?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                                 }
                             },
-                            leadingIcon = if (choice.value == option.current) {
-                                { Icon(Icons.Outlined.Check, contentDescription = "Selected") }
-                            } else null,
+                            // Every item keeps the check's space so names line up.
+                            leadingIcon = {
+                                if (choice.value == option.current) Icon(Icons.Outlined.Check, contentDescription = "Selected")
+                                else Spacer(Modifier.size(24.dp))
+                            },
                             onClick = {
                                 open = false
                                 if (option.category == "permissions" && choice.value == "on") {

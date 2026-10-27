@@ -378,6 +378,14 @@ stack, variables, debug console. Restore the F9 binding when it works.
     (backup `/etc/resolv.conf.avf-backup`); gh then gets a device code at once. The installer
     does the same on AVF guests with systemd-resolved running and a plain resolv.conf. The app
     also answers gh's "Authenticate Git with your GitHub credentials?" with its default (Yes).
+  * The reset guest had no git ("unable to find git executable"): the sign-in now installs it
+    with apt when missing, and skips `gh auth login` when gh already has a login.
+  * Checked on the tablet: the user approved the code once; the rerun installed git and printed
+    "Signed in to GitHub as Kinteshi-dev; Copilot chat and Git use this account" (exit 0). Chat
+    then answered a prompt. Chips: Mode / Model / Allow All load on tap; switching Mode to Plan
+    and back works (agent confirms). Copilot CLI 1.0.104 lists only "Auto" as a model through
+    ACP, before and after sign-in, so the Model picker has one choice for now.
+  * HTML outputs checked: the user's `df.head()` renders as a styled table.
 * Copilot memory: when the language server reports "not signed in", the app remembers it and
   stops the server after 30 s (~280 MB in the guest); later launches don't start it, the status
   bar says "Copilot · Signed out", and tapping it starts the server and signs in.
