@@ -319,6 +319,19 @@ stack, variables, debug console. Restore the F9 binding when it works.
 * All batch 10 items are checked on the tablet (rounds 3–6), except the Copilot ghost text after
   Enter, which waits for Copilot sign-in in the reset guest.
 
+## 11. Copilot, auto-save, notebooks, cleanups (planned 10-27; in progress)
+* Copilot: model picker for chat (and inline completions if the server allows it); one GitHub
+  sign-in for inline suggestions and chat (research first: which tokens each accepts), and Git
+  credentials in the same pass if feasible; else listed under "Mapped for later". Check the ghost
+  text fix now that the user signed in again. Stop the language server while signed out.
+* Auto-save: `files.autoSave` off / afterDelay / onFocusChange / onWindowChange, picker in
+  Settings.
+* Notebooks: HTML outputs (pandas tables) with a Settings toggle; kernel completions in cells
+  (Ctrl+Space, list) if time allows.
+* Cleanups: drop the `AVFKEY` routing log, "Close other editors" asks about unsaved changes,
+  memory probes (app PSS, guest tools).
+* Later (user): new AI assistants (Claude Code, Gemini).
+
 ## Mapped for later (user, 10-27)
 * Model picker and adjustments (e.g. reasoning effort) for the chat UI.
 * Claude Code and Gemini support alongside Copilot (chat agents; ACP where they speak it).
