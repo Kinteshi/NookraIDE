@@ -316,9 +316,8 @@ stack, variables, debug console. Restore the F9 binding when it works.
     keyboard arrows (`asPlainKeyboardArrow`), which fixes every Compose text field (cells, search,
     palette, chat), not just notebooks. Confirmed by the user on the tablet ("beautifully
     fixed"); the second recording shows Right moving the caret (19 → 20) with focus kept.
-* Still not checked on the tablet (the tablet dropped off wireless debugging twice in 25
-  minutes, the first time because it rebooted): Enter indent after the crash fix, cell Tab/Enter,
-  notebook Copilot, plotly, the kernel fallback.
+* All batch 10 items are checked on the tablet (rounds 3–6), except the Copilot ghost text after
+  Enter, which waits for Copilot sign-in in the reset guest.
 
 ## Mapped for later (user, 10-27)
 * Model picker and adjustments (e.g. reasoning effort) for the chat UI.
