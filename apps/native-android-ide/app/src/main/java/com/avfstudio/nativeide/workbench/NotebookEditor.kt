@@ -268,6 +268,7 @@ private fun CellSourceEditor(
     }
     var field by remember(cell.id) { mutableStateOf(TextFieldValue(cell.source)) }
     var layout by remember(cell.id) { mutableStateOf<TextLayoutResult?>(null) }
+    var focused by remember(cell.id) { mutableStateOf(false) }
     // Selecting a cell (Shift+Enter, + Code, a tap) puts the keyboard in it, as in Jupyter's edit mode.
     LaunchedEffect(selected, session.focusRequest) {
         if (!selected) return@LaunchedEffect
@@ -286,7 +287,17 @@ private fun CellSourceEditor(
             session.caretAtEnd = null
             session.caretGoalX = null
         }
-        runCatching { focus.requestFocus() }
+        // The request can land before the field is attached (the list is still moving the cell
+        // into view, or the previous cell's editor is being removed), and Compose then hands focus
+        // to something else, such as the activity bar. Keep asking for a few frames.
+        repeat(10) {
+            if (focused) return@LaunchedEffect
+            runCatching { focus.requestFocus() }
+            withFrameNanos { }
+        }
+        if (!focused && Log.isLoggable(NOTEBOOK_LOG_TAG, Log.DEBUG)) {
+            Log.d(NOTEBOOK_LOG_TAG, "cell=${session.notebook.cells.indexOf(cell)} could not take focus")
+        }
     }
     LaunchedEffect(field.selection, field.text.length) {
         if (Log.isLoggable(NOTEBOOK_LOG_TAG, Log.DEBUG)) {
@@ -393,6 +404,10 @@ private fun CellSourceEditor(
                 event.type == KeyEventType.KeyDown && event.key in cellKeepsKeys
             }
             .onFocusChanged { state ->
+                if (state.isFocused != focused && Log.isLoggable(NOTEBOOK_LOG_TAG, Log.DEBUG)) {
+                    Log.d(NOTEBOOK_LOG_TAG, "cell=${session.notebook.cells.indexOf(cell)} focus=${state.isFocused}")
+                }
+                focused = state.isFocused
                 if (state.isFocused) {
                     session.selectedCell = cell.id
                     controller.focusArea = FocusArea.Notebook

@@ -280,6 +280,11 @@ stack, variables, debug console. Restore the F9 binding when it works.
   * Settings for this batch's features: `editor.autoIndent` (Auto-indent; "none" turns it off),
     `avf.copilot.notebooks`, `avf.notebook.plotly` (Draw Plotly figures; off shows the text
     fallback), `avf.statusBar.guestResources`. The disk-problem banner has no toggle (data safety).
+  * Reproduced focus loss on the new build: Down from the end of `a = 1` through the Markdown and
+    empty cells reached cell 3 at column 5 (sticky column works), then the next Down did nothing
+    and the Git button in the activity bar had focus. Likely the entered cell's single
+    `requestFocus()` ran before it could take focus. It now retries for up to 10 frames, and
+    focus gains/losses are logged under AVFNB.
 * Still not checked on the tablet (the tablet dropped off wireless debugging twice in 25
   minutes, the first time because it rebooted): Enter indent after the crash fix, cell Tab/Enter,
   notebook Copilot, plotly, the kernel fallback.
