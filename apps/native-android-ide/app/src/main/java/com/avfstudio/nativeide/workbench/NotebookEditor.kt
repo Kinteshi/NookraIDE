@@ -248,7 +248,7 @@ private fun NotebookCellView(controller: WorkbenchController, session: NotebookS
                     IconButton(onClick = { controller.deleteCell(session, cell) }, modifier = Modifier.noKeyFocus()) { Icon(Icons.Outlined.Delete, "Delete cell") }
                 }
             }
-            cell.outputs.forEach { output -> CellOutput(output, controller.settings.renderPlotly) }
+            cell.outputs.forEach { output -> CellOutput(output, controller.settings.renderPlotly, controller.settings.renderHtmlOutputs) }
         }
     }
 }
@@ -430,7 +430,7 @@ private fun CellSourceEditor(
 }
 
 @Composable
-private fun CellOutput(output: JsonObject, renderPlotly: Boolean) {
+private fun CellOutput(output: JsonObject, renderPlotly: Boolean, renderHtml: Boolean) {
     val colors = MaterialTheme.colorScheme
     val type = output.get("output_type")?.asString
     val modifier = Modifier.fillMaxWidth().padding(top = 6.dp, start = 4.dp)
@@ -473,6 +473,8 @@ private fun CellOutput(output: JsonObject, renderPlotly: Boolean) {
                     contentScale = ContentScale.Fit,
                     modifier = modifier.heightIn(max = 520.dp).background(Color.White, RoundedCornerShape(6.dp)),
                 )
+                renderHtml && data.has("text/html") && !htmlNeedsScript(NotebookDocument.multiline(data.get("text/html"))) ->
+                    HtmlOutput(NotebookDocument.multiline(data.get("text/html")), LocalDarkTheme.current, modifier)
                 data.has("text/markdown") -> MarkdownText(NotebookDocument.multiline(data.get("text/markdown")), modifier)
                 data.has("text/plain") -> OutputText(NotebookDocument.multiline(data.get("text/plain")).stripAnsi(), colors.onSurface, modifier)
                 else -> OutputText("[${data.keySet().joinToString()} output]", colors.onSurfaceVariant, modifier)

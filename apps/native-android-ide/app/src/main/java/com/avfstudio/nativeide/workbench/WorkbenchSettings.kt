@@ -43,6 +43,8 @@ data class WorkbenchSettings(
     /** Draw Plotly figures; needs plotly.js from cdn.plot.ly the first time. */
     val renderPlotly: Boolean = true,
     val statusBarGuestResources: Boolean = true,
+    /** Script-free `text/html` outputs (pandas tables) as HTML rather than their text form. */
+    val renderHtmlOutputs: Boolean = true,
 ) {
     companion object {
         const val THEME_MODE = "avf.theme.mode"
@@ -71,6 +73,7 @@ data class WorkbenchSettings(
         const val NOTEBOOK_COPILOT = "avf.copilot.notebooks"
         const val RENDER_PLOTLY = "avf.notebook.plotly"
         const val STATUS_BAR_GUEST = "avf.statusBar.guestResources"
+        const val RENDER_HTML = "avf.notebook.htmlOutputs"
 
         fun from(settings: JsonObject): WorkbenchSettings {
             val defaults = WorkbenchSettings()
@@ -109,6 +112,7 @@ data class WorkbenchSettings(
                 notebookCopilot = bool(NOTEBOOK_COPILOT, defaults.notebookCopilot),
                 renderPlotly = bool(RENDER_PLOTLY, defaults.renderPlotly),
                 statusBarGuestResources = bool(STATUS_BAR_GUEST, defaults.statusBarGuestResources),
+                renderHtmlOutputs = bool(RENDER_HTML, defaults.renderHtmlOutputs),
             )
         }
     }

@@ -202,6 +202,11 @@ fun SettingsScreen(controller: WorkbenchController) {
                         set(WorkbenchSettings.RENDER_PLOTLY, it)
                     }
                 }
+                item {
+                    SwitchRow("HTML outputs", "Tables and rich output as HTML (pandas DataFrames); scripts never run", settings.renderHtmlOutputs) {
+                        set(WorkbenchSettings.RENDER_HTML, it)
+                    }
+                }
                 item { Section("Keyboard and advanced") }
                 item { ActionRow("Keyboard shortcuts", "VS Code defaults · Ctrl+K Ctrl+S") { controller.dialog = WorkbenchDialog.Keybindings } }
                 item { ActionRow("Edit settings.json", "Every setting, in VS Code's format") { controller.openSettingsJson() } }
