@@ -29,6 +29,10 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 uuid.workspace = true
 
+[target.'cfg(unix)'.dependencies]
+# statvfs for the guest's storage use in the stats the app shows.
+libc = "0.2"
+
 [dev-dependencies]
 tempfile = "3"
 tokio-tungstenite = "0.26"

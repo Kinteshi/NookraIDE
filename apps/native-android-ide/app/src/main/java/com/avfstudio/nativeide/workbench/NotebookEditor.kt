@@ -341,6 +341,13 @@ private fun CellSourceEditor(
             .padding(12.dp)
             .focusRequester(focus)
             .onPreviewKeyEvent { event ->
+                if (event.type == KeyEventType.KeyDown && Log.isLoggable(NOTEBOOK_LOG_TAG, Log.DEBUG)) {
+                    Log.d(
+                        NOTEBOOK_LOG_TAG,
+                        "cell=${session.notebook.cells.indexOf(cell)} key ${event.key} shift=${event.isShiftPressed} " +
+                            "ctrl=${event.isCtrlPressed} alt=${event.isAltPressed} sel=${field.selection.start}-${field.selection.end}",
+                    )
+                }
                 if (event.type != KeyEventType.KeyDown || event.isCtrlPressed || event.isAltPressed) {
                     return@onPreviewKeyEvent false
                 }
@@ -401,7 +408,11 @@ private fun CellSourceEditor(
             // Keys the text field didn't use bubble up here; without this, an arrow at an edge (or
             // with a modifier the handlers above skip) moved Compose focus out of the notebook.
             .onKeyEvent { event ->
-                event.type == KeyEventType.KeyDown && event.key in cellKeepsKeys
+                val kept = event.type == KeyEventType.KeyDown && event.key in cellKeepsKeys
+                if (kept && Log.isLoggable(NOTEBOOK_LOG_TAG, Log.DEBUG)) {
+                    Log.d(NOTEBOOK_LOG_TAG, "cell=${session.notebook.cells.indexOf(cell)} kept unhandled ${event.key}")
+                }
+                kept
             }
             .onFocusChanged { state ->
                 if (state.isFocused != focused && Log.isLoggable(NOTEBOOK_LOG_TAG, Log.DEBUG)) {

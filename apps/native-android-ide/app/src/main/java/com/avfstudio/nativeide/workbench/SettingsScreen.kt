@@ -118,7 +118,7 @@ fun SettingsScreen(controller: WorkbenchController) {
                 item { SwitchRow("Auto save", "Save to the guest shortly after you stop typing", settings.autoSave) { set(WorkbenchSettings.AUTO_SAVE, if (it) "afterDelay" else "off") } }
 
                 item {
-                    SwitchRow("Guest memory in the status bar", "What the Linux guest costs the tablet, and its CPU", settings.statusBarGuestResources) {
+                    SwitchRow("Guest resources in the status bar", "Memory the Linux guest costs the tablet, its CPU and its storage", settings.statusBarGuestResources) {
                         set(WorkbenchSettings.STATUS_BAR_GUEST, it)
                     }
                 }

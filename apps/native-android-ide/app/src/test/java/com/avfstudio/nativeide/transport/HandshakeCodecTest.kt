@@ -68,6 +68,12 @@ class HandshakeCodecTest {
         val healthy = MessagePackVfsCodec.decode(pong(null)) as IncomingPacket.Stats
         assertEquals(null, healthy.stats.diskProblem)
         assertEquals(1908, healthy.stats.footprintMb)
+        val storage = MessagePackVfsCodec.decode(system("Pong") {
+            packMapHeader(2)
+            packString("disk_used_mb"); packLong(12_000)
+            packString("disk_total_mb"); packLong(64_000)
+        }) as IncomingPacket.Stats
+        assertEquals(12_000L to 64_000L, storage.stats.diskUsedMb to storage.stats.diskTotalMb)
         val broken = MessagePackVfsCodec.decode(pong("The guest's disk went read-only after an error")) as IncomingPacket.Stats
         assertEquals("The guest's disk went read-only after an error", broken.stats.diskProblem)
     }

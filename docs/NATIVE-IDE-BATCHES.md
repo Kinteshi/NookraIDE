@@ -299,9 +299,24 @@ stack, variables, debug console. Restore the F9 binding when it works.
     no restart. Test folder `~/Projects/avf-tests` removed; the app is left installed.
   * Not checked this round: Copilot ghost text after Enter (Copilot is signed out in the reset
     guest).
+* Round 6 (10-27): the user still sees the notebook arrow bug and suspects the Book Cover
+  keyboard. Added `AVFKEYS` logging (every hardware key at the window: key code, scan code,
+  meta, device and its name, source, whether the router took it) and per-cell key/unhandled logs
+  under AVFNB, to compare that keyboard with the test HID keyboard while the user reproduces it.
+  * Guest storage: Pong carries `disk_used_mb`/`disk_total_mb` (statvfs of the home filesystem);
+    the status chip shows used/total GB and the resources panel a storage bar. The existing
+    status-bar toggle covers it (renamed "Guest resources in the status bar").
 * Still not checked on the tablet (the tablet dropped off wireless debugging twice in 25
   minutes, the first time because it rebooted): Enter indent after the crash fix, cell Tab/Enter,
   notebook Copilot, plotly, the kernel fallback.
+
+## Mapped for later (user, 10-27)
+* Model picker and adjustments (e.g. reasoning effort) for the chat UI.
+* Claude Code and Gemini support alongside Copilot (chat agents; ACP where they speak it).
+* Auto-save modes as in VS Code: after a delay (exists), and on focus change (`files.autoSave`
+  `onFocusChange`/`onWindowChange`).
+* Offline experience: the editor alone when no guest is reachable (open/edit local and cached
+  files, no tools).
 
 ## Backlog
 * Finish Copilot chat sign-in on the tablet (needs the user's approval on GitHub).

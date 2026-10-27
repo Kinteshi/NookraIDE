@@ -92,6 +92,7 @@ dependencies = [
  "axum-server",
  "cap-std",
  "futures-util",
+ "libc",
  "notify",
  "portable-pty",
  "rcgen",

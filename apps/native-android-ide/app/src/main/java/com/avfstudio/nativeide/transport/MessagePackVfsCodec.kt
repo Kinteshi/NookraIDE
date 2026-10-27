@@ -364,6 +364,8 @@ internal object MessagePackVfsCodec {
                         cachedMb = mb("mem_cached_mb"),
                         balloonMb = mb("mem_balloon_mb"),
                         diskProblem = fields["disk_problem"]?.takeUnless { it.isNilValue }?.asStringValue()?.asString(),
+                        diskUsedMb = mb("disk_used_mb"),
+                        diskTotalMb = mb("disk_total_mb"),
                     ),
                 )
             }
@@ -442,6 +444,9 @@ data class GuestStats(
     val balloonMb: Long = 0,
     /** Set by the daemon when the guest's disk went read-only or logged an error since boot. */
     val diskProblem: String? = null,
+    /** Storage on the filesystem holding the guest's home; 0 from daemons that don't report it. */
+    val diskUsedMb: Long = 0,
+    val diskTotalMb: Long = 0,
 ) {
     val footprintMb: Long get() = if (freeMb > 0) (totalMb - freeMb - balloonMb).coerceAtLeast(0) else usedMb
     /** The footprint without cache, so programs + cache + free + balloon add up to the total. */

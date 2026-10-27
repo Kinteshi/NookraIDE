@@ -869,6 +869,18 @@ private fun GuestResourcesDialog(controller: WorkbenchController) {
                         color = colors.onSurfaceVariant,
                     )
                     FootprintGraph(controller.guestFootprintHistory, total, colors.primary)
+                    if (stats.diskTotalMb > 0) {
+                        Text(
+                            "Storage: %.1f of %.1f GB used".format(stats.diskUsedMb / 1024f, stats.diskTotalMb / 1024f),
+                            style = MaterialTheme.typography.titleSmall,
+                        )
+                        val used = stats.diskUsedMb.coerceIn(0, stats.diskTotalMb).toFloat()
+                        Row(Modifier.fillMaxWidth().height(10.dp).clip(RoundedCornerShape(5.dp)).background(colors.surfaceContainerHighest)) {
+                            if (used > 0) Box(Modifier.weight(used).fillMaxHeight().background(colors.secondary))
+                            val free = stats.diskTotalMb - used
+                            if (free > 0) Box(Modifier.weight(free).fillMaxHeight())
+                        }
+                    }
                 }
                 Text("Running for the app", style = MaterialTheme.typography.titleSmall)
                 val components = controller.guestComponents

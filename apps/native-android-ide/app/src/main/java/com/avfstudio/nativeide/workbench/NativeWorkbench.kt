@@ -408,8 +408,9 @@ private fun StatusBar(controller: WorkbenchController) {
                     modifier = Modifier.size(14.dp),
                     tint = if (pressure) colors.error else colors.onSurfaceVariant,
                 )
+                val storage = if (stats.diskTotalMb > 0) " · %.0f/%.0f GB".format(stats.diskUsedMb / 1024f, stats.diskTotalMb / 1024f) else ""
                 Text(
-                    " Guest %.1f GB · %d%%".format(stats.footprintMb / 1024f, stats.cpuPercent.toInt()),
+                    " Guest %.1f GB · %d%%%s".format(stats.footprintMb / 1024f, stats.cpuPercent.toInt(), storage),
                     style = MaterialTheme.typography.labelMedium,
                     color = if (pressure) colors.error else colors.onSurfaceVariant,
                 )

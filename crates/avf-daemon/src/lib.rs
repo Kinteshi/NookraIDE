@@ -727,6 +727,8 @@ async fn process_packet(
                             mem_cached_mb: sample.mem_cached_mb,
                             mem_balloon_mb: sample.mem_balloon_mb,
                             disk_problem: sample.disk_problem,
+                            disk_used_mb: sample.disk_used_mb,
+                            disk_total_mb: sample.disk_total_mb,
                         }),
                     )
                     .await
@@ -2220,6 +2222,8 @@ struct SystemSample {
     mem_cached_mb: u64,
     mem_balloon_mb: u64,
     disk_problem: Option<String>,
+    disk_used_mb: u64,
+    disk_total_mb: u64,
 }
 
 impl Telemetry {
@@ -2254,6 +2258,7 @@ impl Telemetry {
                 .unwrap_or(0.0)
         };
         let mebibyte = 1024 * 1024;
+        let disk_usage = storage_usage_mb(&env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/")));
         Ok(SystemSample {
             cpu_usage,
             mem_used_mb: memory.total.saturating_sub(memory.available) / mebibyte,
@@ -2263,6 +2268,8 @@ impl Telemetry {
             // Pages are 4 KiB on the AVF guest; vmstat counts them, not bytes.
             mem_balloon_mb: balloon_pages * 4096 / mebibyte,
             disk_problem: disk_problem().await,
+            disk_used_mb: disk_usage.0,
+            disk_total_mb: disk_usage.1,
         })
     }
 }
@@ -2306,6 +2313,31 @@ fn parse_meminfo(contents: &str) -> Option<MemInfo> {
     let available = kib("MemAvailable").or(kib("MemFree"))?.min(total);
     let cached = (kib("Cached").unwrap_or(0) + kib("Buffers").unwrap_or(0)).saturating_sub(kib("Shmem").unwrap_or(0));
     Some(MemInfo { total, available, free, cached })
+}
+
+/// (used, total) MB of the filesystem holding [path]; used counts blocks not free to anyone, as df does.
+#[cfg(unix)]
+fn storage_usage_mb(path: &Path) -> (u64, u64) {
+    use std::os::unix::ffi::OsStrExt;
+    let Ok(c_path) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
+        return (0, 0);
+    };
+    let mut stats = std::mem::MaybeUninit::<libc::statvfs>::zeroed();
+    // SAFETY: c_path is NUL-terminated and stats is a valid out-pointer for statvfs.
+    if unsafe { libc::statvfs(c_path.as_ptr(), stats.as_mut_ptr()) } != 0 {
+        return (0, 0);
+    }
+    // SAFETY: statvfs returned 0, so it filled the struct.
+    let stats = unsafe { stats.assume_init() };
+    let fragment = stats.f_frsize as u64;
+    let total = stats.f_blocks as u64 * fragment;
+    let free = stats.f_bfree as u64 * fragment;
+    (total.saturating_sub(free) / (1024 * 1024), total / (1024 * 1024))
+}
+
+#[cfg(not(unix))]
+fn storage_usage_mb(_path: &Path) -> (u64, u64) {
+    (0, 0)
 }
 
 /// Whether the guest's disk is in trouble: the root filesystem remounted read-only, or ext4 logged
@@ -2504,6 +2536,14 @@ mod tests {
         assert!(describe_disk_problem(healthy, 200, &since_boot).unwrap().contains("htree_dirblock_to_tree"));
         assert!(describe_disk_problem(read_only, 200, &[]).unwrap().contains("read-only"));
         assert_eq!(boot_time("cpu 1 2\nbtime 1792850000\n"), Some(1792850000));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn storage_usage_reads_the_filesystem() {
+        let (used, total) = storage_usage_mb(Path::new("/"));
+        assert!(total > 0 && used <= total);
+        assert_eq!(storage_usage_mb(Path::new("/no/such/path")), (0, 0));
     }
 
     #[test]

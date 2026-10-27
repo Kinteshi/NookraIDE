@@ -139,6 +139,11 @@ pub enum SystemMessage {
         /// boot; on AVF that has meant memory corruption, and the guest needs a restart.
         #[serde(default)]
         disk_problem: Option<String>,
+        /// Space used and total on the filesystem holding the home directory (0 when unknown).
+        #[serde(default)]
+        disk_used_mb: u64,
+        #[serde(default)]
+        disk_total_mb: u64,
     },
     PortOpened {
         port: u16,
@@ -723,6 +728,8 @@ mod tests {
                 mem_cached_mb: 92,
                 mem_balloon_mb: 32,
                 disk_problem: Some("read-only".into()),
+                disk_used_mb: 4000,
+                disk_total_mb: 64000,
             }),
             MultiplexedPacket::System(SystemMessage::PortOpened {
                 port: 8000,
