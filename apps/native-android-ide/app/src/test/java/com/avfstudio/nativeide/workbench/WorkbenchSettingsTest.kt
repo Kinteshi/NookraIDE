@@ -38,6 +38,15 @@ class WorkbenchSettingsTest {
     }
 
     @Test
+    fun autoSaveReadsVsCodeModes() {
+        fun mode(value: String) = WorkbenchSettings.from(JsonParser.parseString("""{"files.autoSave":"$value"}""").asJsonObject).autoSave
+        assertEquals(AutoSaveMode.AfterDelay, mode("afterDelay"))
+        assertEquals(AutoSaveMode.OnFocusChange, mode("onFocusChange"))
+        assertEquals(AutoSaveMode.OnWindowChange, mode("onWindowChange"))
+        assertEquals(AutoSaveMode.Off, mode("bogus"))
+    }
+
+    @Test
     fun workbenchShortcutsFollowVsCodeDefaults() {
         val stroke = editorKeyStroke(KeyEvent.KEYCODE_GRAVE, ctrl = true, shift = false, alt = false)
         assertEquals("workbench.action.terminal.toggleTerminal", EditorKeybindingDispatcher(EditorCommands.global).dispatch(stroke!!))

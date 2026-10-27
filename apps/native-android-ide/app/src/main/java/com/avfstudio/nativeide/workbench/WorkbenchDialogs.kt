@@ -189,14 +189,14 @@ fun WorkbenchDialogHost(controller: WorkbenchController) {
         )
         is WorkbenchDialog.GitBranches -> GitBranchesDialog(controller, dialog)
         is WorkbenchDialog.ConfirmClose -> AlertDialog(
-            onDismissRequest = { controller.dialog = null },
+            onDismissRequest = controller::cancelClosing,
             title = { Text("Save changes to ${dialog.path.substringAfterLast('/')}?") },
             text = { Text("Your changes will be lost if you don't save them.") },
             confirmButton = { TextButton(onClick = { controller.saveAndClose(dialog.path) }) { Text("Save") } },
             dismissButton = {
                 Row {
                     TextButton(onClick = { controller.closeDiscarding(dialog.path) }) { Text("Don't save", color = MaterialTheme.colorScheme.error) }
-                    TextButton(onClick = { controller.dialog = null }) { Text("Cancel") }
+                    TextButton(onClick = controller::cancelClosing) { Text("Cancel") }
                 }
             },
         )

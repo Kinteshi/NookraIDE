@@ -331,6 +331,14 @@ stack, variables, debug console. Restore the F9 binding when it works.
 * Cleanups: drop the `AVFKEY` routing log, "Close other editors" asks about unsaved changes,
   memory probes (app PSS, guest tools).
 * Later (user): new AI assistants (Claude Code, Gemini).
+* Done (code, unit tests; tablet check pending):
+  * `files.autoSave` is a mode: Off / After delay / Focus change / Leaving app (segmented picker).
+    After delay now covers notebooks too; focus change saves on leaving the editor or notebook
+    (focus area change), on switching tabs (activePath setter), and on leaving the app; leaving
+    app saves all on ON_STOP. Scratch files are never auto-saved.
+  * Close Other Editors goes through the same Save / Don't save / Cancel prompt, one unsaved tab
+    at a time; Cancel stops.
+  * The `AVFKEY` routing log is gone (`AVFKEYS` covers it, gated by setprop).
 
 ## Mapped for later (user, 10-27)
 * Model picker and adjustments (e.g. reasoning effort) for the chat UI.

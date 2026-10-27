@@ -201,7 +201,17 @@ class WorkbenchController(private val context: Context) {
         private set
     val documents = mutableStateListOf<DocumentSession>()
     private val closedDocuments = mutableListOf<DocumentSession>()
-    var activePath by mutableStateOf<String?>(null)
+    private var activePathState by mutableStateOf<String?>(null)
+    var activePath: String?
+        get() = activePathState
+        set(value) {
+            val previous = activePathState
+            activePathState = value
+            // files.autoSave onFocusChange: switching tabs saves the one left behind (text or notebook).
+            if (previous != null && previous != value && settings.autoSave == AutoSaveMode.OnFocusChange) {
+                post { autoSave(previous) }
+            }
+        }
     var pagedDocument by mutableStateOf<PagedDocument?>(null)
         private set
     /** Bumped on edits so dirty markers recompose; DocumentSession itself is not observable. */
@@ -261,7 +271,15 @@ class WorkbenchController(private val context: Context) {
     var chatVisible by mutableStateOf(false)
     var settingsVisible by mutableStateOf(false)
     var compactDestination by mutableStateOf(CompactDestination.Editor)
-    var focusArea by mutableStateOf(FocusArea.Other)
+    private var focusAreaState by mutableStateOf(FocusArea.Other)
+    var focusArea: FocusArea
+        get() = focusAreaState
+        set(value) {
+            val left = focusAreaState in setOf(FocusArea.Editor, FocusArea.Notebook) && value != focusAreaState
+            focusAreaState = value
+            // files.autoSave onFocusChange: leaving the editor (a panel, the sidebar) saves it.
+            if (left && settings.autoSave == AutoSaveMode.OnFocusChange) activePath?.let(::autoSave)
+        }
 
     // Dialogs ---------------------------------------------------------------------------------
     var dialog by mutableStateOf<WorkbenchDialog?>(null)
@@ -731,6 +749,7 @@ class WorkbenchController(private val context: Context) {
     fun onAppVisibilityChanged(visible: Boolean) {
         appVisible = visible
         if (visible) startStatsPolling() else stopStatsPolling()
+        if (!visible && settings.autoSave in setOf(AutoSaveMode.OnFocusChange, AutoSaveMode.OnWindowChange)) autoSaveAll()
         // Coming back from Linux Terminal usually means the guest is up now.
         if (visible && guestUnreachable && !connected && !busy && scheduledReconnect == null) {
             autoConnecting = true
@@ -1620,17 +1639,45 @@ class WorkbenchController(private val context: Context) {
         if (hasUnsavedChanges(path)) dialog = WorkbenchDialog.ConfirmClose(path) else closeDocument(path)
     }
 
+    /** Tabs still to close after the current Save / Don't save prompt (Close Other Editors). */
+    private val closeQueue = ArrayDeque<String>()
+
+    /** Closes [paths], asking about each one with unsaved changes in turn; Cancel stops. */
+    fun requestCloseDocuments(paths: List<String>) {
+        closeQueue.clear()
+        closeQueue.addAll(paths)
+        continueClosing()
+    }
+
+    private fun continueClosing() {
+        while (closeQueue.isNotEmpty()) {
+            val path = closeQueue.removeFirst()
+            if (hasUnsavedChanges(path)) {
+                dialog = WorkbenchDialog.ConfirmClose(path)
+                return
+            }
+            closeDocument(path)
+        }
+    }
+
     fun saveAndClose(path: String) {
         dialog = null
         activePath = path
         closeAfterSave += path
         saveActiveDocument()
+        continueClosing()
     }
 
     fun closeDiscarding(path: String) {
         dialog = null
         closeDocument(path)
         repository.forget(path)
+        continueClosing()
+    }
+
+    fun cancelClosing() {
+        dialog = null
+        closeQueue.clear()
     }
 
     private fun closeIfPendingAfterSave(path: String) {
@@ -1663,15 +1710,26 @@ class WorkbenchController(private val context: Context) {
                 TimeUnit.MILLISECONDS,
             )
         }
-        if (settings.autoSave && !document.path.startsWith("scratch:")) {
-            scheduledAutoSave?.cancel(false)
-            scheduledAutoSave = timer.schedule(
-                { post { if (activePath == document.path && document.dirty) saveActiveDocument() } },
-                settings.autoSaveDelayMs.toLong(),
-                TimeUnit.MILLISECONDS,
-            )
+        scheduleAutoSave(document.path)
+    }
+
+    private fun scheduleAutoSave(path: String) {
+        if (settings.autoSave != AutoSaveMode.AfterDelay || path.startsWith("scratch:")) return
+        scheduledAutoSave?.cancel(false)
+        scheduledAutoSave = timer.schedule({ post { autoSave(path) } }, settings.autoSaveDelayMs.toLong(), TimeUnit.MILLISECONDS)
+    }
+
+    /** Saves [path] if it has unsaved changes; scratch files stay local (saving them asks for a name). */
+    private fun autoSave(path: String) {
+        if (path.startsWith("scratch:")) return
+        val session = notebooks[path]
+        when {
+            session != null -> if (session.notebook.dirty) saveNotebook(session)
+            else -> documents.firstOrNull { it.path == path }?.takeIf { it.dirty }?.let(::saveDocument)
         }
     }
+
+    private fun autoSaveAll() = documents.map { it.path }.forEach(::autoSave)
 
     fun saveActiveDocument() {
         activeNotebook?.let {
@@ -3408,6 +3466,7 @@ class WorkbenchController(private val context: Context) {
         // Keep a draft like text files do, so a restart (the tablet has rebooted mid-session)
         // doesn't lose unsaved cells.
         val path = session.document.path
+        scheduleAutoSave(path)
         synchronized(scheduledDraftWrites) {
             scheduledDraftWrites.remove(path)?.cancel(false)
             scheduledDraftWrites[path] = timer.schedule(
@@ -3626,7 +3685,6 @@ class WorkbenchController(private val context: Context) {
         }
         val handled = handleKeyDown(event) || sendTerminalControlKey(event)
         if (handled) consumedKeyDowns += event.keyCode
-        if (modified) android.util.Log.d("AVFKEY", "route ${AndroidKeyEvent.keyCodeToString(event.keyCode)} meta=${event.metaState} dev=${event.deviceId} focus=$focusArea handled=$handled")
         return handled
     }
 
@@ -3714,7 +3772,7 @@ class WorkbenchController(private val context: Context) {
             }
             "workbench.action.closeActiveEditor" -> activePath?.let(::requestCloseDocument)
             "workbench.action.closeOtherEditors" -> activePath?.let { path ->
-                documents.filter { it.path != path }.map { it.path }.forEach(::closeDocument)
+                requestCloseDocuments(documents.filter { it.path != path }.map { it.path })
             }
             "workbench.action.reopenClosedEditor" -> closedDocuments.removeLastOrNull()?.let { document ->
                 if (document.path.endsWith(".ipynb")) openPath(document.path) else {

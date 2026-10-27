@@ -115,7 +115,19 @@ fun SettingsScreen(controller: WorkbenchController) {
                     }
                 }
                 item { SwitchRow("Format on save", "Ruff for Python, the language server otherwise", settings.formatOnSave) { set(WorkbenchSettings.FORMAT_ON_SAVE, it) } }
-                item { SwitchRow("Auto save", "Save to the guest shortly after you stop typing", settings.autoSave) { set(WorkbenchSettings.AUTO_SAVE, if (it) "afterDelay" else "off") } }
+                item {
+                    SettingRow("Auto save", "Save to the guest after a pause in typing, when you leave the editor, or when you leave the app") {
+                        SingleChoiceSegmentedButtonRow {
+                            AutoSaveMode.entries.forEachIndexed { index, mode ->
+                                SegmentedButton(
+                                    selected = settings.autoSave == mode,
+                                    onClick = { set(WorkbenchSettings.AUTO_SAVE, mode.key) },
+                                    shape = SegmentedButtonDefaults.itemShape(index, AutoSaveMode.entries.size),
+                                ) { Text(mode.label, maxLines = 1) }
+                            }
+                        }
+                    }
+                }
 
                 item {
                     SwitchRow("Guest resources in the status bar", "Memory the Linux guest costs the tablet, its CPU and its storage", settings.statusBarGuestResources) {

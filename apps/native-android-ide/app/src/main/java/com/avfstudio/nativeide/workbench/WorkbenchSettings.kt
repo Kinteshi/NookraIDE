@@ -25,7 +25,7 @@ data class WorkbenchSettings(
     val wordWrap: Boolean = false,
     val lineNumbers: Boolean = true,
     val formatOnSave: Boolean = false,
-    val autoSave: Boolean = false,
+    val autoSave: AutoSaveMode = AutoSaveMode.Off,
     val autoSaveDelayMs: Int = 1000,
     val semanticHighlighting: Boolean = true,
     val terminalFontSize: Float = 13f,
@@ -90,7 +90,7 @@ data class WorkbenchSettings(
                 wordWrap = string(WORD_WRAP)?.let { it == "on" } ?: defaults.wordWrap,
                 lineNumbers = string(LINE_NUMBERS)?.let { it != "off" } ?: defaults.lineNumbers,
                 formatOnSave = bool(FORMAT_ON_SAVE, defaults.formatOnSave),
-                autoSave = string(AUTO_SAVE)?.let { it == "afterDelay" } ?: defaults.autoSave,
+                autoSave = AutoSaveMode.entries.firstOrNull { it.key == string(AUTO_SAVE) } ?: defaults.autoSave,
                 autoSaveDelayMs = number(AUTO_SAVE_DELAY)?.toInt()?.coerceIn(200, 60_000) ?: defaults.autoSaveDelayMs,
                 semanticHighlighting = bool(SEMANTIC_HIGHLIGHTING, defaults.semanticHighlighting),
                 terminalFontSize = number(TERMINAL_FONT_SIZE)?.toFloat()?.coerceIn(6f, 30f) ?: defaults.terminalFontSize,
@@ -112,6 +112,16 @@ data class WorkbenchSettings(
             )
         }
     }
+}
+
+/** VS Code's `files.autoSave` values. */
+enum class AutoSaveMode(val key: String, val label: String) {
+    Off("off", "Off"),
+    AfterDelay("afterDelay", "After delay"),
+    /** When the editor loses focus: another tab, a panel, or leaving the app. */
+    OnFocusChange("onFocusChange", "Focus change"),
+    /** When the app goes to the background. */
+    OnWindowChange("onWindowChange", "Leaving app"),
 }
 
 /** Reads `a.b.c` from nested objects, or from a literal dotted key as VS Code allows. */
