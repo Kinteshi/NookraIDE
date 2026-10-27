@@ -293,7 +293,12 @@ stack, variables, debug console. Restore the F9 binding when it works.
   * Found and fixed: closing a tab with unsaved changes (X or Ctrl+W) closed it silently, keeping
     a stale draft. It now asks Save / Don't save / Cancel as VS Code does; Save closes once the
     save (or the offline queue) went through, Don't save drops the draft. "Close other editors"
-    still closes without asking.
+    still closes without asking. Checked on the tablet: Ctrl+W on the unsaved scratch file shows
+    the prompt; Cancel keeps the tab.
+  * Three installs this round, each with the app backgrounded first, `sync`, and a minute's wait:
+    no restart. Test folder `~/Projects/avf-tests` removed; the app is left installed.
+  * Not checked this round: Copilot ghost text after Enter (Copilot is signed out in the reset
+    guest).
 * Still not checked on the tablet (the tablet dropped off wireless debugging twice in 25
   minutes, the first time because it rebooted): Enter indent after the crash fix, cell Tab/Enter,
   notebook Copilot, plotly, the kernel fallback.
