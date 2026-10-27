@@ -426,6 +426,29 @@ stack, variables, debug console. Restore the F9 binding when it works.
   cursor_start/end); a non-focusable popup under the cell lists matches, typing narrows them,
   Up/Down choose, Enter/Tab accept, Esc closes. Without a kernel, Tab indents.
 
+## Next pass (registered 10-27; not started)
+* **Guided dependency setup (user's priority; large).** The IDE relies on guest tools that a
+  fresh or reset guest may lack. Detect what's missing and offer to install it where it's
+  needed, instead of failing:
+  * Python environments (conda or uv, venv, ipykernel) in the kernel picker and the Python
+    interpreter / environment picker. Today a reset guest only gets "Create ~/.venv with
+    ipykernel" (batch 11) and conda is not offered.
+  * git in the Source Control view (the GitHub sign-in installs it, but the Git view itself
+    should offer it); the GitHub CLI where sign-in is offered.
+  * A keyring / secret service where tools want one (e.g. gh warns "Authentication
+    credentials saved in plain text").
+  * Others found along the way (clipboard utilities gh looks for, python3-venv, ...).
+  Each prompt says what will be installed and how (apt, uv, the daemon's tool catalog), runs in
+  a visible terminal, and rechecks afterwards. Decide per dependency whether it belongs in the
+  installer, an on-demand prompt, or both; keep app scope minimal.
+* Tablet tests still open: kernel completions (needs a kernel; tie in with the item above),
+  Close Other Editors' unsaved-changes prompt, the Copilot server staying stopped while signed
+  out, the option menus' alignment fix.
+* Open bugs from batch 11: terminal types `;1R;120R;56R` into the shell when a tab is switched
+  to or tapped; "terminal ended" notice prints twice; Auto save picker truncates "Focus change";
+  one WebView per HTML output (~35 MB each); Ctrl+Z after IME-typed text (check sora undo);
+  Copilot CLI lists only "Auto" over ACP.
+
 ## Mapped for later (user, 10-27)
 * Model picker and adjustments (e.g. reasoning effort) for the chat UI.
 * Claude Code and Gemini support alongside Copilot (chat agents; ACP where they speak it).
