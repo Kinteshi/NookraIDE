@@ -8,6 +8,7 @@ import android.view.ViewTreeObserver
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import com.avfstudio.nativeide.workbench.KeyRouter
+import com.avfstudio.nativeide.workbench.asPlainKeyboardArrow
 import androidx.compose.ui.platform.ComposeView
 import android.widget.FrameLayout
 import android.view.KeyEvent
@@ -56,13 +57,14 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         val root = object : FrameLayout(this) {
             override fun dispatchKeyEventPreIme(event: KeyEvent): Boolean =
-                KeyRouter.route(event) || super.dispatchKeyEventPreIme(event)
+                KeyRouter.route(event) || super.dispatchKeyEventPreIme(event.asPlainKeyboardArrow())
         }
         root.addView(ComposeView(this).apply { setContent { NativeWorkbench() } })
         setContentView(root)
     }
 
-    override fun dispatchKeyEvent(event: KeyEvent): Boolean = KeyRouter.route(event) || super.dispatchKeyEvent(event)
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean =
+        KeyRouter.route(event) || super.dispatchKeyEvent(event.asPlainKeyboardArrow())
 }
 
 @Composable

@@ -305,7 +305,16 @@ stack, variables, debug console. Restore the F9 binding when it works.
   under AVFNB, to compare that keyboard with the test HID keyboard while the user reproduces it.
   * Guest storage: Pong carries `disk_used_mb`/`disk_total_mb` (statvfs of the home filesystem);
     the status chip shows used/total GB and the resources panel a storage bar. The existing
-    status-bar toggle covers it (renamed "Guest resources in the status bar").
+    status-bar toggle covers it (renamed "Guest resources in the status bar"). Checked on the
+    tablet: "Guest 1,1 GB · 0% · 2/431 GB".
+  * Root cause of the notebook arrow bug, from the user's recording: the Book Cover Keyboard
+    (EF-DX935) reports `KEYBOARD | DPAD` (source 0x301); the test HID keyboard is keyboard only
+    (0x101), which is why it never reproduced. Compose text fields send arrows from D-pad devices
+    to focus navigation (`interceptDPadAndMoveFocus`): Right in the middle of a cell moved focus to
+    the terminal panel's + button. Up/Down and edge Left/Right worked only because the cell's own
+    handler takes them first. Fix: MainActivity re-issues arrows from such keyboards as virtual
+    keyboard arrows (`asPlainKeyboardArrow`), which fixes every Compose text field (cells, search,
+    palette, chat), not just notebooks.
 * Still not checked on the tablet (the tablet dropped off wireless debugging twice in 25
   minutes, the first time because it rebooted): Enter indent after the crash fix, cell Tab/Enter,
   notebook Copilot, plotly, the kernel fallback.
