@@ -386,6 +386,14 @@ stack, variables, debug console. Restore the F9 binding when it works.
     and back works (agent confirms). Copilot CLI 1.0.104 lists only "Auto" as a model through
     ACP, before and after sign-in, so the Model picker has one choice for now.
   * HTML outputs checked: the user's `df.head()` renders as a styled table.
+  * Git after the sign-in: `credential.https://github.com.helper` = `gh auth git-credential`,
+    user.name Kinteshi-dev, noreply email; gh scopes gist, read:org, repo, workflow.
+* Memory probe (10-27 18:5x): app PSS 251 MB at rest → 320 MB with two HTML outputs and chat
+  open (native +42 MB, graphics +19 MB: about 35 MB per WebView); swap 81 MB → 0 after use.
+  Guest: copilot-language-server 257 MB, Copilot CLI (chat) 245 MB, ty 20 MB, ruff 15 MB,
+  weston 82 MB. Later: draw HTML tables without one WebView each (many tables add up).
+* Seen: after gh/apt exit, their cursor-position replies (`;1R;120R…`) land on the shell
+  prompt; harmless, cleared by Ctrl+C. The "terminal ended" notice prints twice per lost tab.
 * Copilot memory: when the language server reports "not signed in", the app remembers it and
   stops the server after 30 s (~280 MB in the guest); later launches don't start it, the status
   bar says "Copilot · Signed out", and tapping it starts the server and signs in.
