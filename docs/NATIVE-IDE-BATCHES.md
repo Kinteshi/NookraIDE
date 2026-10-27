@@ -394,6 +394,10 @@ stack, variables, debug console. Restore the F9 binding when it works.
   weston 82 MB. Later: draw HTML tables without one WebView each (many tables add up).
 * Seen: after gh/apt exit, their cursor-position replies (`;1R;120R…`) land on the shell
   prompt; harmless, cleared by Ctrl+C. The "terminal ended" notice prints twice per lost tab.
+* Checked on the tablet: Copilot ghost text after Enter (request at 2:8, reply replaces 0–8 with
+  8 spaces + `return n`, ghost drawn at the caret, Tab accepts); Auto save "Focus change" saved
+  the test file on switching tabs (then set back to Off, the user's setting); the stale-draft
+  conflict dialog appeared for an old test draft and "Load guest copy" resolved it.
 * Copilot memory: when the language server reports "not signed in", the app remembers it and
   stops the server after 30 s (~280 MB in the guest); later launches don't start it, the status
   bar says "Copilot · Signed out", and tapping it starts the server and signs in.
