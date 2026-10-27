@@ -319,7 +319,7 @@ stack, variables, debug console. Restore the F9 binding when it works.
 * All batch 10 items are checked on the tablet (rounds 3–6), except the Copilot ghost text after
   Enter, which waits for Copilot sign-in in the reset guest.
 
-## 11. Copilot, auto-save, notebooks, cleanups (planned 10-27; in progress)
+## 11. Copilot, auto-save, notebooks, cleanups (10-27; paused by the user, mostly checked)
 * Copilot: model picker for chat (and inline completions if the server allows it); one GitHub
   sign-in for inline suggestions and chat (research first: which tokens each accepts), and Git
   credentials in the same pass if feasible; else listed under "Mapped for later". Check the ghost
@@ -402,6 +402,18 @@ stack, variables, debug console. Restore the F9 binding when it works.
   (system)", which fails on Debian 13 (PEP 668, externally managed). For system Python the app now
   offers "Create ~/.venv with ipykernel" (installs python3-venv if needed; the bridge discovers
   ~/.venv as kernel `avf--venv`).
+* Paused here at the user's request (10-27 ~19:00). Open for the next pass:
+  * Kernel completions untested on the tablet: the guest has no kernel; the user will decide on
+    creating `~/.venv` (the picker's new option) in a follow-up.
+  * Bug: the app's terminal emulator types `;1R;120R;56R` (cursor-position replies) into the
+    shell when a terminal tab is switched to or tapped.
+  * Bug: "this terminal ended…" prints twice per lost tab.
+  * The Auto save picker cuts "Focus change" to "Focus" at tablet width.
+  * HTML outputs cost ~35 MB per WebView; draw tables natively or share one WebView.
+  * Ctrl+Z didn't undo text typed through the keyboard IME path (seen once on a scratch file);
+    check sora's undo grouping for commitText.
+  * Copilot CLI offers only "Auto" as a model over ACP; recheck with newer CLI versions.
+  * Test files removed (`~/Projects/avf-tests`); the app is left installed.
 * Copilot memory: when the language server reports "not signed in", the app remembers it and
   stops the server after 30 s (~280 MB in the guest); later launches don't start it, the status
   bar says "Copilot · Signed out", and tapping it starts the server and signs in.
