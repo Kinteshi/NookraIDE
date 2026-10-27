@@ -285,6 +285,9 @@ stack, variables, debug console. Restore the F9 binding when it works.
     and the Git button in the activity bar had focus. Likely the entered cell's single
     `requestFocus()` ran before it could take focus. It now retries for up to 10 frames, and
     focus gains/losses are logged under AVFNB.
+  * Checked after the fix: the same Down/Up walk hands focus cell to cell (`focus=false` then
+    `focus=true`) with the sticky column (5 → 13 → empty → 5 → 11 → 16 and back); a 60 ms burst of
+    19 keys mixing crossings and Left/Right kept focus in the cells throughout.
 * Still not checked on the tablet (the tablet dropped off wireless debugging twice in 25
   minutes, the first time because it rebooted): Enter indent after the crash fix, cell Tab/Enter,
   notebook Copilot, plotly, the kernel fallback.
