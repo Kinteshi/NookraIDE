@@ -375,7 +375,12 @@ fun WorkbenchDialogHost(controller: WorkbenchController) {
                 when (choice) {
                     is com.avfstudio.nativeide.notebook.KernelSpec -> PaletteRow(choice.displayName, choice.name)
                     is com.avfstudio.nativeide.notebook.InstallableKernel -> ListItem(
-                        headlineContent = { Text("Install ipykernel in Python (${choice.label})") },
+                        headlineContent = {
+                            Text(
+                                if (choice.label == "system") "Create ~/.venv with ipykernel (system Python is managed by apt)"
+                                else "Install ipykernel in Python (${choice.label})",
+                            )
+                        },
                         supportingContent = { Text(choice.python, fontFamily = FontFamily.Monospace, maxLines = 1) },
                         colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
                     )

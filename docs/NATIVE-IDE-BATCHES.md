@@ -398,6 +398,10 @@ stack, variables, debug console. Restore the F9 binding when it works.
   8 spaces + `return n`, ghost drawn at the caret, Tab accepts); Auto save "Focus change" saved
   the test file on switching tabs (then set back to Off, the user's setting); the stale-draft
   conflict dialog appeared for an old test draft and "Load guest copy" resolved it.
+* Found: the reset guest has no conda; the kernel picker offered only "Install ipykernel in Python
+  (system)", which fails on Debian 13 (PEP 668, externally managed). For system Python the app now
+  offers "Create ~/.venv with ipykernel" (installs python3-venv if needed; the bridge discovers
+  ~/.venv as kernel `avf--venv`).
 * Copilot memory: when the language server reports "not signed in", the app remembers it and
   stops the server after 30 s (~280 MB in the guest); later launches don't start it, the status
   bar says "Copilot · Signed out", and tapping it starts the server and signs in.

@@ -3494,10 +3494,19 @@ class WorkbenchController(private val context: Context) {
         dialog = null
         session.notebook.cells.forEach { it.queued = false }
         pendingExecution.remove(session.document.path)
-        newTerminal("'${candidate.python}' -m pip install ipykernel && exit", onExit = { code ->
+        // Debian's system Python refuses pip (PEP 668, "externally managed"): give it a venv in
+        // ~/.venv, which the bridge discovers, instead of installing into the system.
+        val systemPython = candidate.label == "system"
+        val command = if (systemPython) {
+            "{ '${candidate.python}' -m venv --help >/dev/null 2>&1 && '${candidate.python}' -m ensurepip --version >/dev/null 2>&1 || " +
+                "sudo apt-get install -y python3-venv; } && '${candidate.python}' -m venv ~/.venv && ~/.venv/bin/pip install ipykernel && exit"
+        } else {
+            "'${candidate.python}' -m pip install ipykernel && exit"
+        }
+        newTerminal(command, onExit = { code ->
             post {
                 if (code == 0) {
-                    chooseKernel(session, generatedKernelName(candidate.label))
+                    chooseKernel(session, generatedKernelName(if (systemPython) ".venv" else candidate.label))
                 } else {
                     session.kernelState = "ipykernel install failed"
                     status = "pip could not install ipykernel into ${candidate.label}; the terminal shows why"
