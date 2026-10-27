@@ -11,13 +11,17 @@ const val COPILOT_LOGIN_COMMAND = "copilot login --device-code && exit"
 /**
  * One GitHub sign-in for Copilot chat and Git, through the GitHub CLI: Copilot CLI falls back to
  * `gh auth token`, and `gh auth setup-git` makes Git use the same login. Installs `gh` on first
- * use; GH_BROWSER=true makes gh's "press Enter to open the browser" a no-op (the app shows the
- * code and opens the page on Android). Git's name and email are filled in only when unset, with
+ * use, skips the login when gh already has one, and installs git when missing; GH_BROWSER=true
+ * makes gh's "press Enter to open the browser" a no-op (the app shows the code and opens the
+ * page on Android). Git's name and email are filled in only when unset, with
  * the account's private noreply address. The shell exits only when everything succeeded.
  */
 const val GITHUB_SIGN_IN_COMMAND =
     "avf-native-daemon tools install gh >/dev/null && " +
-        "GH_BROWSER=true gh auth login --hostname github.com --git-protocol https --web && " +
+        "{ gh auth status --hostname github.com >/dev/null 2>&1 || " +
+        "GH_BROWSER=true gh auth login --hostname github.com --git-protocol https --web; } && " +
+        // A reset guest may lack git (the installer adds it only with passwordless sudo).
+        "{ command -v git >/dev/null || sudo apt-get install -y git || { sudo apt-get update && sudo apt-get install -y git; }; } && " +
         "gh auth setup-git --hostname github.com && " +
         "login=\$(gh api user --jq .login) && id=\$(gh api user --jq .id) && name=\$(gh api user --jq '.name // .login') && " +
         "{ git config --global user.name >/dev/null || git config --global user.name \"\$name\"; } && " +
