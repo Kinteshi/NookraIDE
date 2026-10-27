@@ -177,7 +177,11 @@ fun SettingsScreen(controller: WorkbenchController) {
                         set(WorkbenchSettings.NOTEBOOK_COPILOT, it)
                     }
                 }
-                item { ActionRow("Sign in to chat", "Runs `copilot login` in a terminal") { controller.signInChatInTerminal(); controller.settingsVisible = false } }
+                item {
+                    ActionRow("Sign in to GitHub", "One login for Copilot chat and Git (GitHub CLI); inline suggestions sign in separately") {
+                        controller.signInGitHubInTerminal(); controller.settingsVisible = false
+                    }
+                }
                 item { ActionRow("Sign out of inline suggestions", null) { controller.runCommand("github.copilot.signOut") } }
 
                 item { Section("Terminal and Jupyter") }

@@ -102,10 +102,10 @@ fun CopilotChatPane(controller: WorkbenchController, modifier: Modifier = Modifi
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Sign in to Copilot chat", style = MaterialTheme.typography.titleSmall)
                     Text(
-                        "Chat uses the Copilot CLI, which keeps its own GitHub login. This runs `copilot login` in a terminal and shows a one-time code here.",
+                        "Chat signs in through the GitHub CLI, which Git then uses too. This runs `gh auth login` in a terminal and shows a one-time code here.",
                         style = MaterialTheme.typography.bodySmall,
                     )
-                    FilledTonalButton(onClick = controller::signInChatInTerminal) { Text("Sign in") }
+                    FilledTonalButton(onClick = controller::signInGitHubInTerminal) { Text("Sign in") }
                 }
             }
         }

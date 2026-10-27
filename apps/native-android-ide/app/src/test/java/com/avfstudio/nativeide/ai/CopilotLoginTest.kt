@@ -25,6 +25,14 @@ class CopilotLoginTest {
     }
 
     @Test
+    fun parsesTheGitHubCliPrompt() {
+        val output = "\u001B[0;33m!\u001B[0m First copy your one-time code: \u001B[1mC0DE-1234\u001B[0m\n" +
+            "Press Enter to open https://github.com/login/device in your browser... "
+        assertEquals(DeviceCodePrompt("https://github.com/login/device", "C0DE-1234"), parseDeviceCodePrompt(output))
+        assertEquals(DeviceCodePrompt("https://github.com/login/device", "ABCD-9999"), parseDeviceCodePrompt("! First copy your one-time code: ABCD-9999"))
+    }
+
+    @Test
     fun returnsNullUntilTheCodeArrives() {
         assertNull(parseDeviceCodePrompt("droid@debian:~/Projects$ copilot login --device-code"))
     }

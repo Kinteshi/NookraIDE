@@ -148,6 +148,34 @@
       "initializationOptions": {}
     },
     {
+      "name": "gh",
+      "version": "2.102.0",
+      "kind": "cli",
+      "languages": ["*"],
+      "command": ["gh"],
+      "install": {
+        "download": {
+          "binary": "gh",
+          "archive_member": "bin/gh",
+          "artifacts": {
+            "aarch64": {
+              "url": "https://github.com/cli/cli/releases/download/v2.102.0/gh_2.102.0_linux_arm64.tar.gz",
+              "sha256": "7862c86c72f43df3a2d93ddde6f473285b4e2af61b494849846827e513ef6484",
+              "archive_member": "gh_2.102.0_linux_arm64/bin/gh"
+            },
+            "x86_64": {
+              "url": "https://github.com/cli/cli/releases/download/v2.102.0/gh_2.102.0_linux_amd64.tar.gz",
+              "sha256": "bb766f710eef8ede859c18578c72c327597cd4c8a85b06001b1f3843c6019386",
+              "archive_member": "gh_2.102.0_linux_amd64/bin/gh"
+            }
+          }
+        }
+      },
+      "settingsSection": "github",
+      "env_allowlist": [],
+      "initializationOptions": {}
+    },
+    {
       "name": "ripgrep",
       "version": "15.2.0",
       "kind": "cli",

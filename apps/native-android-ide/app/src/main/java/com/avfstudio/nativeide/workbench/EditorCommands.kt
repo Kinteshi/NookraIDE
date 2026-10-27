@@ -119,7 +119,9 @@ object EditorCommands {
         command("jupyter.runAll", "Notebook: Run All Cells", ""),
         command("jupyter.interruptKernel", "Notebook: Interrupt Kernel", ""),
         command("jupyter.restartKernel", "Notebook: Restart Kernel", ""),
-        command("github.copilot.chat.signIn", "GitHub Copilot: Sign In to Chat (Terminal)", ""),
+        command("github.signIn", "GitHub: Sign In (Copilot Chat and Git)", ""),
+        command("github.copilot.chat.signIn", "GitHub Copilot: Sign In to Chat", ""),
+        command("github.copilot.chat.signInCli", "Copilot: Sign In to Chat with copilot login", ""),
     )
 
     /** Jupyter-style cell keys; honoured while a notebook is the active editor. */

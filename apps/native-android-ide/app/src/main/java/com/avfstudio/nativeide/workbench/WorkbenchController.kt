@@ -24,6 +24,8 @@ import com.avfstudio.nativeide.ai.AcpClient
 import com.avfstudio.nativeide.ai.AcpEvent
 import com.avfstudio.nativeide.ai.ChatReference
 import com.avfstudio.nativeide.ai.COPILOT_LOGIN_COMMAND
+import com.avfstudio.nativeide.ai.GITHUB_SIGN_IN_COMMAND
+import com.avfstudio.nativeide.ai.stripAnsi
 import com.avfstudio.nativeide.ai.parseDeviceCodePrompt
 import com.avfstudio.nativeide.assets.AssetPackGrammarLoader
 import com.avfstudio.nativeide.assets.AssetPackInstaller
@@ -2922,7 +2924,8 @@ class WorkbenchController(private val context: Context) {
                     cause is JsonRpcException && cause.code == -32000 -> chatEntries.add(
                         ChatEntry.Notice(
                             "Copilot chat needs its own GitHub sign-in (separate from inline suggestions). " +
-                                "Tap “Sign in” to run `copilot login` in the terminal, then send again.",
+                                "Tap “Sign in” for one GitHub login shared with Git, then send again. " +
+                                "If chat still asks, run “Copilot: Sign In to Chat with copilot login” from the command palette.",
                         ),
                     )
                     cause != null -> chatEntries.add(ChatEntry.Notice("Agent error: ${cause.message}"))
@@ -3097,6 +3100,51 @@ class WorkbenchController(private val context: Context) {
             },
         )
         if (chatLoginTerminal != null) chatEntries.add(ChatEntry.Notice("Starting `copilot login` in the terminal..."))
+    }
+
+    /**
+     * One GitHub login for Copilot chat and Git through `gh` (see [GITHUB_SIGN_IN_COMMAND]). The
+     * code appears as a card in chat; gh's "Press Enter to open the browser" is answered here.
+     */
+    fun signInGitHubInTerminal() {
+        chatAgent.stop()
+        chatAuthMethods = emptyList()
+        chatVisible = true
+        val output = StringBuilder()
+        var prompted = false
+        var enterSent = false
+        var terminal: UUID? = null
+        terminal = newTerminal(
+            GITHUB_SIGN_IN_COMMAND,
+            onOutput = { text ->
+                if (enterSent) return@newTerminal
+                output.append(text)
+                if (output.length > 16_384) output.delete(0, output.length - 4_096)
+                val seen = output.toString()
+                if (!prompted) {
+                    parseDeviceCodePrompt(seen)?.let { prompt ->
+                        prompted = true
+                        post { chatEntries.add(ChatEntry.DeviceCode(prompt.url, prompt.code)) }
+                    }
+                }
+                if (prompted && stripAnsi(seen).contains("Press Enter")) {
+                    enterSent = true
+                    terminal?.let { vfs.ptyInput(it, "\r".toByteArray()) }
+                }
+            },
+            onExit = { code ->
+                post {
+                    if (code == 0) {
+                        finishChatSignIn(true, "Signed in to GitHub. Copilot chat and Git use this account; send your message again.")
+                        refreshGitStatus()
+                    } else {
+                        finishChatSignIn(false, "GitHub sign-in did not finish; the terminal shows why.")
+                    }
+                }
+            },
+        )
+        chatLoginTerminal = terminal
+        if (terminal != null) chatEntries.add(ChatEntry.Notice("Signing in to GitHub in the terminal (installs the GitHub CLI the first time)…"))
     }
 
     fun openDeviceLogin(entry: ChatEntry.DeviceCode) {
@@ -3915,7 +3963,9 @@ class WorkbenchController(private val context: Context) {
                 enableCopilot(!copilotEnabled)
                 status = if (copilotEnabled) "Copilot inline suggestions on" else "Copilot inline suggestions off"
             }
-            "github.copilot.chat.signIn" -> signInChatInTerminal()
+            "github.copilot.chat.signIn" -> signInGitHubInTerminal()
+            "github.copilot.chat.signInCli" -> signInChatInTerminal()
+            "github.signIn" -> signInGitHubInTerminal()
             "github.copilot.chat.attachFile" -> attachFileToChat()
             "github.copilot.chat.attachSelection" -> attachSelectionToChat()
             "notebook.cell.executeAndSelectBelow", "notebook.cell.execute", "notebook.cell.executeAndInsertBelow" ->

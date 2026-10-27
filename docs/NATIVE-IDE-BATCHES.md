@@ -360,6 +360,13 @@ stack, variables, debug console. Restore the F9 binding when it works.
   chips show the remembered choice and a tap opens a session to list them. Model and mode are
   remembered and re-applied to new sessions (Autopilot is not); "Allow all" asks first and is
   never remembered. No Settings row: the list comes from the agent, the chips are the picker.
+* GitHub sign-in (code, unit test; tablet check pending): "Sign in to GitHub" (chat pane, Settings,
+  palette `github.signIn`) runs `GITHUB_SIGN_IN_COMMAND` in a terminal: installs `gh` 2.102.0
+  (catalog, pinned with GitHub's checksums, installed on first use only), `gh auth login --web`
+  with GH_BROWSER=true (the app answers gh's "Press Enter" and shows the code as a chat card),
+  `gh auth setup-git`, then Git user.name/email from the account when unset (noreply address).
+  Copilot chat uses gh's token through its documented fallback. `copilot login` stays as the
+  palette command "Copilot: Sign In to Chat with copilot login".
 
 ## Mapped for later (user, 10-27)
 * Model picker and adjustments (e.g. reasoning effort) for the chat UI.
