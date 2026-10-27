@@ -314,7 +314,8 @@ stack, variables, debug console. Restore the F9 binding when it works.
     the terminal panel's + button. Up/Down and edge Left/Right worked only because the cell's own
     handler takes them first. Fix: MainActivity re-issues arrows from such keyboards as virtual
     keyboard arrows (`asPlainKeyboardArrow`), which fixes every Compose text field (cells, search,
-    palette, chat), not just notebooks.
+    palette, chat), not just notebooks. Confirmed by the user on the tablet ("beautifully
+    fixed"); the second recording shows Right moving the caret (19 → 20) with focus kept.
 * Still not checked on the tablet (the tablet dropped off wireless debugging twice in 25
   minutes, the first time because it rebooted): Enter indent after the crash fix, cell Tab/Enter,
   notebook Copilot, plotly, the kernel fallback.
