@@ -38,6 +38,8 @@ data class WorkbenchSettings(
     val chatIdleMinutes: Int = 5,
     /** Copilot CLI's `--reasoning-effort`; empty leaves the CLI's default. */
     val chatReasoningEffort: String = "",
+    /** After the agent stops (idle, reconnect, effort change) the next message reloads the chat shown. */
+    val chatResume: Boolean = true,
     val jupyterDefaultKernel: String = "",
     val autoConnect: Boolean = true,
     val pythonInterpreter: String = "",
@@ -92,6 +94,7 @@ data class WorkbenchSettings(
         const val INLINE_SUGGEST_DELAY = "avf.copilot.inlineSuggestDelayMs"
         const val CHAT_IDLE_MINUTES = "avf.copilot.chatIdleMinutes"
         const val CHAT_REASONING_EFFORT = "avf.copilot.chatReasoningEffort"
+        const val CHAT_RESUME = "avf.copilot.chatResume"
         /** The levels Copilot CLI 1.0.105 accepts for `--reasoning-effort`. */
         val REASONING_EFFORTS = listOf("none", "minimal", "low", "medium", "high", "xhigh", "max")
         const val JUPYTER_DEFAULT_KERNEL = "avf.jupyter.defaultKernel"
@@ -149,6 +152,7 @@ data class WorkbenchSettings(
                     ?: defaults.inlineSuggestDelayMs,
                 chatIdleMinutes = number(CHAT_IDLE_MINUTES)?.toInt()?.coerceIn(1, 120) ?: defaults.chatIdleMinutes,
                 chatReasoningEffort = string(CHAT_REASONING_EFFORT)?.takeIf { it in REASONING_EFFORTS } ?: defaults.chatReasoningEffort,
+                chatResume = bool(CHAT_RESUME, defaults.chatResume),
                 jupyterDefaultKernel = string(JUPYTER_DEFAULT_KERNEL) ?: defaults.jupyterDefaultKernel,
                 autoConnect = bool(AUTO_CONNECT, defaults.autoConnect),
                 pythonInterpreter = string(PYTHON_INTERPRETER)?.trim() ?: defaults.pythonInterpreter,

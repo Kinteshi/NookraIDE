@@ -760,28 +760,79 @@ Guest not reset (the user's conda base and Copilot sign-in were still there); te
 * Backlog: AI chat session history and management (user).
 * Test file removed; the app left installed and connected.
 
-## 19. Problems in the editor, untitled files, Explorer tree, Copilot restart, chat history (10-28 from 16:10; in progress)
+## 19. Problems in the editor, untitled files, Explorer tree, Copilot restart, chat history (10-28 16:10–20:20; done, checked)
 User's pick from the backlog list: 1-4 and 6 (5, custom keybindings, skipped for now).
-* (1, code done, tablet check pending) Problems in the editor: sora's diagnostics (wavy
-  underline per severity, tooltip on tap or mouse hover with the message, `source code`, and a
-  "Quick fix…" action that asks the server for code actions there), unused code faded and
-  deprecated code struck through (LSP tags; `tagSupport` advertised; the span overlay restyles
-  copies and restores the analyzer's spans), and marks beside the scrollbar (tap: go to the
-  problem). Settings (Editor): `editor.renderValidationDecorations`, `editor.showUnused`,
-  `editor.showDeprecated`. More linting (Language servers): `avf.python.lintRules`
-  (Default / Extended B,UP,SIM,I,C4,RUF / All, as Ruff `lint.extendSelect`, sent as Ruff's
-  `initializationOptions.settings`) and `avf.python.typeChecking` (Default / Off / Strict:
-  basedpyright `typeCheckingMode`, ty `ty.configuration.rules.all`); changing them restarts the
-  server.
-* (3, code done, tablet check pending) Untitled files get completion and lint: servers see
-  them as `<workspace>/.untitled/<name>` (never created on disk); diagnostics, locations and
-  workspace edits map back to the `scratch:` document. The status-bar language of an untitled
-  file opens a picker (Plain text, Python, TypeScript, JavaScript, TSX, JSX) that gives the name
-  that extension. Copilot inline suggestions stay with saved files.
-* (4, code done, tablet check pending) Explorer tree: folders open in place (indented, open
-  folder icon), a Collapse folders button, "Show only this folder" in a folder's menu; open
-  folders are remembered across launches and reloaded after file changes. Setting
-  `avf.explorer.tree` (Settings → Workbench rows, on); off keeps one folder at a time.
+* (1) Problems in the editor, with sora's diagnostics support:
+  * Wavy underlines in the problem's colour (the Problems list's colours, `problemColor`). A tap,
+    or a mouse hover, shows a tooltip with the message, `source code` and "Quick fix…".
+  * Unused code is faded and deprecated code struck through (LSP tags; `tagSupport` advertised).
+    The span overlay restyles copies of the analyzer's spans and restores the originals.
+  * Marks beside the scrollbar; a tap moves the cursor to that problem.
+  * Settings → Editor: `editor.renderValidationDecorations`, `editor.showUnused`,
+    `editor.showDeprecated`.
+  * More linting (Settings → Language servers):
+    * `avf.python.lintRules`: Default / Extended (B, UP, SIM, I, C4, RUF) / All. It becomes Ruff's
+      `lint.extendSelect`, sent as `initializationOptions.settings`.
+    * `avf.python.typeChecking`: Default / Off / Strict. It sets basedpyright's `typeCheckingMode`
+      and ty's `ty.configuration.rules.all`.
+    * Checked locally with ty 0.0.94 / Ruff 0.17.3 over LSP. `all = "error"` turns on
+      possibly-unresolved-reference and raises warnings to errors; `"ignore"` leaves none.
+      Ruff's "ALL" adds D100, ANN001 and others.
+  * Code actions now come from every server of the file (ty and Ruff for Python). Each server
+    gets back only its own diagnostics at the cursor, with their `data`, which Ruff builds its
+    fixes from. Ruff's "Remove unused import" and "Organize imports" now show.
+  * Fixed: workspace edits (quick fixes, rename) on the open file replaced its whole text, which
+    sent the cursor to line 1 and dropped the colours. They are now applied in place.
+  * Fixed: restarting a server (interpreter, server or lint picker) did nothing. `close()` marks
+    the server stopped only after shutdown finishes, and the restart ran before that. It now
+    waits for `LanguageClient.stop()` and drops that server's old problems.
+  * Checked on the tablet: underlines and faded `os`; the tooltip on `undefined_name` ("Ruff
+    F821", Quick fix… lists ty's ignore action); Ruff's quick fix removed `import os` with the
+    cursor kept; type checking Off hid ty's problems; switching back restarted ty, whose problems
+    returned.
+* (3) Untitled files get completion and lint:
+  * Servers see them as `<workspace>/.untitled/<name>`, never created on disk (ty and Ruff accept
+    it). Diagnostics, locations and workspace edits map back to the `scratch:` document.
+  * The status-bar language of an untitled file opens a picker (Plain text, Python, TypeScript,
+    JavaScript, TSX, JSX), which gives the file that extension.
+  * Copilot inline suggestions stay with saved files.
+  * Fixed on the way: the first build crashed at launch. Before a workspace exists,
+    `scratch:/welcome.py` has no virtual path; `lspDocumentUri` now keeps such URIs as they are.
+  * Checked: Untitled-1 → Python → underlines, faded `sys`, problems listed under
+    Untitled-1.py; welcome.py reports 4 problems after a restart.
+  * Once, on the first launch after install, welcome.py showed none until the next edit. That
+    didn't happen again after three restarts. The new `AVFLSP` log tag (`setprop
+    log.tag.AVFLSP DEBUG`) logs didOpen and the diagnostics received.
+* (4) Explorer tree (`avf.explorer.tree`, Settings, on; off keeps one folder at a time):
+  * Folders open in place, indented, with VS Code's chevrons. The open-folder icon was too close
+    to the closed one at this size.
+  * A Collapse folders button, and "Show only this folder" in a folder's menu.
+  * Open folders are remembered across launches and reloaded after file changes.
+  * Checked: data → MNIST → raw, Collapse, and data still open after an app restart.
+* (2) Copilot exiting after a daemon restart: not reproduced. Five restarts from a transient unit
+  each came back to Copilot · Normal within about 6 s. No leftover servers: `KillMode=control-group`,
+  and one ty, Ruff and Copilot under the new daemon. The journal had nothing, because the daemon
+  logged server exits at debug. Changes:
+  * The daemon logs exits and kills at info, with the last 20 stderr lines. The new daemon is
+    installed in the guest, with the old binary kept as `avf-native-daemon.previous`.
+  * The app retries the start three times (3, 6 and 12 s) instead of once.
+* (6) AI chat history. Copilot CLI 1.0.105 keeps its sessions and offers `session/list`,
+  `loadSession` and `session/close` over ACP, so the app stores nothing itself:
+  * "Past chats" (history icon in the chat header): this workspace's chats, newest first, with
+    their age. Tap one to replay it into the pane and continue it.
+  * "New chat" (+) starts an empty chat; the previous one stays in the history.
+  * A chat's menu offers Rename and Remove from list. ACP has neither, so the name is the app's
+    own and removing hides the chat; Copilot keeps its files under `~/.copilot/session-state`.
+  * The chat shown continues after the agent stops (idle, reconnect, effort change, Stop): the
+    next message reloads its session quietly, without showing the replay again. Setting
+    `avf.copilot.chatResume` (on).
+  * Checked: the list showed the four chats; the temp-partition chat replayed; Stop, then "What
+    word did you reply with before?" got "pong" in the same session (now "Just now", no new
+    entry); a rename stayed; a removed chat stayed gone after reloading.
+  * Small gap: the header's Stop button can miss that the agent started for the list, until the
+    pane recomposes.
+* Tests: 155 app tests and all daemon tests pass. The tablet was left with welcome.py as it was,
+  the test file deleted, type checking back to Default, and the app installed and connected.
 
 ## Next pass (registered 10-27 23:35, updated 10-28 13:06)
 * Batch 15 did the carried-over tests (Copilot signed out, the setup paths, reconnect cap,
@@ -793,7 +844,7 @@ User's pick from the backlog list: 1-4 and 6 (5, custom keybindings, skipped for
 ## Mapped for later (user, 10-27)
 * Chat adjustments beyond the model/mode picker (batch 11). (Reasoning effort done in batch 16.)
 * Claude Code and Gemini support alongside Copilot (chat agents; ACP where they speak it).
-* AI chat session history and management (user, 10-28): keep past conversations (title, date,
+* (Done in batch 19.) AI chat session history and management (user, 10-28): keep past conversations (title, date,
   workspace), reopen one (ACP `session/load` where the agent supports it, else read-only
   history), rename and delete them, start a new one beside the current; check what Copilot CLI
   keeps itself (it lists sessions in its own store) before storing anything in the app.
@@ -813,9 +864,9 @@ To investigate (user, 10-28):
 * Cell outputs drawn with Material You elements and interaction: native tables for DataFrames
   (sortable, scrollable, theme colours) instead of an HTML WebView, collapsible/expandable
   outputs, copy and clear actions, maybe widgets later. Decide what stays a WebView (Plotly).
-* A tree view in Explorer (expandable folders in place, VS Code style) instead of one level at a
+* (Done in batch 19.) A tree view in Explorer (expandable folders in place, VS Code style) instead of one level at a
   time; check what exists today.
-* Problems in the editor itself (user, 10-28): squiggly underlines in the problem's severity
+* (Done in batch 19.) Problems in the editor itself (user, 10-28): squiggly underlines in the problem's severity
   colour on the exact range, a hover/tap tooltip with the message, source and code (and its
   quick fixes), and gutter/scrollbar markers; plus "appropriate additional linting": e.g. ruff
   rule selection, ty/basedpyright strictness and TypeScript checks exposed as settings, unused
@@ -831,7 +882,7 @@ To investigate (user, 10-28):
   daemon's roots/permissions model (several roots or switching the root).
 
 To investigate (user, 10-28, second set; planned for 10-29):
-* Inline suggestions, completion and hover not working on some files; the Output shows
+* (Done in batch 19: untitled files reach the servers.) Inline suggestions, completion and hover not working on some files; the Output shows
   "Language intelligence requires a connected Python or TypeScript language server". First look:
   `activeLspPosition` (WorkbenchController) refuses when the file's language client is not ready
   *or* the file is a `scratch:` (untitled) document, so untitled files never get a server, and
@@ -854,7 +905,9 @@ Bugs (user, 10-28): both fixed and checked in batch 15.
 
 * (Done in batch 16: re-measured the app's memory, TypeScript 7 and the compact layout.)
 * Copilot sometimes exits right after a daemon restart ("Guest tool exited with code unknown");
-  seen once in two tries, cause unknown. The app retries once after 3 s.
+  seen once in two tries, cause unknown. Batch 19: not reproduced in five restarts; the app now
+  retries three times and the daemon logs exits with stderr. Look in
+  `journalctl --user -u avf-native` if it happens again.
 * Notebook gap: script-based outputs (widgets, bokeh, altair) still show their text form.
 * Customisable keybindings (`keybindings.json`).
 * (Done in batch 17: TypeScript 7 as the default TypeScript server; compact layout reaches

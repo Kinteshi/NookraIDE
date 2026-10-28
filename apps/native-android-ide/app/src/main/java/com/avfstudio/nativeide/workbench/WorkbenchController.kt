@@ -110,6 +110,9 @@ import java.util.concurrent.TimeUnit
 
 private const val SCRATCH_WELCOME_PATH = "scratch:/welcome.py"
 
+/** Copilot starts again after 3, 6 and 12 s when its server fails to start. */
+private const val COPILOT_START_RETRIES = 3
+
 /** Languages an untitled file can take, with the extension that gives it that language. */
 val UNTITLED_LANGUAGES = linkedMapOf(
     "Plain text" to "",
@@ -416,7 +419,8 @@ class WorkbenchController(private val context: Context) {
                 }
             }
         }
-        chatAgent.eventListener = { event -> post { appendChat(event) } }
+        // A silent resume replays the conversation the pane already shows; drop that replay.
+        chatAgent.eventListener = { event -> if (!suppressChatReplay) post { appendChat(event) } }
         chatAgent.configListener = { options -> post { chatConfigOptions = options } }
         chatAgent.exitListener = { message ->
             post {
@@ -3056,7 +3060,7 @@ class WorkbenchController(private val context: Context) {
         }, 30, TimeUnit.SECONDS)
     }
 
-    private fun startCopilot(retry: Boolean = true) {
+    private fun startCopilot(attempt: Int = 0) {
         val workspace = workspaceRoot ?: return
         if (!copilotEnabled || copilot.language.isStarted || !vfs.isConnected()) return
         if (copilotSignedOut) {
@@ -3068,11 +3072,13 @@ class WorkbenchController(private val context: Context) {
         copilotStatus = "Starting"
         copilot.start(workspace).whenComplete { _, error ->
             post {
-                if (error != null && retry && connected) {
-                    // Right after a daemon restart the server sometimes exits at once (seen on the
-                    // tablet, cause unknown); a second start a few seconds later has worked.
-                    status = "Copilot: ${error.cause?.message ?: error.message}; retrying"
-                    timer.schedule({ post { startCopilot(retry = false) } }, 3, TimeUnit.SECONDS)
+                if (error != null && attempt < COPILOT_START_RETRIES && connected) {
+                    // Right after a daemon restart the server once exited at once (cause unknown;
+                    // not seen again in five restarts on 10-28, and the daemon now logs exits with
+                    // their stderr). Starting again a few seconds later has worked; wait longer each time.
+                    val delay = 3L shl attempt
+                    status = "Copilot: ${error.cause?.message ?: error.message}; retrying in $delay s"
+                    timer.schedule({ post { startCopilot(attempt + 1) } }, delay, TimeUnit.SECONDS)
                     return@post
                 }
                 reportLanguageServer("copilot", error)
@@ -3258,6 +3264,11 @@ class WorkbenchController(private val context: Context) {
 
     private fun appendChat(event: AcpEvent) {
         when (event) {
+            is AcpEvent.UserMessageChunk -> {
+                val last = chatEntries.lastOrNull()
+                if (last is ChatEntry.User) chatEntries[chatEntries.lastIndex] = last.copy(text = last.text + event.text)
+                else chatEntries.add(ChatEntry.User(event.text))
+            }
             is AcpEvent.MessageChunk -> {
                 val last = chatEntries.lastOrNull()
                 if (last is ChatEntry.Agent) chatEntries[chatEntries.lastIndex] = last.copy(text = last.text + event.text)
@@ -3323,12 +3334,124 @@ class WorkbenchController(private val context: Context) {
     var chatOptionsLoading by mutableStateOf(false)
         private set
 
-    private fun ensureChatSession(workspace: String): CompletableFuture<Unit> = when {
-        chatAgent.hasSession -> CompletableFuture.completedFuture(Unit)
-        chatAgent.isStarted -> chatAgent.newSession(workspace).thenCompose { applyRememberedChatOptions() }
-        else -> chatAgent.start(workspace, chatAgentArgs()).thenCompose { chatAgent.newSession(workspace) }
-            .thenCompose { applyRememberedChatOptions() }
+    /**
+     * A session for the next prompt. When the pane shows a conversation whose agent stopped (idle,
+     * reconnect, reasoning effort), it is loaded again quietly so the conversation goes on;
+     * otherwise a new one starts.
+     */
+    private fun ensureChatSession(workspace: String): CompletableFuture<Unit> {
+        if (chatAgent.hasSession) return CompletableFuture.completedFuture(Unit)
+        val resume = chatShownSession?.takeIf { settings.chatResume }
+        return startChatAgent(workspace).thenCompose {
+            if (resume != null && chatAgent.canLoadSession) {
+                suppressChatReplay = true
+                chatAgent.loadSession(resume, workspace)
+                    .whenComplete { _, _ -> suppressChatReplay = false }
+                    .exceptionallyCompose { chatAgent.newSession(workspace) }
+            } else {
+                chatAgent.newSession(workspace)
+            }
+        }.thenCompose {
+            chatShownSession = chatAgent.currentSessionId
+            applyRememberedChatOptions()
+        }
     }
+
+    private fun startChatAgent(workspace: String): CompletableFuture<Unit> =
+        if (chatAgent.isStarted) CompletableFuture.completedFuture(Unit) else chatAgent.start(workspace, chatAgentArgs())
+
+    // Chat history ------------------------------------------------------------------------------
+
+    /** The agent session the pane shows (null for a new, empty chat). */
+    @Volatile private var chatShownSession: String? = null
+    @Volatile private var suppressChatReplay = false
+
+    /** Past chats in this workspace, from the agent's own store (Copilot keeps them in ~/.copilot). */
+    var chatSessions by mutableStateOf<List<ChatSessionRow>>(emptyList())
+        private set
+    var chatSessionsLoading by mutableStateOf(false)
+        private set
+    var showChatHistory by mutableStateOf(false)
+
+    fun openChatHistory() {
+        val workspace = workspaceRoot
+        if (workspace == null || !vfs.isConnected()) {
+            status = "Connect to a guest workspace to see past chats"
+            return
+        }
+        showChatHistory = true
+        chatSessionsLoading = true
+        startChatAgent(workspace).thenCompose {
+            if (chatAgent.canListSessions) chatAgent.listSessions(workspace) else CompletableFuture.completedFuture(emptyList())
+        }.whenComplete { sessions, error ->
+            post {
+                chatSessionsLoading = false
+                scheduleChatStop()
+                if (error != null) {
+                    status = "Past chats: ${(error.cause ?: error).message}"
+                    return@post
+                }
+                if (!chatAgent.canListSessions) status = "This agent doesn't list its past chats"
+                chatSessions = chatSessionRows(sessions, chatHiddenSessions(), ::chatSessionName, chatShownSession)
+            }
+        }
+    }
+
+    /** Shows a past chat: the agent replays it into the pane, and new messages continue it. */
+    fun openChatSession(row: ChatSessionRow) {
+        val workspace = workspaceRoot ?: return
+        if (chatBusy) {
+            status = "Wait for the current reply, or stop it, before switching chats"
+            return
+        }
+        showChatHistory = false
+        if (row.id == chatShownSession && chatEntries.isNotEmpty()) return
+        chatAgent.leaveSession()
+        chatEntries.clear()
+        chatShownSession = null
+        chatBusy = true
+        startChatAgent(workspace).thenCompose { chatAgent.loadSession(row.id, workspace) }.whenComplete { _, error ->
+            post {
+                chatBusy = false
+                scheduleChatStop()
+                if (error != null) {
+                    chatEntries.add(ChatEntry.Notice("Could not open “${row.title}”: ${(error.cause ?: error).message}"))
+                } else {
+                    chatShownSession = row.id
+                }
+            }
+        }
+    }
+
+    /** A new, empty chat beside the others; the one shown stays in the history. */
+    fun newChat() {
+        if (chatBusy) chatAgent.cancel()
+        chatAgent.leaveSession()
+        chatShownSession = null
+        chatEntries.clear()
+        chatBusy = false
+        showChatHistory = false
+    }
+
+    /** ACP has no rename, so the name is the app's own, shown instead of the agent's title. */
+    fun renameChatSession(row: ChatSessionRow, name: String) {
+        val trimmed = name.trim()
+        preferences.edit().apply {
+            if (trimmed.isEmpty()) remove("chat-title-${row.id}") else putString("chat-title-${row.id}", trimmed)
+        }.apply()
+        chatSessions = chatSessions.map { if (it.id == row.id) it.copy(title = trimmed.ifEmpty { row.agentTitle }) else it }
+    }
+
+    /** ACP has no delete; the chat leaves this list (Copilot keeps its files under ~/.copilot/session-state). */
+    fun removeChatSession(row: ChatSessionRow) {
+        preferences.edit().putStringSet("chat-hidden", chatHiddenSessions() + row.id).apply()
+        chatSessions = chatSessions.filterNot { it.id == row.id }
+        if (row.id == chatShownSession) newChat()
+    }
+
+    private fun chatHiddenSessions(): Set<String> = preferences.getStringSet("chat-hidden", emptySet()).orEmpty()
+
+    private fun chatSessionName(id: String): String? = preferences.getString("chat-title-$id", null)
 
     /** Copilot CLI reads the reasoning effort at launch only; ACP has no option for it. */
     private fun chatAgentArgs(): List<String> =
@@ -3341,7 +3464,7 @@ class WorkbenchController(private val context: Context) {
         if (chatAgent.isStarted && !chatBusy) {
             chatAgent.stop()
             chatConfigOptions = emptyList()
-            chatEntries.add(ChatEntry.Notice("Reasoning effort: ${reasoningEffortLabel(effort)}. The next message starts a new session with it."))
+            chatEntries.add(ChatEntry.Notice("Reasoning effort: ${reasoningEffortLabel(effort)}. ${nextMessageNote()} with it."))
         }
     }
 
@@ -3411,7 +3534,7 @@ class WorkbenchController(private val context: Context) {
                 post {
                     if (!chatBusy && chatAgent.isStarted) {
                         chatAgent.stop()
-                        chatEntries.add(ChatEntry.Notice("Agent stopped after $minutes idle minutes; the next message starts a new session."))
+                        chatEntries.add(ChatEntry.Notice("Agent stopped after $minutes idle minutes to free guest memory; ${nextMessageNote().replaceFirstChar { it.lowercase() }}."))
                     }
                 }
             },
@@ -3425,8 +3548,16 @@ class WorkbenchController(private val context: Context) {
     fun endChatSession() {
         chatAgent.stop()
         chatBusy = false
-        chatEntries.add(ChatEntry.Notice("Agent session ended"))
+        chatEntries.add(ChatEntry.Notice("Agent stopped; ${nextMessageNote().replaceFirstChar { it.lowercase() }}."))
     }
+
+    /** What the next message does once the agent stopped: agents that reload sessions go on with the chat. */
+    private fun nextMessageNote(): String =
+        if (settings.chatResume && chatAgent.canLoadSession && chatShownSession != null) {
+            "The next message continues this chat"
+        } else {
+            "The next message starts a new chat"
+        }
 
     // Chat context ------------------------------------------------------------------------------
 

@@ -272,6 +272,11 @@ fun SettingsScreen(controller: WorkbenchController) {
                     }
                 }
                 item {
+                    SwitchRow("Continue chats after the agent stops", "When the agent ends (idle, reconnect, reasoning effort), the next message picks up the chat shown", settings.chatResume) {
+                        set(WorkbenchSettings.CHAT_RESUME, it)
+                    }
+                }
+                item {
                     // The common levels as buttons; settings.json takes any level the CLI accepts.
                     val efforts = listOf("", "low", "medium", "high")
                     SettingRow("Chat reasoning effort", "How much Copilot chat thinks before answering; Default leaves it to Copilot") {

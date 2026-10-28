@@ -36,6 +36,13 @@ import androidx.compose.material.icons.automirrored.outlined.Send
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Build
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.DriveFileRenameOutline
+import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.material.icons.outlined.Stop
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
@@ -89,9 +96,17 @@ fun CopilotChatPane(controller: WorkbenchController, modifier: Modifier = Modifi
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(Icons.Outlined.AutoAwesome, contentDescription = null, tint = colors.primary, modifier = Modifier.size(20.dp))
-            Text("Copilot Chat", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(start = 8.dp).weight(1f))
+            Text(
+                if (controller.showChatHistory) "Past chats" else "Copilot Chat",
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.padding(start = 8.dp).weight(1f),
+            )
+            IconButton(onClick = controller::newChat) { Icon(Icons.Outlined.Add, contentDescription = "New chat") }
+            IconButton(onClick = { if (controller.showChatHistory) controller.showChatHistory = false else controller.openChatHistory() }) {
+                Icon(Icons.Outlined.History, contentDescription = "Past chats", tint = if (controller.showChatHistory) colors.primary else colors.onSurfaceVariant)
+            }
             if (controller.chatAgent.isStarted) {
-                IconButton(onClick = controller::endChatSession) { Icon(Icons.Outlined.Stop, contentDescription = "End session") }
+                IconButton(onClick = controller::endChatSession) { Icon(Icons.Outlined.Stop, contentDescription = "Stop the agent") }
             }
             onClose?.let { IconButton(onClick = it) { Icon(Icons.Outlined.Close, contentDescription = "Close chat") } }
         }
@@ -109,6 +124,10 @@ fun CopilotChatPane(controller: WorkbenchController, modifier: Modifier = Modifi
                     FilledTonalButton(onClick = controller::signInGitHubInTerminal) { Text("Sign in") }
                 }
             }
+        }
+        if (controller.showChatHistory) {
+            ChatHistoryList(controller, Modifier.weight(1f).fillMaxWidth())
+            return@Column
         }
         LazyColumn(
             state = listState,
@@ -430,5 +449,73 @@ private fun ReasoningEffortChip(controller: WorkbenchController) {
                 )
             }
         }
+    }
+}
+
+/** The agent's past chats in this workspace: tap to continue one; its menu renames or removes it. */
+@Composable
+private fun ChatHistoryList(controller: WorkbenchController, modifier: Modifier = Modifier) {
+    val colors = MaterialTheme.colorScheme
+    var renaming by remember { mutableStateOf<ChatSessionRow?>(null) }
+    when {
+        controller.chatSessionsLoading -> Box(modifier.padding(24.dp), contentAlignment = Alignment.TopCenter) {
+            CircularProgressIndicator(Modifier.size(24.dp))
+        }
+        controller.chatSessions.isEmpty() -> Text(
+            "No past chats in this workspace yet.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = colors.onSurfaceVariant,
+            modifier = modifier.padding(16.dp),
+        )
+        else -> LazyColumn(modifier.padding(horizontal = 6.dp)) {
+            items(controller.chatSessions, key = { it.id }) { row ->
+                var menu by remember { mutableStateOf(false) }
+                Box {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .background(if (row.current) colors.secondaryContainer else androidx.compose.ui.graphics.Color.Transparent, MaterialTheme.shapes.small)
+                            .combinedClickable(onLongClick = { menu = true }) { controller.openChatSession(row) }
+                            .padding(start = 10.dp, top = 6.dp, bottom = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(row.title, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            Text(chatSessionAge(row.updatedAt), style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant)
+                        }
+                        IconButton(onClick = { menu = true }) { Icon(Icons.Outlined.MoreVert, contentDescription = "More for ${row.title}") }
+                    }
+                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                        DropdownMenuItem(
+                            text = { Text("Rename") },
+                            leadingIcon = { Icon(Icons.Outlined.DriveFileRenameOutline, contentDescription = null) },
+                            onClick = { menu = false; renaming = row },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Remove from list") },
+                            leadingIcon = { Icon(Icons.Outlined.Delete, contentDescription = null) },
+                            onClick = { menu = false; controller.removeChatSession(row) },
+                        )
+                    }
+                }
+            }
+        }
+    }
+    renaming?.let { row ->
+        var name by remember(row.id) { mutableStateOf(row.title) }
+        AlertDialog(
+            onDismissRequest = { renaming = null },
+            title = { Text("Rename chat") },
+            text = {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    singleLine = true,
+                    supportingText = { Text("Empty goes back to Copilot's title") },
+                )
+            },
+            confirmButton = { TextButton(onClick = { controller.renameChatSession(row, name); renaming = null }) { Text("Rename") } },
+            dismissButton = { TextButton(onClick = { renaming = null }) { Text("Cancel") } },
+        )
     }
 }

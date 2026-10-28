@@ -11,6 +11,20 @@ const val COPILOT_AGENT_TOOL = "copilot"
 private const val ACP_PROTOCOL_VERSION = 1
 
 data class AcpAuthMethod(val id: String, val name: String, val description: String?)
+
+/** A past conversation the agent keeps (ACP `session/list`); [updatedAt] is ISO 8601. */
+data class AcpSessionInfo(val id: String, val title: String?, val cwd: String?, val updatedAt: String?)
+
+/** Reads a `session/list` page: its sessions and the cursor of the next page, if any. */
+internal fun parseSessionList(result: JsonElement?): Pair<List<AcpSessionInfo>, String?> {
+    val page = result?.takeIf { it.isJsonObject }?.asJsonObject ?: return emptyList<AcpSessionInfo>() to null
+    val sessions = page.getAsJsonArray("sessions")?.mapNotNull { element ->
+        val session = element.takeIf { it.isJsonObject }?.asJsonObject ?: return@mapNotNull null
+        fun text(name: String) = session.get(name)?.takeIf { it.isJsonPrimitive }?.asString
+        AcpSessionInfo(text("sessionId") ?: return@mapNotNull null, text("title"), text("cwd"), text("updatedAt"))
+    }.orEmpty()
+    return sessions to page.get("nextCursor")?.takeIf { it.isJsonPrimitive }?.asString
+}
 data class AcpPermissionOption(val id: String, val name: String, val kind: String)
 
 /** One choice of a session config option. */
@@ -54,6 +68,8 @@ internal fun parseConfigOptions(result: JsonObject?): List<AcpConfigOption>? {
 }
 
 sealed interface AcpEvent {
+    /** The user's own message, as the agent replays it while loading a past session. */
+    data class UserMessageChunk(val text: String) : AcpEvent
     data class MessageChunk(val text: String) : AcpEvent
     data class ThoughtChunk(val text: String) : AcpEvent
     data class ToolCall(val id: String, val title: String?, val kind: String?, val status: String?) : AcpEvent
@@ -81,6 +97,12 @@ class AcpClient(transport: GuestVfsClient, private val tool: String = COPILOT_AG
     /** Whether the agent accepts embedded `resource` blocks (ACP `promptCapabilities.embeddedContext`). */
     @Volatile var embeddedContext: Boolean = false
         private set
+    /** ACP `agentCapabilities.loadSession`: past sessions can be reopened (Copilot CLI 1.0.105 can). */
+    @Volatile var canLoadSession: Boolean = false
+        private set
+    /** ACP `sessionCapabilities.list`: the agent lists the sessions it keeps. */
+    @Volatile var canListSessions: Boolean = false
+        private set
     @Volatile var eventListener: ((AcpEvent) -> Unit)? = null
     /** The session's mode, model and similar options, as the agent last reported them. */
     @Volatile var configOptions: List<AcpConfigOption> = emptyList()
@@ -89,6 +111,7 @@ class AcpClient(transport: GuestVfsClient, private val tool: String = COPILOT_AG
     @Volatile var exitListener: ((String) -> Unit)? = null
     val isStarted: Boolean get() = connection.bridgeId != null
     val hasSession: Boolean get() = sessionId != null
+    val currentSessionId: String? get() = sessionId
 
     init {
         connection.notificationHandler = ::handleNotification
@@ -116,11 +139,46 @@ class AcpClient(transport: GuestVfsClient, private val tool: String = COPILOT_AG
             }, timeoutSeconds = 60)
         }.thenApply { result ->
             authMethods = parseAuthMethods(result)
+            val capabilities = result.takeIf { it.isJsonObject }?.asJsonObject?.getAsJsonObject("agentCapabilities")
             embeddedContext = runCatching {
-                result.asJsonObject.getAsJsonObject("agentCapabilities")
-                    .getAsJsonObject("promptCapabilities").get("embeddedContext").asBoolean
+                capabilities!!.getAsJsonObject("promptCapabilities").get("embeddedContext").asBoolean
             }.getOrDefault(false)
+            canLoadSession = runCatching { capabilities!!.get("loadSession").asBoolean }.getOrDefault(false)
+            canListSessions = capabilities?.getAsJsonObject("sessionCapabilities")?.has("list") == true
         }
+
+    /** The sessions the agent keeps for [cwd], newest first as the agent sends them (up to [maxPages] pages). */
+    fun listSessions(cwd: String, maxPages: Int = 5): CompletableFuture<List<AcpSessionInfo>> {
+        fun page(cursor: String?, collected: List<AcpSessionInfo>, left: Int): CompletableFuture<List<AcpSessionInfo>> =
+            connection.request("session/list", JsonObject().apply {
+                addProperty("cwd", cwd)
+                cursor?.let { addProperty("cursor", it) }
+            }, timeoutSeconds = 30).thenCompose { result ->
+                val (sessions, next) = parseSessionList(result)
+                val all = collected + sessions
+                if (next == null || left <= 1) CompletableFuture.completedFuture(all) else page(next, all, left - 1)
+            }
+        return page(null, emptyList(), maxPages)
+    }
+
+    /**
+     * Reopens a past session. The agent replays the conversation as `session/update`
+     * notifications before it answers, then later prompts continue it.
+     */
+    fun loadSession(id: String, cwd: String): CompletableFuture<Unit> =
+        connection.request("session/load", JsonObject().apply {
+            addProperty("sessionId", id)
+            addProperty("cwd", cwd)
+            add("mcpServers", JsonArray())
+        }, timeoutSeconds = 60).thenApply { result ->
+            sessionId = id
+            updateConfig(parseConfigOptions(result.takeIf { it.isJsonObject }?.asJsonObject) ?: configOptions)
+        }
+
+    /** Leaves the current session (the agent keeps it for later); the next prompt needs a new or loaded one. */
+    fun leaveSession() {
+        sessionId = null
+    }
 
     fun newSession(cwd: String): CompletableFuture<Unit> =
         connection.request("session/new", JsonObject().apply {
@@ -246,6 +304,7 @@ internal fun parseAuthMethods(result: JsonElement): List<AcpAuthMethod> {
 
 internal fun parseSessionUpdate(update: JsonObject): AcpEvent? =
     when (update.get("sessionUpdate")?.asString) {
+        "user_message_chunk" -> contentText(update)?.let(AcpEvent::UserMessageChunk)
         "agent_message_chunk" -> contentText(update)?.let(AcpEvent::MessageChunk)
         "agent_thought_chunk" -> contentText(update)?.let(AcpEvent::ThoughtChunk)
         "tool_call", "tool_call_update" -> update.get("toolCallId")?.asString?.let { id ->

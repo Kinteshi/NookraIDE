@@ -16,7 +16,7 @@ use tokio::{
     sync::{broadcast, mpsc, watch, Mutex},
     time::{sleep, Instant},
 };
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 const MAX_HEADER_SIZE: usize = 8 * 1024;
 const MAX_MESSAGE_SIZE: usize = 16 * 1024 * 1024;
@@ -214,6 +214,8 @@ impl LspRouter {
             let process_output = output_tx.clone();
             let stderr_server_id = server_id.to_owned();
             let hibernation = self.hibernation;
+            let stderr_tail = Arc::new(std::sync::Mutex::new(VecDeque::new()));
+            let process_stderr_tail = stderr_tail.clone();
 
             tokio::spawn(async move {
                 read_server_output(
@@ -229,7 +231,12 @@ impl LspRouter {
                 loop {
                     match lines.next_line().await {
                         Ok(Some(line)) => {
-                            debug!(server = %stderr_server_id, %line, "language server stderr")
+                            debug!(server = %stderr_server_id, %line, "language server stderr");
+                            let mut tail = process_stderr_tail.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                            if tail.len() == STDERR_TAIL_LINES {
+                                tail.pop_front();
+                            }
+                            tail.push_back(line);
                         }
                         Ok(None) => break,
                         Err(error) => {
@@ -249,6 +256,7 @@ impl LspRouter {
                     sessions: Arc::downgrade(&self.sessions),
                     server_id: session_key.clone(),
                     generation,
+                    stderr_tail,
                 },
             ));
             sessions.insert(
@@ -405,10 +413,21 @@ fn default_servers() -> HashMap<String, ServerCommand> {
     .into()
 }
 
+/// Stderr lines kept per server, logged when it exits so an unexpected exit leaves its cause.
+const STDERR_TAIL_LINES: usize = 20;
+
 struct ServerCleanup {
     sessions: Weak<Mutex<HashMap<String, LspSession>>>,
     server_id: String,
     generation: u64,
+    stderr_tail: Arc<std::sync::Mutex<VecDeque<String>>>,
+}
+
+impl ServerCleanup {
+    fn stderr_tail(&self) -> String {
+        let tail = self.stderr_tail.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        tail.iter().cloned().collect::<Vec<_>>().join(" | ")
+    }
 }
 
 async fn run_server(
@@ -437,7 +456,8 @@ async fn run_server(
         };
         match event {
             Event::Exit(Ok(status)) => {
-                debug!(server = %cleanup.server_id, %status, "language server exited");
+                // Info, not debug: exits the daemon did not ask for are otherwise invisible.
+                info!(server = %cleanup.server_id, %status, stderr = %cleanup.stderr_tail(), "language server exited");
                 break;
             }
             Event::Exit(Err(error)) => {
@@ -452,6 +472,7 @@ async fn run_server(
                 }
             }
             Event::Command(None) | Event::ClientCount(Err(_)) => {
+                info!(server = %cleanup.server_id, "stopping language server: its session ended");
                 let _ = child.start_kill();
                 break;
             }
@@ -462,7 +483,7 @@ async fn run_server(
                 }
             }
             Event::Hibernated => {
-                debug!(server = %cleanup.server_id, "hibernation timeout expired");
+                info!(server = %cleanup.server_id, "stopping language server: idle with no clients");
                 let _ = child.start_kill();
                 break;
             }
