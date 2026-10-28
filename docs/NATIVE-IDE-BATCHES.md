@@ -621,6 +621,25 @@ The small tests stay first; the user resets the guest before that pass.
   files, no tools).
 
 ## Backlog
+To investigate (user, 10-28):
+* Plotly figures updating in place (the user's private-notebook-1.ipynb: `plot_handle =
+  display(fig, display_id=True)`, then `plot_handle.update(fig)` per epoch). First look: the
+  Jupyter bridge maps `update_display_data` to a new `display_data` output and drops
+  `transient.display_id` (`guest/tools/avf-jupyter-bridge.py`, `to_nbformat_output`), so each
+  update most likely appends a new output instead of replacing the one with that id: an app
+  bug, not the notebook's. Check on the tablet, then keep display ids on outputs and replace by
+  id (also `clear_output(wait=True)`).
+* Cell outputs drawn with Material You elements and interaction: native tables for DataFrames
+  (sortable, scrollable, theme colours) instead of an HTML WebView, collapsible/expandable
+  outputs, copy and clear actions, maybe widgets later. Decide what stays a WebView (Plotly).
+* A tree view in Explorer (expandable folders in place, VS Code style) instead of one level at a
+  time; check what exists today.
+* Outline from problems: can diagnostics feed the Outline (problems grouped per symbol, markers
+  next to outline entries) or a problems-by-file tree.
+* Open different workspaces, folders or projects: today the workspace is the daemon's root
+  (`AVF_WORKSPACE_ROOTS`, ~/Projects). Needs an Open Folder flow, recent workspaces, and the
+  daemon's roots/permissions model (several roots or switching the root).
+
 * Re-measure the app's memory.
 * Copilot sometimes exits right after a daemon restart ("Guest tool exited with code unknown");
   seen once in two tries, cause unknown. The app retries once after 3 s.
