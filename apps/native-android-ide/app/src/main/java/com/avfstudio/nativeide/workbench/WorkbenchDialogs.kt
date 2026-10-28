@@ -275,7 +275,7 @@ fun WorkbenchDialogHost(controller: WorkbenchController) {
                 if (choice is EnvironmentSetup) {
                     SetupRow(setupLabel(choice), setupDetail(choice), icon = if (choice == EnvironmentSetup.CreateVenv) Icons.Outlined.Add else Icons.Outlined.Download)
                 }
-                else (choice as Pair<String, String>).let { (label, path) -> PaletteRow(label.substringBefore(" ("), path) }
+                else (choice as Pair<String, String>).let { (label, path) -> PaletteRow(label.substringBeforeLast(" ("), path) }
             }
         }
         is WorkbenchDialog.ConfirmDelete -> AlertDialog(

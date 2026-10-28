@@ -526,10 +526,28 @@ Registered list (10-27):
   one WebView per HTML output (~35 MB each); Ctrl+Z after IME-typed text (check sora undo);
   Copilot CLI lists only "Auto" over ACP.
 
-## Next pass (registered 10-27 23:35, updated 10-28 00:10; not started)
-* **Material You refinement (user).** Go over the UI elements for a consistent Material 3 look
-  that follows dynamic colour: chips and dropdowns, dialogs, tabs, side panes, the status bar,
-  Settings rows, buttons, the setup rows in pickers. Keep the slim/AMOLED taste.
+## 13. Material polish, ended terminals, forwarding hint (10-28 00:15–00:45; done, checked)
+* Ended terminals: when the active terminal has ended, its area becomes a focus target (a tap,
+  watched in the Initial pointer pass so scrolling still works, takes the keyboard from the
+  editor) and a tonal bar says "This terminal ended (exit code N)" with "New terminal".
+  Checked: after `exit`, with welcome.py focused, a tap on the ended terminal and a key went
+  nowhere (welcome.py unchanged).
+* Forwarding hint: two connection refusals in a row switch the banner to "Still can't reach the
+  guest daemon. If Linux Terminal is already open, it may have stopped forwarding the
+  connection: Force stop it in App info (this restarts the guest), then open it again." with a
+  tonal App info button; cleared on connect. Checked by stopping the daemon with a 45 s restart
+  timer: the hint appeared after two refusals and the app reconnected by itself (next backoff
+  step, ~2 min) and cleared the banner.
+* Material pass: one ProblemBanner for the connection and disk banners (leading icon, large
+  shape, actions wrap below the text when narrow); the install dialog gets the dialog icon, a
+  filled Install button and the command in a surfaceContainerHighest code block; picker setup
+  rows get leading icons (+ to create, download to install); Settings → Guest tools uses a
+  tonal Install button. The rest of the chrome already used Material 3 parts (filter chips,
+  tonal containers, M3 dialogs, segmented buttons) and keeps its slim AMOLED look.
+* Found on the way: interpreter picker labels were cut at the first " (" ("Python 3
+  (ipykernel)" showed as "Python"); now at the last.
+
+## Next pass (registered 10-27 23:35, updated 10-28 00:45; not started)
 * **"No space left on device" in the guest when installing libraries (user): investigated and
   fixed 10-27 23:50.** The disk was fine (6.2 of 432 GB, inodes 1%, no ext4 errors). /tmp is a
   2 GB tmpfs in the guest's 3.9 GB of RAM, TMPDIR was unset, and the failing command was
@@ -566,15 +584,12 @@ Registered list (10-27):
   terminals had ended with the daemon restart, so focus stayed in a cell); removed character
   by character, the file on disk was never changed (grep), and the tab was reopened from disk.
   Possible app fix: tapping an ended terminal should still take the keyboard from the editor.
-* Tapping an ended terminal should still take the keyboard from the editor (after a daemon
-  restart, keys went to the last focused notebook cell).
 * Carried over from batch 12:
   * Copilot server staying stopped while signed out.
   * Untested setup paths: Source Control's Install Git, Miniforge, "Create ~/.venv" via uv.
-  * Install the build with the interpreter picker's status fix.
+  * Reconnect backoff reaches 60 s; after the daemon came back it took ~50 s to notice. Consider
+    a shorter cap while the app is in front.
   * Copilot CLI's model list ("Auto" only): retry with a CLI release that has had time to settle.
-  * When the guest is up but Linux Terminal doesn't forward 19870, the app's banner could say
-    to force-stop and reopen Terminal.
   * The guest prompt's `port CONDA_SHLVL=0port PATH` prefix: look at the shell startup files
     with the user's permission.
   * Clean up the Backlog below (several items are done).
