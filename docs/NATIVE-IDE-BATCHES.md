@@ -602,7 +602,7 @@ Registered list (10-27):
   list at 00:55:19 and the VM stopped normally ~50 s later, likely the user closing Terminal or
   starting the reset they planned); left alone.
 
-## 15. Next-pass tests, editor bugs, Material You syntax colours (10-28 12:30–; in progress)
+## 15. Next-pass tests, editor bugs, Material You syntax colours (10-28 12:30–13:06; done, checked)
 Guest not reset (the user's conda base and Copilot sign-in were still there); tested on it.
 * Bug 6 fixed, checked on the tablet: Backspace in leading spaces goes back to the previous tab
   stop (VS Code's `editor.useTabStops`, default on, Settings → Editor → "Backspace by
@@ -619,9 +619,17 @@ Guest not reset (the user's conda base and Copilot sign-in were still there); te
   from onSurfaceVariant. Notebook cells use the same palette. An imported VS Code theme still
   wins. Unit tests check distinct hues and contrast ≥ 3 on the surface in light and dark. Left on
   Material You on the tablet for the user to see.
-* Item 3 done (not timed on the tablet): while the app is in front, reconnect attempts are at
-  most 10 s apart and don't stop after ten; coming back to the app retries at once instead of
-  waiting for a backoff scheduled in the background.
+* Item 3 done, checked: while the app is in front, reconnect attempts are at most 10 s apart
+  and don't stop after ten; coming back to the app retries at once instead of waiting for a
+  backoff scheduled in the background. Timed by stopping the daemon for 30 s (from a
+  `systemd-run --user` transient unit, so the stop doesn't kill the script): the daemon was back
+  at 13:04:35 and the app showed Connected by 13:04:43 (before: ~50 s).
+* Item 1 checked: GitHub Copilot: Sign Out → "Copilot off". Turning Copilot on from the status
+  bar opened the sign-in code (the server said "not signed into GitHub"); Cancel stopped the
+  server at once. Toggle Inline Suggestions while signed out → "Copilot · Signed out" without
+  starting the server (the signed-out state was remembered), and after force-stopping and
+  reopening the app the status bar said "Copilot · Signed out" and no copilot-language-server
+  ran in the guest. The user has to sign in again (tap the status bar, enter the code).
 * Item 2, setup paths:
   * "Create ~/.venv with ipykernel" via uv: ran in a new terminal, exit 0; the picker reopened
     listing Python (.venv) first and no setup row. (No confirmation dialog for this one.)
@@ -644,17 +652,16 @@ Guest not reset (the user's conda base and Copilot sign-in were still there); te
   ends the title sequence early, so the rest prints as text. Harmless. Fix (not applied: editing
   ~/.bashrc was blocked by the permission check, waiting for the user): at the top of ~/.bashrc,
   replace that trap with `trap 'printf "\e]0;%s\a" "${BASH_COMMAND//[[:cntrl:]]/ }"' DEBUG`.
+* Cleanup: ~/Projects/avf-tests, the test ~/.venv, the 1.0.105 probe copy and the staging files
+  in Downloads are removed; git is installed again. The app is left installed and connected.
 
-## Next pass (registered 10-27 23:35, updated 10-28 00:55; not started)
-The small tests stay first; the user resets the guest before that pass.
-* Carried over:
-  * Copilot server staying stopped while signed out (needs a signed-out session).
-  * Untested setup paths: Source Control's Install Git, Miniforge, "Create ~/.venv" via uv.
-  * Reconnect backoff reaches 60 s; after the daemon came back it took ~50 s to notice. Consider
-    a shorter cap while the app is in front.
-  * Copilot CLI's model list ("Auto" only): retry with a CLI release that has had time to settle.
-  * The guest prompt's `port CONDA_SHLVL=0port PATH` prefix: look at the shell startup files
-    with the user's permission.
+## Next pass (registered 10-27 23:35, updated 10-28 13:06)
+* Batch 15 did the carried-over tests (Copilot signed out, the setup paths, reconnect cap,
+  Copilot model list, prompt prefix). Left over:
+  * The prompt prefix fix in ~/.bashrc, once the user approves it (batch 15, item 5).
+  * Miniforge's Install row from the UI on a guest without conda (its command is verified).
+  * Copilot models beyond "Auto" depend on the user's GitHub Copilot settings; nothing to do in
+    the app unless the account offers more and the picker still shows one.
 
 ## Mapped for later (user, 10-27)
 * Chat adjustments beyond the model/mode picker (batch 11), e.g. reasoning effort.
@@ -694,22 +701,17 @@ To investigate (user, 10-28, second set; planned for 10-29):
   gives untitled files completion and lint (in-memory text, `untitled:` URI, or a virtual path
   under the workspace for servers that only accept `file://`).
 
-Bugs (user, 10-28; to correct later):
-* Backspace after Enter does not remove the auto-indent: leaving a nested block needs one
-  Backspace per space. Expected (VS Code): Backspace in leading whitespace deletes back to the
-  previous tab stop (indent unit), so one press per level.
-* Ctrl+Space completion: choosing a suggestion moves the cursor to the start of the file
-  instead of after the inserted text. Check how the completion edit is applied (text edit range
-  / cursor placement after replace).
 * Which interpreter a .py file or the workspace uses: a status-bar chip (VS Code style) that
   shows the Python environment used for completion/lint and opens the interpreter picker; decide
   per workspace vs per file, and restart the language server on change.
 * Guest tools / setup option: move /tmp itself onto the disk (e.g. mask `tmp.mount` or bind a
   disk directory over /tmp) so nothing stays in memory, as an explicit opt-in beside the
   daemon's automatic TMPDIR fix; needs sudo and a guest restart, so confirm and explain.
-* Syntax colours generated from the Material You palette, offered as a toggle/picker like the
-  app theme (e.g. "Syntax colours: Classic / Material You"), in light and dark, keeping
-  contrast readable.
+* (Done in batch 15: syntax colours from the Material You palette, Settings → Syntax colours.)
+
+Bugs (user, 10-28): both fixed and checked in batch 15.
+* (Done: Backspace after Enter now removes one indentation level, `editor.useTabStops`.)
+* (Done: choosing a Ctrl+Space completion leaves the cursor after the inserted text.)
 
 * Re-measure the app's memory.
 * Copilot sometimes exits right after a daemon restart ("Guest tool exited with code unknown");
