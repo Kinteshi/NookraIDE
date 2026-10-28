@@ -383,8 +383,7 @@ private fun ChatOptionsRow(controller: WorkbenchController) {
                                 if (option.category == "permissions" && choice.value == "on") {
                                     confirmAllowAll = option to choice.value
                                 } else {
-                                    controller.rememberChatChoiceName(option, choice.name)
-                                    controller.setChatOption(option, choice.value)
+                                    controller.setChatOption(option, choice.value, choice.name)
                                 }
                             },
                         )

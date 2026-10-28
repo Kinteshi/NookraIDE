@@ -3080,21 +3080,23 @@ class WorkbenchController(private val context: Context) {
         }
     }
 
-    fun setChatOption(option: com.avfstudio.nativeide.ai.AcpConfigOption, value: String) {
+    fun setChatOption(option: com.avfstudio.nativeide.ai.AcpConfigOption, value: String, name: String? = null) {
+        // Autopilot is never carried over to a new session, so it isn't shown as the remembered mode either.
         if (option.category in rememberedChatCategories && !value.endsWith("#autopilot")) {
-            preferences.edit().putString("chat-option-${option.id}", value).apply()
+            preferences.edit()
+                .putString("chat-option-${option.id}", value)
+                .apply { if (name != null) putString("chat-option-${option.id}-name", name) }
+                .apply()
         }
         chatAgent.setConfigOption(option.id, value).whenComplete { _, error ->
             post { if (error != null) status = "Could not change ${option.name}: ${(error.cause ?: error).message}" }
         }
     }
 
-    /** What the picker shows before a session exists: the remembered choice's name, if any. */
-    fun rememberedChatChoice(id: String): String? = preferences.getString("chat-option-$id-name", null)
-
-    fun rememberChatChoiceName(option: com.avfstudio.nativeide.ai.AcpConfigOption, name: String) {
-        if (option.category in rememberedChatCategories) preferences.edit().putString("chat-option-${option.id}-name", name).apply()
-    }
+    /** What the picker shows before a session exists: the remembered choice's name, if it will be re-applied. */
+    fun rememberedChatChoice(id: String): String? =
+        preferences.getString("chat-option-$id", null)?.takeUnless { it.endsWith("#autopilot") }
+            ?.let { preferences.getString("chat-option-$id-name", null) }
 
     /** The agent holds about 300 MB in the guest; end it after the configured idle time. */
     private fun scheduleChatStop() {

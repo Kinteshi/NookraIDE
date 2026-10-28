@@ -470,6 +470,21 @@ Progress (code done, unit tests pass; tablet check pending):
   answers (cursor position, status, device attributes, OSC colours), never keys. Reproduced with
   `printf '\033[6n'` plus an app relaunch (a fresh `;1R` at the prompt), gone after the fix
   over two relaunches.
+* Ctrl+Z after IME-typed text: works on the tablet now (typed "hello world" through the IME into
+  an untitled file; Ctrl+Z removed " world", then the rest); the earlier miss didn't repeat.
+  Found alongside: undoing back to the saved text still asked "Save changes?"; documents now
+  remember the saved text and editing back to it clears the unsaved mark, as in VS Code.
+* Checked on the tablet: Close Other Editors closes clean tabs and asks for each unsaved one in
+  turn (Untitled-1, then Untitled-2; "Don't save" moves on); an untitled file undone back to
+  empty closed without asking. The chat option menus open aligned under their chips (Mode,
+  Model, Allow All); the model list still has only "Auto".
+  * Fixed from that: before the agent started, the Mode chip said "Autopilot" (the name was saved
+    even though Autopilot is never re-applied); names are now kept only with a value that will be
+    re-applied.
+* Not testable now: the Copilot server staying stopped while signed out (the user is signed in).
+* HTML outputs: cells are a lazy list, so only on-screen outputs hold a WebView; kept as is.
+* Copilot CLI over ACP still offers only "Auto" on 1.0.103; 1.0.105 came out hours ago, so the
+  catalog stays on 1.0.103 for now (recheck later).
 * Connecting after a guest boot: Linux Terminal didn't report port 19870 until it was
   force-stopped and relaunched (then `reportVmActivePorts: [19870]` after 16 s).
 * Tablet restart at 19:22 (`rescueparty_by_bootchecker`) after SystemUI crashed in its GC
