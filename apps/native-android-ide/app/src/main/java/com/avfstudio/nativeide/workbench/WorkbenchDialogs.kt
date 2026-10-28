@@ -69,6 +69,10 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.Download
+import androidx.compose.material3.Button
+import androidx.compose.ui.graphics.vector.ImageVector
 
 @Composable
 fun WorkbenchDialogHost(controller: WorkbenchController) {
@@ -220,6 +224,7 @@ fun WorkbenchDialogHost(controller: WorkbenchController) {
         WorkbenchDialog.GuestResources -> GuestResourcesDialog(controller)
         is WorkbenchDialog.InstallDependency -> AlertDialog(
             onDismissRequest = { controller.dialog = null },
+            icon = { Icon(Icons.Outlined.Download, contentDescription = null) },
             title = { Text("Install ${dialog.dependency.label}?") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -230,16 +235,23 @@ fun WorkbenchDialogHost(controller: WorkbenchController) {
                             if ("sudo " in dialog.dependency.install) " and enter your password if sudo asks." else ".",
                         style = MaterialTheme.typography.bodySmall,
                     )
-                    Text(
-                        dialog.dependency.install,
-                        fontFamily = FontFamily.Monospace,
-                        style = MaterialTheme.typography.bodySmall,
-                        maxLines = 4,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        shape = MaterialTheme.shapes.small,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            dialog.dependency.install,
+                            fontFamily = FontFamily.Monospace,
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 4,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        )
+                    }
                 }
             },
-            confirmButton = { TextButton(onClick = { controller.installDependency(dialog.dependency, dialog.then) }) { Text("Install") } },
+            confirmButton = { Button(onClick = { controller.installDependency(dialog.dependency, dialog.then) }) { Text("Install") } },
             dismissButton = { TextButton(onClick = { controller.dialog = null }) { Text("Not now") } },
         )
         is WorkbenchDialog.InterpreterPicker -> {
@@ -260,7 +272,9 @@ fun WorkbenchDialogHost(controller: WorkbenchController) {
                 },
             ) { choice ->
                 @Suppress("UNCHECKED_CAST")
-                if (choice is EnvironmentSetup) SetupRow(setupLabel(choice), setupDetail(choice))
+                if (choice is EnvironmentSetup) {
+                    SetupRow(setupLabel(choice), setupDetail(choice), icon = if (choice == EnvironmentSetup.CreateVenv) Icons.Outlined.Add else Icons.Outlined.Download)
+                }
                 else (choice as Pair<String, String>).let { (label, path) -> PaletteRow(label.substringBefore(" ("), path) }
             }
         }
@@ -420,6 +434,7 @@ fun WorkbenchDialogHost(controller: WorkbenchController) {
                         else "Install ipykernel in Python (${choice.label})",
                         choice.python,
                         path = true,
+                        icon = if (choice.label == "system") Icons.Outlined.Add else Icons.Outlined.Download,
                     )
                     is GuestDependency -> SetupRow("Install ${choice.label} (Miniforge)", choice.usedFor)
                 }
@@ -440,8 +455,9 @@ private fun setupDetail(setup: EnvironmentSetup): String = when (setup) {
 
 /** A picker row that sets something up rather than choosing it, set apart by its background. */
 @Composable
-private fun SetupRow(headline: String, detail: String, path: Boolean = false) {
+private fun SetupRow(headline: String, detail: String, path: Boolean = false, icon: ImageVector = Icons.Outlined.Download) {
     ListItem(
+        leadingContent = { Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
         headlineContent = { Text(headline) },
         supportingContent = {
             Text(detail, fontFamily = if (path) FontFamily.Monospace else null, maxLines = 1, overflow = TextOverflow.Ellipsis)

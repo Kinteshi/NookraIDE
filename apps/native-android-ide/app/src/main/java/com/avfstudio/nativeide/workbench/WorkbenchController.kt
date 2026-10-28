@@ -608,6 +608,8 @@ class WorkbenchController(private val context: Context) {
                 startStatsPolling()
                 checkGuestTools()
                 guestUnreachable = false
+                unreachableFailures = 0
+                guestForwardingSuspected = false
                 reconnectAttempt = 0
                 scheduledReconnect?.cancel(false)
                 scheduledReconnect = null
@@ -1344,6 +1346,11 @@ class WorkbenchController(private val context: Context) {
 
     private var wasConnected = false
     private var guestUnreachable = false
+    /** Connection refusals in a row; after two, Linux Terminal itself is the likely culprit. */
+    private var unreachableFailures = 0
+    /** Set when the guest probably runs but Linux Terminal stopped forwarding its port. */
+    var guestForwardingSuspected by mutableStateOf(false)
+        private set
     private var reconnectAttempt = 0
     private var scheduledReconnect: ScheduledFuture<*>? = null
 
@@ -1383,8 +1390,16 @@ class WorkbenchController(private val context: Context) {
             }
             unreachable -> {
                 guestUnreachable = true
-                guestProblem = "Can't reach the guest daemon. Open Linux Terminal so the guest starts; " +
-                    "if it was reset, set it up again."
+                unreachableFailures++
+                // Seen on the tablet: the guest and daemon run, but Terminal reports no forwarded
+                // port until it is force-stopped and opened again.
+                guestForwardingSuspected = unreachableFailures >= 2
+                guestProblem = if (guestForwardingSuspected) {
+                    "Still can't reach the guest daemon. If Linux Terminal is already open, it may have stopped " +
+                        "forwarding the connection: Force stop it in App info (this restarts the guest), then open it again."
+                } else {
+                    "Can't reach the guest daemon. Open Linux Terminal so the guest starts; if it was reset, set it up again."
+                }
                 status = guestProblem!!
                 if (!wasAutomatic && dialog == WorkbenchDialog.Connect) dialog = null
                 if (reconnectAttempt > 0) scheduleReconnect()

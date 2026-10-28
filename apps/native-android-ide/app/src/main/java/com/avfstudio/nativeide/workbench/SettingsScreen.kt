@@ -14,6 +14,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.LaunchedEffect
@@ -240,7 +241,7 @@ fun SettingsScreen(controller: WorkbenchController) {
                         },
                     ) {
                         when (state) {
-                            DependencyState.Missing -> TextButton(onClick = {
+                            DependencyState.Missing -> FilledTonalButton(onClick = {
                                 controller.settingsVisible = false
                                 controller.offerInstall(dependency)
                             }) { Text("Install") }

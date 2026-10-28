@@ -85,6 +85,10 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.material.icons.outlined.Warning
+import androidx.compose.material3.FilledTonalButton
 
 @Composable
 fun NativeWorkbench() {
@@ -449,22 +453,12 @@ private fun StatusItem(text: String, icon: ImageVector? = null, onClick: (() -> 
 @Composable
 private fun GuestDiskBanner(controller: WorkbenchController) {
     val problem = controller.guestStats?.diskProblem?.takeIf { controller.connected } ?: return
-    val colors = MaterialTheme.colorScheme
-    Surface(
-        color = colors.errorContainer,
-        contentColor = colors.onErrorContainer,
-        shape = MaterialTheme.shapes.medium,
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+    ProblemBanner(
+        Icons.Outlined.Warning,
+        "$problem. Files saved now may be damaged. Copy out what you need, then restart the guest: " +
+            "Force stop Linux Terminal and open it again.",
     ) {
-        Row(Modifier.padding(start = 16.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                "$problem. Files saved now may be damaged. Copy out what you need, then restart the guest: " +
-                    "Force stop Linux Terminal and open it again.",
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.weight(1f).padding(vertical = 10.dp),
-            )
-            TextButton(onClick = controller::openLinuxTerminalAppInfo) { Text("App info") }
-        }
+        TextButton(onClick = controller::openLinuxTerminalAppInfo) { Text("App info") }
     }
 }
 
@@ -473,18 +467,41 @@ private fun GuestDiskBanner(controller: WorkbenchController) {
 private fun GuestProblemBanner(controller: WorkbenchController) {
     val problem = controller.guestProblem ?: return
     if (controller.connected) return
+    ProblemBanner(Icons.Outlined.CloudOff, problem) {
+        if (controller.guestForwardingSuspected) {
+            FilledTonalButton(onClick = controller::openLinuxTerminalAppInfo) { Text("App info") }
+        }
+        TextButton(onClick = controller::openLinuxTerminal) { Text("Open Terminal") }
+        TextButton(onClick = controller::connectGuest, enabled = !controller.busy) { Text("Retry") }
+        TextButton(onClick = { controller.beginGuestSetup() }) { Text("Set up again") }
+    }
+}
+
+/** A Material error banner: icon, message, and actions that wrap below the text when narrow. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ProblemBanner(icon: ImageVector, message: String, actions: @Composable () -> Unit) {
     val colors = MaterialTheme.colorScheme
     Surface(
         color = colors.errorContainer,
         contentColor = colors.onErrorContainer,
-        shape = MaterialTheme.shapes.medium,
+        shape = MaterialTheme.shapes.large,
         modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
     ) {
-        Row(Modifier.padding(start = 16.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(problem, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f).padding(vertical = 10.dp))
-            TextButton(onClick = controller::openLinuxTerminal) { Text("Open Terminal") }
-            TextButton(onClick = controller::connectGuest, enabled = !controller.busy) { Text("Retry") }
-            TextButton(onClick = { controller.beginGuestSetup() }) { Text("Set up again") }
+        FlowRow(
+            Modifier.padding(start = 16.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.End),
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Row(
+                Modifier.weight(1f).widthIn(min = 280.dp).padding(vertical = 6.dp).align(Alignment.CenterVertically),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(icon, contentDescription = null, modifier = Modifier.size(20.dp))
+                Text(message, style = MaterialTheme.typography.bodyMedium)
+            }
+            Row(Modifier.align(Alignment.CenterVertically), verticalAlignment = Alignment.CenterVertically) { actions() }
         }
     }
 }

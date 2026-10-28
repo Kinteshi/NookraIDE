@@ -48,6 +48,15 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.connectbot.terminal.Terminal
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.Surface
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 
 /** Bottom panel (Ctrl+J): terminals, problems and the output log, resizable by its top edge. */
 @Composable
@@ -145,26 +154,61 @@ fun TerminalView(controller: WorkbenchController, modifier: Modifier = Modifier)
         LaunchedEffect(session.id, dark, background) {
             session.emulator.applyColorScheme(terminalPalette(dark), colors.onSurface.toArgb(), background.toArgb())
         }
-        key(session.id) {
-            Terminal(
-                terminalEmulator = session.emulator,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 6.dp)
-                    .onFocusChanged { state ->
-                        if (state.hasFocus) controller.focusArea = FocusArea.Terminal
-                        else if (controller.focusArea == FocusArea.Terminal) controller.focusArea = FocusArea.Other
-                    },
-                initialFontSize = controller.settings.terminalFontSize.sp,
-                backgroundColor = background,
-                foregroundColor = colors.onSurface,
-                selectionBackgroundColor = colors.primary.copy(alpha = 0.35f),
-                keyboardEnabled = !session.exited,
-                onHyperlinkClick = controller::openLink,
-                onInterceptKey = { event ->
-                    event.type == KeyEventType.KeyDown && controller.handleKeyDown(event.nativeKeyEvent)
+        // An ended terminal takes no keys, but tapping it must still take the keyboard away from
+        // the editor: otherwise typing lands in the last focused cell or file.
+        val endedFocus = remember(session.id) { FocusRequester() }
+        Box(
+            Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .focusRequester(endedFocus)
+                .focusable(enabled = session.exited)
+                .pointerInput(session.id, session.exited) {
+                    if (!session.exited) return@pointerInput
+                    awaitEachGesture {
+                        awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                        endedFocus.requestFocus()
+                    }
                 },
-            )
+        ) {
+            key(session.id) {
+                Terminal(
+                    terminalEmulator = session.emulator,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 6.dp)
+                        .onFocusChanged { state ->
+                            if (state.hasFocus) controller.focusArea = FocusArea.Terminal
+                            else if (controller.focusArea == FocusArea.Terminal) controller.focusArea = FocusArea.Other
+                        },
+                    initialFontSize = controller.settings.terminalFontSize.sp,
+                    backgroundColor = background,
+                    foregroundColor = colors.onSurface,
+                    selectionBackgroundColor = colors.primary.copy(alpha = 0.35f),
+                    keyboardEnabled = !session.exited,
+                    onHyperlinkClick = controller::openLink,
+                    onInterceptKey = { event ->
+                        event.type == KeyEventType.KeyDown && controller.handleKeyDown(event.nativeKeyEvent)
+                    },
+                )
+            }
+        }
+        if (session.exited) {
+            Surface(
+                color = colors.secondaryContainer,
+                contentColor = colors.onSecondaryContainer,
+                shape = MaterialTheme.shapes.medium,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
+            ) {
+                Row(Modifier.padding(start = 16.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        if (session.exitCode != null) "This terminal ended (exit code ${session.exitCode})" else "This terminal ended",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.weight(1f).padding(vertical = 8.dp),
+                    )
+                    FilledTonalButton(onClick = { controller.newTerminal() }) { Text("New terminal") }
+                }
+            }
         }
     }
 }
