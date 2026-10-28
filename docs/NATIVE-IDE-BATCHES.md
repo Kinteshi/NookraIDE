@@ -647,6 +647,17 @@ To investigate (user, 10-28, second set; planned for 10-29):
   *or* the file is a `scratch:` (untitled) document, so untitled files never get a server, and
   a .py/.ts file gets the message when its server did not start. Check which case the user hit,
   whether the server started (and why not), and give untitled files a language once chosen.
+  Confirmed by the user (10-28): the file was unsaved. It should not depend on saving: VS Code
+  gives untitled files completion and lint (in-memory text, `untitled:` URI, or a virtual path
+  under the workspace for servers that only accept `file://`).
+
+Bugs (user, 10-28; to correct later):
+* Backspace after Enter does not remove the auto-indent: leaving a nested block needs one
+  Backspace per space. Expected (VS Code): Backspace in leading whitespace deletes back to the
+  previous tab stop (indent unit), so one press per level.
+* Ctrl+Space completion: choosing a suggestion moves the cursor to the start of the file
+  instead of after the inserted text. Check how the completion edit is applied (text edit range
+  / cursor placement after replace).
 * Which interpreter a .py file or the workspace uses: a status-bar chip (VS Code style) that
   shows the Python environment used for completion/lint and opens the interpreter picker; decide
   per workspace vs per file, and restart the language server on change.
