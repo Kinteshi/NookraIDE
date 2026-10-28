@@ -745,6 +745,21 @@ Guest not reset (the user's conda base and Copilot sign-in were still there); te
   run `tools install` with ~/.local/bin on PATH), typescript 7.0.2 installed. Test files
   removed; the app is left installed and connected.
 
+## 18. Stale environments, problems in the outline (10-28 15:10–15:28; done, checked)
+* Stale environments in the pickers: the bridge generated a kernelspec per environment it found
+  (`~/.local/share/avf-studio/kernels/avf-*`) and never removed them; `avf--venv` outlived the
+  deleted ~/.venv. Bridge-5 prunes its own specs whose interpreter is gone, and hides (doesn't
+  delete) any other spec naming a missing interpreter. Checked: the picker lists fourteen,
+  miniconda3, system and python3, and offers "Create ~/.venv" again.
+* Problems in the outline (setting `outline.problems.enabled`, Settings → Editor, on): each
+  Outline entry shows a count badge in its worst problem's colour, counting problems that start
+  inside the symbol (a class counts its methods'); a "Problems only · N" filter keeps those
+  symbols. The Problems list groups by file (foldable header with a count; errors first, then
+  by line). Checked on a test file: Store 3, add 2, helper 2, size and clean none; the filter
+  left Store, add, helper; the Problems list showed otest.py · 5.
+* Backlog: AI chat session history and management (user).
+* Test file removed; the app left installed and connected.
+
 ## Next pass (registered 10-27 23:35, updated 10-28 13:06)
 * Batch 15 did the carried-over tests (Copilot signed out, the setup paths, reconnect cap,
   Copilot model list, prompt prefix). Left over:
@@ -777,7 +792,7 @@ To investigate (user, 10-28):
   outputs, copy and clear actions, maybe widgets later. Decide what stays a WebView (Plotly).
 * A tree view in Explorer (expandable folders in place, VS Code style) instead of one level at a
   time; check what exists today.
-* Outline from problems: can diagnostics feed the Outline (problems grouped per symbol, markers
+* (Done in batch 18.) Outline from problems: can diagnostics feed the Outline (problems grouped per symbol, markers
   next to outline entries) or a problems-by-file tree.
 * Open different workspaces, folders or projects: today the workspace is the daemon's root
   (`AVF_WORKSPACE_ROOTS`, ~/Projects). Needs an Open Folder flow, recent workspaces, and the
@@ -812,7 +827,7 @@ Bugs (user, 10-28): both fixed and checked in batch 15.
 * Customisable keybindings (`keybindings.json`).
 * (Done in batch 17: TypeScript 7 as the default TypeScript server; compact layout reaches
   Source Control, Search, Debug, Output and extra terminals.)
-* The interpreter picker keeps environments that no longer exist (batch 17).
+* (Done in batch 18: the pickers drop environments that no longer exist.)
 * Done and dropped from this list (10-28): Copilot chat sign-in and replies (batch 11),
   stopping the Copilot server while signed out (built; tablet check carried over), HTML outputs
   and kernel completions (batches 11-12).
