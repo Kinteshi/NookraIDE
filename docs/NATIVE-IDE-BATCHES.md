@@ -700,7 +700,6 @@ To investigate (user, 10-28, second set; planned for 10-29):
   Confirmed by the user (10-28): the file was unsaved. It should not depend on saving: VS Code
   gives untitled files completion and lint (in-memory text, `untitled:` URI, or a virtual path
   under the workspace for servers that only accept `file://`).
-
 * Which interpreter a .py file or the workspace uses: a status-bar chip (VS Code style) that
   shows the Python environment used for completion/lint and opens the interpreter picker; decide
   per workspace vs per file, and restart the language server on change.
