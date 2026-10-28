@@ -113,6 +113,12 @@ sealed interface ChatEntry {
 
 /** One guest PTY shown in the Terminal panel; the emulator outlives the composable. */
 class TerminalSession(val id: UUID, val emulator: TerminalEmulator, title: String) {
+    /**
+     * Until this time (uptime ms) the emulator's automatic replies are dropped: a reattach replays
+     * old output, and queries in it (a cursor-position request from gh, say) would otherwise be
+     * answered again into the shell as `;1R;120R`.
+     */
+    @Volatile var replayUntil = 0L
     var title by mutableStateOf(title)
     var exitCode by mutableStateOf<Int?>(null)
     var exited by mutableStateOf(false)

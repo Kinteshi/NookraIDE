@@ -9,6 +9,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.view.KeyEvent as AndroidKeyEvent
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -107,6 +108,8 @@ import java.util.concurrent.TimeUnit
 private const val SCRATCH_WELCOME_PATH = "scratch:/welcome.py"
 private const val MAX_IMPORTED_THEME_BYTES = 8 * 1024 * 1024
 private const val MAX_OUTPUT_LINES = 500
+/** How long after a reattach the replayed output may still make the emulator answer old queries. */
+private const val TERMINAL_REPLAY_WINDOW_MS = 3000L
 private const val MAX_QUICK_OPEN_FILES = 5000
 /** Chat options remembered across sessions; approvals ("permissions") never are. */
 private val rememberedChatCategories = setOf("model", "mode")
@@ -3325,7 +3328,10 @@ class WorkbenchController(private val context: Context) {
             initialCols = 120,
             defaultForeground = Color.White,
             defaultBackground = Color.Black,
-            onKeyboardInput = { bytes -> vfs.ptyInput(id, bytes) },
+            onKeyboardInput = { bytes ->
+                val replaying = SystemClock.uptimeMillis() < session.replayUntil
+                if (!(replaying && isTerminalReply(bytes))) vfs.ptyInput(id, bytes)
+            },
             onResize = { dimensions ->
                 if (dimensions.columns > 0 && dimensions.rows > 0) vfs.ptyResize(id, dimensions.columns, dimensions.rows)
             },
@@ -3375,6 +3381,7 @@ class WorkbenchController(private val context: Context) {
                 ?: createTerminalSession(info.sessionId, info.cwd.substringAfterLast('/').ifEmpty { "bash" })
                     .also(terminals::add)
             session.emulator.clearScreen()
+            session.replayUntil = SystemClock.uptimeMillis() + TERMINAL_REPLAY_WINDOW_MS
             vfs.addPtyListener(session.id) { event -> onPtyEvent(session, event, null) }
             vfs.ptyReattach(session.id)
         }

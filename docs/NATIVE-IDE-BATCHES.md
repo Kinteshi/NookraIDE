@@ -463,6 +463,13 @@ Progress (code done, unit tests pass; tablet check pending):
 * Terminal fixes: "terminal ended" prints once per lost terminal (each key or resize sent to a
   dead shell used to print it again); the Auto save choices get the row's full width (two-line
   labels if needed) instead of cutting "Focus change".
+* Fixed and checked on the tablet: the terminal typing `;1R` (cursor-position answers) into the
+  shell. Cause: every reconnect reattaches the guest's shells, and the daemon replays their
+  recent output; old queries in it (gh and others ask for the cursor position) were answered
+  again into the shell. For 3 s after a reattach the app now drops the emulator's automatic
+  answers (cursor position, status, device attributes, OSC colours), never keys. Reproduced with
+  `printf '\033[6n'` plus an app relaunch (a fresh `;1R` at the prompt), gone after the fix
+  over two relaunches.
 * Connecting after a guest boot: Linux Terminal didn't report port 19870 until it was
   force-stopped and relaunched (then `reportVmActivePorts: [19870]` after 16 s).
 * Tablet restart at 19:22 (`rescueparty_by_bootchecker`) after SystemUI crashed in its GC
