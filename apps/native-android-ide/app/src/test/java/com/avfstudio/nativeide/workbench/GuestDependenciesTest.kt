@@ -32,4 +32,22 @@ class GuestDependenciesTest {
         assertTrue("sha256sum -c" in conda)
         assertTrue("releases/download/26.7.2-0/" in conda)
     }
+
+    @Test
+    fun condaEnvironmentsGetIpykernelFromConda() {
+        val conda = "/home/u/miniconda3/bin/conda"
+        assertEquals(
+            "'$conda' install -y -p '/home/u/miniconda3/envs/fourteen' ipykernel",
+            ipykernelInstallCommand("/home/u/miniconda3/envs/fourteen/bin/python", conda, uv = true),
+        )
+        assertEquals(
+            "'$conda' install -y -p '/home/u/miniconda3' ipykernel",
+            ipykernelInstallCommand("/home/u/miniconda3/bin/python", conda, uv = false),
+        )
+        // A venv elsewhere uses pip, then uv when the venv has no pip.
+        assertEquals(
+            "{ '/home/u/.venv/bin/python' -m pip install ipykernel || uv pip install --python '/home/u/.venv/bin/python' ipykernel; }",
+            ipykernelInstallCommand("/home/u/.venv/bin/python", conda, uv = true),
+        )
+    }
 }

@@ -451,6 +451,20 @@ Progress (code done, unit tests pass; tablet check pending):
   * Keyring: not offered. A secret service in the headless guest needs gnome-keyring plus a
     D-Bus session and an unlock on every boot; gh's plain-text file is mode 0600 in a
     single-user VM whose disk lives in app-private storage. Revisit if a tool needs one.
+* Checked on the tablet (23:00–23:07): the new daemon installed from Linux Terminal (token
+  kept); Settings → Guest tools found every tool, including the user's own ~/miniconda3. With
+  `rg` moved aside, Search said "needs ripgrep" with Install; the confirmation showed the
+  catalog command; the terminal installed it and exited 0; the app checked again and re-ran
+  the search (14 results). The kernel picker listed miniconda3 and its `fourteen` env as
+  "Install ipykernel" rows and no Miniforge row (conda present); closed without choosing.
+  * Fixed from that: ipykernel goes into conda environments with `conda install -p` (not pip);
+    the Conda row no longer says "Miniforge, ~/miniforge3" for another conda; the dialog only
+    mentions sudo when the command uses it.
+* Terminal fixes: "terminal ended" prints once per lost terminal (each key or resize sent to a
+  dead shell used to print it again); the Auto save choices get the row's full width (two-line
+  labels if needed) instead of cutting "Focus change".
+* Connecting after a guest boot: Linux Terminal didn't report port 19870 until it was
+  force-stopped and relaunched (then `reportVmActivePorts: [19870]` after 16 s).
 * Tablet restart at 19:22 (`rescueparty_by_bootchecker`) after SystemUI crashed in its GC
   (19:19 tombstone); nothing from this work was running. The adb pairing was lost and redone.
 

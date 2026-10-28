@@ -3352,16 +3352,20 @@ class WorkbenchController(private val context: Context) {
                 session.exitCode = event.code
                 session.emulator.writeInput("\r\n[process exited with code ${event.code ?: "?"}]\r\n".toByteArray())
             }
-            is PtyEvent.Error -> {
-                // After the daemon restarts (an update, a guest reboot) its shells are gone.
-                val text = if (event.message == "unknown terminal session") {
-                    "this terminal ended when the guest daemon restarted; open a new one with +"
-                } else {
-                    "terminal error: ${event.message}"
-                }
-                session.emulator.writeInput("\r\n[$text]\r\n".toByteArray())
+            is PtyEvent.Error -> if (event.message == "unknown terminal session") {
+                // After the daemon restarts (an update, a guest reboot) its shells are gone. Every
+                // key or resize sent to one gets this error back; say it once.
+                post { endLostTerminal(session) }
+            } else {
+                session.emulator.writeInput("\r\n[terminal error: ${event.message}]\r\n".toByteArray())
             }
         }
+    }
+
+    private fun endLostTerminal(session: TerminalSession) {
+        if (session.exited) return
+        session.exited = true
+        session.emulator.writeInput("\r\n[this terminal ended when the guest daemon restarted; open a new one with +]\r\n".toByteArray())
     }
 
     /** Reconnects the panel to shells the guest kept running, including ones from an earlier app session. */
@@ -3374,8 +3378,8 @@ class WorkbenchController(private val context: Context) {
             vfs.addPtyListener(session.id) { event -> onPtyEvent(session, event, null) }
             vfs.ptyReattach(session.id)
         }
-        terminals.filter { session -> vfs.guestPtySessions.none { it.sessionId == session.id } && !session.exited }
-            .forEach { it.exited = true }
+        terminals.filter { session -> vfs.guestPtySessions.none { it.sessionId == session.id } }
+            .forEach(::endLostTerminal)
         if (activeTerminalId == null) activeTerminalId = terminals.firstOrNull()?.id
     }
 
@@ -3582,8 +3586,7 @@ class WorkbenchController(private val context: Context) {
         val command = if (systemPython) {
             createVenvCommand(candidate.python, uv) + " && exit"
         } else {
-            // uv-made environments have no pip; uv installs into them (and into pip ones) directly.
-            "{ '${candidate.python}' -m pip install ipykernel" + (if (uv) " || uv pip install --python '${candidate.python}' ipykernel" else "") + "; } && exit"
+            ipykernelInstallCommand(candidate.python, (guestTool(GuestDependency.Conda) as? DependencyState.Found)?.path, uv) + " && exit"
         }
         newTerminal(command, onExit = { code ->
             post {

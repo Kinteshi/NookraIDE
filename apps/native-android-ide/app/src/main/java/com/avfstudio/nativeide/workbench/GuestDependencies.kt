@@ -44,10 +44,10 @@ enum class GuestDependency(
         "avf-native-daemon tools install uv",
     ),
     Conda(
-        "Conda (Miniforge)",
+        "Conda",
         listOf("conda", "mamba"),
-        "Conda environments for notebooks; about 400 MB in ~/miniforge3",
-        "conda-forge's Miniforge $MINIFORGE_VERSION installer (checksum-verified)",
+        "Conda environments for notebooks",
+        "conda-forge's Miniforge $MINIFORGE_VERSION installer (checksum-verified; about 400 MB in ~/miniforge3)",
         "f=Miniforge3-$MINIFORGE_VERSION-Linux-\$(uname -m).sh && " +
             "case \$(uname -m) in aarch64) sum=$MINIFORGE_SHA256_AARCH64;; x86_64) sum=$MINIFORGE_SHA256_X86_64;; *) echo \"No Miniforge build for \$(uname -m)\"; false;; esac && " +
             "curl -fL --proto '=https' -o \"/tmp/\$f\" \"https://github.com/conda-forge/miniforge/releases/download/$MINIFORGE_VERSION/\$f\" && " +
@@ -122,6 +122,20 @@ internal fun createVenvCommand(python: String, uv: Boolean): String =
         "{ '$python' -m venv --help >/dev/null 2>&1 && '$python' -m ensurepip --version >/dev/null 2>&1 || " +
             aptInstall("python3-venv") + "; } && '$python' -m venv ~/.venv && ~/.venv/bin/pip install ipykernel"
     }
+
+/**
+ * Installs ipykernel into the environment of [python]: with conda when it is one of [conda]'s
+ * environments (so conda tracks the package), else pip, falling back to uv for uv-made
+ * environments, which have no pip.
+ */
+internal fun ipykernelInstallCommand(python: String, conda: String?, uv: Boolean): String {
+    val prefix = python.substringBeforeLast("/bin/", "")
+    val condaRoot = conda?.substringBeforeLast("/bin/", "")?.takeIf { it.isNotEmpty() }
+    if (condaRoot != null && prefix.isNotEmpty() && (prefix == condaRoot || prefix.startsWith("$condaRoot/envs/"))) {
+        return "'$conda' install -y -p '$prefix' ipykernel"
+    }
+    return "{ '$python' -m pip install ipykernel" + (if (uv) " || uv pip install --python '$python' ipykernel" else "") + "; }"
+}
 
 /** A row in the Python interpreter picker that adds an environment instead of choosing one. */
 sealed interface EnvironmentSetup {

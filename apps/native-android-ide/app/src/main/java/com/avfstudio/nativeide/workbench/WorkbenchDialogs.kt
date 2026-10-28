@@ -225,7 +225,11 @@ fun WorkbenchDialogHost(controller: WorkbenchController) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(dialog.reason ?: "${dialog.dependency.label} isn't installed in the guest.")
                     Text("Used for: ${dialog.dependency.usedFor}.", style = MaterialTheme.typography.bodySmall)
-                    Text("From ${dialog.dependency.source}. It runs in a new terminal, where you can follow it or answer sudo.", style = MaterialTheme.typography.bodySmall)
+                    Text(
+                        "From ${dialog.dependency.source}. It runs in a new terminal, where you can follow it" +
+                            if ("sudo " in dialog.dependency.install) " and enter your password if sudo asks." else ".",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
                     Text(
                         dialog.dependency.install,
                         fontFamily = FontFamily.Monospace,
@@ -417,7 +421,7 @@ fun WorkbenchDialogHost(controller: WorkbenchController) {
                         choice.python,
                         path = true,
                     )
-                    is GuestDependency -> SetupRow("Install ${choice.label} for conda environments", choice.usedFor)
+                    is GuestDependency -> SetupRow("Install ${choice.label} (Miniforge)", choice.usedFor)
                 }
             }
         }

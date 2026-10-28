@@ -41,6 +41,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
 
@@ -121,17 +122,27 @@ fun SettingsScreen(controller: WorkbenchController) {
                 }
                 item { SwitchRow("Format on save", "Ruff for Python, the language server otherwise", settings.formatOnSave) { set(WorkbenchSettings.FORMAT_ON_SAVE, it) } }
                 item {
-                    SettingRow("Auto save", "Save to the guest after a pause in typing, when you leave the editor, or when you leave the app") {
-                        SingleChoiceSegmentedButtonRow {
-                            AutoSaveMode.entries.forEachIndexed { index, mode ->
-                                SegmentedButton(
-                                    selected = settings.autoSave == mode,
-                                    onClick = { set(WorkbenchSettings.AUTO_SAVE, mode.key) },
-                                    shape = SegmentedButtonDefaults.itemShape(index, AutoSaveMode.entries.size),
-                                ) { Text(mode.label, maxLines = 1) }
+                    // Four choices don't fit beside the text at tablet width ("Focus change" was cut
+                    // to "Focus"), so they get the row's full width below it.
+                    ListItem(
+                        headlineContent = { Text("Auto save") },
+                        supportingContent = {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text("Save to the guest after a pause in typing, when you leave the editor, or when you leave the app")
+                                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                                    AutoSaveMode.entries.forEachIndexed { index, mode ->
+                                        SegmentedButton(
+                                            selected = settings.autoSave == mode,
+                                            onClick = { set(WorkbenchSettings.AUTO_SAVE, mode.key) },
+                                            shape = SegmentedButtonDefaults.itemShape(index, AutoSaveMode.entries.size),
+                                        ) { Text(mode.label, maxLines = 2, textAlign = TextAlign.Center) }
+                                    }
+                                }
                             }
-                        }
-                    }
+                        },
+                        colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surface),
+                        modifier = Modifier.widthIn(max = 840.dp).fillMaxWidth(),
+                    )
                 }
 
                 item {
