@@ -655,16 +655,64 @@ Guest not reset (the user's conda base and Copilot sign-in were still there); te
 * Cleanup: ~/Projects/avf-tests, the test ~/.venv, the 1.0.105 probe copy and the staging files
   in Downloads are removed; git is installed again. The app is left installed and connected.
 
+## 16. XS/S candidates: prompt fix, Plotly updates, /tmp option, effort, measurements (10-28 13:10–13:37; done, checked)
+* Prompt prefix fixed (user's permission): the title trap is set in Linux Terminal's
+  `~/.bash_aliases` (`trap 'echo -ne "\e]0;$BASH_COMMAND\007"' DEBUG`). ~/.bashrc now replaces
+  it, just before conda's block, with `trap - DEBUG` then a `printf "\e]0;%s\a"` trap (the test
+  and removal contain no backslashes, since the old trap still runs for them). Backup at
+  `~/.bashrc.before-materialcode`. A fresh terminal shows `(base) droid@debian:~/Projects$`.
+* Plotly in place (bridge-3 + app): display_data keeps `transient.display_id`;
+  update_display_data becomes an `update_display` notification and the app replaces every
+  output shown with that id (NotebookDisplays); `clear_output(wait=True)` clears at the cell's
+  next output; Plotly redraws with Plotly.react in the loaded page (no reload). Checked: a
+  raw-bundle figure updated 5 times stayed one figure ("update 5"), a text display one line,
+  the clear_output loop left only "step 3".
+  * Finding for the user's mnist notebook: `display(fig, display_id=True)` with a plotly Figure
+    can't work in any front end: the Figure's `_ipython_display_` publishes its own output
+    without the id, and `handle.update(fig)` does the same, so each epoch adds a figure (seen
+    here before the change too). Fix in the notebook: publish the bundle, e.g.
+    `plot_handle = display({"application/vnd.plotly.v1+json": fig.to_plotly_json()}, raw=True, display_id=True)`
+    and `plot_handle.update({...same...}, raw=True)`. Not edited (the user's file).
+* /tmp on disk (Settings → Guest tools → Temp files): the daemon's stats now report
+  `tmp_in_memory` and `tmp_mount_masked`; the row shows In memory / Moves to disk when the
+  guest restarts / On disk (moved by MaterialCode) / On disk, with Move to disk, Undo or Back
+  to memory (confirmed `sudo systemctl mask|unmask tmp.mount` in a terminal). Checked the whole
+  loop with one guest restart (force-stop + relaunch of Linux Terminal); then unmasked again, so
+  /tmp returns to memory at the next restart (the user's default kept).
+* Chat reasoning effort: Copilot CLI 1.0.105 has no ACP option for it, only
+  `--reasoning-effort none|minimal|low|medium|high|xhigh|max` at launch. New setting
+  `avf.copilot.chatReasoningEffort` (Settings → GitHub Copilot, Default/Low/Medium/High) and an
+  "Effort" chip in the chat beside Model and Mode; changing it ends a running agent so the next
+  message starts with it. Checked: the CLI opens an ACP session with `--reasoning-effort low`;
+  the chip shows. Not checked: a full chat turn (Copilot signed out of suggestions; no quota
+  spent).
+* Daemon/bridge deployed without the full installer (it would reinstall Copilot CLI 1.0.103
+  over the self-updated 1.0.105): new binary in ~/.local/bin, `tools install jupyter`, restart
+  through a `systemd-run --user` unit.
+* Measurements:
+  * App PSS: 209 MB fresh with a notebook open (10-27: 251 MB at rest); 323 MB after two
+    Plotly notebooks (graphics 94 MB, native 55 MB: about 45-55 MB per Plotly WebView).
+  * TypeScript 7.0.2 (typescript-go, `tsc --lsp --stdio`, 26 MB native binary, no Node): 48 MB
+    RSS after hover + completion on a small project, ready in ~2 s. vtsls (catalog today) needs
+    Node + tsserver, typically a few hundred MB: switching the catalog is a candidate.
+  * Compact layout (window resized to ~570 dp): bottom navigation Files / Editor / Terminal /
+    Chat / More works and the notebook fits. Gaps: no way to reach Source Control, Search across
+    files, Debug, Output or more terminals (More has Problems, Outline, References, Settings;
+    the compact Terminal has no tab strip or +).
+* Seen: the chat's Mode placeholder (before a session) reads "Autopilot", though autopilot is
+  never re-applied; check `rememberedChatChoice`.
+* Cleanup: test notebooks, ~/Projects/avf-tests, TS7 and Copilot probe copies, staging files in
+  Downloads removed. App installed and connected.
+
 ## Next pass (registered 10-27 23:35, updated 10-28 13:06)
 * Batch 15 did the carried-over tests (Copilot signed out, the setup paths, reconnect cap,
   Copilot model list, prompt prefix). Left over:
-  * The prompt prefix fix in ~/.bashrc, once the user approves it (batch 15, item 5).
   * Miniforge's Install row from the UI on a guest without conda (its command is verified).
   * Copilot models beyond "Auto" depend on the user's GitHub Copilot settings; nothing to do in
     the app unless the account offers more and the picker still shows one.
 
 ## Mapped for later (user, 10-27)
-* Chat adjustments beyond the model/mode picker (batch 11), e.g. reasoning effort.
+* Chat adjustments beyond the model/mode picker (batch 11). (Reasoning effort done in batch 16.)
 * Claude Code and Gemini support alongside Copilot (chat agents; ACP where they speak it).
 * (Done in batch 11: auto-save modes after a delay, on focus change and on window change.)
 * Offline experience: the editor alone when no guest is reachable (open/edit local and cached
@@ -672,7 +720,7 @@ Guest not reset (the user's conda base and Copilot sign-in were still there); te
 
 ## Backlog
 To investigate (user, 10-28):
-* Plotly figures updating in place (the user's private-notebook-1.ipynb: `plot_handle =
+* (Done in batch 16, with a notebook-side finding.) Plotly figures updating in place (the user's private-notebook-1.ipynb: `plot_handle =
   display(fig, display_id=True)`, then `plot_handle.update(fig)` per epoch). First look: the
   Jupyter bridge maps `update_display_data` to a new `display_data` output and drops
   `transient.display_id` (`guest/tools/avf-jupyter-bridge.py`, `to_nbformat_output`), so each
@@ -703,7 +751,7 @@ To investigate (user, 10-28, second set; planned for 10-29):
 * Which interpreter a .py file or the workspace uses: a status-bar chip (VS Code style) that
   shows the Python environment used for completion/lint and opens the interpreter picker; decide
   per workspace vs per file, and restart the language server on change.
-* Guest tools / setup option: move /tmp itself onto the disk (e.g. mask `tmp.mount` or bind a
+* (Done in batch 16.) Guest tools / setup option: move /tmp itself onto the disk (e.g. mask `tmp.mount` or bind a
   disk directory over /tmp) so nothing stays in memory, as an explicit opt-in beside the
   daemon's automatic TMPDIR fix; needs sudo and a guest restart, so confirm and explain.
 * (Done in batch 15: syntax colours from the Material You palette, Settings → Syntax colours.)
@@ -712,11 +760,13 @@ Bugs (user, 10-28): both fixed and checked in batch 15.
 * (Done: Backspace after Enter now removes one indentation level, `editor.useTabStops`.)
 * (Done: choosing a Ctrl+Space completion leaves the cursor after the inserted text.)
 
-* Re-measure the app's memory.
+* (Done in batch 16: re-measured the app's memory, TypeScript 7 and the compact layout.)
 * Copilot sometimes exits right after a daemon restart ("Guest tool exited with code unknown");
   seen once in two tries, cause unknown. The app retries once after 3 s.
 * Notebook gap: script-based outputs (widgets, bokeh, altair) still show their text form.
-* Customisable keybindings (`keybindings.json`), TypeScript 7 measurement, compact layout check.
+* Customisable keybindings (`keybindings.json`).
+* Use TypeScript 7 (`tsc --lsp --stdio`, 48 MB) instead of vtsls in the catalog.
+* Compact layout: reach Source Control, Search, Debug, Output and extra terminals (batch 16).
 * Done and dropped from this list (10-28): Copilot chat sign-in and replies (batch 11),
   stopping the Copilot server while signed out (built; tablet check carried over), HTML outputs
   and kernel completions (batches 11-12).
