@@ -547,7 +547,7 @@ Registered list (10-27):
 * Found on the way: interpreter picker labels were cut at the first " (" ("Python 3
   (ipykernel)" showed as "Python"); now at the last.
 
-## Next pass (registered 10-27 23:35, updated 10-28 00:45; not started)
+## 12b. Guest disk space and kernel completions (10-27 23:40 – 10-28 00:10; done, checked)
 * **"No space left on device" in the guest when installing libraries (user): investigated and
   fixed 10-27 23:50.** The disk was fine (6.2 of 432 GB, inodes 1%, no ext4 errors). /tmp is a
   2 GB tmpfs in the guest's 3.9 GB of RAM, TMPDIR was unset, and the failing command was
@@ -583,32 +583,33 @@ Registered list (10-27):
   Then a cleanup command typed for the app's terminal landed in the user's notebook (its
   terminals had ended with the daemon restart, so focus stayed in a cell); removed character
   by character, the file on disk was never changed (grep), and the tab was reopened from disk.
-  Possible app fix: tapping an ended terminal should still take the keyboard from the editor.
-* Carried over from batch 12:
-  * Copilot server staying stopped while signed out.
+  Fixed in batch 13: tapping an ended terminal takes the keyboard from the editor.
+
+## Next pass (registered 10-27 23:35, updated 10-28 00:45; not started)
+* Carried over:
+  * Copilot server staying stopped while signed out (needs a signed-out session).
   * Untested setup paths: Source Control's Install Git, Miniforge, "Create ~/.venv" via uv.
   * Reconnect backoff reaches 60 s; after the daemon came back it took ~50 s to notice. Consider
     a shorter cap while the app is in front.
   * Copilot CLI's model list ("Auto" only): retry with a CLI release that has had time to settle.
   * The guest prompt's `port CONDA_SHLVL=0port PATH` prefix: look at the shell startup files
     with the user's permission.
-  * Clean up the Backlog below (several items are done).
 
 ## Mapped for later (user, 10-27)
-* Model picker and adjustments (e.g. reasoning effort) for the chat UI.
+* Chat adjustments beyond the model/mode picker (batch 11), e.g. reasoning effort.
 * Claude Code and Gemini support alongside Copilot (chat agents; ACP where they speak it).
-* Auto-save modes as in VS Code: after a delay (exists), and on focus change (`files.autoSave`
-  `onFocusChange`/`onWindowChange`).
+* (Done in batch 11: auto-save modes after a delay, on focus change and on window change.)
 * Offline experience: the editor alone when no guest is reachable (open/edit local and cached
   files, no tools).
 
 ## Backlog
-* Finish Copilot chat sign-in on the tablet (needs the user's approval on GitHub).
-* Stop the Copilot language server (~280 MB) while signed out.
 * Re-measure the app's memory.
-* Copilot chat replies on the tablet (attachments work; chat needs the user's sign-in).
 * Copilot sometimes exits right after a daemon restart ("Guest tool exited with code unknown");
   seen once in two tries, cause unknown. The app retries once after 3 s.
-* Notebook gaps: HTML outputs, kernel completion UI.
+* Notebook gap: script-based outputs (widgets, bokeh, altair) still show their text form.
 * Customisable keybindings (`keybindings.json`), TypeScript 7 measurement, compact layout check.
-* Remove the `AVFKEY` routing log once the Book Cover keyboard is confirmed.
+* Remove the `AVFKEY` routing log (gated by `log.tag.AVFKEYS`) now that the Book Cover keyboard
+  fix is confirmed.
+* Done and dropped from this list (10-28): Copilot chat sign-in and replies (batch 11),
+  stopping the Copilot server while signed out (built; tablet check carried over), HTML outputs
+  and kernel completions (batches 11-12).
