@@ -1819,7 +1819,7 @@ class WorkbenchController(private val context: Context) {
                 beginSaveAs(document)
                 return
             }
-            document.dirty = false
+            document.markSaved(document.text)
             repository.persistDraft(document)
             documentRevision++
             status = "Saved locally; connect to save it to the guest"

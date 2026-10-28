@@ -47,6 +47,8 @@ data class DocumentSession(
 ) {
     val languageId: String = path.substringAfterLast('.', "").lowercase()
     val expectedModifiedTs: Long? get() = baseModifiedTs
+    /** The text as last loaded or saved, when known: editing back to it (undo) clears [dirty], as in VS Code. */
+    var savedText: String? = if (dirty) null else text
 
     fun updateText(nextText: String) {
         if (text != nextText) {
@@ -54,8 +56,14 @@ data class DocumentSession(
             val firstLineBreak = nextText.indexOf('\n')
             if (firstLineBreak >= 0) eol = if (firstLineBreak > 0 && nextText[firstLineBreak - 1] == '\r') "\r\n" else "\n"
             version += 1
-            dirty = true
+            dirty = nextText != savedText
         }
+    }
+
+    /** Records that [savedText] reached the guest (or the local draft); later edits make it dirty again. */
+    fun markSaved(savedText: String) {
+        this.savedText = savedText
+        dirty = text != savedText
     }
 }
 
@@ -176,11 +184,12 @@ class DocumentRepository(
             "UTF-16BE" -> StandardCharsets.UTF_16BE
             else -> StandardCharsets.UTF_8
         }
+        val savingText = document.text
         val bytes = try {
             val encoded = charset.newEncoder()
                 .onMalformedInput(CodingErrorAction.REPORT)
                 .onUnmappableCharacter(CodingErrorAction.REPORT)
-                .encode(CharBuffer.wrap(document.text))
+                .encode(CharBuffer.wrap(savingText))
             ByteArray(encoded.remaining()).also(encoded::get)
         } catch (error: java.nio.charset.CharacterCodingException) {
             return CompletableFuture.failedFuture(
@@ -209,14 +218,15 @@ class DocumentRepository(
         return writeAll(document.path, bytes, document.baseModifiedTs)
             .thenApply<SaveResult> { modifiedTs ->
                 document.baseModifiedTs = modifiedTs
-                document.dirty = false
+                document.markSaved(savingText)
                 document.conflict = null
                 cache.save(
                     DocumentSnapshot(
                         document.path,
                         document.text,
                         modifiedTs,
-                        dirty = false,
+                        // Typing that went on during the write stays unsaved.
+                        dirty = document.dirty,
                         encoding = document.encoding,
                         eol = document.eol,
                     ),
@@ -285,7 +295,7 @@ class DocumentRepository(
         document.baseModifiedTs = remote.remoteModifiedTs
         document.encoding = remote.remoteEncoding
         document.eol = if (remote.remoteText.contains("\r\n")) "\r\n" else "\n"
-        document.dirty = false
+        document.markSaved(remote.remoteText)
         document.conflict = null
         cache.save(
             DocumentSnapshot(

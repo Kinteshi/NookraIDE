@@ -146,6 +146,22 @@ class DocumentRepositoryTest {
         assertTrue(vfs.contents.copyOfRange(0, 2).contentEquals(byteArrayOf(0xFF.toByte(), 0xFE.toByte())))
         assertEquals("\uFEFFx\ny", String(vfs.contents, Charsets.UTF_16LE))
     }
+
+    @Test
+    fun editingBackToTheSavedTextIsClean() {
+        val document = DocumentSession("/w/a.py", "print(1)\n", baseModifiedTs = 1, dirty = false)
+        document.updateText("print(12)\n")
+        assertTrue(document.dirty)
+        document.updateText("print(1)\n")
+        assertFalse(document.dirty)
+        document.markSaved("print(2)\n")
+        assertTrue(document.dirty)
+        // A restored draft never matched a known saved text: it stays unsaved until saved.
+        val draft = DocumentSession("/w/b.py", "x", baseModifiedTs = 1, dirty = true)
+        draft.updateText("xy")
+        draft.updateText("x")
+        assertTrue(draft.dirty)
+    }
 }
 
 private class MemoryDocumentCache : DocumentCache {
