@@ -526,6 +526,27 @@ Registered list (10-27):
   one WebView per HTML output (~35 MB each); Ctrl+Z after IME-typed text (check sora undo);
   Copilot CLI lists only "Auto" over ACP.
 
+## Next pass (registered 10-27 23:35; not started)
+* **Material You refinement (user).** Go over the UI elements for a consistent Material 3 look
+  that follows dynamic colour: chips and dropdowns, dialogs, tabs, side panes, the status bar,
+  Settings rows, buttons, the setup rows in pickers. Keep the slim/AMOLED taste.
+* **"No space left on device" in the guest when installing libraries (user).** The root
+  filesystem had 6 of 431 GB used, so the error likely comes from a smaller filesystem: /tmp as
+  a RAM-backed tmpfs (pip and conda unpack large wheels such as torch there), or a cache
+  directory on one. Check `df -h /tmp ~/.cache`, the failing path, and TMPDIR; if it is /tmp,
+  point installs (and the app's install terminals) at a disk-backed temp dir.
+* Carried over from batch 12:
+  * Kernel completions on the tablet (needs ipykernel in one of the user's conda envs).
+  * Copilot server staying stopped while signed out.
+  * Untested setup paths: Source Control's Install Git, Miniforge, "Create ~/.venv" via uv.
+  * Install the build with the interpreter picker's status fix.
+  * Copilot CLI's model list ("Auto" only): retry with a CLI release that has had time to settle.
+  * When the guest is up but Linux Terminal doesn't forward 19870, the app's banner could say
+    to force-stop and reopen Terminal.
+  * The guest prompt's `port CONDA_SHLVL=0port PATH` prefix: look at the shell startup files
+    with the user's permission.
+  * Clean up the Backlog below (several items are done).
+
 ## Mapped for later (user, 10-27)
 * Model picker and adjustments (e.g. reasoning effort) for the chat UI.
 * Claude Code and Gemini support alongside Copilot (chat agents; ACP where they speak it).
