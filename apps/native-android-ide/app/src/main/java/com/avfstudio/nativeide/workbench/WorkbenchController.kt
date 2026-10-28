@@ -67,7 +67,7 @@ import com.avfstudio.nativeide.language.JsonRpcException
 import com.avfstudio.nativeide.language.LanguageClient
 import com.avfstudio.nativeide.language.LanguageDiagnostic
 import com.avfstudio.nativeide.language.SettingsResolver
-import com.avfstudio.nativeide.language.lspDocumentPath
+import com.avfstudio.nativeide.language.lspDocumentUri
 import com.avfstudio.nativeide.language.untitledPathFor
 import com.avfstudio.nativeide.notebook.CellType
 import com.avfstudio.nativeide.notebook.KernelClient
@@ -390,6 +390,7 @@ class WorkbenchController(private val context: Context) {
         }
         languageClients.values.forEach { client ->
             client.diagnosticsListener = { uri, updates ->
+                lspLog { "diagnostics $uri: ${updates.size}" }
                 post {
                     diagnosticsByClient.getOrPut(client) { mutableMapOf() }[uri] = updates
                     diagnostics.clear()
@@ -499,16 +500,28 @@ class WorkbenchController(private val context: Context) {
         terminals.forEach { /* font size is read by the composable */ }
         // Servers read these at start, so a change restarts them.
         if (settings.pythonLanguageServer != previousServer || settings.pythonTypeChecking != previousTypeChecking) {
-            languageClients.getValue("python").close()
-            post { documents.forEach { ensureLanguageServers(it.path) } }
+            restartLanguageServer("python")
         }
-        if (settings.pythonLintRules != previousLintRules) {
-            languageClients.getValue("python-format").close()
-            post { documents.forEach { ensureLanguageServers(it.path) } }
-        }
-        if (settings.typescriptLanguageServer != previousTypescriptServer) {
-            languageClients.getValue("typescript").close()
-            post { documents.forEach { ensureLanguageServers(it.path) } }
+        if (settings.pythonLintRules != previousLintRules) restartLanguageServer("python-format")
+        if (settings.typescriptLanguageServer != previousTypescriptServer) restartLanguageServer("typescript")
+    }
+
+    /**
+     * Stops [language]'s server and, once it is gone, starts it again for the open documents
+     * (starting earlier found it still running and did nothing). Its old problems are dropped;
+     * the new server reports again.
+     */
+    private fun restartLanguageServer(language: String) {
+        val client = languageClients.getValue(language)
+        if (!client.isStarted) return
+        client.stop().whenComplete { _, _ ->
+            post {
+                diagnosticsByClient.remove(client)
+                diagnostics.clear()
+                diagnostics.addAll(diagnosticsByClient.values.flatMap { it.values.flatten() })
+                refreshEditorProblems()
+                documents.forEach { ensureLanguageServers(it.path) }
+            }
         }
     }
 
@@ -1167,10 +1180,7 @@ class WorkbenchController(private val context: Context) {
         updateSetting(WorkbenchSettings.PYTHON_INTERPRETER, path)
         status = "Python interpreter: $path"
         // The language server reads the environment at start, so it starts again with the new one.
-        if (changed && languageClients.getValue("python").isStarted) {
-            languageClients.getValue("python").close()
-            post { documents.forEach { ensureLanguageServers(it.path) } }
-        }
+        if (changed) restartLanguageServer("python")
         then?.invoke()
     }
 
@@ -2279,8 +2289,7 @@ class WorkbenchController(private val context: Context) {
     }
 
     /** The URI a language server reports a document's diagnostics under. */
-    fun diagnosticUri(path: String): String =
-        java.net.URI("file", "", lspDocumentPath(path, workspaceRoot), null).toASCIIString()
+    fun diagnosticUri(path: String): String = lspDocumentUri(path, workspaceRoot)
 
     /** Maps a path from a language server back to the open document, untitled ones included. */
     fun documentPathFor(lspPath: String): String = untitledPathFor(lspPath, workspaceRoot) ?: lspPath
@@ -2391,6 +2400,7 @@ class WorkbenchController(private val context: Context) {
         if (document.path in notebooks) return
         lspLanguageId(document.path)?.let { languageId ->
             languageClientsFor(document.path).filter { it.isReady }.forEach { client ->
+                lspLog { "didOpen ${document.path} v${document.version} (${document.text.length} chars) in ${languageClients.entries.firstOrNull { it.value === client }?.key}" }
                 client.didOpen(document.path, languageId, document.version, document.text)
             }
         }
@@ -2652,10 +2662,14 @@ class WorkbenchController(private val context: Context) {
                         val (target, text) = update
                         if (documents.none { it.path == path }) documents.add(target)
                         notifyDocumentOpened(target)
-                        target.updateText(text)
+                        if (activePath == path && editorHost.selection(path) != null) {
+                            // In place: the cursor, colours and undo history stay; the host tells the servers.
+                            editorHost.applyEdits(path, edits.getValue(path))
+                        } else {
+                            target.updateText(text)
+                            notifyDocumentChanged(path, target.version, target.text)
+                        }
                         onDocumentEdited(target)
-                        notifyDocumentChanged(path, target.version, target.text)
-                        if (activePath == path) editorView?.setText(text)
                     }
                     status = "$successMessage in ${updated.size} file(s); save to persist changes"
                     onApplied?.invoke()
@@ -2666,44 +2680,61 @@ class WorkbenchController(private val context: Context) {
         }
     }
 
+    /** Whether the cursor is on this problem (its last character included), as VS Code asks for actions. */
+    private fun LanguageDiagnostic.covers(position: LspPosition): Boolean {
+        fun point(name: String) = range.getAsJsonObject(name)?.let { LspPosition(it.get("line").asInt, it.get("character").asInt) }
+        val start = point("start") ?: return false
+        val end = point("end") ?: return false
+        val order = compareBy<LspPosition>({ it.line }, { it.character })
+        return order.compare(start, position) <= 0 && order.compare(position, end) <= 0
+    }
+
+    /** Asks every server of the file (for Python, ty or basedpyright and Ruff) and lists their actions together. */
     fun showCodeActions() {
         val (document, position) = activeLspPosition() ?: return
-        val client = languageClientFor(document.path) ?: return
         val uri = diagnosticUri(document.path)
-        val fileDiagnostics = JsonArray().apply {
-            diagnostics.filter { it.uri == uri }.forEach { diagnostic ->
-                add(JsonObject().apply {
-                    add("range", diagnostic.range)
-                    diagnostic.severity?.let { addProperty("severity", it) }
-                    addProperty("message", diagnostic.message)
-                    diagnostic.source?.let { addProperty("source", it) }
-                    diagnostic.code?.let { add("code", it) }
-                })
-            }
-        }
-        client.codeActions(document.path, LspRange(position, position), fileDiagnostics).whenComplete { response, error ->
-            post {
-                if (error != null) {
-                    status = "Code actions failed: ${error.cause?.message ?: error.message}"
-                    return@post
+        val clients = languageClientsFor(document.path).filter { it.isReady }
+        val requests = clients.map { client ->
+            // Each server gets back its own diagnostics, with their data.
+            val fileDiagnostics = JsonArray().apply {
+                diagnosticsByClient[client]?.get(uri).orEmpty().filter { it.covers(position) }.forEach { diagnostic ->
+                    add(JsonObject().apply {
+                        add("range", diagnostic.range)
+                        diagnostic.severity?.let { addProperty("severity", it) }
+                        addProperty("message", diagnostic.message)
+                        diagnostic.source?.let { addProperty("source", it) }
+                        diagnostic.code?.let { add("code", it) }
+                        if (diagnostic.tags.isNotEmpty()) add("tags", JsonArray().apply { diagnostic.tags.forEach(::add) })
+                        diagnostic.data?.let { add("data", it) }
+                    })
                 }
-                val choices = if (response.isJsonArray) {
-                    response.asJsonArray.mapNotNull { value ->
+            }
+            client.codeActions(document.path, LspRange(position, position), fileDiagnostics)
+                .handle { response, error -> Triple(client, response, error) }
+        }
+        CompletableFuture.allOf(*requests.toTypedArray()).whenComplete { _, _ ->
+            val answers = requests.map { it.join() }
+            post {
+                val choices = answers.flatMap { (client, response, _) ->
+                    response?.takeIf { it.isJsonArray }?.asJsonArray?.mapNotNull { value ->
                         val action = value.takeIf { it.isJsonObject }?.asJsonObject ?: return@mapNotNull null
                         val title = action.get("title")?.takeUnless { it.isJsonNull }?.asString ?: return@mapNotNull null
-                        CodeActionChoice(title, action)
-                    }
-                } else {
-                    emptyList()
+                        CodeActionChoice(title, action, client)
+                    }.orEmpty()
                 }
-                if (choices.isEmpty()) status = "No code actions available" else dialog = WorkbenchDialog.CodeActions(choices)
+                val failure = answers.firstNotNullOfOrNull { it.third }
+                when {
+                    choices.isNotEmpty() -> dialog = WorkbenchDialog.CodeActions(choices)
+                    failure != null -> status = "Code actions failed: ${failure.cause?.message ?: failure.message}"
+                    else -> status = "No code actions available"
+                }
             }
         }
     }
 
     fun applyCodeAction(choice: CodeActionChoice) {
         val document = activeDocument ?: return
-        val client = languageClientFor(document.path) ?: return
+        val client = choice.client ?: languageClientFor(document.path) ?: return
         dialog = null
         val action = choice.action
         val commandValue = action.get("command")?.takeUnless { it.isJsonNull }
@@ -4112,6 +4143,11 @@ class WorkbenchController(private val context: Context) {
         val text = value.text.substring(0, suggestion.start) + suggestion.text + value.text.substring(end)
         copilot.accepted(suggestion.source)
         return TextFieldValue(text, TextRange(suggestion.start + suggestion.text.length))
+    }
+
+    /** `adb shell setprop log.tag.AVFLSP DEBUG` logs documents opened in language servers and their diagnostics. */
+    private inline fun lspLog(message: () -> String) {
+        if (android.util.Log.isLoggable("AVFLSP", android.util.Log.DEBUG)) android.util.Log.d("AVFLSP", message())
     }
 
     /** `adb shell setprop log.tag.AVFCOP DEBUG` logs inline suggestion requests and replies. */

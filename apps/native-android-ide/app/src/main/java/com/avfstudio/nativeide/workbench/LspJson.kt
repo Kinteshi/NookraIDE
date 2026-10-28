@@ -26,7 +26,12 @@ internal fun InputStream.readUtf8Limited(maxBytes: Int): String {
 data class LanguageLocation(val uri: String, val range: JsonObject)
 data class EditorNavigationTarget(val path: String, val line: Int, val character: Int)
 data class CompletionChoice(val label: String, val detail: String?, val edit: LspTextEdit?)
-data class CodeActionChoice(val title: String, val action: JsonObject)
+/** A code action and the server that offered it (it resolves and runs its own commands). */
+data class CodeActionChoice(
+    val title: String,
+    val action: JsonObject,
+    val client: com.avfstudio.nativeide.language.LanguageClient? = null,
+)
 data class LanguageServerIssue(val server: String, val message: String)
 data class OutlineSymbol(
     val name: String,

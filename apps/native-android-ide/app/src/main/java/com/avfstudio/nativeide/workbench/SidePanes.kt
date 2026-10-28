@@ -47,6 +47,7 @@ import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Functions
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.UnfoldLess
 import androidx.compose.material.icons.outlined.WarningAmber
@@ -150,7 +151,10 @@ fun ExplorerList(controller: WorkbenchController) {
                 Box {
                     PaneRow(
                         when {
-                            row.expanded -> Icons.Outlined.FolderOpen
+                            // The tree marks folders with VS Code's chevrons (the open folder icon is
+                            // too close to the closed one at this size).
+                            tree && row.expanded -> Icons.Outlined.KeyboardArrowDown
+                            tree && entry.isDirectory -> Icons.AutoMirrored.Outlined.KeyboardArrowRight
                             entry.isDirectory -> Icons.Outlined.Folder
                             entry.name.endsWith(".ipynb") -> Icons.Outlined.Code
                             else -> Icons.AutoMirrored.Outlined.InsertDriveFile

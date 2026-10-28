@@ -30,6 +30,12 @@ fun lspDocumentPath(path: String, workspaceRoot: String?): String =
         path
     }
 
+/** The URI a server knows a document by; an untitled one before any workspace keeps its own name. */
+fun lspDocumentUri(path: String, workspaceRoot: String?): String {
+    val lspPath = lspDocumentPath(path, workspaceRoot)
+    return if (lspPath.startsWith(UNTITLED_PREFIX)) lspPath else URI("file", "", lspPath, null).toASCIIString()
+}
+
 /** The untitled document [lspPath] stands for, or null for a real file. */
 fun untitledPathFor(lspPath: String, workspaceRoot: String?): String? {
     val folder = workspaceRoot?.let { "${it.trimEnd('/')}/.untitled/" } ?: return null
@@ -45,6 +51,8 @@ data class LanguageDiagnostic(
     val code: JsonElement?,
     /** LSP diagnostic tags: 1 unnecessary (shown faded), 2 deprecated (struck through). */
     val tags: List<Int> = emptyList(),
+    /** Server data to hand back with code action requests (Ruff builds its fixes from it). */
+    val data: JsonElement? = null,
 )
 
 class LanguageClient(
@@ -306,6 +314,7 @@ class LanguageClient(
                 source = diagnostic.get("source")?.takeUnless { it.isJsonNull }?.asString,
                 code = diagnostic.get("code"),
                 tags = diagnostic.getAsJsonArray("tags")?.mapNotNull { it.takeIf { tag -> tag.isJsonPrimitive }?.asInt }.orEmpty(),
+                data = diagnostic.get("data")?.takeUnless { it.isJsonNull },
             )
         }
         diagnosticsListener?.invoke(uri, diagnostics)
@@ -427,18 +436,29 @@ class LanguageClient(
         }
     }
 
-    private fun fileUri(path: String): String = URI("file", "", lspDocumentPath(path, workspaceRoot), null).toASCIIString()
+    private fun fileUri(path: String): String = lspDocumentUri(path, workspaceRoot)
 
     override fun close() {
-        if (connection.bridgeId == null) return
+        stop()
+    }
+
+    /** Shuts the server down; completes once it is gone, so it can be started again. */
+    fun stop(): CompletableFuture<Unit> {
+        if (connection.bridgeId == null) {
+            isStarted = false
+            return CompletableFuture.completedFuture(Unit)
+        }
         isReady = false
         openedDocuments.clear()
+        val stopped = CompletableFuture<Unit>()
         request("shutdown", JsonNull.INSTANCE).whenComplete { _, _ ->
             connection.notify("exit", JsonNull.INSTANCE).whenComplete { _, _ ->
                 connection.stop()
                 isStarted = false
+                stopped.complete(Unit)
             }
         }
+        return stopped
     }
 
 }

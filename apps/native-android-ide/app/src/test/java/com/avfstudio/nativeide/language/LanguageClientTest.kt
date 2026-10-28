@@ -28,6 +28,9 @@ class LanguageClientTest {
         assertEquals("scratch:/welcome.py", lspDocumentPath("scratch:/welcome.py", null))
         assertEquals("scratch:/Untitled-1.py", untitledPathFor("/root/Projects/.untitled/Untitled-1.py", "/root/Projects"))
         assertEquals(null, untitledPathFor("/root/Projects/a.py", "/root/Projects"))
+        // Before a workspace (not connected yet) an untitled URI stays as it is, without throwing.
+        assertEquals("scratch:/welcome.py", lspDocumentUri("scratch:/welcome.py", null))
+        assertEquals("file:///root/Projects/.untitled/welcome.py", lspDocumentUri("scratch:/welcome.py", "/root/Projects"))
     }
 
     @Test
