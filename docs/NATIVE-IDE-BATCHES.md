@@ -426,8 +426,8 @@ stack, variables, debug console. Restore the F9 binding when it works.
   cursor_start/end); a non-focusable popup under the cell lists matches, typing narrows them,
   Up/Down choose, Enter/Tab accept, Esc closes. Without a kernel, Tab indents.
 
-## 12. Guided dependency setup, open tests and bugs (started 10-27 22:45; in progress)
-Progress (code done, unit tests pass; tablet check pending):
+## 12. Guided dependency setup, open tests and bugs (10-27 22:45–23:30; done, mostly checked)
+Progress (unit tests pass; checked on the tablet where noted):
 * Daemon: Welcome now lists `features` (`probe_commands`); new `ProbeCommands` /
   `CommandsProbed` say which commands the guest has (daemon PATH plus ~/.local/bin and the
   conda installers' default prefixes; bare names only, 32 per request). Older daemons close the
@@ -482,6 +482,19 @@ Progress (code done, unit tests pass; tablet check pending):
     even though Autopilot is never re-applied); names are now kept only with a value that will be
     re-applied.
 * Not testable now: the Copilot server staying stopped while signed out (the user is signed in).
+* Python interpreter picker on the tablet: miniconda3, `fourteen`, system, daemon PATH, then
+  "Create ~/.venv with ipykernel"; no Miniforge row (conda present). Closed without choosing.
+  Its status line kept saying "Looking for Python environments…"; it now says "Choose a Python
+  interpreter" (code only; the tablet build predates this one-line change).
+* Still open after batch 12:
+  * Kernel completions on the tablet: needs ipykernel in one of the user's conda envs (the
+    picker offers it with `conda install -p`); not installed without the user.
+  * Copilot server staying stopped while signed out.
+  * Untested paths of the setup: Source Control's "Install Git" (git is present), Miniforge's
+    install (conda is present), "Create ~/.venv" via uv.
+  * Copilot CLI model list ("Auto" only) with a newer CLI.
+  * The user's guest prompt starts with `port CONDA_SHLVL=0port PATH` in both Linux Terminal
+    and the app; it comes from the guest's shell startup files (conda init), not the app.
 * HTML outputs: cells are a lazy list, so only on-screen outputs hold a WebView; kept as is.
 * Copilot CLI over ACP still offers only "Auto" on 1.0.103; 1.0.105 came out hours ago, so the
   catalog stays on 1.0.103 for now (recheck later).

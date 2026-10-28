@@ -1066,7 +1066,8 @@ class WorkbenchController(private val context: Context) {
                     found?.installable?.forEach { add("${it.label} (${it.python})" to it.python) }
                     add("python3 on the daemon's PATH" to "python3")
                 }.distinctBy { it.second }
-                if (error != null) status = "Python discovery failed (${error.message}); pick python3 or set python.defaultInterpreterPath"
+                status = if (error != null) "Python discovery failed (${error.message}); pick python3 or set python.defaultInterpreterPath"
+                else "Choose a Python interpreter"
                 checkGuestTools {
                     val setup = buildList {
                         if (options.none { "/.venv/" in it.second }) add(EnvironmentSetup.CreateVenv)
