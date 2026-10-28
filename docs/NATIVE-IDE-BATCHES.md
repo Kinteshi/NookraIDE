@@ -602,6 +602,49 @@ Registered list (10-27):
   list at 00:55:19 and the VM stopped normally ~50 s later, likely the user closing Terminal or
   starting the reset they planned); left alone.
 
+## 15. Next-pass tests, editor bugs, Material You syntax colours (10-28 12:30–; in progress)
+Guest not reset (the user's conda base and Copilot sign-in were still there); tested on it.
+* Bug 6 fixed, checked on the tablet: Backspace in leading spaces goes back to the previous tab
+  stop (VS Code's `editor.useTabStops`, default on, Settings → Editor → "Backspace by
+  indentation level"), in the code editor (NativeCodeEditor.deleteText) and notebook cells.
+  After `if x:` + Enter (column 8), one Backspace put the cursor at column 4.
+* Bug 7 fixed, checked: LSP edits are applied with sora's `Content.replace` instead of
+  `setText`, so choosing a Ctrl+Space completion leaves the cursor after the inserted text
+  (`os.pa` → `os.path`, typing continued at Ln 6 Col 20) and undo keeps the history; format
+  and workspace edits use the same path.
+* Item 11 done, checked: `avf.theme.syntaxColors` (Settings → Appearance → Syntax colours:
+  Classic / Material You). Material You generates a TextMate theme and semantic-token colours
+  from the scheme: keywords primary, strings tertiary, numbers/functions/types/constants the
+  primary hue turned 300/120/180/240° at the scheme's accent lightness, comments and operators
+  from onSurfaceVariant. Notebook cells use the same palette. An imported VS Code theme still
+  wins. Unit tests check distinct hues and contrast ≥ 3 on the surface in light and dark. Left on
+  Material You on the tablet for the user to see.
+* Item 3 done (not timed on the tablet): while the app is in front, reconnect attempts are at
+  most 10 s apart and don't stop after ten; coming back to the app retries at once instead of
+  waiting for a backoff scheduled in the background.
+* Item 2, setup paths:
+  * "Create ~/.venv with ipykernel" via uv: ran in a new terminal, exit 0; the picker reopened
+    listing Python (.venv) first and no setup row. (No confirmation dialog for this one.)
+  * Install Git: with git removed (`apt-get remove git`, only git itself), Source Control showed
+    "Git isn't installed", Install Git → confirmation → apt in a terminal, exit 0, "Git
+    installed", the view reloaded. Git 2.47.3 is back.
+  * Miniforge: not offered in the UI (miniconda3 counts as conda), so its exact command was run
+    in a script: download, checksum, `-b -p ~/miniforge3`, `conda install ipykernel` all
+    passed (ipykernel 7.4.0, Python 3.14.7) but it takes 816 MB, not ~400: the dialog text now
+    says about 800 MB. The test install and its environments.txt line were removed.
+* Item 4: the guest's Copilot CLI had updated itself to 1.0.105 (catalog pins 1.0.103). An ACP
+  probe (initialize + session/new, then 25 s of updates) shows the CLI itself offers only
+  "auto" (listed twice; one with copilotEnablement "enabled"), and no later model update. So it
+  is the account's model availability, not the app or the CLI version: models are enabled per
+  account in GitHub's Copilot settings (or limited by an organisation policy). The app already
+  shows the duplicate once.
+* Item 5, the `port CONDA_SHLVL=0port PATH` prompt prefix: found. Linux Terminal installs a
+  DEBUG trap `echo -ne "\e]0;$BASH_COMMAND\007"` (window title per command). `echo -e` turns the
+  backslash in conda's hook lines `\export CONDA_SHLVL=0` and `\export PATH` into an ESC, which
+  ends the title sequence early, so the rest prints as text. Harmless. Fix (not applied: editing
+  ~/.bashrc was blocked by the permission check, waiting for the user): at the top of ~/.bashrc,
+  replace that trap with `trap 'printf "\e]0;%s\a" "${BASH_COMMAND//[[:cntrl:]]/ }"' DEBUG`.
+
 ## Next pass (registered 10-27 23:35, updated 10-28 00:55; not started)
 The small tests stay first; the user resets the guest before that pass.
 * Carried over:

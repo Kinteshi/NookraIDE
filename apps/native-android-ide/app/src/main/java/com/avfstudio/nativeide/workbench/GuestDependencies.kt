@@ -47,7 +47,7 @@ enum class GuestDependency(
         "Conda",
         listOf("conda", "mamba"),
         "Conda environments for notebooks",
-        "conda-forge's Miniforge $MINIFORGE_VERSION installer (checksum-verified; about 400 MB in ~/miniforge3)",
+        "conda-forge's Miniforge $MINIFORGE_VERSION installer (checksum-verified; about 800 MB in ~/miniforge3 with ipykernel)",
         "f=Miniforge3-$MINIFORGE_VERSION-Linux-\$(uname -m).sh && " +
             "case \$(uname -m) in aarch64) sum=$MINIFORGE_SHA256_AARCH64;; x86_64) sum=$MINIFORGE_SHA256_X86_64;; *) echo \"No Miniforge build for \$(uname -m)\"; false;; esac && " +
             "curl -fL --proto '=https' -o \"/tmp/\$f\" \"https://github.com/conda-forge/miniforge/releases/download/$MINIFORGE_VERSION/\$f\" && " +
