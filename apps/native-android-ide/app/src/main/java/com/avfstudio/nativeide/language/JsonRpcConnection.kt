@@ -3,6 +3,7 @@ package com.avfstudio.nativeide.language
 import com.avfstudio.nativeide.transport.GuestVfsClient
 import com.avfstudio.nativeide.transport.RpcEvent
 import com.google.gson.Gson
+import com.google.gson.GsonBuilder
 import com.google.gson.JsonElement
 import com.google.gson.JsonNull
 import com.google.gson.JsonObject
@@ -24,7 +25,9 @@ class JsonRpcException(val code: Int, message: String, val data: JsonElement? = 
 class JsonRpcConnection(
     private val transport: GuestVfsClient,
     private val kind: String = "Lsp",
-    private val gson: Gson = Gson(),
+    // Nulls are kept: JSON-RPC replies need `"result": null`, and LSP's initialize needs
+    // `"processId": null` (TypeScript 7 rejects it missing; Gson drops nulls by default).
+    private val gson: Gson = GsonBuilder().serializeNulls().create(),
 ) {
     private val requestIds = AtomicLong(0)
     private val pendingRequests = ConcurrentHashMap<Long, CompletableFuture<JsonElement>>()

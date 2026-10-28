@@ -28,7 +28,8 @@ data class LanguageDiagnostic(
 class LanguageClient(
     transport: GuestVfsClient,
     private val settings: Map<String, JsonElement> = emptyMap(),
-    private val gson: Gson = Gson(),
+    // Keeps nulls like the connection does (`"processId": null` in initialize).
+    private val gson: Gson = com.google.gson.GsonBuilder().serializeNulls().create(),
     private val initializationOptions: JsonObject? = null,
 ) : Closeable {
     @Volatile private var configuredSettings: Map<String, JsonElement> =
@@ -44,6 +45,12 @@ class LanguageClient(
     @Volatile var isStarted: Boolean = false
         private set
     @Volatile var diagnosticsListener: ((String, List<LanguageDiagnostic>) -> Unit)? = null
+    /**
+     * Pull diagnostics (LSP 3.17 `textDocument/diagnostic`) for servers that only answer requests,
+     * such as TypeScript 7; servers that push (ty, ruff) stop it at their first publish.
+     */
+    @Volatile private var pullDiagnostics = false
+    private val diagnosticPulls = ConcurrentHashMap<String, Boolean>()
     @Volatile var messageListener: ((String) -> Unit)? = null
     /** Receives notifications this client does not handle itself, such as Copilot status. */
     @Volatile var notificationListener: ((String, JsonObject) -> Unit)? = null
@@ -73,6 +80,7 @@ class LanguageClient(
                 semanticTokenTypes = legend?.getAsJsonArray("tokenTypes")?.mapNotNull { it.asString }.orEmpty()
                 semanticTokenModifiers =
                     legend?.getAsJsonArray("tokenModifiers")?.mapNotNull { it.asString }.orEmpty()
+                pullDiagnostics = capabilities?.has("diagnosticProvider") == true
                 notify("initialized", JsonObject())
                 notify("workspace/didChangeConfiguration", JsonObject().apply {
                     add("settings", gson.toJsonTree(configuredSettings))
@@ -99,6 +107,7 @@ class LanguageClient(
                 addProperty("text", text)
             })
         })
+        pullDiagnosticsFor(path)
     }
 
     fun didChange(path: String, version: Long, text: String) {
@@ -112,6 +121,27 @@ class LanguageClient(
                 add(JsonObject().apply { addProperty("text", text) })
             })
         })
+        pullDiagnosticsFor(path)
+    }
+
+    /** One request per document at a time; a change while one is out asks again when it answers. */
+    private fun pullDiagnosticsFor(path: String) {
+        if (!pullDiagnostics) return
+        // A request is out: mark it stale (false) so it asks again when it answers.
+        if (diagnosticPulls.putIfAbsent(path, true) != null) {
+            diagnosticPulls[path] = false
+            return
+        }
+        val uri = fileUri(path)
+        request("textDocument/diagnostic", JsonObject().apply {
+            add("textDocument", JsonObject().apply { addProperty("uri", uri) })
+        }).whenComplete { result, _ ->
+            val items = result?.takeIf { it.isJsonObject }?.asJsonObject
+                ?.takeIf { it.get("kind")?.asString == "full" }?.getAsJsonArray("items")
+            if (items != null && pullDiagnostics) deliverDiagnostics(uri, items)
+            // Changed again while waiting: pull once more for the latest text.
+            if (diagnosticPulls.remove(path) == false && path in openedDocuments) pullDiagnosticsFor(path)
+        }
     }
 
     fun didClose(path: String) {
@@ -232,7 +262,11 @@ class LanguageClient(
 
     private fun publishDiagnostics(params: JsonObject) {
         val uri = params.get("uri")?.asString ?: return
-        val items = params.getAsJsonArray("diagnostics") ?: JsonArray()
+        pullDiagnostics = false
+        deliverDiagnostics(uri, params.getAsJsonArray("diagnostics") ?: JsonArray())
+    }
+
+    private fun deliverDiagnostics(uri: String, items: JsonArray) {
         val diagnostics = items.mapNotNull { item ->
             if (!item.isJsonObject) return@mapNotNull null
             val diagnostic = item.asJsonObject

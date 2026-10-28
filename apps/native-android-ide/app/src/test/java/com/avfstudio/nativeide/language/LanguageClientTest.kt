@@ -137,8 +137,10 @@ private class LanguageProtocolListener : WebSocketListener() {
                 val textDocumentCapabilities = message.getAsJsonObject("params")
                     .getAsJsonObject("capabilities").getAsJsonObject("textDocument")
                 // Strict servers such as Ruff refuse initialize without semanticTokens.formats.
+                // TypeScript 7 refuses initialize without processId (null is allowed, absent isn't).
                 publishDiagnosticsSupported = textDocumentCapabilities.has("publishDiagnostics") &&
-                    textDocumentCapabilities.getAsJsonObject("semanticTokens").has("formats")
+                    textDocumentCapabilities.getAsJsonObject("semanticTokens").has("formats") &&
+                    message.getAsJsonObject("params").has("processId")
                 diagnosticsCapability.countDown()
                 val id = message.get("id").asLong
                 webSocket.send(rpcPacket("Message", bridge) {

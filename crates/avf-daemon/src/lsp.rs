@@ -394,6 +394,13 @@ fn default_servers() -> HashMap<String, ServerCommand> {
                 args: vec!["--stdio".to_owned()],
             },
         ),
+        (
+            "typescript".to_owned(),
+            ServerCommand {
+                program: "tsgo".to_owned(),
+                args: vec!["--lsp".to_owned(), "--stdio".to_owned()],
+            },
+        ),
     ]
     .into()
 }
