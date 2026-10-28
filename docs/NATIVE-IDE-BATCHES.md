@@ -704,6 +704,47 @@ Guest not reset (the user's conda base and Copilot sign-in were still there); te
 * Cleanup: test notebooks, ~/Projects/avf-tests, TS7 and Copilot probe copies, staging files in
   Downloads removed. App installed and connected.
 
+## 17. Candidates 1-7 (10-28 13:40–14:26; done, checked except 1)
+* 1, the mnist notebook's two lines: not applied. Editing the user's notebook was blocked by the
+  permission check; candidate 4 makes the notebook work unchanged instead (checked below).
+* 2, chat Mode placeholder: it read "Autopilot" for the saved Agent mode (the stored name came
+  from a different value). Names are now saved with the value they name
+  (`chat-option-<id>-name-of`) and refreshed from the agent's choices each session; a stale or
+  missing name falls back to the value's last segment. Checked: "Mode: Agent".
+* 3, effort with a real message: Effort Low → "Reply with just the word OK" → "OK"; the guest
+  ran `copilot --acp --stdio --reasoning-effort low`. Set back to Default afterwards (the
+  agent stopped, as designed).
+* 4, `avf.notebook.plotlyDisplayIds` (default on; Settings → Terminal and Jupyter → "Plotly
+  figures update in place"): bridge-4 runs a silent snippet in fresh and restarted Python
+  kernels that removes plotly's `BaseFigure._ipython_display_` (only if plotly is installed),
+  so IPython uses the figure's mime bundle and keeps the display id. Checked with the user's
+  exact pattern (`display(fig, display_id=True)`, `handle.update(fig)`): one figure ending at
+  "update 5".
+* 5, TypeScript 7: catalog entry `typescript` 7.0.2 (npm @typescript/typescript-linux-<arch>,
+  sha256 pinned, verified against npm's sha512). New download option `keep_directory` puts the
+  package's lib folder in the tool's folder (tsc needs its lib.*.d.ts) behind a `tsgo` launcher;
+  Rust test included. Added to the daemon's LSP table and the installer's tool list. Setting
+  `avf.typescript.languageServer` (TypeScript 7 / vtsls) in Settings → Language servers; Guest
+  tools row; the app offers the install when it's missing. Fixes found on the tablet:
+  JSON-RPC now keeps nulls (`processId: null`, which tsgo requires) and the client pulls
+  diagnostics (`textDocument/diagnostic`) for servers that don't publish. Checked: "typescript
+  ready", completions after `items.` (length, push, …), errors "Type 'string' is not
+  assignable to type 'number'" and "Identifier expected".
+* 6, compact layout: Terminal has Terminal / Debug / Output chips and New terminal; More adds
+  Search and Source Control (chips scroll); starting a debug session opens the Terminal
+  destination's Debug tab. Checked at ~570 dp: Source Control lists changes and the branch.
+* 7, Python environment chip: status bar "Python: <env>" for .py files (or "Select Python"),
+  opening the interpreter picker. ty gets the environment at start (CONDA_PREFIX for conda,
+  VIRTUAL_ENV for venvs; allowlisted in ty's catalog entry; RPC starts now carry env),
+  basedpyright gets `python.pythonPath` unless set; changing it restarts the server. Checked:
+  miniconda3 → "Cannot resolve imported module `torch`"; fourteen → the error is gone.
+* Seen: the interpreter picker still listed ~/.venv after it was deleted (cached discovery);
+  Linux Terminal and Settings came to the front twice during tests (stray taps outside the app's
+  window after resizes).
+* Guest: daemon updated twice, bridge-4, ty reinstalled for its allowlist (needs uv on PATH:
+  run `tools install` with ~/.local/bin on PATH), typescript 7.0.2 installed. Test files
+  removed; the app is left installed and connected.
+
 ## Next pass (registered 10-27 23:35, updated 10-28 13:06)
 * Batch 15 did the carried-over tests (Copilot signed out, the setup paths, reconnect cap,
   Copilot model list, prompt prefix). Left over:
@@ -748,7 +789,7 @@ To investigate (user, 10-28, second set; planned for 10-29):
   Confirmed by the user (10-28): the file was unsaved. It should not depend on saving: VS Code
   gives untitled files completion and lint (in-memory text, `untitled:` URI, or a virtual path
   under the workspace for servers that only accept `file://`).
-* Which interpreter a .py file or the workspace uses: a status-bar chip (VS Code style) that
+* (Done in batch 17.) Which interpreter a .py file or the workspace uses: a status-bar chip (VS Code style) that
   shows the Python environment used for completion/lint and opens the interpreter picker; decide
   per workspace vs per file, and restart the language server on change.
 * (Done in batch 16.) Guest tools / setup option: move /tmp itself onto the disk (e.g. mask `tmp.mount` or bind a
@@ -765,8 +806,9 @@ Bugs (user, 10-28): both fixed and checked in batch 15.
   seen once in two tries, cause unknown. The app retries once after 3 s.
 * Notebook gap: script-based outputs (widgets, bokeh, altair) still show their text form.
 * Customisable keybindings (`keybindings.json`).
-* Use TypeScript 7 (`tsc --lsp --stdio`, 48 MB) instead of vtsls in the catalog.
-* Compact layout: reach Source Control, Search, Debug, Output and extra terminals (batch 16).
+* (Done in batch 17: TypeScript 7 as the default TypeScript server; compact layout reaches
+  Source Control, Search, Debug, Output and extra terminals.)
+* The interpreter picker keeps environments that no longer exist (batch 17).
 * Done and dropped from this list (10-28): Copilot chat sign-in and replies (batch 11),
   stopping the Copilot server while signed out (built; tablet check carried over), HTML outputs
   and kernel completions (batches 11-12).
