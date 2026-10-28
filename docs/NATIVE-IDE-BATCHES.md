@@ -494,7 +494,7 @@ Progress (unit tests pass; checked on the tablet where noted):
     install (conda is present), "Create ~/.venv" via uv.
   * Copilot CLI model list ("Auto" only) with a newer CLI.
   * The user's guest prompt starts with `port CONDA_SHLVL=0port PATH` in both Linux Terminal
-    and the app; it comes from the guest's shell startup files (conda init), not the app.
+    and the app; most likely from the guest's shell startup files (conda init), not checked.
 * HTML outputs: cells are a lazy list, so only on-screen outputs hold a WebView; kept as is.
 * Copilot CLI over ACP still offers only "Auto" on 1.0.103; 1.0.105 came out hours ago, so the
   catalog stays on 1.0.103 for now (recheck later).
