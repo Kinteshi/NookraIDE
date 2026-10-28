@@ -6,8 +6,16 @@ use tracing_subscriber::EnvFilter;
 
 mod tools;
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
+fn main() -> Result<(), Box<dyn Error>> {
+    // Before the runtime starts any thread: this changes the environment children inherit.
+    let disk_tmpdir = avf_daemon::tmpdir::prefer_disk_tmpdir();
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?
+        .block_on(run(disk_tmpdir))
+}
+
+async fn run(disk_tmpdir: Option<std::path::PathBuf>) -> Result<(), Box<dyn Error>> {
     #[cfg(all(feature = "native-protocol", unix))]
     {
         let mut args_os = std::env::args_os();
@@ -30,6 +38,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
         .init();
+    if let Some(dir) = &disk_tmpdir {
+        tracing::info!(dir = %dir.display(), "/tmp is a tmpfs in memory; programs started here use a temp dir on disk");
+    }
 
     if args.first().is_some_and(|arg| arg == "pair") {
         if let Err(error) = avf_daemon::print_pairing_code(&args[1..]) {

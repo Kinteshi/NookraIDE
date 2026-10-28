@@ -4,6 +4,7 @@ mod git;
 mod lsp;
 mod ports;
 mod probe;
+pub mod tmpdir;
 mod pairing;
 mod tls;
 mod pty;

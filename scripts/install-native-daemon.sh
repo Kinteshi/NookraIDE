@@ -63,12 +63,25 @@ mv "$HOME/.local/bin/avf-native-daemon.new" "$HOME/.local/bin/avf-native-daemon"
 mkdir -p "$config" "$workspace" "$(dirname "$unit")"
 chmod 700 "$config"
 # /tmp in the AVF guest is a RAM-backed tmpfs of half the guest's memory (2 GB on a 4 GB guest);
-# pip and conda unpack large packages there and fail with "No space left on device". Programs the
-# daemon starts (the app's terminals, kernels, language servers) get a temp dir on disk instead,
-# which systemd-tmpfiles clears of week-old files.
-mkdir -p "$HOME/.cache/tmp" "$HOME/.config/user-tmpfiles.d"
-chmod 700 "$HOME/.cache/tmp"
-printf 'd %%h/.cache/tmp 0700 - - 7d\n' >"$HOME/.config/user-tmpfiles.d/avf-tmp.conf"
+# pip and conda unpack large packages there and fail with "No space left on device". When /tmp
+# is a tmpfs, the daemon (which also checks this itself) and, in the guest, login shells such as
+# Linux Terminal's use a temp dir on disk, which systemd-tmpfiles clears of week-old files.
+tmp_line=""
+if [[ "$(findmnt -no FSTYPE /tmp 2>/dev/null)" == tmpfs ]]; then
+  mkdir -p "$HOME/.cache/tmp" "$HOME/.config/user-tmpfiles.d"
+  chmod 700 "$HOME/.cache/tmp"
+  printf 'd %%h/.cache/tmp 0700 - - 7d\n' >"$HOME/.config/user-tmpfiles.d/avf-tmp.conf"
+  tmp_line="Environment=TMPDIR=%h/.cache/tmp"
+  profile_script='# AVF Studio: /tmp is a tmpfs in memory; large installs (pip, conda) need a temp dir on disk.
+if [ -z "${TMPDIR:-}" ] && [ -n "${HOME:-}" ] && [ "$HOME" != / ] && mkdir -p -m 700 "$HOME/.cache/tmp" 2>/dev/null; then
+  export TMPDIR="$HOME/.cache/tmp"
+fi'
+  # Only in the AVF guest: on a remote host the daemon's own check is enough, and system files
+  # there are the owner's business.
+  if ! $remote && ! printf '%s\n' "$profile_script" | sudo -n tee /etc/profile.d/avf-tmpdir.sh >/dev/null 2>&1; then
+    echo "note: /tmp is in memory; for shells outside AVF Studio, add 'export TMPDIR=\$HOME/.cache/tmp' to ~/.profile" >&2
+  fi
+fi
 if [[ ! -f "$config/env" ]]; then
   (umask 077 && printf 'AVF_TOKEN=%s\n' "$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n')" >"$config/env")
 fi
@@ -86,7 +99,7 @@ Environment=AVF_WORKSPACE_ROOTS=$workspace
 Environment=AVF_BIND_ADDR=$bind
 $tls_line
 Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
-Environment=TMPDIR=%h/.cache/tmp
+$tmp_line
 Restart=on-failure
 RestartSec=2
 UMask=0077

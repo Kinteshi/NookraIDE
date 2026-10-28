@@ -545,8 +545,16 @@ Registered list (10-27):
     nbformat (plotly's notebook renderer needs it), into `fourteen`, with TMPDIR on disk; /tmp
     stayed empty. ipykernel 7.3.0 was already there (the user ran the picker's conda
     install). The Anaconda terms were already accepted, so nothing was agreed to.
-  * Shells opened in Linux Terminal don't go through the daemon and still use /tmp; adding
-    `export TMPDIR=$HOME/.cache/tmp` to the guest's ~/.bashrc would cover them (user's file).
+  * Made automatic (user, 10-28): the daemon checks /proc/self/mounts at startup and, when /tmp
+    is a tmpfs and TMPDIR is unset, uses ~/.cache/tmp for everything it starts (set before the
+    tokio runtime spawns threads). The installer does the same check: only then it writes the
+    unit's TMPDIR, the tmpfiles rule and, in the guest only (not `--remote` hosts),
+    /etc/profile.d/avf-tmpdir.sh for login shells such as Linux Terminal's (via sudo -n; a note
+    otherwise). No Settings step needed. Checked on the tablet 10-28 00:07: profile.d written,
+    a fresh login shell and the daemon both have TMPDIR=/home/droid/.cache/tmp.
+  * 10-28 00:05: the VM stopped while nothing of ours ran in it (Android had just reclaimed
+    Firefox for memory; Linux Terminal was relaunched and the VM force-killed 8 s later, which
+    matches its window being closed). Restarted with force-stop + launch.
 * **Kernel completions checked on the tablet (10-27 23:53).** A test notebook asking for
   `python3` started the `fourteen` kernel on its own; `import torch` ran; typing `x.su` + Tab
   opened the kernel's list (sub, sub_, subtract, subtract_, sum, sum_to_size); Down x4 + Enter
