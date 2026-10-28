@@ -62,6 +62,13 @@ install -D -m 755 "$daemon_source" "$HOME/.local/bin/avf-native-daemon.new"
 mv "$HOME/.local/bin/avf-native-daemon.new" "$HOME/.local/bin/avf-native-daemon"
 mkdir -p "$config" "$workspace" "$(dirname "$unit")"
 chmod 700 "$config"
+# /tmp in the AVF guest is a RAM-backed tmpfs of half the guest's memory (2 GB on a 4 GB guest);
+# pip and conda unpack large packages there and fail with "No space left on device". Programs the
+# daemon starts (the app's terminals, kernels, language servers) get a temp dir on disk instead,
+# which systemd-tmpfiles clears of week-old files.
+mkdir -p "$HOME/.cache/tmp" "$HOME/.config/user-tmpfiles.d"
+chmod 700 "$HOME/.cache/tmp"
+printf 'd %%h/.cache/tmp 0700 - - 7d\n' >"$HOME/.config/user-tmpfiles.d/avf-tmp.conf"
 if [[ ! -f "$config/env" ]]; then
   (umask 077 && printf 'AVF_TOKEN=%s\n' "$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n')" >"$config/env")
 fi
@@ -79,6 +86,7 @@ Environment=AVF_WORKSPACE_ROOTS=$workspace
 Environment=AVF_BIND_ADDR=$bind
 $tls_line
 Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=TMPDIR=%h/.cache/tmp
 Restart=on-failure
 RestartSec=2
 UMask=0077

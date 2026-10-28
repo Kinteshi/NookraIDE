@@ -530,11 +530,34 @@ Registered list (10-27):
 * **Material You refinement (user).** Go over the UI elements for a consistent Material 3 look
   that follows dynamic colour: chips and dropdowns, dialogs, tabs, side panes, the status bar,
   Settings rows, buttons, the setup rows in pickers. Keep the slim/AMOLED taste.
-* **"No space left on device" in the guest when installing libraries (user).** The root
-  filesystem had 6 of 431 GB used, so the error likely comes from a smaller filesystem: /tmp as
-  a RAM-backed tmpfs (pip and conda unpack large wheels such as torch there), or a cache
-  directory on one. Check `df -h /tmp ~/.cache`, the failing path, and TMPDIR; if it is /tmp,
-  point installs (and the app's install terminals) at a disk-backed temp dir.
+* **"No space left on device" in the guest when installing libraries (user): investigated and
+  fixed 10-27 23:50.** The disk was fine (6.2 of 432 GB, inodes 1%, no ext4 errors). /tmp is a
+  2 GB tmpfs in the guest's 3.9 GB of RAM, TMPDIR was unset, and the failing command was
+  `pip install jupyter plotly pandas torchvision` in the user's `fourteen` env: PyPI's
+  Linux aarch64 torch wheels are CUDA builds that pull several GB of nvidia-* wheels (1.6 GB
+  sat in pip's cache), unpacked through /tmp. Linux Terminal's StorageBalloonWorker
+  (`setStorageBalloon 401888899072`) only mirrors the tablet's free space; not the cause.
+  * Fix in `install-native-daemon.sh`: the daemon unit sets `TMPDIR=%h/.cache/tmp` (disk), so
+    the app's terminals, kernels and language servers inherit it; a user tmpfiles rule clears
+    files there older than 7 days. Verified in the running daemon's environment.
+  * With the user's permission: installed CPU-only torch 2.14.1 + torchvision 0.29.1 from
+    download.pytorch.org/whl/cpu (159 MB instead of GBs of CUDA), plus plotly, pandas and
+    nbformat (plotly's notebook renderer needs it), into `fourteen`, with TMPDIR on disk; /tmp
+    stayed empty. ipykernel 7.3.0 was already there (the user ran the picker's conda
+    install). The Anaconda terms were already accepted, so nothing was agreed to.
+  * Shells opened in Linux Terminal don't go through the daemon and still use /tmp; adding
+    `export TMPDIR=$HOME/.cache/tmp` to the guest's ~/.bashrc would cover them (user's file).
+* **Kernel completions checked on the tablet (10-27 23:53).** A test notebook asking for
+  `python3` started the `fourteen` kernel on its own; `import torch` ran; typing `x.su` + Tab
+  opened the kernel's list (sub, sub_, subtract, subtract_, sum, sum_to_size); Down x4 + Enter
+  accepted `sum`; the cell ran (`tensor(3.)`). Copilot's ghost text showed alongside the popup.
+* Incidents in this check: Linux Terminal crashed (NullPointerException in its
+  TerminalTabFragment page callback) when brought to the front after the app had lost the
+  daemon, and Android killed the VM forcibly; the next boot's ext4 journal recovery was clean.
+  Then a cleanup command typed for the app's terminal landed in the user's notebook (its
+  terminals had ended with the daemon restart, so focus stayed in a cell); removed character
+  by character, the file on disk was never changed (grep), and the tab was reopened from disk.
+  Possible app fix: tapping an ended terminal should still take the keyboard from the editor.
 * Carried over from batch 12:
   * Kernel completions on the tablet (needs ipykernel in one of the user's conda envs).
   * Copilot server staying stopped while signed out.
