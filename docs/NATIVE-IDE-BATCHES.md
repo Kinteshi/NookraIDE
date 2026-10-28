@@ -640,6 +640,23 @@ To investigate (user, 10-28):
   (`AVF_WORKSPACE_ROOTS`, ~/Projects). Needs an Open Folder flow, recent workspaces, and the
   daemon's roots/permissions model (several roots or switching the root).
 
+To investigate (user, 10-28, second set; planned for 10-29):
+* Inline suggestions, completion and hover not working on some files; the Output shows
+  "Language intelligence requires a connected Python or TypeScript language server". First look:
+  `activeLspPosition` (WorkbenchController) refuses when the file's language client is not ready
+  *or* the file is a `scratch:` (untitled) document, so untitled files never get a server, and
+  a .py/.ts file gets the message when its server did not start. Check which case the user hit,
+  whether the server started (and why not), and give untitled files a language once chosen.
+* Which interpreter a .py file or the workspace uses: a status-bar chip (VS Code style) that
+  shows the Python environment used for completion/lint and opens the interpreter picker; decide
+  per workspace vs per file, and restart the language server on change.
+* Guest tools / setup option: move /tmp itself onto the disk (e.g. mask `tmp.mount` or bind a
+  disk directory over /tmp) so nothing stays in memory, as an explicit opt-in beside the
+  daemon's automatic TMPDIR fix; needs sudo and a guest restart, so confirm and explain.
+* Syntax colours generated from the Material You palette, offered as a toggle/picker like the
+  app theme (e.g. "Syntax colours: Classic / Material You"), in light and dark, keeping
+  contrast readable.
+
 * Re-measure the app's memory.
 * Copilot sometimes exits right after a daemon restart ("Guest tool exited with code unknown");
   seen once in two tries, cause unknown. The app retries once after 3 s.
