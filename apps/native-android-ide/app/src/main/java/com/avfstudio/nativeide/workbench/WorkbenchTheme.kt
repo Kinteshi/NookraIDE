@@ -23,6 +23,8 @@ import io.github.rosemoe.sora.langs.textmate.TextMateColorScheme
 import io.github.rosemoe.sora.langs.textmate.registry.ThemeRegistry
 import io.github.rosemoe.sora.widget.CodeEditor
 import io.github.rosemoe.sora.widget.schemes.EditorColorScheme
+import java.io.ByteArrayInputStream
+import org.eclipse.tm4e.core.registry.IThemeSource
 
 /** True when the workbench is drawn dark; editors and terminals match it. */
 val LocalDarkTheme = staticCompositionLocalOf { true }
@@ -67,21 +69,35 @@ private fun ColorScheme.pureBlack(): ColorScheme = copy(
 
 /**
  * Applies the syntax theme and Material chrome colours to a code editor. Imported VS Code themes
- * keep their own colours; the built-in Dark+/Light+ syntax themes blend into the app surfaces.
+ * keep their own colours; otherwise code is coloured with Dark+/Light+ ([SyntaxColors.Classic])
+ * or a theme generated from the Material You palette, blended into the app surfaces.
  */
-fun applyEditorTheme(editor: CodeEditor, context: Context, colors: ColorScheme, dark: Boolean) {
+fun applyEditorTheme(
+    editor: CodeEditor,
+    context: Context,
+    colors: ColorScheme,
+    dark: Boolean,
+    syntax: SyntaxColors = SyntaxColors.Classic,
+) {
     PythonTextMate.initialize(context)
     val registry = ThemeRegistry.getInstance()
     val imported = hasImportedTheme(context)
     if (imported) restoreImportedTheme(context)
+    val material = !imported && syntax == SyntaxColors.MaterialYou
+    val palette = if (material) SyntaxPalette.materialYou(colors, dark) else null
     val fileName = when {
         imported -> IMPORTED_THEME_FILE
+        palette != null -> materialSyntaxTheme(palette, colors.surface)
         dark -> DARK_SYNTAX_THEME
         else -> LIGHT_SYNTAX_THEME
     }
     registry.findThemeByFileName(fileName)?.let(registry::setTheme)
     editor.colorScheme = TextMateColorScheme.create(registry)
-    SoraBracketColorizer.configureColors(editor, loadSavedSemanticColors(context), light = !dark && !imported)
+    SoraBracketColorizer.configureColors(
+        editor,
+        palette?.semanticColors() ?: loadSavedSemanticColors(context),
+        light = !dark && !imported,
+    )
     if (imported) return
     val scheme = editor.colorScheme
     fun set(id: Int, color: Color) = scheme.setColor(id, color.toArgb())
@@ -106,6 +122,24 @@ fun applyEditorTheme(editor: CodeEditor, context: Context, colors: ColorScheme, 
     set(EditorColorScheme.COMPLETION_WND_TEXT_SECONDARY, colors.onSurfaceVariant)
     set(EditorColorScheme.COMPLETION_WND_ITEM_CURRENT, colors.secondaryContainer)
 }
+
+/**
+ * Registers the TextMate theme for [palette] once and returns its file name. The registry keeps
+ * every theme it loads, so each palette (wallpaper, light or dark) gets its own name.
+ */
+private fun materialSyntaxTheme(palette: SyntaxPalette, background: Color): String {
+    val fileName = "material-you-%08x.tmTheme.json".format(palette.hashCode() xor background.hashCode())
+    val registry = ThemeRegistry.getInstance()
+    if (registry.findThemeByFileName(fileName) == null) {
+        val json = palette.textMateTheme("Material You", background)
+        registry.loadTheme(IThemeSource.fromInputStream(ByteArrayInputStream(json.toByteArray()), fileName, Charsets.UTF_8))
+    }
+    return fileName
+}
+
+/** The colours notebook cells use for [syntax], matching the code editor. */
+fun syntaxPalette(syntax: SyntaxColors, colors: ColorScheme, dark: Boolean): SyntaxPalette =
+    if (syntax == SyntaxColors.MaterialYou) SyntaxPalette.materialYou(colors, dark) else SyntaxPalette.classic(dark)
 
 /** The 16 ANSI colours for terminals, tuned for the current light or dark surface. */
 fun terminalPalette(dark: Boolean): IntArray =

@@ -35,6 +35,9 @@ class WorkbenchSettingsTest {
         )
         assertEquals(listOf(false, false, false, false), listOf(off.autoIndent, off.notebookCopilot, off.renderPlotly, off.statusBarGuestResources))
         assertEquals(true, WorkbenchSettings.from(JsonParser.parseString("""{"editor.autoIndent":"advanced"}""").asJsonObject).autoIndent)
+        assertEquals(listOf(true, false), listOf(defaults.useTabStops, WorkbenchSettings.from(JsonParser.parseString("""{"editor.useTabStops":false}""").asJsonObject).useTabStops))
+        assertEquals(SyntaxColors.Classic, defaults.syntaxColors)
+        assertEquals(SyntaxColors.MaterialYou, WorkbenchSettings.from(JsonParser.parseString("""{"avf":{"theme":{"syntaxColors":"materialYou"}}}""").asJsonObject).syntaxColors)
     }
 
     @Test

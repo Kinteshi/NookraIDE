@@ -242,7 +242,7 @@ private fun LargeFileView(controller: WorkbenchController) {
                     setTextSize(13f)
                     setWordwrap(false)
                     setEditable(false)
-                    applyEditorTheme(this, context, colors, dark)
+                    applyEditorTheme(this, context, colors, dark, controller.settings.syntaxColors)
                     setText(paged.text)
                 }
             },
@@ -273,7 +273,7 @@ private fun NativeEditorView(controller: WorkbenchController, document: Document
                         ?.let { TextMateLanguage.create(it, true) }
                         ?: editorLanguage
                 }
-                applyEditorTheme(this, context, colors, dark)
+                applyEditorTheme(this, context, colors, dark, controller.settings.syntaxColors)
                 setEditorLanguage(language)
                 props.symbolPairAutoCompletion = false
                 val bracketColorizer = SoraBracketColorizer(this, document.languageId)
@@ -330,8 +330,8 @@ private fun NativeEditorView(controller: WorkbenchController, document: Document
             controller.editorReady(view)
         },
     )
-    LaunchedEffect(dark, colors, themeRevision, settings.semanticHighlighting) {
-        controller.editorView?.let { applyEditorTheme(it, it.context, colors, dark) }
+    LaunchedEffect(dark, colors, themeRevision, settings.semanticHighlighting, settings.syntaxColors) {
+        controller.editorView?.let { applyEditorTheme(it, it.context, colors, dark, settings.syntaxColors) }
     }
     LaunchedEffect(document.path) { controller.onActiveDocumentChanged() }
     DisposableEffect(document.path) {
@@ -412,6 +412,8 @@ internal class NativeCodeEditor(
     var insertSpaces = true
     /** `editor.autoIndent`; off leaves Enter to sora (a plain newline). */
     var autoIndent = true
+    /** `editor.useTabStops`: Backspace in leading spaces removes one indentation level. */
+    var useTabStops = true
 
     override fun setStyles(styles: Styles?) {
         super.setStyles(styles)
@@ -470,6 +472,18 @@ internal class NativeCodeEditor(
         val start = text.indexer.getCharPosition(replacement.selectionStart)
         val end = text.indexer.getCharPosition(replacement.selectionEnd)
         setSelectionRegion(start.line, start.column, end.line, end.column)
+    }
+
+    override fun deleteText() {
+        val cursor = cursor
+        if (useTabStops && insertSpaces && isEditable && !cursor.isSelected) {
+            val prefix = text.getLineString(cursor.leftLine).substring(0, cursor.leftColumn)
+            backspaceTabStop(prefix, tabWidth)?.let { stop ->
+                text.delete(cursor.leftLine, stop, cursor.leftLine, cursor.leftColumn)
+                return
+            }
+        }
+        super.deleteText()
     }
 
     override fun dispatchKeyEvent(event: AndroidKeyEvent): Boolean {

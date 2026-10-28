@@ -31,6 +31,8 @@ interface EditorSurface {
     val selection: EditorSelection
     val visibleLines: VisibleLines
     fun setText(value: String)
+    /** Applies [edits] in place; editors that can keep the cursor and undo history do so. */
+    fun applyEdits(edits: List<LspTextEdit>) = setText(applyLspTextEdits(text, edits))
     fun setSelection(selection: EditorSelection)
     fun setDecorations(decorations: List<EditorDecoration>)
     fun observe(listener: (EditorEvent) -> Unit): Closeable
@@ -84,7 +86,8 @@ class SoraTextEditorHost : TextEditorHost {
         binding.document.updateText(updated)
         binding.suppressContentEvents = true
         try {
-            binding.surface.setText(updated)
+            binding.surface.applyEdits(edits)
+            if (binding.surface.text != updated) binding.surface.setText(updated)
         } finally {
             binding.suppressContentEvents = false
         }
@@ -138,6 +141,21 @@ class SoraEditorSurface(
         editor.setText(value)
     }
 
+    /** Replaces the edited ranges only (last first), so the cursor and undo history survive. */
+    override fun applyEdits(edits: List<LspTextEdit>) {
+        val content = editor.text
+        content.beginBatchEdit()
+        try {
+            edits.sortedWith(compareBy<LspTextEdit>({ it.range.start.line }, { it.range.start.character })).asReversed()
+                .forEach { edit ->
+                    val (start, end) = edit.range
+                    content.replace(start.line, start.character, end.line, end.character, edit.newText)
+                }
+        } finally {
+            content.endBatchEdit()
+        }
+    }
+
     override fun setSelection(selection: EditorSelection) {
         editor.setSelectionRegion(
             selection.anchor.line,
@@ -180,6 +198,16 @@ class SoraEditorSurface(
             scrollReceipt.unsubscribe()
             focusReceipt.unsubscribe()
         }
+    }
+}
+
+/** Where the cursor ends up after inserting [edit]: just past its new text. */
+fun LspTextEdit.endAfterInsert(): LspPosition {
+    val lines = newText.split('\n')
+    return if (lines.size == 1) {
+        LspPosition(range.start.line, range.start.character + newText.length)
+    } else {
+        LspPosition(range.start.line + lines.size - 1, lines.last().length)
     }
 }
 

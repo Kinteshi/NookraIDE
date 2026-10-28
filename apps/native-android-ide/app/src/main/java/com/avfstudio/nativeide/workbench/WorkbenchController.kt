@@ -60,6 +60,7 @@ import com.avfstudio.nativeide.editor.LspRange
 import com.avfstudio.nativeide.editor.LspTextEdit
 import com.avfstudio.nativeide.editor.SoraTextEditorHost
 import com.avfstudio.nativeide.editor.applyLspTextEdits
+import com.avfstudio.nativeide.editor.endAfterInsert
 import com.avfstudio.nativeide.language.CopilotClient
 import com.avfstudio.nativeide.language.CopilotSuggestion
 import com.avfstudio.nativeide.language.JsonRpcException
@@ -108,6 +109,8 @@ import java.util.concurrent.TimeUnit
 private const val SCRATCH_WELCOME_PATH = "scratch:/welcome.py"
 private const val MAX_IMPORTED_THEME_BYTES = 8 * 1024 * 1024
 private const val MAX_OUTPUT_LINES = 500
+/** Longest wait between reconnect attempts while the app is in front. */
+private const val FOREGROUND_RECONNECT_CAP_S = 10L
 /** How long after a reattach the replayed output may still make the emulator answer old queries. */
 private const val TERMINAL_REPLAY_WINDOW_MS = 3000L
 private const val MAX_QUICK_OPEN_FILES = 5000
@@ -496,6 +499,7 @@ class WorkbenchController(private val context: Context) {
         (view as? NativeCodeEditor)?.let {
             it.insertSpaces = current.insertSpaces
             it.autoIndent = current.autoIndent
+            it.useTabStops = current.useTabStops
         }
         if (view.isWordwrap != current.wordWrap) view.setWordwrap(current.wordWrap)
         if (view.isLineNumberEnabled != current.lineNumbers) view.setLineNumberEnabled(current.lineNumbers)
@@ -763,7 +767,10 @@ class WorkbenchController(private val context: Context) {
         if (visible) startStatsPolling() else stopStatsPolling()
         if (!visible && settings.autoSave in setOf(AutoSaveMode.OnFocusChange, AutoSaveMode.OnWindowChange)) autoSaveAll()
         // Coming back from Linux Terminal usually means the guest is up now.
-        if (visible && guestUnreachable && !connected && !busy && scheduledReconnect == null) {
+        // A retry scheduled in the background may be a minute away; try now instead.
+        if (visible && !connected && !busy && (guestUnreachable || scheduledReconnect != null)) {
+            scheduledReconnect?.cancel(false)
+            scheduledReconnect = null
             autoConnecting = true
             connectGuest()
         }
@@ -1354,11 +1361,16 @@ class WorkbenchController(private val context: Context) {
     private var reconnectAttempt = 0
     private var scheduledReconnect: ScheduledFuture<*>? = null
 
-    /** Retries a lost connection with backoff (2 s … 60 s, ten attempts). */
+    /**
+     * Retries a lost connection with backoff: 2 s … 60 s and ten attempts in the background, but
+     * at most [FOREGROUND_RECONNECT_CAP_S] apart and without a limit while the app is in front, so
+     * a guest that comes back is noticed within seconds.
+     */
     private fun scheduleReconnect() {
         if (!settings.autoConnect || endpoint.isBlank() || token.isBlank() || scheduledReconnect != null) return
-        if (reconnectAttempt >= 10) return
-        val delay = listOf(2L, 5L, 10L, 20L, 30L, 60L)[reconnectAttempt.coerceAtMost(5)]
+        if (!appVisible && reconnectAttempt >= 10) return
+        val backoff = listOf(2L, 5L, 10L, 20L, 30L, 60L)[reconnectAttempt.coerceAtMost(5)]
+        val delay = if (appVisible) backoff.coerceAtMost(FOREGROUND_RECONNECT_CAP_S) else backoff
         reconnectAttempt++
         status = "Guest disconnected; reconnecting in ${delay}s"
         scheduledReconnect = timer.schedule({
@@ -2372,6 +2384,8 @@ class WorkbenchController(private val context: Context) {
         val document = activeDocument ?: return
         val edit = choice.edit ?: return
         editorHost.applyEdits(document.path, listOf(edit))
+        val end = edit.endAfterInsert()
+        editorView?.setSelection(end.line, end.character)
         onDocumentEdited(document)
     }
 

@@ -268,8 +268,9 @@ private fun CellSourceEditor(
 ) {
     val colors = MaterialTheme.colorScheme
     val focus = remember { FocusRequester() }
-    val highlighter = remember(dark, cell.type) {
-        if (cell.type == CellType.Code) PythonHighlighter(dark) else VisualTransformation.None
+    val palette = syntaxPalette(controller.settings.syntaxColors, colors, dark)
+    val highlighter = remember(palette, cell.type) {
+        if (cell.type == CellType.Code) PythonHighlighter(palette) else VisualTransformation.None
     }
     var field by remember(cell.id) { mutableStateOf(TextFieldValue(cell.source)) }
     var layout by remember(cell.id) { mutableStateOf<TextLayoutResult?>(null) }
@@ -440,6 +441,8 @@ private fun CellSourceEditor(
                     when (event.key) {
                         Key.Enter, Key.NumPadEnter -> cell.type == CellType.Code && settings.autoIndent &&
                             true.also { apply(CellTextEdits.newline(field, settings.tabSize, settings.insertSpaces)) }
+                        Key.Backspace -> settings.useTabStops &&
+                            CellTextEdits.backspace(field, settings.tabSize)?.also { apply(it) } != null
                         Key.DirectionUp -> moveVertically(-1)
                         Key.DirectionDown -> moveVertically(1)
                         // At the edges Left/Right would hand focus to whatever is beside the cell; keep it here.
@@ -611,14 +614,14 @@ private val ansiPattern = Regex("\u001B\\[[0-9;?]*[ -/]*[@-~]")
 
 internal fun String.stripAnsi(): String = replace(ansiPattern, "")
 
-/** Lightweight Python colouring for notebook cells, using the Dark+/Light+ palette. */
-private class PythonHighlighter(dark: Boolean) : VisualTransformation {
-    private val keyword = Color(if (dark) 0xFFC586C0 else 0xFFAF00DB)
-    private val string = Color(if (dark) 0xFFCE9178 else 0xFFA31515)
-    private val comment = Color(if (dark) 0xFF6A9955 else 0xFF008000)
-    private val number = Color(if (dark) 0xFFB5CEA8 else 0xFF098658)
-    private val builtin = Color(if (dark) 0xFFDCDCAA else 0xFF795E26)
-    private val decorator = Color(if (dark) 0xFF4EC9B0 else 0xFF267F99)
+/** Lightweight Python colouring for notebook cells, in the code editor's [SyntaxPalette]. */
+private class PythonHighlighter(palette: SyntaxPalette) : VisualTransformation {
+    private val keyword = palette.keyword
+    private val string = palette.string
+    private val comment = palette.comment
+    private val number = palette.number
+    private val builtin = palette.function
+    private val decorator = palette.type
     private val token = Regex(
         """(#[^\n]*)|("{3}[\s\S]*?"{3}|'{3}[\s\S]*?'{3}|[rbfuRBFU]{0,2}"(?:\\.|[^"\\\n])*"|[rbfuRBFU]{0,2}'(?:\\.|[^'\\\n])*')|(@[\w.]+)|\b(\d+(?:\.\d+)?(?:[eE][+-]?\d+)?j?)\b|\b(False|None|True|and|as|assert|async|await|break|class|continue|def|del|elif|else|except|finally|for|from|global|if|import|in|is|lambda|nonlocal|not|or|pass|raise|return|try|while|with|yield|match|case)\b|\b(print|len|range|list|dict|set|tuple|str|int|float|bool|open|enumerate|zip|map|filter|sum|min|max|sorted|isinstance|super|type|self)\b""",
     )

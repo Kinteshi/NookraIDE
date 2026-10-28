@@ -142,6 +142,16 @@ internal fun newlineIndentation(linePrefix: String, tabSize: Int, insertSpaces: 
 }
 
 /**
+ * Where Backspace deletes back to when [linePrefix] (the line before the cursor) is only spaces:
+ * the previous tab stop, so one press removes one indentation level (VS Code's
+ * `editor.useTabStops`). Null when there is other text or a single space: a plain Backspace.
+ */
+internal fun backspaceTabStop(linePrefix: String, tabSize: Int): Int? {
+    if (linePrefix.length < 2 || tabSize < 2 || linePrefix.any { it != ' ' }) return null
+    return (linePrefix.length - 1) / tabSize * tabSize
+}
+
+/**
  * The ghost text for a suggestion that replaces [typed] (the line from the suggestion's start to
  * the cursor) with [insertText]: what follows what is already typed. When only indentation is
  * typed, Copilot may indent differently (accepting replaces the whole range); show the code part.

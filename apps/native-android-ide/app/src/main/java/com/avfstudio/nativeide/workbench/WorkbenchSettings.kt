@@ -19,6 +19,7 @@ data class WorkbenchSettings(
     val themeMode: ThemeMode = ThemeMode.System,
     val dynamicColor: Boolean = true,
     val pureBlack: Boolean = false,
+    val syntaxColors: SyntaxColors = SyntaxColors.Classic,
     val editorFontSize: Float = 14f,
     val tabSize: Int = 4,
     val insertSpaces: Boolean = true,
@@ -39,6 +40,8 @@ data class WorkbenchSettings(
     val restoreSession: Boolean = true,
     /** Enter keeps the indentation (one level more after a block opener). */
     val autoIndent: Boolean = true,
+    /** Backspace in leading spaces goes back to the previous tab stop (one indentation level). */
+    val useTabStops: Boolean = true,
     val notebookCopilot: Boolean = true,
     /** Draw Plotly figures; needs plotly.js from cdn.plot.ly the first time. */
     val renderPlotly: Boolean = true,
@@ -52,6 +55,7 @@ data class WorkbenchSettings(
         const val THEME_MODE = "avf.theme.mode"
         const val DYNAMIC_COLOR = "avf.theme.dynamicColor"
         const val PURE_BLACK = "avf.theme.pureBlack"
+        const val SYNTAX_COLORS = "avf.theme.syntaxColors"
         const val EDITOR_FONT_SIZE = "editor.fontSize"
         const val TAB_SIZE = "editor.tabSize"
         const val INSERT_SPACES = "editor.insertSpaces"
@@ -72,6 +76,7 @@ data class WorkbenchSettings(
         const val RESTORE_SESSION = "avf.session.restore"
         /** VS Code's enum (none/keep/brackets/advanced/full); anything but "none" is on here. */
         const val AUTO_INDENT = "editor.autoIndent"
+        const val USE_TAB_STOPS = "editor.useTabStops"
         const val NOTEBOOK_COPILOT = "avf.copilot.notebooks"
         const val RENDER_PLOTLY = "avf.notebook.plotly"
         const val STATUS_BAR_GUEST = "avf.statusBar.guestResources"
@@ -90,6 +95,7 @@ data class WorkbenchSettings(
                 themeMode = ThemeMode.entries.firstOrNull { it.key == string(THEME_MODE) } ?: defaults.themeMode,
                 dynamicColor = bool(DYNAMIC_COLOR, defaults.dynamicColor),
                 pureBlack = bool(PURE_BLACK, defaults.pureBlack),
+                syntaxColors = SyntaxColors.entries.firstOrNull { it.key == string(SYNTAX_COLORS) } ?: defaults.syntaxColors,
                 editorFontSize = number(EDITOR_FONT_SIZE)?.toFloat()?.coerceIn(8f, 40f) ?: defaults.editorFontSize,
                 tabSize = number(TAB_SIZE)?.toInt()?.coerceIn(1, 8) ?: defaults.tabSize,
                 insertSpaces = bool(INSERT_SPACES, defaults.insertSpaces),
@@ -112,6 +118,7 @@ data class WorkbenchSettings(
                 pythonInterpreter = string(PYTHON_INTERPRETER)?.trim() ?: defaults.pythonInterpreter,
                 restoreSession = bool(RESTORE_SESSION, defaults.restoreSession),
                 autoIndent = string(AUTO_INDENT)?.let { it != "none" } ?: defaults.autoIndent,
+                useTabStops = bool(USE_TAB_STOPS, defaults.useTabStops),
                 notebookCopilot = bool(NOTEBOOK_COPILOT, defaults.notebookCopilot),
                 renderPlotly = bool(RENDER_PLOTLY, defaults.renderPlotly),
                 statusBarGuestResources = bool(STATUS_BAR_GUEST, defaults.statusBarGuestResources),

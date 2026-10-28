@@ -95,6 +95,19 @@ fun SettingsScreen(controller: WorkbenchController) {
                     }
                 }
                 item {
+                    SettingRow("Syntax colours", "VS Code's Dark+ and Light+, or colours from the Material You palette") {
+                        SingleChoiceSegmentedButtonRow {
+                            SyntaxColors.entries.forEachIndexed { index, choice ->
+                                SegmentedButton(
+                                    selected = settings.syntaxColors == choice,
+                                    onClick = { set(WorkbenchSettings.SYNTAX_COLORS, choice.key) },
+                                    shape = SegmentedButtonDefaults.itemShape(index, SyntaxColors.entries.size),
+                                ) { Text(choice.label) }
+                            }
+                        }
+                    }
+                }
+                item {
                     ActionRow("Import VS Code theme", "Syntax colours from a .vsix or theme JSON") { controller.pickAssetPack?.invoke("vsix") }
                 }
                 item {
@@ -112,6 +125,11 @@ fun SettingsScreen(controller: WorkbenchController) {
                 item {
                     SwitchRow("Auto-indent", "Enter keeps the indentation, one level more after : or an open bracket", settings.autoIndent) {
                         set(WorkbenchSettings.AUTO_INDENT, if (it) "full" else "none")
+                    }
+                }
+                item {
+                    SwitchRow("Backspace by indentation level", "In leading spaces, Backspace goes back to the previous tab stop", settings.useTabStops) {
+                        set(WorkbenchSettings.USE_TAB_STOPS, it)
                     }
                 }
                 item { SwitchRow("Word wrap", "Wrap long lines at the edge of the editor", settings.wordWrap) { set(WorkbenchSettings.WORD_WRAP, if (it) "on" else "off") } }

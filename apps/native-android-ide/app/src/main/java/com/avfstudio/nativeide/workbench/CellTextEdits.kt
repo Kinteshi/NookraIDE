@@ -37,6 +37,15 @@ internal object CellTextEdits {
         return TextFieldValue(updated, TextRange(start + insertion.length))
     }
 
+    /** Backspace in leading spaces: back to the previous tab stop; null when it is a plain Backspace. */
+    fun backspace(value: TextFieldValue, tabSize: Int): TextFieldValue? {
+        if (!value.selection.collapsed) return null
+        val caret = value.selection.start
+        val start = lineStart(value.text, caret)
+        val stop = backspaceTabStop(value.text.substring(start, caret), tabSize) ?: return null
+        return TextFieldValue(value.text.removeRange(start + stop, caret), TextRange(start + stop))
+    }
+
     private fun spansLines(text: String, selection: TextRange): Boolean =
         text.substring(selection.min, selection.max).contains('\n')
 
