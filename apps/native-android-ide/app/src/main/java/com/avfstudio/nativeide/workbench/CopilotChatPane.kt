@@ -356,6 +356,7 @@ private fun ChatOptionsRow(controller: WorkbenchController) {
                 )
             }
         }
+        ReasoningEffortChip(controller)
         options.forEach { option ->
             var open by remember(option.id) { mutableStateOf(false) }
             Box {
@@ -400,5 +401,34 @@ private fun ChatOptionsRow(controller: WorkbenchController) {
             confirmButton = { TextButton(onClick = { confirmAllowAll = null; controller.setChatOption(option, value) }) { Text("Allow all") } },
             dismissButton = { TextButton(onClick = { confirmAllowAll = null }) { Text("Cancel") } },
         )
+    }
+}
+
+/** Copilot CLI's `--reasoning-effort`, which it reads at launch; changing it starts a new session. */
+@Composable
+private fun ReasoningEffortChip(controller: WorkbenchController) {
+    var open by remember { mutableStateOf(false) }
+    val current = controller.settings.chatReasoningEffort
+    Box {
+        AssistChip(
+            onClick = { open = true },
+            label = { Text("Effort: ${reasoningEffortLabel(current)}", maxLines = 1) },
+            trailingIcon = { Icon(Icons.Outlined.ArrowDropDown, contentDescription = null, modifier = Modifier.size(18.dp)) },
+        )
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            (listOf("") + WorkbenchSettings.REASONING_EFFORTS).forEach { effort ->
+                DropdownMenuItem(
+                    text = { Text(reasoningEffortLabel(effort)) },
+                    leadingIcon = {
+                        if (effort == current) Icon(Icons.Outlined.Check, contentDescription = "Selected")
+                        else Spacer(Modifier.size(24.dp))
+                    },
+                    onClick = {
+                        open = false
+                        controller.setChatReasoningEffort(effort)
+                    },
+                )
+            }
+        }
     }
 }

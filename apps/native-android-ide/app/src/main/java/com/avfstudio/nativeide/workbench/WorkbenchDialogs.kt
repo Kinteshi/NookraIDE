@@ -71,6 +71,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Download
+import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.Button
 import androidx.compose.ui.graphics.vector.ImageVector
 
@@ -252,6 +253,30 @@ fun WorkbenchDialogHost(controller: WorkbenchController) {
                 }
             },
             confirmButton = { Button(onClick = { controller.installDependency(dialog.dependency, dialog.then) }) { Text("Install") } },
+            dismissButton = { TextButton(onClick = { controller.dialog = null }) { Text("Not now") } },
+        )
+        is WorkbenchDialog.GuestCommand -> AlertDialog(
+            onDismissRequest = { controller.dialog = null },
+            icon = { Icon(Icons.Outlined.Terminal, contentDescription = null) },
+            title = { Text(dialog.title) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(dialog.text)
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        shape = MaterialTheme.shapes.small,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            dialog.command,
+                            fontFamily = FontFamily.Monospace,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        )
+                    }
+                }
+            },
+            confirmButton = { Button(onClick = { controller.runGuestCommand(dialog) }) { Text("Run") } },
             dismissButton = { TextButton(onClick = { controller.dialog = null }) { Text("Not now") } },
         )
         is WorkbenchDialog.InterpreterPicker -> {

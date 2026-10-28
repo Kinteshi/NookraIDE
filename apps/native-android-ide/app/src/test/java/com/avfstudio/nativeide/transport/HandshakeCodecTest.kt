@@ -74,6 +74,13 @@ class HandshakeCodecTest {
             packString("disk_total_mb"); packLong(64_000)
         }) as IncomingPacket.Stats
         assertEquals(12_000L to 64_000L, storage.stats.diskUsedMb to storage.stats.diskTotalMb)
+        assertEquals(null to null, storage.stats.tmpInMemory to storage.stats.tmpMountMasked)
+        val tmp = MessagePackVfsCodec.decode(system("Pong") {
+            packMapHeader(2)
+            packString("tmp_in_memory"); packBoolean(true)
+            packString("tmp_mount_masked"); packNil()
+        }) as IncomingPacket.Stats
+        assertEquals(true to null, tmp.stats.tmpInMemory to tmp.stats.tmpMountMasked)
         val broken = MessagePackVfsCodec.decode(pong("The guest's disk went read-only after an error")) as IncomingPacket.Stats
         assertEquals("The guest's disk went read-only after an error", broken.stats.diskProblem)
     }

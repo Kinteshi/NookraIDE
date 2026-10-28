@@ -1184,6 +1184,39 @@ class WorkbenchController(private val context: Context) {
         })
     }
 
+    /** Where /tmp lives in the guest, when the daemon reports it. */
+    val tmpPlacement: TmpPlacement?
+        get() = guestStats?.let { tmpPlacement(it.tmpInMemory, it.tmpMountMasked) }
+
+    /** Offers to keep /tmp on disk (or back in memory) from the next guest restart. */
+    fun offerTmpPlacement(toDisk: Boolean) {
+        dialog = if (toDisk) {
+            WorkbenchDialog.GuestCommand(
+                title = "Move /tmp to disk?",
+                text = "/tmp is a tmpfs in the guest's memory, so big installs can fail with \"No space left on device\" " +
+                    "and its files cost the tablet RAM. This masks systemd's tmp.mount: from the next guest restart " +
+                    "/tmp is a folder on the guest's disk. It runs in a new terminal; enter your password if sudo asks.",
+                command = TMP_TO_DISK_COMMAND,
+                done = "/tmp moves to disk when the guest restarts (close Linux Terminal and open it again)",
+            )
+        } else {
+            WorkbenchDialog.GuestCommand(
+                title = "Keep /tmp in memory?",
+                text = "This unmasks systemd's tmp.mount, so /tmp is a tmpfs in memory again from the next guest restart. " +
+                    "It runs in a new terminal; enter your password if sudo asks.",
+                command = TMP_TO_MEMORY_COMMAND,
+                done = "/tmp goes back to memory when the guest restarts",
+            )
+        }
+    }
+
+    fun runGuestCommand(command: WorkbenchDialog.GuestCommand) {
+        if (dialog == command) dialog = null
+        newTerminal("${command.command} && exit", onExit = { code ->
+            post { status = if (code == 0) command.done else "The command didn't finish; the terminal shows why" }
+        })
+    }
+
     // Source control ----------------------------------------------------------------------------
 
     var gitStatus by mutableStateOf<GitResult.Status?>(null)
@@ -3081,7 +3114,23 @@ class WorkbenchController(private val context: Context) {
     private fun ensureChatSession(workspace: String): CompletableFuture<Unit> = when {
         chatAgent.hasSession -> CompletableFuture.completedFuture(Unit)
         chatAgent.isStarted -> chatAgent.newSession(workspace).thenCompose { applyRememberedChatOptions() }
-        else -> chatAgent.start(workspace).thenCompose { chatAgent.newSession(workspace) }.thenCompose { applyRememberedChatOptions() }
+        else -> chatAgent.start(workspace, chatAgentArgs()).thenCompose { chatAgent.newSession(workspace) }
+            .thenCompose { applyRememberedChatOptions() }
+    }
+
+    /** Copilot CLI reads the reasoning effort at launch only; ACP has no option for it. */
+    private fun chatAgentArgs(): List<String> =
+        settings.chatReasoningEffort.takeIf { it.isNotEmpty() }?.let { listOf("--reasoning-effort", it) }.orEmpty()
+
+    /** Saves the effort; a running agent ends so the next message starts one with it. */
+    fun setChatReasoningEffort(effort: String) {
+        if (effort == settings.chatReasoningEffort) return
+        updateSetting(WorkbenchSettings.CHAT_REASONING_EFFORT, effort.ifEmpty { null })
+        if (chatAgent.isStarted && !chatBusy) {
+            chatAgent.stop()
+            chatConfigOptions = emptyList()
+            chatEntries.add(ChatEntry.Notice("Reasoning effort: ${reasoningEffortLabel(effort)}. The next message starts a new session with it."))
+        }
     }
 
     /** Re-applies the model (and a non-autonomous mode) chosen earlier; approvals always start at the agent's default. */
@@ -3483,8 +3532,13 @@ class WorkbenchController(private val context: Context) {
         notebook.dirty = document.dirty
         val kernel = KernelClient(vfs)
         val session = NotebookSession(document, notebook, kernel)
-        kernel.outputListener = { cellId, output -> post { appendCellOutput(session, cellId, output) } }
-        kernel.clearListener = { cellId, _ -> post { notebook.cells.firstOrNull { it.id == cellId }?.outputs?.clear() } }
+        kernel.outputListener = { cellId, output, displayId -> post { appendCellOutput(session, cellId, output, displayId) } }
+        kernel.updateDisplayListener = { displayId, output ->
+            post { if (session.displays.update(notebook.cells, displayId, output)) notebook.dirty = true }
+        }
+        kernel.clearListener = { cellId, wait ->
+            post { notebook.cells.firstOrNull { it.id == cellId }?.let { session.displays.clear(it, wait) } }
+        }
         kernel.busyListener = { busy -> post { session.busy = busy } }
         kernel.exitListener = { message ->
             post {
@@ -3497,8 +3551,9 @@ class WorkbenchController(private val context: Context) {
         return true
     }
 
-    private fun appendCellOutput(session: NotebookSession, cellId: String, output: JsonObject) {
+    private fun appendCellOutput(session: NotebookSession, cellId: String, output: JsonObject, displayId: String? = null) {
         val cell = session.notebook.cells.firstOrNull { it.id == cellId } ?: return
+        session.displays.beforeOutput(cell)
         val last = cell.outputs.lastOrNull()
         // Merge consecutive stream chunks the way Jupyter front ends do.
         if (output.get("output_type")?.asString == "stream" && last?.get("output_type")?.asString == "stream" &&
@@ -3511,7 +3566,7 @@ class WorkbenchController(private val context: Context) {
             )
             cell.outputs[cell.outputs.lastIndex] = merged
         } else {
-            cell.outputs.add(output)
+            session.displays.append(cell, output, displayId)
         }
         session.notebook.dirty = true
     }

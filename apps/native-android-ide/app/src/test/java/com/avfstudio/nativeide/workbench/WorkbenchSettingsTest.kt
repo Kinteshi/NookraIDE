@@ -37,6 +37,10 @@ class WorkbenchSettingsTest {
         assertEquals(true, WorkbenchSettings.from(JsonParser.parseString("""{"editor.autoIndent":"advanced"}""").asJsonObject).autoIndent)
         assertEquals(listOf(true, false), listOf(defaults.useTabStops, WorkbenchSettings.from(JsonParser.parseString("""{"editor.useTabStops":false}""").asJsonObject).useTabStops))
         assertEquals(SyntaxColors.Classic, defaults.syntaxColors)
+        assertEquals("", defaults.chatReasoningEffort)
+        assertEquals("high", WorkbenchSettings.from(JsonParser.parseString("""{"avf.copilot.chatReasoningEffort":"high"}""").asJsonObject).chatReasoningEffort)
+        assertEquals("", WorkbenchSettings.from(JsonParser.parseString("""{"avf.copilot.chatReasoningEffort":"turbo"}""").asJsonObject).chatReasoningEffort)
+        assertEquals(listOf("Default", "Extra high", "Low"), listOf("", "xhigh", "low").map(::reasoningEffortLabel))
         assertEquals(SyntaxColors.MaterialYou, WorkbenchSettings.from(JsonParser.parseString("""{"avf":{"theme":{"syntaxColors":"materialYou"}}}""").asJsonObject).syntaxColors)
     }
 

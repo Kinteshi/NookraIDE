@@ -50,4 +50,14 @@ class GuestDependenciesTest {
             ipykernelInstallCommand("/home/u/.venv/bin/python", conda, uv = true),
         )
     }
+
+    @Test
+    fun tmpPlacementFollowsTheMountAndTheMask() {
+        assertEquals(null, tmpPlacement(null, true))
+        assertEquals(TmpPlacement.Memory, tmpPlacement(true, false))
+        assertEquals(TmpPlacement.Memory, tmpPlacement(true, null))
+        assertEquals(TmpPlacement.DiskAfterRestart, tmpPlacement(true, true))
+        assertEquals(TmpPlacement.MovedToDisk, tmpPlacement(false, true))
+        assertEquals(TmpPlacement.Disk, tmpPlacement(false, false))
+    }
 }

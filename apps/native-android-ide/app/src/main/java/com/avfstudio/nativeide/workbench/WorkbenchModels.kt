@@ -84,6 +84,8 @@ sealed interface WorkbenchDialog {
     data class GuestSetup(val reason: String? = null) : WorkbenchDialog
     /** Offers to install a missing guest tool; [then] continues what needed it. */
     data class InstallDependency(val dependency: GuestDependency, val reason: String?, val then: (() -> Unit)?) : WorkbenchDialog
+    /** Confirms a guest command that runs in a new terminal; [done] is the status when it exits 0. */
+    data class GuestCommand(val title: String, val text: String, val command: String, val done: String) : WorkbenchDialog
     data class CopilotSignInCode(val signIn: CopilotSignIn) : WorkbenchDialog
     data class KernelPicker(
         val path: String,
@@ -130,6 +132,8 @@ class NotebookSession(
     val notebook: NotebookDocument,
     val kernel: KernelClient,
 ) {
+    /** Display ids and pending clear_output(wait=True) of the running kernel's outputs. */
+    val displays = com.avfstudio.nativeide.notebook.NotebookDisplays()
     var kernelName by mutableStateOf<String?>(null)
     var kernelState by mutableStateOf("No kernel")
     var busy by mutableStateOf(false)

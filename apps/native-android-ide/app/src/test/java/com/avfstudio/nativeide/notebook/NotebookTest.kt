@@ -55,7 +55,7 @@ class NotebookTest {
         }.use { guest ->
             val kernel = KernelClient(guest.transport)
             val outputs = LinkedBlockingQueue<Pair<String, JsonObject>>()
-            kernel.outputListener = { cell, output -> outputs.offer(cell to output) }
+            kernel.outputListener = { cell, output, _ -> outputs.offer(cell to output) }
             kernel.launch("/w").get(5, TimeUnit.SECONDS)
             assertEquals("Kernel", guest.startedKinds.poll(5, TimeUnit.SECONDS))
             assertEquals(JUPYTER_BRIDGE_TOOL, guest.startedTools.poll(5, TimeUnit.SECONDS))

@@ -13,5 +13,7 @@ class PlotlyOutputTest {
         assertFalse(page.contains("</script><script>alert"))
         assertTrue(page.contains("<\\/script>"))
         assertTrue(page.contains("plotly-4.1.1.min.js"))
+        // Drawn through avfRender, which updates in place use as well.
+        assertTrue(page.contains("Plotly.react") && page.contains("avfRender({"))
     }
 }

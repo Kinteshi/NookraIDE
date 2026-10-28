@@ -387,6 +387,8 @@ internal object MessagePackVfsCodec {
                         diskProblem = fields["disk_problem"]?.takeUnless { it.isNilValue }?.asStringValue()?.asString(),
                         diskUsedMb = mb("disk_used_mb"),
                         diskTotalMb = mb("disk_total_mb"),
+                        tmpInMemory = fields["tmp_in_memory"]?.takeIf { it.isBooleanValue }?.asBooleanValue()?.boolean,
+                        tmpMountMasked = fields["tmp_mount_masked"]?.takeIf { it.isBooleanValue }?.asBooleanValue()?.boolean,
                     ),
                 )
             }
@@ -468,6 +470,10 @@ data class GuestStats(
     /** Storage on the filesystem holding the guest's home; 0 from daemons that don't report it. */
     val diskUsedMb: Long = 0,
     val diskTotalMb: Long = 0,
+    /** Whether /tmp is a RAM-backed tmpfs; null from daemons that don't report it. */
+    val tmpInMemory: Boolean? = null,
+    /** Whether systemd's tmp.mount is masked, which puts /tmp on disk from the next boot. */
+    val tmpMountMasked: Boolean? = null,
 ) {
     val footprintMb: Long get() = if (freeMb > 0) (totalMb - freeMb - balloonMb).coerceAtLeast(0) else usedMb
     /** The footprint without cache, so programs + cache + free + balloon add up to the total. */

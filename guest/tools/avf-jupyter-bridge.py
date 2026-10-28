@@ -11,8 +11,8 @@ venvs, system Python with ipykernel), so nothing is installed into them.
 
 Requests:  kernelspecs, start {name, cwd}, execute {code, cell_id}, complete {code, cursor_pos},
            interrupt, restart, shutdown
-Notifications to the client: output {cell_id, output}, clear_output {cell_id, wait},
-           status {state}
+Notifications to the client: output {cell_id, output, display_id}, clear_output {cell_id, wait},
+           update_display {display_id, output}, status {state}
 """
 
 import glob
@@ -223,8 +223,16 @@ class Bridge:
                 notify("clear_output", {"cell_id": cell_id, "wait": message["content"].get("wait", False)})
                 continue
             output = to_nbformat_output(message)
-            if output is not None:
-                notify("output", {"cell_id": cell_id, "output": output})
+            if output is None:
+                continue
+            # display(..., display_id=True) handles: the id is transient (not saved in the notebook);
+            # an update replaces every output shown with that id, in whichever cell it is.
+            display_id = message["content"].get("transient", {}).get("display_id")
+            if kind == "update_display_data":
+                if display_id:
+                    notify("update_display", {"display_id": display_id, "output": output})
+                continue
+            notify("output", {"cell_id": cell_id, "output": output, "display_id": display_id})
         reply = self.client.get_shell_msg(timeout=30)
         while reply.get("parent_header", {}).get("msg_id") != msg_id:
             reply = self.client.get_shell_msg(timeout=30)

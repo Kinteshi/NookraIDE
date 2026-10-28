@@ -142,3 +142,23 @@ sealed interface EnvironmentSetup {
     data object CreateVenv : EnvironmentSetup
     data class Install(val dependency: GuestDependency) : EnvironmentSetup
 }
+
+/** Where the guest's /tmp lives, from the daemon's stats. */
+enum class TmpPlacement(val summary: String) {
+    Memory("In memory (a RAM-backed tmpfs, half the guest's memory). The app's own tools already use ~/.cache/tmp; moving /tmp covers every program"),
+    DiskAfterRestart("Moves to disk when the guest restarts: close Linux Terminal and open it again"),
+    MovedToDisk("On disk (moved by MaterialCode)"),
+    Disk("On disk"),
+}
+
+internal fun tmpPlacement(inMemory: Boolean?, masked: Boolean?): TmpPlacement? = when {
+    inMemory == null -> null
+    inMemory && masked == true -> TmpPlacement.DiskAfterRestart
+    inMemory -> TmpPlacement.Memory
+    masked == true -> TmpPlacement.MovedToDisk
+    else -> TmpPlacement.Disk
+}
+
+/** Debian's tmpfs /tmp comes from systemd's tmp.mount; masked, /tmp stays on the root filesystem. */
+internal const val TMP_TO_DISK_COMMAND = "sudo systemctl mask tmp.mount"
+internal const val TMP_TO_MEMORY_COMMAND = "sudo systemctl unmask tmp.mount"

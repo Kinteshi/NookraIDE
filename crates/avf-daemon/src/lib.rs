@@ -733,6 +733,8 @@ async fn process_packet(
                             disk_problem: sample.disk_problem,
                             disk_used_mb: sample.disk_used_mb,
                             disk_total_mb: sample.disk_total_mb,
+                            tmp_in_memory: sample.tmp_in_memory,
+                            tmp_mount_masked: sample.tmp_mount_masked,
                         }),
                     )
                     .await
@@ -2245,6 +2247,8 @@ struct SystemSample {
     disk_problem: Option<String>,
     disk_used_mb: u64,
     disk_total_mb: u64,
+    tmp_in_memory: Option<bool>,
+    tmp_mount_masked: Option<bool>,
 }
 
 impl Telemetry {
@@ -2279,6 +2283,7 @@ impl Telemetry {
                 .unwrap_or(0.0)
         };
         let mebibyte = 1024 * 1024;
+        let (tmp_in_memory, tmp_mount_masked) = tmpdir::tmp_state();
         let disk_usage = storage_usage_mb(&env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/")));
         Ok(SystemSample {
             cpu_usage,
@@ -2291,6 +2296,8 @@ impl Telemetry {
             disk_problem: disk_problem().await,
             disk_used_mb: disk_usage.0,
             disk_total_mb: disk_usage.1,
+            tmp_in_memory,
+            tmp_mount_masked,
         })
     }
 }

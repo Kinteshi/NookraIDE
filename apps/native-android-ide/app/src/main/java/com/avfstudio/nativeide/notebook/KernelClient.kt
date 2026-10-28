@@ -27,7 +27,10 @@ data class KernelCompletions(val matches: List<String>, val start: Int, val end:
 
 class KernelClient(transport: GuestVfsClient) {
     private val connection = JsonRpcConnection(transport, "Kernel")
-    @Volatile var outputListener: ((String, JsonObject) -> Unit)? = null
+    /** Cell id, output, and the display id when the output can be updated later. */
+    @Volatile var outputListener: ((String, JsonObject, String?) -> Unit)? = null
+    /** Display id and the output that replaces what was shown with it. */
+    @Volatile var updateDisplayListener: ((String, JsonObject) -> Unit)? = null
     @Volatile var clearListener: ((String, Boolean) -> Unit)? = null
     @Volatile var busyListener: ((Boolean) -> Unit)? = null
     @Volatile var exitListener: ((String) -> Unit)? = null
@@ -37,7 +40,16 @@ class KernelClient(transport: GuestVfsClient) {
         connection.notificationHandler = { method, params ->
             when (method) {
                 "output" -> params.getAsJsonObject("output")?.let { output ->
-                    outputListener?.invoke(params.get("cell_id")?.asString.orEmpty(), output)
+                    outputListener?.invoke(
+                        params.get("cell_id")?.asString.orEmpty(),
+                        output,
+                        params.get("display_id")?.takeIf { it.isJsonPrimitive }?.asString,
+                    )
+                }
+                "update_display" -> {
+                    val displayId = params.get("display_id")?.takeIf { it.isJsonPrimitive }?.asString
+                    val output = params.getAsJsonObject("output")
+                    if (displayId != null && output != null) updateDisplayListener?.invoke(displayId, output)
                 }
                 "clear_output" -> clearListener?.invoke(
                     params.get("cell_id")?.asString.orEmpty(),

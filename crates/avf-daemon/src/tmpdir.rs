@@ -43,6 +43,30 @@ pub fn prefer_disk_tmpdir() -> Option<PathBuf> {
     Some(dir)
 }
 
+/// Whether systemd's tmp.mount is masked (linked to /dev/null) in `unit_dir`
+/// (`/etc/systemd/system`), which keeps /tmp on the root filesystem from the next boot. None when
+/// there is no systemd unit directory to look in.
+pub fn tmp_mount_masked(unit_dir: &Path) -> Option<bool> {
+    if !unit_dir.is_dir() {
+        return None;
+    }
+    Some(
+        std::fs::read_link(unit_dir.join("tmp.mount"))
+            .is_ok_and(|target| target == Path::new("/dev/null")),
+    )
+}
+
+/// Where /tmp lives now and whether it moves to disk at the next boot, for the stats reply.
+pub fn tmp_state() -> (Option<bool>, Option<bool>) {
+    let in_memory = std::fs::read_to_string("/proc/self/mounts")
+        .ok()
+        .map(|mounts| tmp_is_tmpfs(&mounts));
+    (
+        in_memory,
+        tmp_mount_masked(Path::new("/etc/systemd/system")),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -74,5 +98,15 @@ mod tests {
         assert_eq!(disk_tmpdir(Some(home), Some("/scratch"), GUEST), None);
         assert_eq!(disk_tmpdir(Some(home), None, DISK_TMP), None);
         assert_eq!(disk_tmpdir(None, None, GUEST), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sees_a_masked_tmp_mount() {
+        let units = tempfile::tempdir().unwrap();
+        assert_eq!(tmp_mount_masked(units.path()), Some(false));
+        std::os::unix::fs::symlink("/dev/null", units.path().join("tmp.mount")).unwrap();
+        assert_eq!(tmp_mount_masked(units.path()), Some(true));
+        assert_eq!(tmp_mount_masked(&units.path().join("missing")), None);
     }
 }

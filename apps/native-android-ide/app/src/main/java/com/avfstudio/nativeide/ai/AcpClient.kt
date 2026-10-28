@@ -102,8 +102,8 @@ class AcpClient(transport: GuestVfsClient, private val tool: String = COPILOT_AG
     }
 
     /** Launches the agent and negotiates the protocol; [newSession] then opens a conversation. */
-    fun start(cwd: String): CompletableFuture<Unit> =
-        connection.start(tool, cwd).thenCompose {
+    fun start(cwd: String, args: List<String> = emptyList()): CompletableFuture<Unit> =
+        connection.start(tool, cwd, args).thenCompose {
             connection.request("initialize", JsonObject().apply {
                 addProperty("protocolVersion", ACP_PROTOCOL_VERSION)
                 add("clientCapabilities", JsonObject().apply {

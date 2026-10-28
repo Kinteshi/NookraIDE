@@ -149,6 +149,12 @@ pub enum SystemMessage {
         disk_used_mb: u64,
         #[serde(default)]
         disk_total_mb: u64,
+        /// Whether /tmp is a RAM-backed tmpfs (None when the daemon can't tell).
+        #[serde(default)]
+        tmp_in_memory: Option<bool>,
+        /// Whether systemd's tmp.mount is masked, which puts /tmp on disk from the next boot.
+        #[serde(default)]
+        tmp_mount_masked: Option<bool>,
     },
     /// Which of `names` the daemon could run, for offering to install what a feature needs.
     ProbeCommands {
@@ -773,6 +779,8 @@ mod tests {
                 disk_problem: Some("read-only".into()),
                 disk_used_mb: 4000,
                 disk_total_mb: 64000,
+                tmp_in_memory: Some(true),
+                tmp_mount_masked: Some(false),
             }),
             MultiplexedPacket::System(SystemMessage::PortOpened {
                 port: 8000,

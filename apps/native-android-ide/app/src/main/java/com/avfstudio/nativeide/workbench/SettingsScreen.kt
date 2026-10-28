@@ -208,6 +208,21 @@ fun SettingsScreen(controller: WorkbenchController) {
                     }
                 }
                 item {
+                    // The common levels as buttons; settings.json takes any level the CLI accepts.
+                    val efforts = listOf("", "low", "medium", "high")
+                    SettingRow("Chat reasoning effort", "How much Copilot chat thinks before answering; Default leaves it to Copilot") {
+                        SingleChoiceSegmentedButtonRow {
+                            efforts.forEachIndexed { index, effort ->
+                                SegmentedButton(
+                                    selected = settings.chatReasoningEffort == effort,
+                                    onClick = { controller.setChatReasoningEffort(effort) },
+                                    shape = SegmentedButtonDefaults.itemShape(index, efforts.size),
+                                ) { Text(reasoningEffortLabel(effort)) }
+                            }
+                        }
+                    }
+                }
+                item {
                     SwitchRow("Suggestions in notebooks", "Copilot sees all cells of the notebook as context", settings.notebookCopilot) {
                         set(WorkbenchSettings.NOTEBOOK_COPILOT, it)
                     }
@@ -265,6 +280,23 @@ fun SettingsScreen(controller: WorkbenchController) {
                             }) { Text("Install") }
                             is DependencyState.Found -> Icon(Icons.Outlined.CheckCircle, contentDescription = "Installed", tint = MaterialTheme.colorScheme.primary)
                             DependencyState.Unknown -> Unit
+                        }
+                    }
+                }
+                controller.tmpPlacement?.let { placement ->
+                    item {
+                        SettingRow("Temp files (/tmp)", placement.summary) {
+                            when (placement) {
+                                TmpPlacement.Memory -> FilledTonalButton(onClick = {
+                                    controller.settingsVisible = false
+                                    controller.offerTmpPlacement(toDisk = true)
+                                }) { Text("Move to disk") }
+                                TmpPlacement.DiskAfterRestart, TmpPlacement.MovedToDisk -> TextButton(onClick = {
+                                    controller.settingsVisible = false
+                                    controller.offerTmpPlacement(toDisk = false)
+                                }) { Text(if (placement == TmpPlacement.MovedToDisk) "Back to memory" else "Undo") }
+                                TmpPlacement.Disk -> Unit
+                            }
                         }
                     }
                 }
