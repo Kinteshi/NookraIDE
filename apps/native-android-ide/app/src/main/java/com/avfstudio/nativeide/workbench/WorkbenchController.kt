@@ -473,12 +473,17 @@ class WorkbenchController(private val context: Context) {
             return
         }
         val previousServer = settings.pythonLanguageServer
+        val previousTypescriptServer = settings.typescriptLanguageServer
         userSettings = next
         updateLanguageSettings()
         editorView?.let(::applyEditorSettings)
         terminals.forEach { /* font size is read by the composable */ }
         if (settings.pythonLanguageServer != previousServer) {
             languageClients.getValue("python").close()
+            post { documents.forEach { ensureLanguageServers(it.path) } }
+        }
+        if (settings.typescriptLanguageServer != previousTypescriptServer) {
+            languageClients.getValue("typescript").close()
             post { documents.forEach { ensureLanguageServers(it.path) } }
         }
     }
@@ -507,7 +512,11 @@ class WorkbenchController(private val context: Context) {
 
     private fun updateLanguageSettings() {
         languageClients.forEach { (language, client) ->
-            val merged = SettingsResolver.merge(defaultSettings, userSettings, workspaceSettings, language)
+            var merged = SettingsResolver.merge(defaultSettings, userSettings, workspaceSettings, language)
+            // basedpyright reads the interpreter from its settings (ty gets it at start, as env).
+            if (language == "python" && settings.pythonInterpreter.isNotBlank() && merged.getPath("python.pythonPath") == null) {
+                merged = merged.withPath("python.pythonPath", settings.pythonInterpreter)
+            }
             client.updateSettings(SettingsResolver.sections(merged))
         }
     }
@@ -891,6 +900,8 @@ class WorkbenchController(private val context: Context) {
         debugConsole.add(DebugConsoleLine("Launching ${program.substringAfterLast('/')} with $python", DebugConsoleLine.Kind.Info))
         panelVisible = true
         panelTab = PanelTab.Debug
+        // The compact layout shows the panel's tabs under Terminal.
+        compactDestination = CompactDestination.Terminal
         debugger.eventListener = { event, body -> post { onDebugEvent(event, body) } }
         debugger.exitListener = { message -> post { if (debugState != DebugState.Idle) endDebugSession(message) } }
         debugger.start(cwd)
@@ -1106,8 +1117,14 @@ class WorkbenchController(private val context: Context) {
 
     fun selectInterpreter(path: String, then: (() -> Unit)?) {
         dialog = null
+        val changed = path != settings.pythonInterpreter
         updateSetting(WorkbenchSettings.PYTHON_INTERPRETER, path)
         status = "Python interpreter: $path"
+        // The language server reads the environment at start, so it starts again with the new one.
+        if (changed && languageClients.getValue("python").isStarted) {
+            languageClients.getValue("python").close()
+            post { documents.forEach { ensureLanguageServers(it.path) } }
+        }
         then?.invoke()
     }
 
@@ -2191,7 +2208,7 @@ class WorkbenchController(private val context: Context) {
         when (language) {
             "python" -> settings.pythonLanguageServer
             "python-format" -> "ruff"
-            else -> "vtsls"
+            else -> settings.typescriptLanguageServer
         }
 
     private fun copilotLanguageId(path: String): String =
@@ -2251,11 +2268,18 @@ class WorkbenchController(private val context: Context) {
         languageClients.filterValues { it in languageClientsFor(path) && !it.isStarted }.forEach { (language, client) ->
             val tool = languageServerTool(language)
             status = "Starting $tool"
-            client.start(workspace, tool).whenComplete { _, error ->
+            // ty finds the chosen interpreter's environment through CONDA_PREFIX / VIRTUAL_ENV.
+            val env = if (language == "python" && tool == "ty") pythonEnvironmentVariables(settings.pythonInterpreter) else emptyList()
+            client.start(workspace, tool, env).whenComplete { _, error ->
                 post {
                     reportLanguageServer(language, error)
                     if (error != null) {
-                        status = "$tool: ${error.cause?.message ?: error.message}"
+                        val message = error.cause?.message ?: error.message.orEmpty()
+                        status = "$tool: $message"
+                        // A server the guest doesn't have yet (TypeScript 7): offer it once, then start it.
+                        missingDependencyIn(message)?.takeIf { dialog == null }?.let { dependency ->
+                            offerInstall(dependency, "${dependency.label} isn't installed in the guest.") { ensureLanguageServers(path) }
+                        }
                         return@post
                     }
                     status = "$tool ready"
@@ -3138,6 +3162,8 @@ class WorkbenchController(private val context: Context) {
         var chain = CompletableFuture.completedFuture(Unit)
         chatAgent.configOptions.filter { it.category in rememberedChatCategories }.forEach { option ->
             val saved = preferences.getString("chat-option-${option.id}", null)
+            // The agent's own name for the saved value, for the picker before the next session.
+            option.choices.firstOrNull { it.value == saved }?.let { rememberChatChoice(option.id, it.value, it.name) }
             if (saved != null && saved != option.current && option.choices.any { it.value == saved }) {
                 chain = chain.thenCompose { chatAgent.setConfigOption(option.id, saved) }.exceptionally { }
             }
@@ -3162,20 +3188,31 @@ class WorkbenchController(private val context: Context) {
     fun setChatOption(option: com.avfstudio.nativeide.ai.AcpConfigOption, value: String, name: String? = null) {
         // Autopilot is never carried over to a new session, so it isn't shown as the remembered mode either.
         if (option.category in rememberedChatCategories && !value.endsWith("#autopilot")) {
-            preferences.edit()
-                .putString("chat-option-${option.id}", value)
-                .apply { if (name != null) putString("chat-option-${option.id}-name", name) }
-                .apply()
+            rememberChatChoice(option.id, value, name ?: option.choices.firstOrNull { it.value == value }?.name)
         }
         chatAgent.setConfigOption(option.id, value).whenComplete { _, error ->
             post { if (error != null) status = "Could not change ${option.name}: ${(error.cause ?: error).message}" }
         }
     }
 
+    /** Saves a choice to re-apply; the name is kept with the value it names, so it can't go stale. */
+    private fun rememberChatChoice(id: String, value: String, name: String?) {
+        preferences.edit()
+            .putString("chat-option-$id", value)
+            .apply {
+                if (name != null) putString("chat-option-$id-name", name).putString("chat-option-$id-name-of", value)
+                else remove("chat-option-$id-name").remove("chat-option-$id-name-of")
+            }
+            .apply()
+    }
+
     /** What the picker shows before a session exists: the remembered choice's name, if it will be re-applied. */
-    fun rememberedChatChoice(id: String): String? =
-        preferences.getString("chat-option-$id", null)?.takeUnless { it.endsWith("#autopilot") }
-            ?.let { preferences.getString("chat-option-$id-name", null) }
+    fun rememberedChatChoice(id: String): String? {
+        val value = preferences.getString("chat-option-$id", null)?.takeUnless { it.endsWith("#autopilot") } ?: return null
+        return preferences.getString("chat-option-$id-name", null)
+            ?.takeIf { preferences.getString("chat-option-$id-name-of", null) == value }
+            ?: chatValueLabel(value)
+    }
 
     /** The agent holds about 300 MB in the guest; end it after the configured idle time. */
     private fun scheduleChatStop() {
@@ -3633,7 +3670,7 @@ class WorkbenchController(private val context: Context) {
         } else {
             CompletableFuture.completedFuture(Unit)
         }
-        ready.thenCompose { session.kernel.startKernel(spec.name, directory) }.whenComplete { _, error ->
+        ready.thenCompose { session.kernel.startKernel(spec.name, directory, settings.plotlyDisplayIds) }.whenComplete { _, error ->
             post {
                 if (error != null) {
                     session.kernelState = "Kernel failed to start"

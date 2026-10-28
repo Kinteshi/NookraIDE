@@ -290,13 +290,20 @@ class GuestVfsClient(
     fun startLanguageServer(tool: String, cwd: String, args: List<String> = emptyList()): CompletableFuture<UUID> =
         startRpc(tool, cwd, "Lsp", args)
 
-    fun startRpc(tool: String, cwd: String, kind: String, args: List<String> = emptyList()): CompletableFuture<UUID> {
+    /** [env] must be names the tool's catalog entry allows (`env_allowlist`). */
+    fun startRpc(
+        tool: String,
+        cwd: String,
+        kind: String,
+        args: List<String> = emptyList(),
+        env: List<Pair<String, String>> = emptyList(),
+    ): CompletableFuture<UUID> {
         val activeSocket = connectedSocket()
             ?: return CompletableFuture.failedFuture(IOException("Guest is not connected"))
         val bridgeId = UUID.randomUUID()
         val started = CompletableFuture<RpcEvent.Started>()
         pendingRpcStarts[bridgeId] = started
-        if (!activeSocket.send(ByteString.of(*MessagePackVfsCodec.rpcStart(bridgeId, tool, args, cwd, kind)))) {
+        if (!activeSocket.send(ByteString.of(*MessagePackVfsCodec.rpcStart(bridgeId, tool, args, cwd, kind, env)))) {
             pendingRpcStarts.remove(bridgeId)
             return CompletableFuture.failedFuture(IOException("Guest WebSocket is not accepting RPC messages"))
         }

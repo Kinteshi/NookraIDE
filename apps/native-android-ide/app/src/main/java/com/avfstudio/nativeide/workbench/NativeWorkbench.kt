@@ -58,6 +58,9 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -328,15 +331,37 @@ private fun CompactContent(controller: WorkbenchController) {
     when (controller.compactDestination) {
         CompactDestination.Files -> SidebarContent(controller, SidebarView.Explorer)
         CompactDestination.Editor -> EditorArea(controller)
+        // The bottom panel's tabs (Problems lives under More) and "+", which the wide layout has in its panel.
         CompactDestination.Terminal -> Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceContainerLow)) {
-            TerminalView(controller, Modifier.weight(1f))
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                listOf(PanelTab.Terminal, PanelTab.Debug, PanelTab.Output).forEach { tab ->
+                    FilterChip(selected = controller.panelTab == tab, onClick = { controller.panelTab = tab }, label = { Text(tab.title) })
+                }
+                if (controller.panelTab == PanelTab.Terminal) {
+                    IconButton(onClick = { controller.newTerminal() }) { Icon(Icons.Outlined.Add, contentDescription = "New terminal") }
+                }
+            }
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                when (controller.panelTab) {
+                    PanelTab.Debug -> DebugPanel(controller)
+                    PanelTab.Output -> OutputLog(controller)
+                    else -> TerminalView(controller)
+                }
+            }
         }
         CompactDestination.Chat -> CopilotChatPane(controller)
         CompactDestination.More -> {
             var view by remember { mutableStateOf(SidebarView.Problems) }
             Column(Modifier.fillMaxSize()) {
-                Row(Modifier.padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf(SidebarView.Problems, SidebarView.Outline, SidebarView.References).forEach {
+                Row(
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    listOf(SidebarView.Search, SidebarView.SourceControl, SidebarView.Problems, SidebarView.Outline, SidebarView.References).forEach {
                         FilterChip(selected = view == it, onClick = { view = it }, label = { Text(it.title) })
                     }
                     FilterChip(selected = false, onClick = { controller.settingsVisible = true }, label = { Text("Settings") })
@@ -429,6 +454,13 @@ private fun StatusBar(controller: WorkbenchController) {
             controller.cursorPosition?.let { StatusItem("Ln ${it.line + 1}, Col ${it.character + 1}") { controller.runCommand("workbench.action.gotoLine") } }
             StatusItem(document.encoding) { controller.dialog = WorkbenchDialog.Encoding }
             StatusItem(if (document.eol == "\r\n") "CRLF" else "LF") { controller.dialog = WorkbenchDialog.LineEnding }
+            if (controller.lspLanguageId(document.path) == "python") {
+                // VS Code's interpreter chip: the environment completion, lint and debugging use.
+                val environment = pythonEnvironmentName(controller.settings.pythonInterpreter)
+                StatusItem(if (controller.settings.pythonInterpreter.isBlank()) environment else "Python: $environment") {
+                    controller.chooseInterpreter()
+                }
+            }
             StatusItem(controller.lspLanguageId(document.path) ?: document.languageId.ifEmpty { "plain text" })
         }
     }

@@ -62,10 +62,10 @@ class LanguageClient(
         }
     }
 
-    fun start(rootPath: String, tool: String = "ty"): CompletableFuture<Unit> {
+    fun start(rootPath: String, tool: String = "ty", env: List<Pair<String, String>> = emptyList()): CompletableFuture<Unit> {
         isStarted = true
         workspaceRoot = rootPath
-        return connection.start(tool, rootPath).thenCompose {
+        return connection.start(tool, rootPath, env = env).thenCompose {
             request("initialize", initializeParams(rootPath)).thenApply { initializeResult ->
                 val capabilities = initializeResult.asJsonObject.getAsJsonObject("capabilities")
                 val semanticProvider = capabilities?.getAsJsonObject("semanticTokensProvider")

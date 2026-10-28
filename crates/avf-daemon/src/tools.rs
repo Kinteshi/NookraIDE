@@ -72,6 +72,11 @@ pub struct DownloadSpec {
     pub archive_member: String,
     /// Per-architecture artifacts keyed by `std::env::consts::ARCH`.
     pub artifacts: std::collections::BTreeMap<String, DownloadArtifact>,
+    /// Keep the member's whole directory in the tool's own folder (for executables that need
+    /// files beside them, like TypeScript's `lib.*.d.ts`); `binary` then names a launcher put in
+    /// `~/.local/bin`, which may differ from the member's file name.
+    #[serde(default)]
+    pub keep_directory: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -316,9 +321,11 @@ fn validate_download_spec(name: &str, download: &DownloadSpec) -> Result<(), Str
             && member
                 .components()
                 .all(|component| matches!(component, std::path::Component::Normal(_)))
-            && member
-                .file_name()
-                .is_some_and(|file| file == download.binary.as_str())
+            && (download.keep_directory
+                || member
+                    .file_name()
+                    .is_some_and(|file| file == download.binary.as_str()))
+            && (!download.keep_directory || member.parent().is_some_and(|parent| !parent.as_os_str().is_empty()))
     };
     let members = std::iter::once(download.archive_member.as_str())
         .chain(download.artifacts.values().filter_map(|artifact| artifact.archive_member.as_deref()));
@@ -672,6 +679,13 @@ fn install_downloaded_archive(
     let extract_dir = staging.join("extract");
     fs::create_dir(&extract_dir)
         .map_err(|error| format!("Cannot create extraction directory for '{name}': {error}"))?;
+    let member = Path::new(download.member_for(artifact));
+    // A kept directory is unpacked whole; otherwise only the executable.
+    let unpack = if download.keep_directory {
+        member.parent().unwrap_or(member)
+    } else {
+        member
+    };
     let status = Command::new("tar")
         .arg("--extract")
         .arg("--gzip")
@@ -681,7 +695,7 @@ fn install_downloaded_archive(
         .arg("--directory")
         .arg(&extract_dir)
         .arg("--")
-        .arg(download.member_for(artifact))
+        .arg(unpack)
         .stdin(Stdio::null())
         .status()
         .map_err(|error| format!("Could not start tar to unpack '{name}': {error}."))?;
@@ -696,12 +710,60 @@ fn install_downloaded_archive(
             "The archive member for '{name}' is not a regular file."
         ));
     }
+    if download.keep_directory {
+        return install_kept_directory(home, name, download, &extract_dir.join(unpack), member);
+    }
 
     let bin_dir = local_bin_directory(home)?;
     install_executable(name, &bin_dir, &download.binary, |staged| {
         fs::copy(&extracted, staged)
             .map(|_| ())
             .map_err(|error| format!("Cannot stage the '{name}' executable: {error}"))
+    })
+}
+
+/// Moves an unpacked directory into the tool's folder (`<tools>/<name>/files`) and puts a launcher
+/// on PATH that runs the executable from there.
+fn install_kept_directory(
+    home: &Path,
+    name: &str,
+    download: &DownloadSpec,
+    unpacked: &Path,
+    member: &Path,
+) -> Result<(), String> {
+    let executable = member
+        .file_name()
+        .ok_or_else(|| format!("The archive member for '{name}' has no file name."))?;
+    let tool_dir = ensure_tools_root(home)?.join(name);
+    ensure_directory(&tool_dir)?;
+    let files = tool_dir.join("files");
+    let previous = tool_dir.join(format!(
+        ".files-old-{}-{}",
+        std::process::id(),
+        TEMP_FILE_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    ));
+    if fs::symlink_metadata(&files).is_ok() {
+        fs::rename(&files, &previous)
+            .map_err(|error| format!("Cannot replace the files of '{name}': {error}"))?;
+    }
+    if let Err(error) = fs::rename(unpacked, &files) {
+        let _ = fs::rename(&previous, &files);
+        return Err(format!("Cannot install the files of '{name}': {error}"));
+    }
+    let _ = fs::remove_dir_all(&previous);
+    let target = files.join(executable);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&target, fs::Permissions::from_mode(0o755))
+            .map_err(|error| format!("Cannot mark '{name}' executable: {error}"))?;
+    }
+    let quoted = target.display().to_string().replace('\'', "'\\''");
+    let launcher = format!("#!/bin/sh\nexec '{quoted}' \"$@\"\n");
+    let bin_dir = local_bin_directory(home)?;
+    install_executable(name, &bin_dir, &download.binary, |staged| {
+        fs::write(staged, launcher)
+            .map_err(|error| format!("Cannot write the '{name}' launcher: {error}"))
     })
 }
 
@@ -1083,6 +1145,7 @@ mod tests {
                 },
             )]
             .into(),
+            keep_directory: false,
         }
     }
 
@@ -1216,6 +1279,58 @@ mod tests {
                 0o755
             );
         }
+    }
+
+    #[test]
+    fn kept_directory_installs_its_files_and_a_launcher() {
+        use sha2::{Digest, Sha256};
+        let home = tempdir().unwrap();
+        let work = tempdir().unwrap();
+        let lib = work.path().join("package/lib");
+        fs::create_dir_all(&lib).unwrap();
+        fs::write(lib.join("tsc"), "#!/bin/sh\necho compiler\n").unwrap();
+        fs::write(lib.join("lib.d.ts"), "declare var x: number;\n").unwrap();
+        fs::write(work.path().join("package/README.md"), "not needed\n").unwrap();
+        let archive = work.path().join("ts.tgz");
+        assert!(Command::new("tar")
+            .arg("-czf")
+            .arg(&archive)
+            .arg("-C")
+            .arg(work.path())
+            .arg("package")
+            .status()
+            .unwrap()
+            .success());
+        let digest: String = Sha256::digest(fs::read(&archive).unwrap())
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        let mut download = sample_download(&digest);
+        download.binary = "tsgo".into();
+        download.archive_member = "package/lib/tsc".into();
+        download.keep_directory = true;
+        assert!(validate_download_spec("typescript", &download).is_ok());
+        let artifact = download.artifacts["aarch64"].clone();
+        for _ in 0..2 {
+            // A second install replaces the first one's files.
+            let staging = staging_directory(home.path(), "typescript").unwrap();
+            install_downloaded_archive(home.path(), "typescript", &download, &artifact, &archive, &staging).unwrap();
+            let _ = fs::remove_dir_all(&staging);
+        }
+        let files = fs::canonicalize(home.path()).unwrap().join(".local/share/avf-studio/tools/typescript/files");
+        assert!(files.join("lib.d.ts").is_file());
+        assert!(!files.join("README.md").exists());
+        let launcher = fs::read_to_string(home.path().join(".local/bin/tsgo")).unwrap();
+        assert_eq!(launcher, format!("#!/bin/sh\nexec '{}' \"$@\"\n", files.join("tsc").display()));
+        let output = Command::new(home.path().join(".local/bin/tsgo")).output().unwrap();
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "compiler\n");
+
+        // Without keep_directory the member must still be the executable itself.
+        download.keep_directory = false;
+        assert!(validate_download_spec("typescript", &download).is_err());
+        download.keep_directory = true;
+        download.archive_member = "tsc".into();
+        assert!(validate_download_spec("typescript", &download).is_err());
     }
 
     #[test]

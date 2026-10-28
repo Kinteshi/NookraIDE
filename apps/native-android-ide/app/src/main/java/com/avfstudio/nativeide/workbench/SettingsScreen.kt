@@ -184,6 +184,19 @@ fun SettingsScreen(controller: WorkbenchController) {
                     }
                 }
                 item {
+                    SettingRow("TypeScript language server", "TypeScript 7 is native (about 50 MB); vtsls runs tsserver on Node") {
+                        SingleChoiceSegmentedButtonRow {
+                            listOf("typescript" to "TypeScript 7", "vtsls" to "vtsls").forEachIndexed { index, (server, label) ->
+                                SegmentedButton(
+                                    selected = settings.typescriptLanguageServer == server,
+                                    onClick = { set(WorkbenchSettings.TYPESCRIPT_LANGUAGE_SERVER, server) },
+                                    shape = SegmentedButtonDefaults.itemShape(index, 2),
+                                ) { Text(label) }
+                            }
+                        }
+                    }
+                }
+                item {
                     SliderRow("Stop idle servers after", settings.languageServerIdleSeconds.toFloat(), 10f..600f, "%.0f s") {
                         set(WorkbenchSettings.LANGUAGE_SERVER_IDLE, it.roundToInt())
                     }
@@ -251,6 +264,13 @@ fun SettingsScreen(controller: WorkbenchController) {
                     SwitchRow("Draw Plotly figures", "Interactive charts in cell outputs; loads plotly.js from cdn.plot.ly the first time", settings.renderPlotly) {
                         set(WorkbenchSettings.RENDER_PLOTLY, it)
                     }
+                }
+                item {
+                    SwitchRow(
+                        "Plotly figures update in place",
+                        "display(fig, display_id=True) and its update() redraw one figure; applies to kernels started from now on",
+                        settings.plotlyDisplayIds,
+                    ) { set(WorkbenchSettings.PLOTLY_DISPLAY_IDS, it) }
                 }
                 item {
                     SwitchRow("HTML outputs", "Tables and rich output as HTML (pandas DataFrames); scripts never run", settings.renderHtmlOutputs) {

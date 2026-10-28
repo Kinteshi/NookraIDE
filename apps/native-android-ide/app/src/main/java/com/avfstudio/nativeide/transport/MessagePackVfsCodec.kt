@@ -100,7 +100,14 @@ internal object MessagePackVfsCodec {
             }
         }
 
-    fun rpcStart(bridgeId: UUID, tool: String, args: List<String>, cwd: String?, kind: String = "Lsp"): ByteArray =
+    fun rpcStart(
+        bridgeId: UUID,
+        tool: String,
+        args: List<String>,
+        cwd: String?,
+        kind: String = "Lsp",
+        env: List<Pair<String, String>> = emptyList(),
+    ): ByteArray =
         rpcPacket("Start") {
             require(kind in setOf("Lsp", "Dap", "Acp", "Kernel")) { "Unsupported RPC bridge kind: $kind" }
             packMapHeader(6)
@@ -113,7 +120,12 @@ internal object MessagePackVfsCodec {
             packString("cwd")
             cwd?.let(::packString) ?: packNil()
             packString("env")
-            packArrayHeader(0)
+            packArrayHeader(env.size)
+            env.forEach { (name, value) ->
+                packArrayHeader(2)
+                packString(name)
+                packString(value)
+            }
         }
 
     fun rpcMessage(bridgeId: UUID, body: String): ByteArray =

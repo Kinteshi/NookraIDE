@@ -85,10 +85,12 @@ class KernelClient(transport: GuestVfsClient) {
             )
         }
 
-    fun startKernel(name: String, cwd: String): CompletableFuture<Unit> =
+    /** [plotlyDisplayIds]: let `display(fig, display_id=True)` update Plotly figures in place. */
+    fun startKernel(name: String, cwd: String, plotlyDisplayIds: Boolean = false): CompletableFuture<Unit> =
         connection.request("start", JsonObject().apply {
             addProperty("name", name)
             addProperty("cwd", cwd)
+            addProperty("plotly_display_ids", plotlyDisplayIds)
         }, timeoutSeconds = 300).thenApply { }
 
     fun execute(cellId: String, code: String): CompletableFuture<ExecuteReply> =

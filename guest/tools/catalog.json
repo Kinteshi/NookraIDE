@@ -11,7 +11,7 @@
         "uv": ["ty"]
       },
       "settingsSection": "ty",
-      "env_allowlist": [],
+      "env_allowlist": ["VIRTUAL_ENV", "CONDA_PREFIX"],
       "initializationOptions": {}
     },
     {
@@ -37,6 +37,33 @@
         "uv": ["ruff"]
       },
       "settingsSection": "ruff",
+      "env_allowlist": [],
+      "initializationOptions": {}
+    },
+    {
+      "name": "typescript",
+      "version": "7.0.2",
+      "kind": "lsp",
+      "languages": ["typescript", "javascript"],
+      "command": ["tsgo", "--lsp", "--stdio"],
+      "install": {
+        "download": {
+          "binary": "tsgo",
+          "archive_member": "package/lib/tsc",
+          "keep_directory": true,
+          "artifacts": {
+            "aarch64": {
+              "url": "https://registry.npmjs.org/@typescript/typescript-linux-arm64/-/typescript-linux-arm64-7.0.2.tgz",
+              "sha256": "c83d931ac9dd7549cde6e71246aa9d6a9812843023df3e277fe3b5dcf41dd0ea"
+            },
+            "x86_64": {
+              "url": "https://registry.npmjs.org/@typescript/typescript-linux-x64/-/typescript-linux-x64-7.0.2.tgz",
+              "sha256": "7ecad6f67377e831856367ab062ef394f21506a611405bf8ac0ff039348637d3"
+            }
+          }
+        }
+      },
+      "settingsSection": "typescript",
       "env_allowlist": [],
       "initializationOptions": {}
     },
@@ -120,7 +147,7 @@
     },
     {
       "name": "jupyter",
-      "version": "bridge-3",
+      "version": "bridge-4",
       "kind": "kernel",
       "languages": ["python"],
       "command": ["avf-jupyter-bridge"],

@@ -61,6 +61,13 @@ enum class GuestDependency(
         "the MaterialCode tool catalog",
         "avf-native-daemon tools install jupyter",
     ),
+    TypeScript(
+        "TypeScript 7",
+        listOf("tsgo"),
+        "TypeScript and JavaScript completion, errors and navigation",
+        "the MaterialCode tool catalog (pinned, checksum-verified; about 26 MB)",
+        "avf-native-daemon tools install typescript",
+    ),
     Ripgrep(
         "ripgrep",
         listOf("rg"),
@@ -103,6 +110,7 @@ internal fun missingDependencyIn(message: String): GuestDependency? {
     return when {
         "tool 'jupyter' is not installed" in lower -> GuestDependency.JupyterBridge
         "tool 'gh' is not installed" in lower -> GuestDependency.GitHubCli
+        "tool 'typescript' is not installed" in lower -> GuestDependency.TypeScript
         "could not start ripgrep" in lower && notFound -> GuestDependency.Ripgrep
         "could not start git" in lower && notFound -> GuestDependency.Git
         "unable to find git executable" in lower -> GuestDependency.Git
@@ -162,3 +170,28 @@ internal fun tmpPlacement(inMemory: Boolean?, masked: Boolean?): TmpPlacement? =
 /** Debian's tmpfs /tmp comes from systemd's tmp.mount; masked, /tmp stays on the root filesystem. */
 internal const val TMP_TO_DISK_COMMAND = "sudo systemctl mask tmp.mount"
 internal const val TMP_TO_MEMORY_COMMAND = "sudo systemctl unmask tmp.mount"
+
+private val CONDA_ROOT_NAMES = setOf("miniconda3", "miniforge3", "anaconda3", "mambaforge", "micromamba", "miniconda", "anaconda")
+
+/**
+ * How a Python language server learns which environment [python] belongs to: ty reads a conda
+ * environment from CONDA_PREFIX and a venv from VIRTUAL_ENV (which must hold a pyvenv.cfg).
+ * Nothing for the system Python or a bare command name.
+ */
+internal fun pythonEnvironmentVariables(python: String): List<Pair<String, String>> {
+    val prefix = python.substringBeforeLast("/bin/", "")
+    if (prefix.isEmpty() || prefix == "/usr" || prefix == "/usr/local") return emptyList()
+    val conda = "/envs/" in prefix || prefix.substringAfterLast('/') in CONDA_ROOT_NAMES
+    return listOf((if (conda) "CONDA_PREFIX" else "VIRTUAL_ENV") to prefix)
+}
+
+/** The short name the status bar shows for an interpreter path: its environment's folder. */
+internal fun pythonEnvironmentName(python: String): String {
+    val prefix = python.substringBeforeLast("/bin/", "")
+    return when {
+        python.isBlank() -> "Select Python"
+        prefix.isEmpty() -> python
+        prefix == "/usr" || prefix == "/usr/local" -> "system"
+        else -> prefix.substringAfterLast('/')
+    }
+}

@@ -31,6 +31,8 @@ data class WorkbenchSettings(
     val semanticHighlighting: Boolean = true,
     val terminalFontSize: Float = 13f,
     val pythonLanguageServer: String = "ty",
+    /** TypeScript 7's native server ("typescript") or vtsls (Node + tsserver). */
+    val typescriptLanguageServer: String = "typescript",
     val languageServerIdleSeconds: Int = 60,
     val inlineSuggestDelayMs: Int = 350,
     val chatIdleMinutes: Int = 5,
@@ -47,6 +49,8 @@ data class WorkbenchSettings(
     val notebookCopilot: Boolean = true,
     /** Draw Plotly figures; needs plotly.js from cdn.plot.ly the first time. */
     val renderPlotly: Boolean = true,
+    /** Python kernels let `display(fig, display_id=True)` update Plotly figures in place. */
+    val plotlyDisplayIds: Boolean = true,
     val statusBarGuestResources: Boolean = true,
     /** Script-free `text/html` outputs (pandas tables) as HTML rather than their text form. */
     val renderHtmlOutputs: Boolean = true,
@@ -69,6 +73,7 @@ data class WorkbenchSettings(
         const val SEMANTIC_HIGHLIGHTING = "editor.semanticHighlighting.enabled"
         const val TERMINAL_FONT_SIZE = "terminal.integrated.fontSize"
         const val PYTHON_LANGUAGE_SERVER = "avf.python.languageServer"
+        const val TYPESCRIPT_LANGUAGE_SERVER = "avf.typescript.languageServer"
         const val LANGUAGE_SERVER_IDLE = "avf.languageServers.idleStopSeconds"
         const val INLINE_SUGGEST_DELAY = "avf.copilot.inlineSuggestDelayMs"
         const val CHAT_IDLE_MINUTES = "avf.copilot.chatIdleMinutes"
@@ -84,6 +89,7 @@ data class WorkbenchSettings(
         const val USE_TAB_STOPS = "editor.useTabStops"
         const val NOTEBOOK_COPILOT = "avf.copilot.notebooks"
         const val RENDER_PLOTLY = "avf.notebook.plotly"
+        const val PLOTLY_DISPLAY_IDS = "avf.notebook.plotlyDisplayIds"
         const val STATUS_BAR_GUEST = "avf.statusBar.guestResources"
         const val RENDER_HTML = "avf.notebook.htmlOutputs"
         const val NOTEBOOK_TAB_COMPLETION = "avf.notebook.tabCompletion"
@@ -113,6 +119,8 @@ data class WorkbenchSettings(
                 terminalFontSize = number(TERMINAL_FONT_SIZE)?.toFloat()?.coerceIn(6f, 30f) ?: defaults.terminalFontSize,
                 pythonLanguageServer = string(PYTHON_LANGUAGE_SERVER)?.takeIf { it in setOf("ty", "basedpyright") }
                     ?: defaults.pythonLanguageServer,
+                typescriptLanguageServer = string(TYPESCRIPT_LANGUAGE_SERVER)?.takeIf { it in setOf("typescript", "vtsls") }
+                    ?: defaults.typescriptLanguageServer,
                 languageServerIdleSeconds = number(LANGUAGE_SERVER_IDLE)?.toInt()?.coerceIn(10, 3600)
                     ?: defaults.languageServerIdleSeconds,
                 inlineSuggestDelayMs = number(INLINE_SUGGEST_DELAY)?.toInt()?.coerceIn(0, 5000)
@@ -127,6 +135,7 @@ data class WorkbenchSettings(
                 useTabStops = bool(USE_TAB_STOPS, defaults.useTabStops),
                 notebookCopilot = bool(NOTEBOOK_COPILOT, defaults.notebookCopilot),
                 renderPlotly = bool(RENDER_PLOTLY, defaults.renderPlotly),
+                plotlyDisplayIds = bool(PLOTLY_DISPLAY_IDS, defaults.plotlyDisplayIds),
                 statusBarGuestResources = bool(STATUS_BAR_GUEST, defaults.statusBarGuestResources),
                 renderHtmlOutputs = bool(RENDER_HTML, defaults.renderHtmlOutputs),
                 notebookTabCompletion = bool(NOTEBOOK_TAB_COMPLETION, defaults.notebookTabCompletion),
@@ -134,6 +143,10 @@ data class WorkbenchSettings(
         }
     }
 }
+
+/** A readable name for a chat option value without one, e.g. a mode URL ending in `#agent`. */
+internal fun chatValueLabel(value: String): String =
+    value.substringAfterLast('#').substringAfterLast('/').replaceFirstChar { it.uppercase() }
 
 /** How a `--reasoning-effort` level reads in the UI; empty is the CLI's own default. */
 fun reasoningEffortLabel(effort: String): String = when (effort) {

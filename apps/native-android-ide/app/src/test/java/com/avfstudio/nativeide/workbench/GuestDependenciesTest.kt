@@ -60,4 +60,15 @@ class GuestDependenciesTest {
         assertEquals(TmpPlacement.MovedToDisk, tmpPlacement(false, true))
         assertEquals(TmpPlacement.Disk, tmpPlacement(false, false))
     }
+
+    @Test
+    fun interpretersMapToTheEnvironmentTyReads() {
+        assertEquals(listOf("CONDA_PREFIX" to "/home/droid/miniconda3/envs/fourteen"), pythonEnvironmentVariables("/home/droid/miniconda3/envs/fourteen/bin/python"))
+        assertEquals(listOf("CONDA_PREFIX" to "/home/droid/miniforge3"), pythonEnvironmentVariables("/home/droid/miniforge3/bin/python"))
+        assertEquals(listOf("VIRTUAL_ENV" to "/home/droid/.venv"), pythonEnvironmentVariables("/home/droid/.venv/bin/python"))
+        assertEquals(emptyList<Pair<String, String>>(), pythonEnvironmentVariables("/usr/bin/python3"))
+        assertEquals(emptyList<Pair<String, String>>(), pythonEnvironmentVariables("python3"))
+        assertEquals(listOf("fourteen", ".venv", "system", "python3", "Select Python"),
+            listOf("/home/droid/miniconda3/envs/fourteen/bin/python", "/home/droid/.venv/bin/python", "/usr/bin/python3", "python3", "").map(::pythonEnvironmentName))
+    }
 }

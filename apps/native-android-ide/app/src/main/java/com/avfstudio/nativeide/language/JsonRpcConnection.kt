@@ -37,8 +37,13 @@ class JsonRpcConnection(
     @Volatile var exitListener: ((Int?) -> Unit)? = null
     @Volatile var errorListener: ((String) -> Unit)? = null
 
-    fun start(tool: String, cwd: String, args: List<String> = emptyList()): CompletableFuture<Unit> =
-        transport.startRpc(tool, cwd, kind, args).thenApply { id ->
+    fun start(
+        tool: String,
+        cwd: String,
+        args: List<String> = emptyList(),
+        env: List<Pair<String, String>> = emptyList(),
+    ): CompletableFuture<Unit> =
+        transport.startRpc(tool, cwd, kind, args, env).thenApply { id ->
             bridgeId = id
             transport.addRpcEventListener(id, ::onRpcEvent)
         }

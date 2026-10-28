@@ -9,7 +9,7 @@ Speaks newline-delimited JSON-RPC 2.0 on stdin/stdout (one bridge per notebook) 
 single kernel through jupyter_client. Kernels come from the user's own environments (conda,
 venvs, system Python with ipykernel), so nothing is installed into them.
 
-Requests:  kernelspecs, start {name, cwd}, execute {code, cell_id}, complete {code, cursor_pos},
+Requests:  kernelspecs, start {name, cwd, plotly_display_ids}, execute {code, cell_id}, complete {code, cursor_pos},
            interrupt, restart, shutdown
 Notifications to the client: output {cell_id, output, display_id}, clear_output {cell_id, wait},
            update_display {display_id, output}, status {state}
@@ -133,6 +133,26 @@ def spec_manager(missing):
     return manager
 
 
+# Plotly figures display themselves through _ipython_display_, which ignores display_id:
+# `handle = display(fig, display_id=True)` then `handle.update(fig)` adds a new figure each
+# time. Without that hook IPython uses the figure's mime bundle, which keeps the id. Only when
+# plotly is installed in the kernel's environment; importing it costs a moment at start.
+PLOTLY_DISPLAY_IDS = """\
+def _avf_plotly_display_ids():
+    import importlib.util
+    if importlib.util.find_spec("plotly") is None:
+        return
+    from plotly.basedatatypes import BaseFigure
+    if "_ipython_display_" in vars(BaseFigure) and hasattr(BaseFigure, "_repr_mimebundle_"):
+        del BaseFigure._ipython_display_
+try:
+    _avf_plotly_display_ids()
+except Exception:
+    pass
+del _avf_plotly_display_ids
+"""
+
+
 def to_nbformat_output(message):
     kind = message["header"]["msg_type"]
     content = message["content"]
@@ -204,7 +224,19 @@ class Bridge:
         client.start_channels()
         client.wait_for_ready(timeout=120)
         self.kernel, self.client = manager, client
+        spec = self.specs.get_kernel_spec(params["name"])
+        self.plotly_display_ids = bool(params.get("plotly_display_ids")) and spec.language == "python"
+        self._prepare_kernel()
         return {"name": params["name"]}
+
+    def _prepare_kernel(self):
+        """Runs the bridge's own setup in a fresh kernel, silently and before any cell."""
+        if not getattr(self, "plotly_display_ids", False):
+            return
+        msg_id = self.client.execute(PLOTLY_DISPLAY_IDS, silent=True, store_history=False, allow_stdin=False)
+        reply = self.client.get_shell_msg(timeout=60)
+        while reply.get("parent_header", {}).get("msg_id") != msg_id:
+            reply = self.client.get_shell_msg(timeout=60)
 
     def execute(self, params, request_id):
         if self.client is None:
@@ -261,6 +293,7 @@ class Bridge:
             raise RuntimeError("No kernel is running")
         self.kernel.restart_kernel(now=True)
         self.client.wait_for_ready(timeout=120)
+        self._prepare_kernel()
         return None
 
     def shutdown(self, _params):

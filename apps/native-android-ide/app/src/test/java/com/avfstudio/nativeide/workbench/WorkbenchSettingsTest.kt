@@ -41,6 +41,8 @@ class WorkbenchSettingsTest {
         assertEquals("high", WorkbenchSettings.from(JsonParser.parseString("""{"avf.copilot.chatReasoningEffort":"high"}""").asJsonObject).chatReasoningEffort)
         assertEquals("", WorkbenchSettings.from(JsonParser.parseString("""{"avf.copilot.chatReasoningEffort":"turbo"}""").asJsonObject).chatReasoningEffort)
         assertEquals(listOf("Default", "Extra high", "Low"), listOf("", "xhigh", "low").map(::reasoningEffortLabel))
+        assertEquals("Agent", chatValueLabel("https://agentclientprotocol.com/protocol/session-modes#agent"))
+        assertEquals("Auto", chatValueLabel("auto"))
         assertEquals(SyntaxColors.MaterialYou, WorkbenchSettings.from(JsonParser.parseString("""{"avf":{"theme":{"syntaxColors":"materialYou"}}}""").asJsonObject).syntaxColors)
     }
 
