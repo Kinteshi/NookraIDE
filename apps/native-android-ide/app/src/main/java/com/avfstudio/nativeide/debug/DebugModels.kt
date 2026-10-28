@@ -70,7 +70,7 @@ fun pythonLaunchArguments(program: String, cwd: String, python: String, justMyCo
 
 fun dapInitializeArguments(): JsonObject = JsonObject().apply {
     addProperty("clientID", "avf-studio")
-    addProperty("clientName", "AVF Studio")
+    addProperty("clientName", "MaterialCode")
     addProperty("adapterID", "debugpy")
     addProperty("linesStartAt1", true)
     addProperty("columnsStartAt1", true)

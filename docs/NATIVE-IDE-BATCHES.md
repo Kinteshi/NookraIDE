@@ -585,7 +585,21 @@ Registered list (10-27):
   by character, the file on disk was never changed (grep), and the tab was reopened from disk.
   Fixed in batch 13: tapping an ended terminal takes the keyboard from the editor.
 
-## Next pass (registered 10-27 23:35, updated 10-28 00:45; not started)
+## 14. MaterialCode name and icon; key log removed (10-28 00:55; built, not installed yet)
+* The app is called MaterialCode (launcher label, top bar, welcome screen, notification,
+  dialogs, the daemon's pairing instructions, the installer's notes and unit description). The
+  package id stays com.avfstudio.nativeide so the tablet build updates in place and keeps its
+  settings, token and drafts; internal names (avf-native-daemon, crates, repo) are unchanged.
+* Icon: "< / >" in Material 3 tones (lavender #D0BCFF chevrons, mint #7DDBC4 slash) on #1C1B1F.
+  Adaptive icon for Android 8+ (vector foreground, colour background, monochrome layer for
+  Android 13 themed icons) and PNG fallbacks for Android 7 rendered from
+  `docs/branding/materialcode-icon.svg` (512 px preview next to it).
+* Backlog item 15 done: the AVFKEYS routing log is gone (KeyRouter.route is one line again).
+* Not installed: the user was training in private-notebook-1.ipynb (guest CPU 59%); an install
+  restarts the app and would stop the kernel.
+
+## Next pass (registered 10-27 23:35, updated 10-28 00:55; not started)
+The small tests stay first; the user resets the guest before that pass.
 * Carried over:
   * Copilot server staying stopped while signed out (needs a signed-out session).
   * Untested setup paths: Source Control's Install Git, Miniforge, "Create ~/.venv" via uv.
@@ -608,8 +622,6 @@ Registered list (10-27):
   seen once in two tries, cause unknown. The app retries once after 3 s.
 * Notebook gap: script-based outputs (widgets, bokeh, altair) still show their text form.
 * Customisable keybindings (`keybindings.json`), TypeScript 7 measurement, compact layout check.
-* Remove the `AVFKEY` routing log (gated by `log.tag.AVFKEYS`) now that the Book Cover keyboard
-  fix is confirmed.
 * Done and dropped from this list (10-28): Copilot chat sign-in and replies (batch 11),
   stopping the Copilot server while signed out (built; tablet check carried over), HTML outputs
   and kernel completions (batches 11-12).

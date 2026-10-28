@@ -37,7 +37,7 @@ class CopilotClient(
         transport,
         initializationOptions = JsonObject().apply {
             add("editorInfo", JsonObject().apply {
-                addProperty("name", "AVF Studio Native")
+                addProperty("name", "MaterialCode")
                 addProperty("version", editorVersion)
             })
             add("editorPluginInfo", JsonObject().apply {

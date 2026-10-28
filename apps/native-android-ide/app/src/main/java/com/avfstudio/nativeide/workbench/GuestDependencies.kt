@@ -33,14 +33,14 @@ enum class GuestDependency(
         "GitHub CLI",
         listOf("gh"),
         "Signing in to GitHub for Copilot chat and Git",
-        "the AVF Studio tool catalog (pinned, checksum-verified)",
+        "the MaterialCode tool catalog (pinned, checksum-verified)",
         "avf-native-daemon tools install gh",
     ),
     Uv(
         "uv",
         listOf("uv"),
         "The Jupyter bridge, ty, ruff and quick Python environments",
-        "the AVF Studio tool catalog (pinned, checksum-verified)",
+        "the MaterialCode tool catalog (pinned, checksum-verified)",
         "avf-native-daemon tools install uv",
     ),
     Conda(
@@ -58,14 +58,14 @@ enum class GuestDependency(
         "Jupyter bridge",
         listOf("avf-jupyter-bridge"),
         "Running notebook kernels",
-        "the AVF Studio tool catalog",
+        "the MaterialCode tool catalog",
         "avf-native-daemon tools install jupyter",
     ),
     Ripgrep(
         "ripgrep",
         listOf("rg"),
         "Search across files",
-        "the AVF Studio tool catalog (pinned, checksum-verified)",
+        "the MaterialCode tool catalog (pinned, checksum-verified)",
         "avf-native-daemon tools install ripgrep",
     ),
     ;

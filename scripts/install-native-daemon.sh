@@ -72,14 +72,14 @@ if [[ "$(findmnt -no FSTYPE /tmp 2>/dev/null)" == tmpfs ]]; then
   chmod 700 "$HOME/.cache/tmp"
   printf 'd %%h/.cache/tmp 0700 - - 7d\n' >"$HOME/.config/user-tmpfiles.d/avf-tmp.conf"
   tmp_line="Environment=TMPDIR=%h/.cache/tmp"
-  profile_script='# AVF Studio: /tmp is a tmpfs in memory; large installs (pip, conda) need a temp dir on disk.
+  profile_script='# MaterialCode: /tmp is a tmpfs in memory; large installs (pip, conda) need a temp dir on disk.
 if [ -z "${TMPDIR:-}" ] && [ -n "${HOME:-}" ] && [ "$HOME" != / ] && mkdir -p -m 700 "$HOME/.cache/tmp" 2>/dev/null; then
   export TMPDIR="$HOME/.cache/tmp"
 fi'
   # Only in the AVF guest: on a remote host the daemon's own check is enough, and system files
   # there are the owner's business.
   if ! $remote && ! printf '%s\n' "$profile_script" | sudo -n tee /etc/profile.d/avf-tmpdir.sh >/dev/null 2>&1; then
-    echo "note: /tmp is in memory; for shells outside AVF Studio, add 'export TMPDIR=\$HOME/.cache/tmp' to ~/.profile" >&2
+    echo "note: /tmp is in memory; for shells outside MaterialCode, add 'export TMPDIR=\$HOME/.cache/tmp' to ~/.profile" >&2
   fi
 fi
 if [[ ! -f "$config/env" ]]; then
@@ -88,7 +88,7 @@ fi
 
 cat >"$unit" <<UNIT
 [Unit]
-Description=AVF Studio native IDE daemon
+Description=MaterialCode IDE daemon (avf-native)
 
 [Service]
 Type=simple

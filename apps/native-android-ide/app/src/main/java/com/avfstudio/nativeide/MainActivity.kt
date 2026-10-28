@@ -85,7 +85,7 @@ private fun NativeEditorLab() {
                 .background(Color(0xFF252526))
                 .padding(horizontal = 16.dp, vertical = 12.dp),
         ) {
-            Text("AVF Native IDE", color = Color(0xFFF3F3F3), fontSize = 18.sp)
+            Text("MaterialCode", color = Color(0xFFF3F3F3), fontSize = 18.sp)
             Spacer(Modifier.height(4.dp))
             Text("N0 editor engine evaluation", color = Color(0xFFB8B8B8), fontSize = 12.sp)
         }

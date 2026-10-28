@@ -324,7 +324,7 @@ class WorkbenchController(private val context: Context) {
             DocumentSession(it.path, it.text, it.modifiedTs, it.dirty, encoding = it.encoding, eol = it.eol)
         } ?: DocumentSession(
             SCRATCH_WELCOME_PATH,
-            "# Welcome to AVF Native IDE\n# Edit this scratch file offline, or connect to a guest workspace.\n\n" +
+            "# Welcome to MaterialCode\n# Edit this scratch file offline, or connect to a guest workspace.\n\n" +
                 "def greet(name: str) -> str:\n    return f\"Hello, {name}!\"\n",
             baseModifiedTs = null,
             dirty = false,
@@ -2687,7 +2687,7 @@ class WorkbenchController(private val context: Context) {
         }
         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         val text = view.text.toString().substring(range.startIndex, range.endIndex)
-        clipboard.setPrimaryClip(ClipData.newPlainText("AVF Studio", text))
+        clipboard.setPrimaryClip(ClipData.newPlainText("MaterialCode", text))
         if (cut) view.deleteText()
     }
 

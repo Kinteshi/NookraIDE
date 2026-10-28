@@ -646,7 +646,7 @@ private fun GuestSetupDialog(controller: WorkbenchController, setup: WorkbenchDi
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 setup.reason?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = colors.error) }
-                Text("1. Run this in Linux Terminal. It installs the AVF Studio daemon and its tools, then prints a pairing code.", style = MaterialTheme.typography.bodyMedium)
+                Text("1. Run this in Linux Terminal. It installs the MaterialCode daemon and its tools, then prints a pairing code.", style = MaterialTheme.typography.bodyMedium)
                 when {
                     controller.setupError != null -> Text(controller.setupError!!, style = MaterialTheme.typography.bodySmall, color = colors.error)
                     controller.setupCommand == null -> Text("Preparing the setup files…", style = MaterialTheme.typography.bodySmall)

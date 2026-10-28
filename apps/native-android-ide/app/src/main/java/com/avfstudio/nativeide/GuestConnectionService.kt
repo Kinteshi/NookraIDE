@@ -62,7 +62,7 @@ class GuestConnectionService : Service() {
             Notification.Builder(this)
         })
             .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
-            .setContentTitle("AVF Native IDE")
+            .setContentTitle("MaterialCode")
             .setContentText(if (host.isBlank()) state else "$state · $host")
             .setContentIntent(openApp)
             .setOngoing(true)

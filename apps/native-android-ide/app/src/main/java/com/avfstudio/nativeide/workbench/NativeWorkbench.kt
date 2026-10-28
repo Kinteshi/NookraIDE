@@ -198,7 +198,7 @@ private fun TopBar(controller: WorkbenchController, expanded: Boolean) {
             }
         }
         Column(Modifier.widthIn(max = 220.dp).padding(horizontal = 6.dp)) {
-            Text("AVF Studio", style = MaterialTheme.typography.titleMedium, maxLines = 1)
+            Text("MaterialCode", style = MaterialTheme.typography.titleMedium, maxLines = 1)
             Text(
                 controller.workspaceRoot?.substringAfterLast('/') ?: "No workspace",
                 style = MaterialTheme.typography.labelSmall,

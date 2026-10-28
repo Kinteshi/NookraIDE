@@ -188,7 +188,7 @@ private fun EmptyEditor(controller: WorkbenchController) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        Text("AVF Studio", style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.onSurface)
+        Text("MaterialCode", style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.onSurface)
         Spacer(Modifier.height(16.dp))
         listOf(
             "Quick Open" to "Ctrl+P",

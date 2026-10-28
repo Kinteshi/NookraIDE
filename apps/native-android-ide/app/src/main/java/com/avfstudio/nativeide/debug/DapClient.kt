@@ -114,7 +114,7 @@ class DapClient(private val transport: GuestVfsClient, private val tool: String 
             addProperty("request_seq", request.get("seq")?.asInt ?: 0)
             addProperty("success", false)
             addProperty("command", request.get("command")?.asString ?: "")
-            addProperty("message", "Not supported by AVF Studio")
+            addProperty("message", "Not supported by MaterialCode")
         }
         transport.sendRpcMessage(id, gson.toJson(response))
     }
