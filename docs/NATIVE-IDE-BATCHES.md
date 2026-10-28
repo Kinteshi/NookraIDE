@@ -792,6 +792,15 @@ To investigate (user, 10-28):
   outputs, copy and clear actions, maybe widgets later. Decide what stays a WebView (Plotly).
 * A tree view in Explorer (expandable folders in place, VS Code style) instead of one level at a
   time; check what exists today.
+* Problems in the editor itself (user, 10-28): squiggly underlines in the problem's severity
+  colour on the exact range, a hover/tap tooltip with the message, source and code (and its
+  quick fixes), and gutter/scrollbar markers; plus "appropriate additional linting": e.g. ruff
+  rule selection, ty/basedpyright strictness and TypeScript checks exposed as settings, unused
+  code shown faded, deprecated code struck through (LSP diagnostic tags). First look: the editor
+  shows no diagnostics today (they only reach Problems and the Outline); sora-editor 0.23.6 has
+  built-in support (`DiagnosticsContainer`, `DiagnosticRegion`, `DiagnosticDetail` with
+  quick fixes, `setDiagnosticIndicatorStyle`, a diagnostic tooltip window), so the underline
+  part is likely S-M.
 * (Done in batch 18.) Outline from problems: can diagnostics feed the Outline (problems grouped per symbol, markers
   next to outline entries) or a problems-by-file tree.
 * Open different workspaces, folders or projects: today the workspace is the daemon's root
