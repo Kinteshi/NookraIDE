@@ -16,6 +16,26 @@ import java.net.URI
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
 
+private const val UNTITLED_PREFIX = "scratch:/"
+
+/**
+ * The path a server knows a document by. Untitled (`scratch:`) documents have no file, so they
+ * appear under the workspace's `.untitled/` folder (never created on disk): every server accepts
+ * `file://` URIs, and imports from the workspace still resolve, as for VS Code's untitled files.
+ */
+fun lspDocumentPath(path: String, workspaceRoot: String?): String =
+    if (path.startsWith(UNTITLED_PREFIX) && workspaceRoot != null) {
+        "${workspaceRoot.trimEnd('/')}/.untitled/${path.removePrefix(UNTITLED_PREFIX)}"
+    } else {
+        path
+    }
+
+/** The untitled document [lspPath] stands for, or null for a real file. */
+fun untitledPathFor(lspPath: String, workspaceRoot: String?): String? {
+    val folder = workspaceRoot?.let { "${it.trimEnd('/')}/.untitled/" } ?: return null
+    return lspPath.takeIf { it.startsWith(folder) }?.let { UNTITLED_PREFIX + it.removePrefix(folder) }
+}
+
 data class LanguageDiagnostic(
     val uri: String,
     val message: String,
@@ -23,6 +43,8 @@ data class LanguageDiagnostic(
     val range: JsonObject,
     val source: String?,
     val code: JsonElement?,
+    /** LSP diagnostic tags: 1 unnecessary (shown faded), 2 deprecated (struck through). */
+    val tags: List<Int> = emptyList(),
 )
 
 class LanguageClient(
@@ -69,11 +91,16 @@ class LanguageClient(
         }
     }
 
-    fun start(rootPath: String, tool: String = "ty", env: List<Pair<String, String>> = emptyList()): CompletableFuture<Unit> {
+    fun start(
+        rootPath: String,
+        tool: String = "ty",
+        env: List<Pair<String, String>> = emptyList(),
+        options: JsonObject? = initializationOptions,
+    ): CompletableFuture<Unit> {
         isStarted = true
         workspaceRoot = rootPath
         return connection.start(tool, rootPath, env = env).thenCompose {
-            request("initialize", initializeParams(rootPath)).thenApply { initializeResult ->
+            request("initialize", initializeParams(rootPath, options)).thenApply { initializeResult ->
                 val capabilities = initializeResult.asJsonObject.getAsJsonObject("capabilities")
                 val semanticProvider = capabilities?.getAsJsonObject("semanticTokensProvider")
                 val legend = semanticProvider?.getAsJsonObject("legend")
@@ -98,7 +125,7 @@ class LanguageClient(
     }
 
     fun didOpen(path: String, languageId: String, version: Long, text: String) {
-        if (!isReady || path.startsWith("scratch:") || !openedDocuments.add(path)) return
+        if (!isReady || !openedDocuments.add(path)) return
         notify("textDocument/didOpen", JsonObject().apply {
             add("textDocument", JsonObject().apply {
                 addProperty("uri", fileUri(path))
@@ -278,6 +305,7 @@ class LanguageClient(
                 range = range,
                 source = diagnostic.get("source")?.takeUnless { it.isJsonNull }?.asString,
                 code = diagnostic.get("code"),
+                tags = diagnostic.getAsJsonArray("tags")?.mapNotNull { it.takeIf { tag -> tag.isJsonPrimitive }?.asInt }.orEmpty(),
             )
         }
         diagnosticsListener?.invoke(uri, diagnostics)
@@ -300,12 +328,12 @@ class LanguageClient(
         })
     }
 
-    private fun initializeParams(rootPath: String) = JsonObject().apply {
+    private fun initializeParams(rootPath: String, options: JsonObject?) = JsonObject().apply {
         add("processId", JsonNull.INSTANCE)
         addProperty("rootUri", fileUri(rootPath))
         add("workspaceFolders", workspaceFolders(rootPath))
         addProperty("trace", "off")
-        initializationOptions?.let { add("initializationOptions", it.deepCopy()) }
+        options?.let { add("initializationOptions", it.deepCopy()) }
         add("capabilities", JsonObject().apply {
             add("window", JsonObject().apply {
                 addProperty("workDoneProgress", true)
@@ -318,7 +346,10 @@ class LanguageClient(
                 add("workspaceEdit", JsonObject().apply { addProperty("documentChanges", true) })
             })
             add("textDocument", JsonObject().apply {
-                add("publishDiagnostics", JsonObject().apply { addProperty("relatedInformation", true) })
+                add("publishDiagnostics", JsonObject().apply {
+                    addProperty("relatedInformation", true)
+                    add("tagSupport", JsonObject().apply { add("valueSet", JsonArray().apply { add(1); add(2) }) })
+                })
                 add("synchronization", JsonObject().apply {
                     addProperty("dynamicRegistration", false)
                     addProperty("willSave", false)
@@ -396,7 +427,7 @@ class LanguageClient(
         }
     }
 
-    private fun fileUri(path: String): String = URI("file", "", path, null).toASCIIString()
+    private fun fileUri(path: String): String = URI("file", "", lspDocumentPath(path, workspaceRoot), null).toASCIIString()
 
     override fun close() {
         if (connection.bridgeId == null) return

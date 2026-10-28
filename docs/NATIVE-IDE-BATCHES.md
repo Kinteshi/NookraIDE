@@ -760,6 +760,29 @@ Guest not reset (the user's conda base and Copilot sign-in were still there); te
 * Backlog: AI chat session history and management (user).
 * Test file removed; the app left installed and connected.
 
+## 19. Problems in the editor, untitled files, Explorer tree, Copilot restart, chat history (10-28 from 16:10; in progress)
+User's pick from the backlog list: 1-4 and 6 (5, custom keybindings, skipped for now).
+* (1, code done, tablet check pending) Problems in the editor: sora's diagnostics (wavy
+  underline per severity, tooltip on tap or mouse hover with the message, `source code`, and a
+  "Quick fix…" action that asks the server for code actions there), unused code faded and
+  deprecated code struck through (LSP tags; `tagSupport` advertised; the span overlay restyles
+  copies and restores the analyzer's spans), and marks beside the scrollbar (tap: go to the
+  problem). Settings (Editor): `editor.renderValidationDecorations`, `editor.showUnused`,
+  `editor.showDeprecated`. More linting (Language servers): `avf.python.lintRules`
+  (Default / Extended B,UP,SIM,I,C4,RUF / All, as Ruff `lint.extendSelect`, sent as Ruff's
+  `initializationOptions.settings`) and `avf.python.typeChecking` (Default / Off / Strict:
+  basedpyright `typeCheckingMode`, ty `ty.configuration.rules.all`); changing them restarts the
+  server.
+* (3, code done, tablet check pending) Untitled files get completion and lint: servers see
+  them as `<workspace>/.untitled/<name>` (never created on disk); diagnostics, locations and
+  workspace edits map back to the `scratch:` document. The status-bar language of an untitled
+  file opens a picker (Plain text, Python, TypeScript, JavaScript, TSX, JSX) that gives the name
+  that extension. Copilot inline suggestions stay with saved files.
+* (4, code done, tablet check pending) Explorer tree: folders open in place (indented, open
+  folder icon), a Collapse folders button, "Show only this folder" in a folder's menu; open
+  folders are remembered across launches and reloaded after file changes. Setting
+  `avf.explorer.tree` (Settings → Workbench rows, on); off keeps one folder at a time.
+
 ## Next pass (registered 10-27 23:35, updated 10-28 13:06)
 * Batch 15 did the carried-over tests (Copilot signed out, the setup paths, reconnect cap,
   Copilot model list, prompt prefix). Left over:

@@ -47,6 +47,19 @@ class WorkbenchSettingsTest {
     }
 
     @Test
+    fun problemSettingsFollowVsCodeKeysAndLintPickersReadTheirKeys() {
+        fun from(json: String) = WorkbenchSettings.from(JsonParser.parseString(json).asJsonObject)
+        val defaults = from("{}")
+        assertEquals(listOf(true, true, true), listOf(defaults.problemUnderlines, defaults.showUnused, defaults.showDeprecated))
+        assertEquals(false, from("""{"editor.renderValidationDecorations":"off"}""").problemUnderlines)
+        assertEquals(true, from("""{"editor.renderValidationDecorations":"editable"}""").problemUnderlines)
+        assertEquals(false, from("""{"editor.showUnused":false}""").showUnused)
+        assertEquals(PythonLintRules.Extended, from("""{"avf.python.lintRules":"extended"}""").pythonLintRules)
+        assertEquals(PythonTypeChecking.Strict, from("""{"avf.python.typeChecking":"strict"}""").pythonTypeChecking)
+        assertEquals(PythonTypeChecking.Default, from("""{"avf.python.typeChecking":"bogus"}""").pythonTypeChecking)
+    }
+
+    @Test
     fun autoSaveReadsVsCodeModes() {
         fun mode(value: String) = WorkbenchSettings.from(JsonParser.parseString("""{"files.autoSave":"$value"}""").asJsonObject).autoSave
         assertEquals(AutoSaveMode.AfterDelay, mode("afterDelay"))

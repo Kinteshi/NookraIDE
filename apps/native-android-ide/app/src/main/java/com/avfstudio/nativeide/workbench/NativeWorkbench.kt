@@ -461,7 +461,13 @@ private fun StatusBar(controller: WorkbenchController) {
                     controller.chooseInterpreter()
                 }
             }
-            StatusItem(controller.lspLanguageId(document.path) ?: document.languageId.ifEmpty { "plain text" })
+            val language = controller.lspLanguageId(document.path) ?: document.languageId.ifEmpty { "plain text" }
+            // Untitled files take their language from here (saved ones from their name).
+            StatusItem(language, onClick = if (document.path.startsWith("scratch:")) {
+                { controller.dialog = WorkbenchDialog.UntitledLanguage }
+            } else {
+                null
+            })
         }
     }
 }

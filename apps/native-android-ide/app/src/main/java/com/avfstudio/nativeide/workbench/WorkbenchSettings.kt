@@ -58,6 +58,18 @@ data class WorkbenchSettings(
     val notebookTabCompletion: Boolean = true,
     /** Problem counts beside Outline entries and its "Problems only" filter. */
     val outlineProblems: Boolean = true,
+    /** Squiggles under problems in the editor and their marks beside the scrollbar. */
+    val problemUnderlines: Boolean = true,
+    /** Code the server tags unnecessary (unused imports, variables) is drawn faded. */
+    val showUnused: Boolean = true,
+    /** Code the server tags deprecated is struck through. */
+    val showDeprecated: Boolean = true,
+    /** Extra Ruff rule sets on top of the project's own configuration. */
+    val pythonLintRules: PythonLintRules = PythonLintRules.Default,
+    /** How strict ty or basedpyright check types; Default leaves the server's (or project's) level. */
+    val pythonTypeChecking: PythonTypeChecking = PythonTypeChecking.Default,
+    /** Explorer folders open in place as a tree; off goes into a folder one level at a time. */
+    val explorerTree: Boolean = true,
 ) {
     companion object {
         const val THEME_MODE = "avf.theme.mode"
@@ -96,6 +108,13 @@ data class WorkbenchSettings(
         const val RENDER_HTML = "avf.notebook.htmlOutputs"
         const val NOTEBOOK_TAB_COMPLETION = "avf.notebook.tabCompletion"
         const val OUTLINE_PROBLEMS = "outline.problems.enabled"
+        /** VS Code's enum (editable/on/off); only "off" hides them. */
+        const val PROBLEM_UNDERLINES = "editor.renderValidationDecorations"
+        const val SHOW_UNUSED = "editor.showUnused"
+        const val SHOW_DEPRECATED = "editor.showDeprecated"
+        const val PYTHON_LINT_RULES = "avf.python.lintRules"
+        const val PYTHON_TYPE_CHECKING = "avf.python.typeChecking"
+        const val EXPLORER_TREE = "avf.explorer.tree"
 
         fun from(settings: JsonObject): WorkbenchSettings {
             val defaults = WorkbenchSettings()
@@ -143,6 +162,14 @@ data class WorkbenchSettings(
                 renderHtmlOutputs = bool(RENDER_HTML, defaults.renderHtmlOutputs),
                 notebookTabCompletion = bool(NOTEBOOK_TAB_COMPLETION, defaults.notebookTabCompletion),
                 outlineProblems = bool(OUTLINE_PROBLEMS, defaults.outlineProblems),
+                problemUnderlines = string(PROBLEM_UNDERLINES)?.let { it != "off" } ?: defaults.problemUnderlines,
+                showUnused = bool(SHOW_UNUSED, defaults.showUnused),
+                showDeprecated = bool(SHOW_DEPRECATED, defaults.showDeprecated),
+                pythonLintRules = PythonLintRules.entries.firstOrNull { it.key == string(PYTHON_LINT_RULES) }
+                    ?: defaults.pythonLintRules,
+                pythonTypeChecking = PythonTypeChecking.entries.firstOrNull { it.key == string(PYTHON_TYPE_CHECKING) }
+                    ?: defaults.pythonTypeChecking,
+                explorerTree = bool(EXPLORER_TREE, defaults.explorerTree),
             )
         }
     }
@@ -157,6 +184,21 @@ fun reasoningEffortLabel(effort: String): String = when (effort) {
     "" -> "Default"
     "xhigh" -> "Extra high"
     else -> effort.replaceFirstChar { it.uppercase() }
+}
+
+/** Ruff rule sets added with `lint.extendSelect`; the project's `ruff.toml`/`pyproject.toml` still applies. */
+enum class PythonLintRules(val key: String, val label: String, val extendSelect: List<String>) {
+    Default("default", "Default", emptyList()),
+    /** Likely bugs, outdated syntax, simplifications, import order, comprehensions, Ruff's own. */
+    Extended("extended", "Extended", listOf("B", "UP", "SIM", "I", "C4", "RUF")),
+    All("all", "All rules", listOf("ALL")),
+}
+
+/** One strictness picker for both Python servers. */
+enum class PythonTypeChecking(val key: String, val label: String, val basedpyrightMode: String?, val tyRulesLevel: String?) {
+    Default("default", "Default", null, null),
+    Off("off", "Off", "off", "ignore"),
+    Strict("strict", "Strict", "strict", "error"),
 }
 
 /** VS Code's `files.autoSave` values. */

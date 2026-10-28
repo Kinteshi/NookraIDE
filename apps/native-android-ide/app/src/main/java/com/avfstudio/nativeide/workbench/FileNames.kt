@@ -1,5 +1,7 @@
 package com.avfstudio.nativeide.workbench
 
+import com.avfstudio.nativeide.transport.FileEntry
+
 /**
  * Checks a name typed into New File, New Folder, Rename or Save As. Names are used exactly as
  * typed: no extension is added. [allowSubpath] permits `dir/name`, creating `dir` as needed.
@@ -32,3 +34,28 @@ fun nextUntitledName(openPaths: Collection<String>): String {
     while ("scratch:/Untitled-$number" in openPaths) number++
     return "Untitled-$number"
 }
+
+/** A row of the Explorer tree: [entry] at [depth] below the shown folder. */
+data class ExplorerRow(val entry: FileEntry, val depth: Int, val expanded: Boolean)
+
+/**
+ * Flattens the Explorer tree: [top] are the shown folder's entries, and each folder in
+ * [expanded] whose children are loaded ([children]) lists them below itself, one level deeper.
+ * A collapsed folder keeps its expanded subfolders, so they come back open, as in VS Code.
+ */
+fun explorerRows(top: List<FileEntry>, expanded: Set<String>, children: Map<String, List<FileEntry>>): List<ExplorerRow> {
+    val rows = mutableListOf<ExplorerRow>()
+    fun add(entries: List<FileEntry>, depth: Int) {
+        entries.forEach { entry ->
+            val open = entry.isDirectory && entry.path in expanded
+            rows += ExplorerRow(entry, depth, open)
+            if (open) children[entry.path]?.let { add(it, depth + 1) }
+        }
+    }
+    add(top, 0)
+    return rows
+}
+
+/** Explorer order: folders first, then by name. */
+fun sortedEntries(entries: List<FileEntry>): List<FileEntry> =
+    entries.sortedWith(compareByDescending<FileEntry> { it.isDirectory }.thenBy { it.name })

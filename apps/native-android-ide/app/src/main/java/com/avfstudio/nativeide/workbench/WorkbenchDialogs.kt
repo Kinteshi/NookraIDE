@@ -182,6 +182,12 @@ fun WorkbenchDialogHost(controller: WorkbenchController) {
                 controller.dialog = null
             }
         }
+        WorkbenchDialog.UntitledLanguage -> controller.activeDocument?.let { document ->
+            val current = UNTITLED_LANGUAGES.entries.firstOrNull { it.value == document.languageId }?.key ?: "Plain text"
+            ChoiceDialog("Language", current, UNTITLED_LANGUAGES.keys.toList(), controller::setUntitledLanguage) {
+                controller.dialog = null
+            }
+        }
         is WorkbenchDialog.PathPrompt -> PathPromptDialog(controller, dialog)
         is WorkbenchDialog.GuestSetup -> GuestSetupDialog(controller, dialog)
         is WorkbenchDialog.GitPrompt -> GitPromptDialog(controller, dialog)

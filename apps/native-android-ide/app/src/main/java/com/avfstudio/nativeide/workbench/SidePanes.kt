@@ -44,9 +44,11 @@ import androidx.compose.material.icons.outlined.DriveFileRenameOutline
 import androidx.compose.material.icons.outlined.DataObject
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Functions
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.UnfoldLess
 import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -116,27 +118,53 @@ fun ExplorerList(controller: WorkbenchController) {
             }
         }
         else -> LazyColumn {
+            val tree = controller.settings.explorerTree
+            val rows = if (tree) {
+                explorerRows(controller.entries, controller.expandedFolders.toSet(), controller.folderChildren)
+            } else {
+                controller.entries.map { ExplorerRow(it, 0, expanded = false) }
+            }
             item {
                 val parent = directory.substringBeforeLast('/', "")
                 val atRoot = controller.roots.any { it.trimEnd('/') == directory.trimEnd('/') }
-                PaneRow(Icons.AutoMirrored.Outlined.ArrowBack, if (atRoot) directory else "..", muted = true) {
+                PaneRow(
+                    Icons.AutoMirrored.Outlined.ArrowBack,
+                    if (atRoot) directory else "..",
+                    muted = true,
+                    trailing = if (tree && rows.any { it.expanded }) {
+                        {
+                            IconButton(onClick = controller::collapseFolders, modifier = Modifier.size(24.dp)) {
+                                Icon(Icons.Outlined.UnfoldLess, contentDescription = "Collapse folders", modifier = Modifier.size(18.dp))
+                            }
+                        }
+                    } else {
+                        null
+                    },
+                ) {
                     if (!atRoot && parent.isNotEmpty()) controller.loadDirectory(parent)
                 }
             }
-            items(controller.entries, key = { it.path }) { entry ->
+            items(rows, key = { it.entry.path }) { row ->
+                val entry = row.entry
                 var menu by remember { mutableStateOf(false) }
                 Box {
                     PaneRow(
                         when {
+                            row.expanded -> Icons.Outlined.FolderOpen
                             entry.isDirectory -> Icons.Outlined.Folder
                             entry.name.endsWith(".ipynb") -> Icons.Outlined.Code
                             else -> Icons.AutoMirrored.Outlined.InsertDriveFile
                         },
                         entry.name,
                         selected = entry.path == controller.activePath,
+                        indent = row.depth,
                         onLongClick = { menu = true },
                     ) {
-                        if (entry.isDirectory) controller.loadDirectory(entry.path) else controller.openPath(entry.path)
+                        when {
+                            !entry.isDirectory -> controller.openPath(entry.path)
+                            tree -> controller.toggleFolder(entry.path)
+                            else -> controller.loadDirectory(entry.path)
+                        }
                     }
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                         if (entry.isDirectory) {
@@ -145,6 +173,13 @@ fun ExplorerList(controller: WorkbenchController) {
                                 leadingIcon = { Icon(Icons.AutoMirrored.Outlined.NoteAdd, contentDescription = null) },
                                 onClick = { menu = false; controller.beginNewEntry(folder = false, parent = entry.path) },
                             )
+                            if (tree) {
+                                DropdownMenuItem(
+                                    text = { Text("Show only this folder") },
+                                    leadingIcon = { Icon(Icons.Outlined.FolderOpen, contentDescription = null) },
+                                    onClick = { menu = false; controller.loadDirectory(entry.path) },
+                                )
+                            }
                         }
                         if (!entry.isDirectory) {
                             DropdownMenuItem(
@@ -176,7 +211,7 @@ private fun OutlineList(controller: WorkbenchController) {
     val rows = remember(controller.outlineSymbols) { flattenOutline(controller.outlineSymbols) }
     val showProblems = controller.settings.outlineProblems
     val path = document?.path
-    val fileDiagnostics = controller.diagnostics.filter { path != null && runCatching { java.net.URI(it.uri).path }.getOrNull() == path }
+    val fileDiagnostics = controller.diagnostics.filter { path != null && it.uri == controller.diagnosticUri(path) }
     val problems = if (showProblems) outlineProblems(rows, fileDiagnostics) else rows.map { null }
     var problemsOnly by remember { mutableStateOf(false) }
     val visible = if (showProblems && problemsOnly) rowsWithProblems(rows, problems) else rows.indices.toList()
@@ -207,7 +242,7 @@ private fun OutlineList(controller: WorkbenchController) {
                         indent = depth,
                         trailing = problems[index]?.let { problem -> { ProblemBadge(problem) } },
                     ) {
-                        val uri = java.net.URI("file", "", document.path, null).toASCIIString()
+                        val uri = controller.diagnosticUri(document.path)
                         controller.navigateToLocation(LanguageLocation(uri, symbol.range))
                     }
                 }
@@ -357,9 +392,9 @@ fun PaneRow(
 private fun severityStyle(severity: Int?): Pair<ImageVector, androidx.compose.ui.graphics.Color> {
     val colors = MaterialTheme.colorScheme
     return when (severity) {
-        1, null -> Icons.Outlined.ErrorOutline to colors.error
-        2 -> Icons.Outlined.WarningAmber to colors.tertiary
-        else -> Icons.Outlined.Info to colors.primary
+        1, null -> Icons.Outlined.ErrorOutline to colors.problemColor(severity)
+        2 -> Icons.Outlined.WarningAmber to colors.problemColor(severity)
+        else -> Icons.Outlined.Info to colors.problemColor(severity)
     }
 }
 

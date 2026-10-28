@@ -22,6 +22,15 @@ import java.util.UUID
 
 class LanguageClientTest {
     @Test
+    fun untitledDocumentsLiveUnderTheWorkspacesUntitledFolder() {
+        assertEquals("/root/Projects/.untitled/Untitled-1.py", lspDocumentPath("scratch:/Untitled-1.py", "/root/Projects/"))
+        assertEquals("/root/Projects/a.py", lspDocumentPath("/root/Projects/a.py", "/root/Projects"))
+        assertEquals("scratch:/welcome.py", lspDocumentPath("scratch:/welcome.py", null))
+        assertEquals("scratch:/Untitled-1.py", untitledPathFor("/root/Projects/.untitled/Untitled-1.py", "/root/Projects"))
+        assertEquals(null, untitledPathFor("/root/Projects/a.py", "/root/Projects"))
+    }
+
+    @Test
     fun semanticTokenDeltasDecodeIntoUtf16RangesAndLegendNames() {
         val result = JsonParser.parseString(
             """{"data":[0,2,3,1,1,0,4,2,0,0,1,0,1,1,0]}""",
@@ -64,8 +73,9 @@ class LanguageClientTest {
             languageClient.start("/workspace").get(5, TimeUnit.SECONDS)
             assertTrue(protocol.diagnosticsCapability.await(5, TimeUnit.SECONDS))
             assertTrue(protocol.publishDiagnosticsSupported)
+            // Untitled files reach the server under the workspace's .untitled/ folder.
             languageClient.didOpen("scratch:/welcome.py", "python", 1, "offline")
-            assertTrue(protocol.openedPaths.isEmpty())
+            assertEquals("/workspace/.untitled/welcome.py", protocol.openedPaths.poll(5, TimeUnit.SECONDS))
             languageClient.didOpen("/workspace/main.py", "python", 1, "value = missing_name\n")
             assertEquals("/workspace/main.py", protocol.openedPaths.poll(5, TimeUnit.SECONDS))
             assertTrue(protocol.configurationResponse.await(5, TimeUnit.SECONDS))

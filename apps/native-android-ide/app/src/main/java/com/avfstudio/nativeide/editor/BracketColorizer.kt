@@ -11,6 +11,9 @@ import java.util.IdentityHashMap
 
 data class BracketColorToken(val offset: Int, val depth: Int)
 
+/** Columns [start, end) on [line] drawn faded (unnecessary code) and/or struck through (deprecated). */
+data class TagDecoration(val line: Int, val start: Int, val end: Int, val faded: Boolean, val struck: Boolean)
+
 fun bracketColorTokens(text: String, languageId: String): List<BracketColorToken> {
     val tokens = mutableListOf<BracketColorToken>()
     val stack = mutableListOf<Char>()
@@ -118,6 +121,9 @@ private val LIGHT_SEMANTIC_COLORS = mapOf(
     500_017 to 0xFF008000.toInt(),
     500_018 to 0xFF000000.toInt(),
 )
+/** The colour of code a language server tags unnecessary (unused imports and variables). */
+const val UNNECESSARY_CODE_COLOR_ID = 500_090
+
 private val SEMANTIC_TOKEN_COLORS = mapOf(
     "class" to (500_010 to 0xFF4EC9B0.toInt()),
     "enum" to (500_010 to 0xFF4EC9B0.toInt()),
@@ -144,11 +150,21 @@ class SoraBracketColorizer(
     private val languageId: String,
 ) {
     private val injected = Collections.newSetFromMap(IdentityHashMap<Span, Boolean>())
+    /** Our restyled copies of analyzer spans, mapped to the span each one stands in for. */
+    private val replaced = IdentityHashMap<Span, Span>()
     private var semanticDecorations: List<EditorDecoration> = emptyList()
+    private var tagDecorations: List<TagDecoration> = emptyList()
 
     /** Called on the UI thread. */
     fun setSemanticDecorations(decorations: List<EditorDecoration>) {
         semanticDecorations = decorations
+        update()
+    }
+
+    /** Called on the UI thread. */
+    fun setTagDecorations(decorations: List<TagDecoration>) {
+        if (decorations == tagDecorations) return
+        tagDecorations = decorations
         update()
     }
 
@@ -201,6 +217,7 @@ class SoraBracketColorizer(
             }
             Triple(range.start.line, range.start.character, range.end.character to colorId)
         }.groupBy({ it.first }, { it.second to it.third })
+        val tagsByLine = tagDecorations.groupBy(TagDecoration::line)
 
         // Read every line before writing any: while the analyzer holds the span locks, sora's
         // reader returns a fresh placeholder list ([0:TEXT_NORMAL]) instead of the line's real
@@ -215,16 +232,19 @@ class SoraBracketColorizer(
             lineSpans += read
         }
         val modifier = spans.modify()
-        val previousInjected = injected.toSet()
+        val previousInjected = Collections.newSetFromMap(IdentityHashMap<Span, Boolean>()).apply { addAll(injected) }
+        val previousReplaced = IdentityHashMap(replaced)
         injected.clear()
+        replaced.clear()
         for (line in 0 until editor.lineCount) {
             val base = lineSpans[line]
-                .filterNot(previousInjected::contains)
+                .mapNotNull { span -> previousReplaced[span] ?: span.takeUnless(previousInjected::contains) }
                 .sortedBy(Span::getColumn)
             val lineTokens = tokensByLine[line].orEmpty()
             val semanticTokens = semanticByLine[line].orEmpty()
-            if ((lineTokens.isEmpty() && semanticTokens.isEmpty()) || base.isEmpty()) {
-                if (base.size != lineSpans[line].size) modifier.setSpansOnLine(line, base)
+            val lineTags = tagsByLine[line].orEmpty()
+            if ((lineTokens.isEmpty() && semanticTokens.isEmpty() && lineTags.isEmpty()) || base.isEmpty()) {
+                if (lineSpans[line].any(previousInjected::contains)) modifier.setSpansOnLine(line, base)
                 continue
             }
 
@@ -256,12 +276,39 @@ class SoraBracketColorizer(
                 }
             }
             output.sortBy(Span::getColumn)
+            lineTags.forEach { tag -> applyTag(output, tag, lineLength) }
             modifier.setSpansOnLine(line, output)
         }
         // sora caches each drawn line (hardware RenderNodes) and redraws one only when its range
         // is invalidated; a plain invalidate() would keep showing the old, or uncoloured, lines.
         // This re-enters update() through NativeCodeEditor.updateStyles, which [applying] stops.
         if (editor.lineCount > 0) editor.updateStyles(styles, SequenceUpdateRange(0, editor.lineCount - 1))
+    }
+
+    /** Restyles [tag]'s columns in [output] (sorted), splitting spans at its edges. */
+    private fun applyTag(output: MutableList<Span>, tag: TagDecoration, lineLength: Int) {
+        val start = tag.start.coerceIn(0, lineLength)
+        val end = tag.end.coerceIn(start, lineLength)
+        if (start == end) return
+        fun splitAt(column: Int) {
+            if (column <= 0 || column >= lineLength || output.any { it.column == column }) return
+            val index = output.indexOfLast { it.column < column }.takeIf { it >= 0 } ?: return
+            output.add(index + 1, restoredSpan(column, output[index]))
+        }
+        splitAt(start)
+        splitAt(end)
+        output.indices.filter { output[it].column in start until end }.forEach { index ->
+            val source = output[index]
+            val styled = if (source in injected) source else source.copy().also { copy ->
+                injected += copy
+                replaced[copy] = source
+            }
+            var style = styled.style
+            if (tag.faded) style = withForeground(style, UNNECESSARY_CODE_COLOR_ID)
+            if (tag.struck) style = style or TextStyle.STRIKETHROUGH_BIT
+            styled.style = style
+            output[index] = styled
+        }
     }
 
     private fun coloredSpan(column: Int, source: Span, colorId: Int): Span =
@@ -300,6 +347,8 @@ class SoraBracketColorizer(
                 }
                 editor.colorScheme.setColor(colorId, color)
             }
+            // Unnecessary code: the line numbers' dim grey, as VS Code fades it (Material themes reset it).
+            editor.colorScheme.setColor(UNNECESSARY_CODE_COLOR_ID, editor.colorScheme.getColor(EditorColorScheme.LINE_NUMBER))
             editor.setHighlightBracketPair(true)
             editor.colorScheme.setColor(
                 EditorColorScheme.HIGHLIGHTED_DELIMITERS_FOREGROUND,

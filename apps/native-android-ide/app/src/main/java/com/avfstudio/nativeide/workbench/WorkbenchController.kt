@@ -67,6 +67,8 @@ import com.avfstudio.nativeide.language.JsonRpcException
 import com.avfstudio.nativeide.language.LanguageClient
 import com.avfstudio.nativeide.language.LanguageDiagnostic
 import com.avfstudio.nativeide.language.SettingsResolver
+import com.avfstudio.nativeide.language.lspDocumentPath
+import com.avfstudio.nativeide.language.untitledPathFor
 import com.avfstudio.nativeide.notebook.CellType
 import com.avfstudio.nativeide.notebook.KernelClient
 import com.avfstudio.nativeide.notebook.generatedKernelName
@@ -107,6 +109,16 @@ import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 
 private const val SCRATCH_WELCOME_PATH = "scratch:/welcome.py"
+
+/** Languages an untitled file can take, with the extension that gives it that language. */
+val UNTITLED_LANGUAGES = linkedMapOf(
+    "Plain text" to "",
+    "Python" to "py",
+    "TypeScript" to "ts",
+    "JavaScript" to "js",
+    "TSX" to "tsx",
+    "JSX" to "jsx",
+)
 private const val MAX_IMPORTED_THEME_BYTES = 8 * 1024 * 1024
 private const val MAX_OUTPUT_LINES = 500
 /** Longest wait between reconnect attempts while the app is in front. */
@@ -209,6 +221,9 @@ class WorkbenchController(private val context: Context) {
         private set
     var entries by mutableStateOf(emptyList<FileEntry>())
         private set
+    /** Explorer folders open in place (tree view), and the children loaded for each. */
+    val expandedFolders = mutableStateListOf<String>()
+    val folderChildren = mutableStateMapOf<String, List<FileEntry>>()
     val documents = mutableStateListOf<DocumentSession>()
     private val closedDocuments = mutableListOf<DocumentSession>()
     private var activePathState by mutableStateOf<String?>(null)
@@ -379,6 +394,7 @@ class WorkbenchController(private val context: Context) {
                     diagnosticsByClient.getOrPut(client) { mutableMapOf() }[uri] = updates
                     diagnostics.clear()
                     diagnostics.addAll(diagnosticsByClient.values.flatMap { it.values.flatten() })
+                    refreshEditorProblems()
                 }
             }
             client.messageListener = { message -> post { status = message } }
@@ -474,12 +490,20 @@ class WorkbenchController(private val context: Context) {
         }
         val previousServer = settings.pythonLanguageServer
         val previousTypescriptServer = settings.typescriptLanguageServer
+        val previousTypeChecking = settings.pythonTypeChecking
+        val previousLintRules = settings.pythonLintRules
         userSettings = next
         updateLanguageSettings()
         editorView?.let(::applyEditorSettings)
+        refreshEditorProblems()
         terminals.forEach { /* font size is read by the composable */ }
-        if (settings.pythonLanguageServer != previousServer) {
+        // Servers read these at start, so a change restarts them.
+        if (settings.pythonLanguageServer != previousServer || settings.pythonTypeChecking != previousTypeChecking) {
             languageClients.getValue("python").close()
+            post { documents.forEach { ensureLanguageServers(it.path) } }
+        }
+        if (settings.pythonLintRules != previousLintRules) {
+            languageClients.getValue("python-format").close()
             post { documents.forEach { ensureLanguageServers(it.path) } }
         }
         if (settings.typescriptLanguageServer != previousTypescriptServer) {
@@ -512,14 +536,36 @@ class WorkbenchController(private val context: Context) {
 
     private fun updateLanguageSettings() {
         languageClients.forEach { (language, client) ->
-            var merged = SettingsResolver.merge(defaultSettings, userSettings, workspaceSettings, language)
-            // basedpyright reads the interpreter from its settings (ty gets it at start, as env).
-            if (language == "python" && settings.pythonInterpreter.isNotBlank() && merged.getPath("python.pythonPath") == null) {
-                merged = merged.withPath("python.pythonPath", settings.pythonInterpreter)
-            }
-            client.updateSettings(SettingsResolver.sections(merged))
+            client.updateSettings(SettingsResolver.sections(serverSettings(language)))
         }
     }
+
+    /** The settings a language server sees: settings.json plus what the app's own pickers add. */
+    private fun serverSettings(language: String): JsonObject {
+        var merged = SettingsResolver.merge(defaultSettings, userSettings, workspaceSettings, language)
+        fun fill(path: String, value: Any?) {
+            if (value != null && merged.getPath(path) == null) merged = merged.withPath(path, value)
+        }
+        if (language == "python") {
+            // basedpyright reads the interpreter from its settings (ty gets it at start, as env).
+            if (settings.pythonInterpreter.isNotBlank()) fill("python.pythonPath", settings.pythonInterpreter)
+            fill("basedpyright.analysis.typeCheckingMode", settings.pythonTypeChecking.basedpyrightMode)
+            // ty's inline configuration wins over ty.toml; `all` sets every rule's level.
+            fill("ty.configuration.rules.all", settings.pythonTypeChecking.tyRulesLevel)
+        }
+        if (language == "python-format" && settings.pythonLintRules.extendSelect.isNotEmpty()) {
+            fill("ruff.lint.extendSelect", com.google.gson.JsonArray().apply { settings.pythonLintRules.extendSelect.forEach(::add) })
+        }
+        return merged
+    }
+
+    /** Ruff takes its editor settings only at start (`initializationOptions.settings`). */
+    private fun initializationOptions(language: String, tool: String): JsonObject? =
+        if (tool == "ruff") {
+            JsonObject().apply { add("settings", serverSettings(language).getPath("ruff")?.deepCopy() ?: JsonObject()) }
+        } else {
+            null
+        }
 
     private fun loadWorkspaceSettings(root: String): CompletableFuture<JsonObject> {
         val path = "${root.trimEnd('/')}/.vscode/settings.json"
@@ -825,7 +871,7 @@ class WorkbenchController(private val context: Context) {
 
     /** Stops tools that no open document needs, the chat agent and the debugger. */
     fun stopIdleGuestTools() {
-        val needed = documents.filterNot { it.path.startsWith("scratch:") || it.path in notebooks }
+        val needed = documents.filterNot { it.path in notebooks }
             .flatMap { languageClientsFor(it.path) }.toSet()
         languageClients.values.filter { it.isStarted && it !in needed }.forEach(LanguageClient::close)
         if (chatAgent.isStarted && !chatBusy) endChatSession()
@@ -1605,6 +1651,7 @@ class WorkbenchController(private val context: Context) {
             .putString("session-open", com.google.gson.Gson().toJson(open))
             .putString("session-active", activePath?.takeUnless { it.startsWith("scratch:") })
             .putString("session-directory", currentDirectory.ifEmpty { null })
+            .putString("session-expanded", com.google.gson.Gson().toJson(expandedFolders.toList()))
             .apply()
     }
 
@@ -1620,6 +1667,12 @@ class WorkbenchController(private val context: Context) {
         preferences.getString("session-directory", null)
             ?.takeIf { it.startsWith(workspace) && it != workspace }
             ?.let(::loadDirectory)
+        runCatching {
+            com.google.gson.Gson().fromJson(preferences.getString("session-expanded", "[]"), Array<String>::class.java).toList()
+        }.getOrDefault(emptyList()).filter { it.startsWith(workspace) }.forEach { path ->
+            expandedFolders.add(path)
+            loadFolderChildren(path)
+        }
     }
 
     private fun startKeepAlive(state: String) {
@@ -1688,7 +1741,7 @@ class WorkbenchController(private val context: Context) {
                     status = "Explorer error: ${error.message ?: "request failed"}"
                 } else {
                     currentDirectory = path
-                    entries = result.sortedWith(compareByDescending<FileEntry> { it.isDirectory }.thenBy { it.name })
+                    entries = sortedEntries(result)
                     persistSession()
                 }
             }
@@ -1714,6 +1767,38 @@ class WorkbenchController(private val context: Context) {
                 quickOpenIndexing = false
             }
         }
+    }
+
+    /** A folder row in the tree: opens or closes it in place, loading its children the first time. */
+    fun toggleFolder(path: String) {
+        if (path in expandedFolders) {
+            expandedFolders.remove(path)
+            persistSession()
+            return
+        }
+        expandedFolders.add(path)
+        persistSession()
+        loadFolderChildren(path)
+    }
+
+    private fun loadFolderChildren(path: String) {
+        vfs.listDir(path).whenComplete { result, error ->
+            post {
+                if (error != null) {
+                    expandedFolders.remove(path)
+                    folderChildren.remove(path)
+                    status = "Explorer error: ${error.message ?: "request failed"}"
+                } else {
+                    folderChildren[path] = sortedEntries(result)
+                }
+            }
+        }
+    }
+
+    /** Collapses every folder open in the tree (VS Code's Collapse Folders). */
+    fun collapseFolders() {
+        expandedFolders.clear()
+        persistSession()
     }
 
     fun navigateToDirectory(path: String) {
@@ -1969,6 +2054,38 @@ class WorkbenchController(private val context: Context) {
         status = "Created $name"
     }
 
+    /**
+     * The status bar's language for an untitled file. The language follows the name's extension
+     * (as it does for saved files), so "Python" makes `Untitled-1` into `Untitled-1.py`.
+     */
+    fun setUntitledLanguage(label: String) {
+        dialog = null
+        val document = activeDocument?.takeIf { it.path.startsWith("scratch:") } ?: return
+        val extension = UNTITLED_LANGUAGES[label] ?: return
+        val name = document.path.substringAfterLast('/')
+        val base = if (document.languageId.isEmpty()) name else name.substringBeforeLast('.')
+        val target = "scratch:/" + if (extension.isEmpty()) base else "$base.$extension"
+        if (target == document.path) return
+        if (documents.any { it.path == target }) {
+            status = "${target.removePrefix("scratch:/")} is already open"
+            return
+        }
+        notifyDocumentClosed(document.path)
+        forgetDiagnostics(diagnosticUri(document.path))
+        val renamed = document.copy(path = target)
+        documents[documents.indexOf(document)] = renamed
+        selectDocument(target)
+        notifyDocumentOpened(renamed)
+        ensureLanguageServers(target)
+        status = "Language set to $label"
+    }
+
+    /** Drops what servers reported for a document that no longer exists under that URI. */
+    private fun forgetDiagnostics(uri: String) {
+        diagnosticsByClient.values.forEach { it.remove(uri) }
+        diagnostics.removeAll { it.uri == uri }
+    }
+
     // File operations -------------------------------------------------------------------------
 
     /** Folder that New File/Folder and Save As start from: the Explorer's, else the workspace. */
@@ -2107,6 +2224,10 @@ class WorkbenchController(private val context: Context) {
 
     private fun afterFileSystemChange() {
         currentDirectory.takeIf(String::isNotEmpty)?.let(::loadDirectory)
+        // Reload open folders; ones that went away (deleted, renamed) close.
+        folderChildren.keys.toList().forEach { path ->
+            if (path in expandedFolders) loadFolderChildren(path) else folderChildren.remove(path)
+        }
         quickOpenIndex = emptyList()
         refreshQuickOpenIndex()
     }
@@ -2132,7 +2253,44 @@ class WorkbenchController(private val context: Context) {
             view.ensureSelectionVisible()
             pendingNavigation = null
         }
-        if (newlyBound) activeDocument?.let(::refreshSemanticTokens)
+        if (newlyBound) {
+            activeDocument?.let(::refreshSemanticTokens)
+            refreshEditorProblems()
+        }
+    }
+
+    /** Problems of the active file, for the marks beside the editor's scrollbar. */
+    var editorProblemMarks by mutableStateOf<List<ProblemMark>>(emptyList())
+        private set
+
+    /** Redraws the active file's problems in the editor (underlines, tooltips, faded code, marks). */
+    fun refreshEditorProblems() {
+        val view = editorView as? NativeCodeEditor ?: return
+        val path = activePath
+        val uri = path?.let(::diagnosticUri)
+        val content = view.text
+        val lineLengths = (0 until content.lineCount).map(content::getColumnCount)
+        val problems = editorProblems(diagnostics.filter { it.uri == uri }, lineLengths)
+        showEditorProblems(view, problems, settings) { position ->
+            view.setSelection(position.line, position.character)
+            showCodeActions()
+        }
+        editorProblemMarks = if (settings.problemUnderlines) problemMarks(problems, content.lineCount) else emptyList()
+    }
+
+    /** The URI a language server reports a document's diagnostics under. */
+    fun diagnosticUri(path: String): String =
+        java.net.URI("file", "", lspDocumentPath(path, workspaceRoot), null).toASCIIString()
+
+    /** Maps a path from a language server back to the open document, untitled ones included. */
+    fun documentPathFor(lspPath: String): String = untitledPathFor(lspPath, workspaceRoot) ?: lspPath
+
+    /** A tap on a scrollbar mark: put the cursor on that problem. */
+    fun goToProblemMark(mark: ProblemMark) {
+        val view = editorView ?: return
+        view.setSelection(mark.line, mark.column)
+        view.ensureSelectionVisible()
+        view.requestFocus()
     }
 
     private fun onEditorEvent(event: EditorEvent) {
@@ -2153,7 +2311,7 @@ class WorkbenchController(private val context: Context) {
                     clearInlineSuggestion()
                 }
             }
-            is EditorEvent.ContentChanged -> if (!event.uri.startsWith("scratch:")) {
+            is EditorEvent.ContentChanged -> run {
                 notifyDocumentChanged(event.uri, event.version, event.text)
                 post {
                     if (activePath == event.uri) {
@@ -2230,13 +2388,14 @@ class WorkbenchController(private val context: Context) {
         }
 
     private fun notifyDocumentOpened(document: DocumentSession) {
-        if (document.path.startsWith("scratch:") || document.path in notebooks) return
+        if (document.path in notebooks) return
         lspLanguageId(document.path)?.let { languageId ->
             languageClientsFor(document.path).filter { it.isReady }.forEach { client ->
                 client.didOpen(document.path, languageId, document.version, document.text)
             }
         }
-        if (copilot.language.isReady) {
+        // Copilot's suggestions stay with saved files.
+        if (copilot.language.isReady && !document.path.startsWith("scratch:")) {
             copilot.language.didOpen(document.path, copilotLanguageId(document.path), document.version, document.text)
         }
     }
@@ -2263,14 +2422,14 @@ class WorkbenchController(private val context: Context) {
     /** Starts the servers a document needs, so idle languages cost no guest memory. */
     private fun ensureLanguageServers(path: String) {
         val workspace = workspaceRoot ?: return
-        if (!vfs.isConnected() || path.startsWith("scratch:") || path in notebooks) return
+        if (!vfs.isConnected() || path in notebooks) return
         scheduledServerStop?.cancel(false)
         languageClients.filterValues { it in languageClientsFor(path) && !it.isStarted }.forEach { (language, client) ->
             val tool = languageServerTool(language)
             status = "Starting $tool"
             // ty finds the chosen interpreter's environment through CONDA_PREFIX / VIRTUAL_ENV.
             val env = if (language == "python" && tool == "ty") pythonEnvironmentVariables(settings.pythonInterpreter) else emptyList()
-            client.start(workspace, tool, env).whenComplete { _, error ->
+            client.start(workspace, tool, env, initializationOptions(language, tool)).whenComplete { _, error ->
                 post {
                     reportLanguageServer(language, error)
                     if (error != null) {
@@ -2301,7 +2460,7 @@ class WorkbenchController(private val context: Context) {
         scheduledServerStop = timer.schedule(
             {
                 post {
-                    val needed = documents.filterNot { it.path.startsWith("scratch:") || it.path in notebooks }
+                    val needed = documents.filterNot { it.path in notebooks }
                         .flatMap { languageClientsFor(it.path) }.toSet()
                     languageClients.values.filter { it.isStarted && it !in needed }.forEach(LanguageClient::close)
                 }
@@ -2312,10 +2471,6 @@ class WorkbenchController(private val context: Context) {
     }
 
     private fun refreshOutline(document: DocumentSession) {
-        if (document.path.startsWith("scratch:")) {
-            if (activePath == document.path) outlineSymbols = emptyList()
-            return
-        }
         val client = languageClientFor(document.path)
         if (client?.isReady != true) {
             if (activePath == document.path) outlineSymbols = emptyList()
@@ -2332,6 +2487,7 @@ class WorkbenchController(private val context: Context) {
     fun onActiveDocumentChanged() {
         outlineSymbols = emptyList()
         clearInlineSuggestion()
+        refreshEditorProblems()
         activeDocument?.let { document ->
             refreshOutline(document)
             refreshSemanticTokens(document)
@@ -2340,7 +2496,7 @@ class WorkbenchController(private val context: Context) {
     }
 
     private fun refreshSemanticTokens(document: DocumentSession) {
-        if (document.path.startsWith("scratch:") || !settings.semanticHighlighting) return
+        if (!settings.semanticHighlighting) return
         val client = languageClientFor(document.path)
         if (client?.isReady != true) return
         client.semanticTokens(document.path).whenComplete { decorations, error ->
@@ -2379,7 +2535,7 @@ class WorkbenchController(private val context: Context) {
     private fun activeLspPosition(): Pair<DocumentSession, LspPosition>? {
         val document = activeDocument ?: return null
         val client = languageClientFor(document.path)
-        if (client?.isReady != true || document.path.startsWith("scratch:")) {
+        if (client?.isReady != true) {
             status = "Language intelligence requires a connected Python or TypeScript language server"
             return null
         }
@@ -2388,7 +2544,7 @@ class WorkbenchController(private val context: Context) {
     }
 
     fun navigateToLocation(location: LanguageLocation) {
-        val path = java.net.URI(location.uri).path ?: return
+        val path = java.net.URI(location.uri).path?.let(::documentPathFor) ?: return
         val start = location.range.getAsJsonObject("start") ?: return
         val target = EditorNavigationTarget(path, start.get("line").asInt, start.get("character").asInt)
         compactDestination = CompactDestination.Editor
@@ -2462,15 +2618,16 @@ class WorkbenchController(private val context: Context) {
     }
 
     private fun applyWorkspaceEdits(
-        edits: Map<String, List<LspTextEdit>>,
+        serverEdits: Map<String, List<LspTextEdit>>,
         successMessage: String,
         onApplied: (() -> Unit)? = null,
     ) {
+        val edits = serverEdits.mapKeys { (path, _) -> documentPathFor(path) }
         if (edits.isEmpty()) {
             onApplied?.invoke()
             return
         }
-        if (edits.keys.any { path -> roots.none { root -> isPathWithinRoot(path, root) } }) {
+        if (edits.keys.any { path -> !path.startsWith("scratch:") && roots.none { root -> isPathWithinRoot(path, root) } }) {
             status = "Workspace edit refused a change outside the connected workspace"
             return
         }
@@ -2509,10 +2666,10 @@ class WorkbenchController(private val context: Context) {
         }
     }
 
-    private fun showCodeActions() {
+    fun showCodeActions() {
         val (document, position) = activeLspPosition() ?: return
         val client = languageClientFor(document.path) ?: return
-        val uri = java.net.URI("file", "", document.path, null).toASCIIString()
+        val uri = diagnosticUri(document.path)
         val fileDiagnostics = JsonArray().apply {
             diagnostics.filter { it.uri == uri }.forEach { diagnostic ->
                 add(JsonObject().apply {
@@ -2722,7 +2879,7 @@ class WorkbenchController(private val context: Context) {
         }
         val order = compareBy<LspPosition>({ it.line }, { it.character })
         val problems = diagnostics
-            .filter { runCatching { java.net.URI(it.uri).path }.getOrNull() == document.path }
+            .filter { it.uri == diagnosticUri(document.path) }
             .sortedWith(compareBy(order) { position(it) })
         if (problems.isEmpty()) {
             status = "No problems in this file"

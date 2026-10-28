@@ -55,6 +55,8 @@ sealed interface WorkbenchDialog {
     data object GotoLine : WorkbenchDialog
     data object Encoding : WorkbenchDialog
     data object LineEnding : WorkbenchDialog
+    /** The language of an untitled file. */
+    data object UntitledLanguage : WorkbenchDialog
     data object Rename : WorkbenchDialog
     data object SettingsJson : WorkbenchDialog
     data object Keybindings : WorkbenchDialog

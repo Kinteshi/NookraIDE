@@ -19,6 +19,7 @@ import com.avfstudio.nativeide.DARK_SYNTAX_THEME
 import com.avfstudio.nativeide.LIGHT_SYNTAX_THEME
 import com.avfstudio.nativeide.PythonTextMate
 import com.avfstudio.nativeide.editor.SoraBracketColorizer
+import com.avfstudio.nativeide.editor.UNNECESSARY_CODE_COLOR_ID
 import io.github.rosemoe.sora.langs.textmate.TextMateColorScheme
 import io.github.rosemoe.sora.langs.textmate.registry.ThemeRegistry
 import io.github.rosemoe.sora.widget.CodeEditor
@@ -67,6 +68,13 @@ private fun ColorScheme.pureBlack(): ColorScheme = copy(
     surfaceContainerHighest = Color(0xFF202024),
 )
 
+/** A problem's colour by LSP severity (1 error, 2 warning, else information), as in Problems. */
+fun ColorScheme.problemColor(severity: Int?): Color = when (severity) {
+    1, null -> error
+    2 -> tertiary
+    else -> primary
+}
+
 /**
  * Applies the syntax theme and Material chrome colours to a code editor. Imported VS Code themes
  * keep their own colours; otherwise code is coloured with Dark+/Light+ ([SyntaxColors.Classic])
@@ -98,9 +106,18 @@ fun applyEditorTheme(
         palette?.semanticColors() ?: loadSavedSemanticColors(context),
         light = !dark && !imported,
     )
-    if (imported) return
     val scheme = editor.colorScheme
     fun set(id: Int, color: Color) = scheme.setColor(id, color.toArgb())
+    // Problems keep the app's colours under imported themes too, matching the Problems list.
+    set(EditorColorScheme.PROBLEM_ERROR, colors.problemColor(1))
+    set(EditorColorScheme.PROBLEM_WARNING, colors.problemColor(2))
+    set(EditorColorScheme.PROBLEM_TYPO, colors.problemColor(3))
+    set(EditorColorScheme.DIAGNOSTIC_TOOLTIP_BACKGROUND, colors.surfaceContainerHigh)
+    set(EditorColorScheme.DIAGNOSTIC_TOOLTIP_BRIEF_MSG, colors.onSurface)
+    set(EditorColorScheme.DIAGNOSTIC_TOOLTIP_DETAILED_MSG, colors.onSurfaceVariant)
+    set(EditorColorScheme.DIAGNOSTIC_TOOLTIP_ACTION, colors.primary)
+    if (imported) return
+    set(UNNECESSARY_CODE_COLOR_ID, colors.onSurface.copy(alpha = 0.45f))
     set(EditorColorScheme.WHOLE_BACKGROUND, colors.surface)
     set(EditorColorScheme.LINE_NUMBER_BACKGROUND, colors.surface)
     set(EditorColorScheme.LINE_NUMBER, colors.onSurfaceVariant.copy(alpha = 0.55f))

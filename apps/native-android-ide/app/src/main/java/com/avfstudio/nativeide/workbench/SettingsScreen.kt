@@ -144,6 +144,21 @@ fun SettingsScreen(controller: WorkbenchController) {
                         set(WorkbenchSettings.OUTLINE_PROBLEMS, it)
                     }
                 }
+                item {
+                    SwitchRow("Problem underlines", "Wavy lines under problems, their message on tap or hover, and marks beside the scrollbar", settings.problemUnderlines) {
+                        set(WorkbenchSettings.PROBLEM_UNDERLINES, if (it) "on" else "off")
+                    }
+                }
+                item {
+                    SwitchRow("Fade unused code", "Imports and variables the language server reports as unused", settings.showUnused) {
+                        set(WorkbenchSettings.SHOW_UNUSED, it)
+                    }
+                }
+                item {
+                    SwitchRow("Strike through deprecated code", null, settings.showDeprecated) {
+                        set(WorkbenchSettings.SHOW_DEPRECATED, it)
+                    }
+                }
                 item { SwitchRow("Format on save", "Ruff for Python, the language server otherwise", settings.formatOnSave) { set(WorkbenchSettings.FORMAT_ON_SAVE, it) } }
                 item {
                     // Four choices don't fit beside the text at tablet width ("Focus change" was cut
@@ -169,6 +184,11 @@ fun SettingsScreen(controller: WorkbenchController) {
                     )
                 }
 
+                item {
+                    SwitchRow("Explorer tree", "Folders open in place below themselves; off opens one folder at a time", settings.explorerTree) {
+                        set(WorkbenchSettings.EXPLORER_TREE, it)
+                    }
+                }
                 item {
                     SwitchRow("Guest resources in the status bar", "Memory the Linux guest costs the tablet, its CPU and its storage", settings.statusBarGuestResources) {
                         set(WorkbenchSettings.STATUS_BAR_GUEST, it)
@@ -197,6 +217,32 @@ fun SettingsScreen(controller: WorkbenchController) {
                                     onClick = { set(WorkbenchSettings.TYPESCRIPT_LANGUAGE_SERVER, server) },
                                     shape = SegmentedButtonDefaults.itemShape(index, 2),
                                 ) { Text(label) }
+                            }
+                        }
+                    }
+                }
+                item {
+                    SettingRow("Python lint rules", "Ruff rules added to the project's own: Extended adds bugbear, pyupgrade, simplify, import order and Ruff's rules") {
+                        SingleChoiceSegmentedButtonRow {
+                            PythonLintRules.entries.forEachIndexed { index, rules ->
+                                SegmentedButton(
+                                    selected = settings.pythonLintRules == rules,
+                                    onClick = { set(WorkbenchSettings.PYTHON_LINT_RULES, rules.key) },
+                                    shape = SegmentedButtonDefaults.itemShape(index, PythonLintRules.entries.size),
+                                ) { Text(rules.label) }
+                            }
+                        }
+                    }
+                }
+                item {
+                    SettingRow("Python type checking", "Strict makes every ty rule an error (basedpyright: strict mode); Off keeps syntax errors only") {
+                        SingleChoiceSegmentedButtonRow {
+                            PythonTypeChecking.entries.forEachIndexed { index, level ->
+                                SegmentedButton(
+                                    selected = settings.pythonTypeChecking == level,
+                                    onClick = { set(WorkbenchSettings.PYTHON_TYPE_CHECKING, level.key) },
+                                    shape = SegmentedButtonDefaults.itemShape(index, PythonTypeChecking.entries.size),
+                                ) { Text(level.label) }
                             }
                         }
                     }

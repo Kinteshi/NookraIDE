@@ -8,15 +8,18 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -83,6 +86,39 @@ fun EditorArea(controller: WorkbenchController, modifier: Modifier = Modifier) {
                 else -> EmptyEditor(controller)
             }
             if (notebook == null && paged == null) InlineGhostText(controller)
+            if (notebook == null && paged == null && activeDocument != null) {
+                ProblemScrollMarks(controller, Modifier.align(Alignment.TopEnd))
+            }
+        }
+    }
+}
+
+/**
+ * The active file's problems beside the scrollbar (VS Code's overview ruler): the whole file
+ * maps onto the editor's height, and a tap on a mark moves the cursor to that problem. Only the
+ * marks take touches, so the editor and its scrollbar keep the rest of the strip.
+ */
+@Composable
+private fun ProblemScrollMarks(controller: WorkbenchController, modifier: Modifier = Modifier) {
+    val marks = controller.editorProblemMarks
+    if (marks.isEmpty()) return
+    val colors = MaterialTheme.colorScheme
+    BoxWithConstraints(modifier.fillMaxHeight().width(12.dp)) {
+        val usable = maxHeight - 8.dp
+        marks.forEach { mark ->
+            Box(
+                Modifier
+                    .offset(y = usable * mark.fraction)
+                    .size(12.dp, 8.dp)
+                    .clickable { controller.goToProblemMark(mark) },
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(
+                    Modifier
+                        .size(6.dp, 3.dp)
+                        .background(colors.problemColor(mark.severity), RoundedCornerShape(1.dp)),
+                )
+            }
         }
     }
 }
@@ -277,6 +313,7 @@ private fun NativeEditorView(controller: WorkbenchController, document: Document
                 setEditorLanguage(language)
                 props.symbolPairAutoCompletion = false
                 val bracketColorizer = SoraBracketColorizer(this, document.languageId)
+                overlay = bracketColorizer
                 onStylesPublished = {
                     bracketColorizer.update()
                     controller.decorateEditorLines(this, document.path)
@@ -408,6 +445,8 @@ internal class NativeCodeEditor(
     /** Runs on the UI thread each time the analyzer publishes spans, so overlays (bracket pairs,
      *  semantic tokens) are re-applied to the fresh spans before the next frame. */
     var onStylesPublished: (() -> Unit)? = null
+    /** Bracket, semantic and problem-tag colours drawn over the analyzer's spans. */
+    var overlay: SoraBracketColorizer? = null
     /** `editor.insertSpaces`; the tab size is the editor's tab width. */
     var insertSpaces = true
     /** `editor.autoIndent`; off leaves Enter to sora (a plain newline). */
