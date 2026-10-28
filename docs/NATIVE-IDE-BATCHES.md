@@ -526,7 +526,7 @@ Registered list (10-27):
   one WebView per HTML output (~35 MB each); Ctrl+Z after IME-typed text (check sora undo);
   Copilot CLI lists only "Auto" over ACP.
 
-## Next pass (registered 10-27 23:35; not started)
+## Next pass (registered 10-27 23:35, updated 10-28 00:10; not started)
 * **Material You refinement (user).** Go over the UI elements for a consistent Material 3 look
   that follows dynamic colour: chips and dropdowns, dialogs, tabs, side panes, the status bar,
   Settings rows, buttons, the setup rows in pickers. Keep the slim/AMOLED taste.
@@ -566,8 +566,9 @@ Registered list (10-27):
   terminals had ended with the daemon restart, so focus stayed in a cell); removed character
   by character, the file on disk was never changed (grep), and the tab was reopened from disk.
   Possible app fix: tapping an ended terminal should still take the keyboard from the editor.
+* Tapping an ended terminal should still take the keyboard from the editor (after a daemon
+  restart, keys went to the last focused notebook cell).
 * Carried over from batch 12:
-  * Kernel completions on the tablet (needs ipykernel in one of the user's conda envs).
   * Copilot server staying stopped while signed out.
   * Untested setup paths: Source Control's Install Git, Miniforge, "Create ~/.venv" via uv.
   * Install the build with the interpreter picker's status fix.
