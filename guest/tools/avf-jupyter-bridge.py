@@ -19,6 +19,7 @@ import glob
 import json
 import os
 import queue
+import shutil
 import subprocess
 import sys
 import threading
@@ -85,6 +86,7 @@ def generated_kernel_dir(missing):
     system_python = next((p for p in ("/usr/bin/python3", "/usr/local/bin/python3") if os.path.exists(p)), None)
     if system_python:
         pythons.append(system_python)
+    prune_generated_specs(target)
     for python in pythons:
         if not os.path.exists(python):
             continue
@@ -105,6 +107,23 @@ def generated_kernel_dir(missing):
         with open(os.path.join(directory, "kernel.json"), "w", encoding="utf-8") as handle:
             json.dump(spec, handle)
     return target
+
+
+def prune_generated_specs(target):
+    """Removes the bridge's own kernelspecs whose interpreter is gone (a deleted venv or env)."""
+    for kernel_json in glob.glob(os.path.join(target, "avf-*", "kernel.json")):
+        try:
+            with open(kernel_json, encoding="utf-8") as handle:
+                argv = json.load(handle).get("argv") or []
+        except (OSError, ValueError):
+            argv = []
+        if not argv or not os.path.exists(argv[0]):
+            shutil.rmtree(os.path.dirname(kernel_json), ignore_errors=True)
+
+
+def interpreter_missing(argv):
+    """A spec that names an interpreter by absolute path that no longer exists."""
+    return bool(argv) and os.path.isabs(argv[0]) and not os.path.exists(argv[0])
 
 
 def resolve_argv(argv, resource_dir):
@@ -193,6 +212,9 @@ class Bridge:
         for name, entry in sorted(self.specs.get_all_specs().items()):
             spec = entry.get("spec", {})
             argv = resolve_argv(spec.get("argv") or [], entry.get("resource_dir", ""))
+            # Specs left behind by deleted environments (the user's own are hidden, not removed).
+            if interpreter_missing(argv):
+                continue
             result.append({
                 "name": name,
                 "display_name": spec.get("display_name", name),

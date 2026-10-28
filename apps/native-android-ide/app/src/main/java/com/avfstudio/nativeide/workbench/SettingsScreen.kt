@@ -139,6 +139,11 @@ fun SettingsScreen(controller: WorkbenchController) {
                         set(WorkbenchSettings.SEMANTIC_HIGHLIGHTING, it)
                     }
                 }
+                item {
+                    SwitchRow("Problems in the outline", "Problem counts beside Outline entries, and a filter for symbols with problems", settings.outlineProblems) {
+                        set(WorkbenchSettings.OUTLINE_PROBLEMS, it)
+                    }
+                }
                 item { SwitchRow("Format on save", "Ruff for Python, the language server otherwise", settings.formatOnSave) { set(WorkbenchSettings.FORMAT_ON_SAVE, it) } }
                 item {
                     // Four choices don't fit beside the text at tablet width ("Focus change" was cut

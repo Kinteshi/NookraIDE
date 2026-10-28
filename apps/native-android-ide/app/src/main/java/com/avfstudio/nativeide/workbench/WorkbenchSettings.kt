@@ -56,6 +56,8 @@ data class WorkbenchSettings(
     val renderHtmlOutputs: Boolean = true,
     /** Jupyter-style Tab after a name or dot asks the kernel for completions (Ctrl+Space always does). */
     val notebookTabCompletion: Boolean = true,
+    /** Problem counts beside Outline entries and its "Problems only" filter. */
+    val outlineProblems: Boolean = true,
 ) {
     companion object {
         const val THEME_MODE = "avf.theme.mode"
@@ -93,6 +95,7 @@ data class WorkbenchSettings(
         const val STATUS_BAR_GUEST = "avf.statusBar.guestResources"
         const val RENDER_HTML = "avf.notebook.htmlOutputs"
         const val NOTEBOOK_TAB_COMPLETION = "avf.notebook.tabCompletion"
+        const val OUTLINE_PROBLEMS = "outline.problems.enabled"
 
         fun from(settings: JsonObject): WorkbenchSettings {
             val defaults = WorkbenchSettings()
@@ -139,6 +142,7 @@ data class WorkbenchSettings(
                 statusBarGuestResources = bool(STATUS_BAR_GUEST, defaults.statusBarGuestResources),
                 renderHtmlOutputs = bool(RENDER_HTML, defaults.renderHtmlOutputs),
                 notebookTabCompletion = bool(NOTEBOOK_TAB_COMPLETION, defaults.notebookTabCompletion),
+                outlineProblems = bool(OUTLINE_PROBLEMS, defaults.outlineProblems),
             )
         }
     }

@@ -147,7 +147,7 @@
     },
     {
       "name": "jupyter",
-      "version": "bridge-4",
+      "version": "bridge-5",
       "kind": "kernel",
       "languages": ["python"],
       "command": ["avf-jupyter-bridge"],

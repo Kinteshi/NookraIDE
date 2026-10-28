@@ -60,6 +60,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -173,22 +174,42 @@ fun ExplorerList(controller: WorkbenchController) {
 private fun OutlineList(controller: WorkbenchController) {
     val document = controller.activeDocument
     val rows = remember(controller.outlineSymbols) { flattenOutline(controller.outlineSymbols) }
+    val showProblems = controller.settings.outlineProblems
+    val path = document?.path
+    val fileDiagnostics = controller.diagnostics.filter { path != null && runCatching { java.net.URI(it.uri).path }.getOrNull() == path }
+    val problems = if (showProblems) outlineProblems(rows, fileDiagnostics) else rows.map { null }
+    var problemsOnly by remember { mutableStateOf(false) }
+    val visible = if (showProblems && problemsOnly) rowsWithProblems(rows, problems) else rows.indices.toList()
     when {
         document == null -> EmptyMessage("Open a file to show its symbols.")
         rows.isEmpty() -> EmptyMessage("No symbols found.")
-        else -> LazyColumn {
-            items(rows) { (symbol, depth) ->
-                PaneRow(
-                    when (symbol.kind) {
-                        5, 10, 11, 23 -> Icons.Outlined.DataObject
-                        6, 9, 12 -> Icons.Outlined.Functions
-                        else -> Icons.Outlined.Code
-                    },
-                    symbol.name,
-                    indent = depth,
-                ) {
-                    val uri = java.net.URI("file", "", document.path, null).toASCIIString()
-                    controller.navigateToLocation(LanguageLocation(uri, symbol.range))
+        else -> Column {
+            if (showProblems && fileDiagnostics.isNotEmpty()) {
+                Row(Modifier.padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    FilterChip(
+                        selected = problemsOnly,
+                        onClick = { problemsOnly = !problemsOnly },
+                        label = { Text("Problems only · ${fileDiagnostics.size}") },
+                        leadingIcon = { Icon(Icons.Outlined.FilterList, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                    )
+                }
+            }
+            LazyColumn {
+                items(visible) { index ->
+                    val (symbol, depth) = rows[index]
+                    PaneRow(
+                        when (symbol.kind) {
+                            5, 10, 11, 23 -> Icons.Outlined.DataObject
+                            6, 9, 12 -> Icons.Outlined.Functions
+                            else -> Icons.Outlined.Code
+                        },
+                        symbol.name,
+                        indent = depth,
+                        trailing = problems[index]?.let { problem -> { ProblemBadge(problem) } },
+                    ) {
+                        val uri = java.net.URI("file", "", document.path, null).toASCIIString()
+                        controller.navigateToLocation(LanguageLocation(uri, symbol.range))
+                    }
                 }
             }
         }
@@ -203,22 +224,32 @@ fun ProblemsList(controller: WorkbenchController) {
         EmptyMessage("No problems have been detected in the open files.")
         return
     }
+    val groups = problemsByFile(diagnostics)
+    // Files the user folded; new files start open.
+    val collapsed = remember { mutableStateMapOf<String, Boolean>() }
     LazyColumn {
         items(issues) { issue ->
             ProblemRow(Icons.Outlined.ErrorOutline, MaterialTheme.colorScheme.error, "${issue.server} unavailable", issue.message) {}
         }
-        items(diagnostics) { diagnostic -> DiagnosticRow(diagnostic) { controller.navigateToLocation(LanguageLocation(diagnostic.uri, diagnostic.range)) } }
+        groups.forEach { (uri, items) ->
+            val folded = collapsed[uri] == true
+            item(key = "file:$uri") {
+                PaneRow(
+                    if (folded) Icons.AutoMirrored.Outlined.KeyboardArrowRight else Icons.Outlined.ExpandMore,
+                    uri.substringAfterLast('/'),
+                    trailing = { ProblemBadge(ProblemCount(items.size, items.minOf { it.severity ?: 1 })) },
+                ) { collapsed[uri] = !folded }
+            }
+            if (!folded) {
+                items(items) { diagnostic -> DiagnosticRow(diagnostic) { controller.navigateToLocation(LanguageLocation(diagnostic.uri, diagnostic.range)) } }
+            }
+        }
     }
 }
 
 @Composable
 private fun DiagnosticRow(diagnostic: LanguageDiagnostic, onClick: () -> Unit) {
-    val colors = MaterialTheme.colorScheme
-    val (icon, tint) = when (diagnostic.severity) {
-        1 -> Icons.Outlined.ErrorOutline to colors.error
-        2 -> Icons.Outlined.WarningAmber to colors.tertiary
-        else -> Icons.Outlined.Info to colors.primary
-    }
+    val (icon, tint) = severityStyle(diagnostic.severity)
     val line = diagnostic.range.getAsJsonObject("start")?.get("line")?.asInt?.plus(1)
     ProblemRow(
         icon,
@@ -284,6 +315,7 @@ fun PaneRow(
     selected: Boolean = false,
     indent: Int = 0,
     onLongClick: (() -> Unit)? = null,
+    trailing: (@Composable () -> Unit)? = null,
     onClick: () -> Unit,
 ) {
     val colors = MaterialTheme.colorScheme
@@ -314,8 +346,35 @@ fun PaneRow(
             },
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
+            modifier = if (trailing != null) Modifier.weight(1f) else Modifier,
         )
+        trailing?.invoke()
     }
+}
+
+/** The colour and icon of an LSP severity (1 error, 2 warning, else information). */
+@Composable
+private fun severityStyle(severity: Int?): Pair<ImageVector, androidx.compose.ui.graphics.Color> {
+    val colors = MaterialTheme.colorScheme
+    return when (severity) {
+        1, null -> Icons.Outlined.ErrorOutline to colors.error
+        2 -> Icons.Outlined.WarningAmber to colors.tertiary
+        else -> Icons.Outlined.Info to colors.primary
+    }
+}
+
+/** A problem count beside an outline entry, in the colour of its worst problem. */
+@Composable
+private fun ProblemBadge(problem: ProblemCount) {
+    val (_, tint) = severityStyle(problem.worst)
+    Text(
+        problem.count.toString(),
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.surface,
+        modifier = Modifier
+            .background(tint, androidx.compose.foundation.shape.CircleShape)
+            .padding(horizontal = 6.dp, vertical = 1.dp),
+    )
 }
 
 @Composable

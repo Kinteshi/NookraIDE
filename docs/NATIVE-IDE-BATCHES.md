@@ -755,6 +755,10 @@ Guest not reset (the user's conda base and Copilot sign-in were still there); te
 ## Mapped for later (user, 10-27)
 * Chat adjustments beyond the model/mode picker (batch 11). (Reasoning effort done in batch 16.)
 * Claude Code and Gemini support alongside Copilot (chat agents; ACP where they speak it).
+* AI chat session history and management (user, 10-28): keep past conversations (title, date,
+  workspace), reopen one (ACP `session/load` where the agent supports it, else read-only
+  history), rename and delete them, start a new one beside the current; check what Copilot CLI
+  keeps itself (it lists sessions in its own store) before storing anything in the app.
 * (Done in batch 11: auto-save modes after a delay, on focus change and on window change.)
 * Offline experience: the editor alone when no guest is reachable (open/edit local and cached
   files, no tools).

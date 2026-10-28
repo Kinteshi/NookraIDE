@@ -151,3 +151,49 @@ internal fun wordAtPosition(text: String, position: LspPosition): String {
 }
 
 internal fun isIdentifierCharacter(char: Char): Boolean = char == '_' || char.isLetterOrDigit()
+
+/** Problems counted for one outline symbol; [worst] is the lowest LSP severity (1 = error). */
+data class ProblemCount(val count: Int, val worst: Int)
+
+private fun JsonObject.lineSpan(): IntRange? {
+    val start = getAsJsonObject("start")?.get("line")?.asInt ?: return null
+    val end = getAsJsonObject("end")?.get("line")?.asInt ?: start
+    return start..maxOf(start, end)
+}
+
+/**
+ * For each flattened outline row, the problems that start inside its symbol, as VS Code's
+ * outline decorations do (a class counts the problems of its methods too).
+ */
+internal fun outlineProblems(
+    rows: List<Pair<OutlineSymbol, Int>>,
+    diagnostics: List<com.avfstudio.nativeide.language.LanguageDiagnostic>,
+): List<ProblemCount?> {
+    val starts = diagnostics.mapNotNull { diagnostic ->
+        diagnostic.range.getAsJsonObject("start")?.get("line")?.asInt?.let { it to (diagnostic.severity ?: 1) }
+    }
+    return rows.map { (symbol, _) ->
+        val span = symbol.range.lineSpan() ?: return@map null
+        val inside = starts.filter { it.first in span }
+        if (inside.isEmpty()) null else ProblemCount(inside.size, inside.minOf { it.second })
+    }
+}
+
+/** Rows to keep when the outline shows only symbols with problems: those and their parents. */
+internal fun rowsWithProblems(rows: List<Pair<OutlineSymbol, Int>>, problems: List<ProblemCount?>): List<Int> {
+    // A parent's span contains its children's, so its count is never smaller: keeping rows with
+    // any count keeps the parents of every kept row.
+    return rows.indices.filter { problems.getOrNull(it) != null }
+}
+
+/** Problems grouped by file for the Problems list: files by name, problems by severity then line. */
+internal fun problemsByFile(
+    diagnostics: List<com.avfstudio.nativeide.language.LanguageDiagnostic>,
+): List<Pair<String, List<com.avfstudio.nativeide.language.LanguageDiagnostic>>> =
+    diagnostics.groupBy { it.uri }
+        .map { (uri, items) ->
+            uri to items.sortedWith(
+                compareBy({ it.severity ?: 1 }, { it.range.getAsJsonObject("start")?.get("line")?.asInt ?: 0 }),
+            )
+        }
+        .sortedBy { (uri, _) -> uri.substringAfterLast('/').lowercase() }
