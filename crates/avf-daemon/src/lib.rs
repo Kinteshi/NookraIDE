@@ -3,6 +3,7 @@ mod git;
 #[cfg(feature = "native-protocol")]
 mod lsp;
 mod ports;
+mod probe;
 mod pairing;
 mod tls;
 mod pty;
@@ -17,7 +18,8 @@ mod vfs;
 
 use avf_protocol::{
     decode, encode, FsEventKind, MultiplexedPacket, PtyPayload, RejectReason, SystemMessage,
-    VfsErrorCode, VfsMessage, MAX_CHUNK_SIZE, MAX_FRAME_SIZE, PROTOCOL_VERSION,
+    VfsErrorCode, VfsMessage, FEATURE_PROBE_COMMANDS, MAX_CHUNK_SIZE, MAX_FRAME_SIZE,
+    PROTOCOL_VERSION,
 };
 #[cfg(feature = "native-protocol")]
 use avf_protocol::{GitMessage, RpcKind, RpcMessage, SearchMessage};
@@ -495,6 +497,7 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
             protocol_version: PROTOCOL_VERSION,
             daemon_version: env!("CARGO_PKG_VERSION").to_owned(),
             pty_sessions: state.pty.sessions().await,
+            features: vec![FEATURE_PROBE_COMMANDS.to_owned()],
         }),
     )
     .await
@@ -741,6 +744,23 @@ async fn process_packet(
                     Err(())
                 }
             }
+        }
+        MultiplexedPacket::System(SystemMessage::ProbeCommands { request_id, names }) => {
+            let home = env::var_os("HOME").map(PathBuf::from);
+            let path = env::var_os("PATH");
+            let commands = tokio::task::spawn_blocking(move || {
+                probe::probe_commands(home.as_deref(), path.as_deref(), &names)
+            })
+            .await
+            .unwrap_or_default();
+            send_outbound(
+                outbound,
+                MultiplexedPacket::System(SystemMessage::CommandsProbed {
+                    request_id,
+                    commands,
+                }),
+            )
+            .await
         }
         MultiplexedPacket::Vfs(VfsMessage::ListDirReq { req_id, path }) => {
             let response = match state.vfs.list_dir(path).await {

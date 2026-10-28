@@ -62,6 +62,14 @@ fun SourceControlView(controller: WorkbenchController) {
     Column(Modifier.fillMaxSize()) {
         when {
             !controller.connected -> EmptyMessage("Connect to a guest to use Git.")
+            controller.gitMissing -> Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Git isn't installed in the guest.", style = MaterialTheme.typography.bodyMedium)
+                Button(
+                    onClick = { controller.offerInstall(GuestDependency.Git, then = controller::refreshGitStatus) },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Install Git") }
+                OutlinedButton(onClick = { controller.checkGuestTools(controller::refreshGitStatus) }, modifier = Modifier.fillMaxWidth()) { Text("Check again") }
+            }
             controller.gitNotARepository -> NotARepository(controller)
             controller.gitProblem != null -> Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(controller.gitProblem!!, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)

@@ -102,6 +102,11 @@ pub enum SystemMessage {
         protocol_version: u32,
         daemon_version: String,
         pty_sessions: Vec<PtySessionInfo>,
+        /// Requests this daemon understands beyond the base protocol (see [`FEATURE_PROBE_COMMANDS`]).
+        /// An older daemon closes the connection on a packet it can't decode, so clients check
+        /// here before sending one.
+        #[serde(default)]
+        features: Vec<String>,
     },
     Rejected {
         reason: RejectReason,
@@ -145,6 +150,15 @@ pub enum SystemMessage {
         #[serde(default)]
         disk_total_mb: u64,
     },
+    /// Which of `names` the daemon could run, for offering to install what a feature needs.
+    ProbeCommands {
+        request_id: u64,
+        names: Vec<String>,
+    },
+    CommandsProbed {
+        request_id: u64,
+        commands: Vec<ProbedCommand>,
+    },
     PortOpened {
         port: u16,
         protocol: PortProtocol,
@@ -157,6 +171,16 @@ pub enum SystemMessage {
     ProtocolError {
         message: String,
     },
+}
+
+/// Welcome feature: the daemon answers [`SystemMessage::ProbeCommands`].
+pub const FEATURE_PROBE_COMMANDS: &str = "probe_commands";
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProbedCommand {
+    pub name: String,
+    /// Where the command was found, or `None` when it isn't installed.
+    pub path: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -703,11 +727,30 @@ mod tests {
                     cols: 80,
                     rows: 24,
                 }],
+                features: vec![FEATURE_PROBE_COMMANDS.into()],
             }),
             MultiplexedPacket::System(SystemMessage::Welcome {
                 protocol_version: PROTOCOL_VERSION,
                 daemon_version: "0.1.0".into(),
                 pty_sessions: Vec::new(),
+                features: Vec::new(),
+            }),
+            MultiplexedPacket::System(SystemMessage::ProbeCommands {
+                request_id: 7,
+                names: vec!["git".into(), "conda".into()],
+            }),
+            MultiplexedPacket::System(SystemMessage::CommandsProbed {
+                request_id: 7,
+                commands: vec![
+                    ProbedCommand {
+                        name: "git".into(),
+                        path: Some("/usr/bin/git".into()),
+                    },
+                    ProbedCommand {
+                        name: "conda".into(),
+                        path: None,
+                    },
+                ],
             }),
             MultiplexedPacket::System(SystemMessage::Rejected {
                 reason: RejectReason::InvalidToken,

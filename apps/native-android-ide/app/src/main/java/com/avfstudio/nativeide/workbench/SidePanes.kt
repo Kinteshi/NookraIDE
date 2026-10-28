@@ -53,6 +53,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -413,7 +414,10 @@ private fun SearchView(controller: WorkbenchController) {
             controller.searchSummary?.let {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (controller.searchRunning) CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
-                    Text(it, style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant)
+                    Text(it, style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant, modifier = Modifier.weight(1f, fill = false))
+                    if (missingDependencyIn(it) == GuestDependency.Ripgrep || "needs ripgrep" in it) {
+                        TextButton(onClick = { controller.offerInstall(GuestDependency.Ripgrep) { controller.scheduleSearch() } }) { Text("Install") }
+                    }
                 }
             }
         }

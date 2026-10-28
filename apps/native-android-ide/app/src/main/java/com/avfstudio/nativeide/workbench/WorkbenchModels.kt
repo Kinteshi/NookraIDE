@@ -74,14 +74,23 @@ sealed interface WorkbenchDialog {
     /** Closing a tab with unsaved changes, as VS Code asks. */
     data class ConfirmClose(val path: String) : WorkbenchDialog
     /** Python environments found in the guest; [then] runs after one is chosen (e.g. start debugging). */
-    data class InterpreterPicker(val options: List<Pair<String, String>>, val then: (() -> Unit)?) : WorkbenchDialog
+    data class InterpreterPicker(
+        val options: List<Pair<String, String>>,
+        val then: (() -> Unit)?,
+        /** Ways to add an environment when the guest has none to pick. */
+        val setup: List<EnvironmentSetup> = emptyList(),
+    ) : WorkbenchDialog
     /** Set up (or re-pair) the Linux guest; [reason] says why it opened, e.g. a rejected token. */
     data class GuestSetup(val reason: String? = null) : WorkbenchDialog
+    /** Offers to install a missing guest tool; [then] continues what needed it. */
+    data class InstallDependency(val dependency: GuestDependency, val reason: String?, val then: (() -> Unit)?) : WorkbenchDialog
     data class CopilotSignInCode(val signIn: CopilotSignIn) : WorkbenchDialog
     data class KernelPicker(
         val path: String,
         val specs: List<KernelSpec>,
         val installable: List<com.avfstudio.nativeide.notebook.InstallableKernel>,
+        /** Missing tools that would add environments (conda), offered below the kernels. */
+        val setup: List<GuestDependency> = emptyList(),
     ) : WorkbenchDialog
 }
 

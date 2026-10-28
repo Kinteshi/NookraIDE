@@ -426,7 +426,35 @@ stack, variables, debug console. Restore the F9 binding when it works.
   cursor_start/end); a non-focusable popup under the cell lists matches, typing narrows them,
   Up/Down choose, Enter/Tab accept, Esc closes. Without a kernel, Tab indents.
 
-## Next pass (registered 10-27; not started)
+## 12. Guided dependency setup, open tests and bugs (started 10-27 22:45; in progress)
+Progress (code done, unit tests pass; tablet check pending):
+* Daemon: Welcome now lists `features` (`probe_commands`); new `ProbeCommands` /
+  `CommandsProbed` say which commands the guest has (daemon PATH plus ~/.local/bin and the
+  conda installers' default prefixes; bare names only, 32 per request). Older daemons close the
+  connection on an unknown packet, so the app only asks when Welcome lists the feature.
+* uv joins the tool catalog (0.13.0, same pins as the installer), so the app can install it with
+  `avf-native-daemon tools install uv`.
+* App: `GuestDependency` (Git, GitHub CLI, uv, Conda via Miniforge 26.7.2-0 checksum-verified,
+  Jupyter bridge, ripgrep). The app checks on connect; `offerInstall` shows what is installed,
+  from where, and the exact command, then runs it in a visible terminal and checks again.
+  * Kernel picker: "Install Conda (Miniforge) for conda environments" when conda is missing; a
+    missing Jupyter bridge offers its install instead of a status line. "Create ~/.venv" uses
+    uv when present (no python3-venv needed); pip installs fall back to `uv pip`.
+  * Python interpreter picker: "Create ~/.venv with ipykernel" when there is none, and
+    Miniforge when conda is missing.
+  * Source Control: "Git isn't installed in the guest" with Install Git / Check again.
+  * Search: an Install button when ripgrep is missing.
+  * Settings → Guest tools: each tool with its path or "not installed" and an Install button;
+    "Check guest tools again". No on/off toggle: prompts appear only where a feature already
+    failed, and the list in Settings is the picker.
+  * GitHub CLI: the sign-in command already installs gh (and git) itself.
+  * Keyring: not offered. A secret service in the headless guest needs gnome-keyring plus a
+    D-Bus session and an unlock on every boot; gh's plain-text file is mode 0600 in a
+    single-user VM whose disk lives in app-private storage. Revisit if a tool needs one.
+* Tablet restart at 19:22 (`rescueparty_by_bootchecker`) after SystemUI crashed in its GC
+  (19:19 tombstone); nothing from this work was running. The adb pairing was lost and redone.
+
+Registered list (10-27):
 * **Guided dependency setup (user's priority; large).** The IDE relies on guest tools that a
   fresh or reset guest may lack. Detect what's missing and offer to install it where it's
   needed, instead of failing:

@@ -603,6 +603,7 @@ class WorkbenchController(private val context: Context) {
                 }
                 startKeepAlive("Connected")
                 startStatsPolling()
+                checkGuestTools()
                 guestUnreachable = false
                 reconnectAttempt = 0
                 scheduledReconnect?.cancel(false)
@@ -709,8 +710,8 @@ class WorkbenchController(private val context: Context) {
                     is SearchEvent.Error -> {
                         searchRunning = false
                         activeSearch = null
-                        searchSummary = if ("Could not start ripgrep" in event.message) {
-                            "ripgrep is missing in the guest; install it with `avf-native-daemon tools install ripgrep`"
+                        searchSummary = if (missingDependencyIn(event.message) == GuestDependency.Ripgrep) {
+                            "Search needs ripgrep, which isn't installed in the guest"
                         } else {
                             event.message
                         }
@@ -1063,7 +1064,29 @@ class WorkbenchController(private val context: Context) {
                     add("python3 on the daemon's PATH" to "python3")
                 }.distinctBy { it.second }
                 if (error != null) status = "Python discovery failed (${error.message}); pick python3 or set python.defaultInterpreterPath"
-                dialog = WorkbenchDialog.InterpreterPicker(options, then)
+                checkGuestTools {
+                    val setup = buildList {
+                        if (options.none { "/.venv/" in it.second }) add(EnvironmentSetup.CreateVenv)
+                        if (guestTool(GuestDependency.Conda) == DependencyState.Missing) add(EnvironmentSetup.Install(GuestDependency.Conda))
+                    }
+                    dialog = WorkbenchDialog.InterpreterPicker(options, then, setup)
+                }
+            }
+        }
+    }
+
+    /** A picker row that adds an environment; the picker opens again once it exists. */
+    fun setUpEnvironment(setup: EnvironmentSetup, then: (() -> Unit)?) {
+        dialog = null
+        when (setup) {
+            is EnvironmentSetup.Install -> offerInstall(setup.dependency) { chooseInterpreter(then) }
+            EnvironmentSetup.CreateVenv -> {
+                status = "Creating ~/.venv…"
+                newTerminal(createVenvCommand("python3", guestTool(GuestDependency.Uv) is DependencyState.Found) + " && exit", onExit = { code ->
+                    post {
+                        if (code == 0) chooseInterpreter(then) else status = "~/.venv wasn't created; the terminal shows why"
+                    }
+                })
             }
         }
     }
@@ -1107,6 +1130,47 @@ class WorkbenchController(private val context: Context) {
         add("end", position)
     }
 
+    // Guest dependencies ------------------------------------------------------------------------
+
+    /** What the guest has of each tool an IDE feature needs; Unknown until checked. */
+    var guestTools by mutableStateOf<Map<GuestDependency, DependencyState>>(emptyMap())
+        private set
+
+    fun guestTool(dependency: GuestDependency): DependencyState = guestTools[dependency] ?: DependencyState.Unknown
+
+    /** Asks the daemon which tools exist; [then] runs once the answer (or the failure) is in. */
+    fun checkGuestTools(then: (() -> Unit)? = null) {
+        vfs.probeCommands(GuestDependency.allCommands).whenComplete { paths, error ->
+            post {
+                guestTools = if (error != null) emptyMap() else dependencyStates(paths)
+                then?.invoke()
+            }
+        }
+    }
+
+    /** Asks before installing [dependency]; [reason] says what needs it, [then] runs after a successful install. */
+    fun offerInstall(dependency: GuestDependency, reason: String? = null, then: (() -> Unit)? = null) {
+        dialog = WorkbenchDialog.InstallDependency(dependency, reason, then)
+    }
+
+    /** Installs in a visible terminal, checks the guest again, then continues with [then]. */
+    fun installDependency(dependency: GuestDependency, then: (() -> Unit)? = null) {
+        if (dialog is WorkbenchDialog.InstallDependency) dialog = null
+        status = "Installing ${dependency.label}…"
+        newTerminal(installCommand(dependency), onExit = { code ->
+            post {
+                checkGuestTools {
+                    if (code == 0) {
+                        status = "${dependency.label} installed"
+                        then?.invoke()
+                    } else {
+                        status = "${dependency.label} wasn't installed; the terminal shows why"
+                    }
+                }
+            }
+        })
+    }
+
     // Source control ----------------------------------------------------------------------------
 
     var gitStatus by mutableStateOf<GitResult.Status?>(null)
@@ -1116,6 +1180,10 @@ class WorkbenchController(private val context: Context) {
         private set
     var gitNotARepository by mutableStateOf(false)
         private set
+    /** Git itself is missing from the guest (the check said so, or Git couldn't be started). */
+    val gitMissing: Boolean
+        get() = guestTool(GuestDependency.Git) == DependencyState.Missing ||
+            gitProblem?.let(::missingDependencyIn) == GuestDependency.Git
     /** Label of the Git operation in flight, shown in the view. */
     var gitBusy by mutableStateOf<String?>(null)
         private set
@@ -3416,27 +3484,40 @@ class WorkbenchController(private val context: Context) {
         launched.thenCompose { session.kernel.kernelSpecs() }.whenComplete { discovery, error ->
             post {
                 if (error != null) {
+                    val message = generateSequence(error) { it.cause }.last().message ?: "the bridge didn't start"
                     session.kernelState = "Kernel bridge unavailable"
-                    status = "Jupyter: ${error.cause?.message ?: error.message}. Install it with `avf-native-daemon tools install jupyter`."
+                    if (missingDependencyIn(message) == GuestDependency.JupyterBridge) {
+                        status = "Jupyter: the kernel bridge isn't installed in the guest"
+                        offerInstall(GuestDependency.JupyterBridge, "Notebooks run through the Jupyter bridge, which isn't installed in the guest.") {
+                            chooseKernel(session, preferredSpec)
+                        }
+                    } else {
+                        status = "Jupyter: $message"
+                    }
                     return@post
                 }
                 val specs = discovery.specs
-                if (specs.isEmpty() && discovery.installable.isEmpty()) {
-                    session.kernelState = "No kernels found"
-                    status = "No Python environment with ipykernel was found in the guest"
-                    return@post
-                }
                 if (!running) session.kernelState = if (specs.isEmpty()) "No kernels yet" else "No kernel"
                 val preferred = preferredSpec ?: session.notebook.kernelName ?: settings.jupyterDefaultKernel
                 val match = specs.firstOrNull { it.name == preferred }
+                // Rows that set up an environment, for a guest with no conda yet.
+                val picker = {
+                    checkGuestTools {
+                        val setup = listOf(GuestDependency.Conda).filter { guestTool(it) == DependencyState.Missing }
+                        if (specs.isEmpty() && discovery.installable.isEmpty() && setup.isEmpty()) {
+                            session.kernelState = "No kernels found"
+                            status = "No Python environment with ipykernel was found in the guest"
+                        } else {
+                            dialog = WorkbenchDialog.KernelPicker(session.document.path, specs, discovery.installable, setup)
+                        }
+                    }
+                }
                 if (match != null && session.kernelName == null) {
                     // A notebook from elsewhere (VS Code, Copilot) names a kernel such as "python3"
                     // that may not start here; fall back to asking instead of failing on every run.
-                    startKernel(session, match, onFailure = {
-                        dialog = WorkbenchDialog.KernelPicker(session.document.path, specs, discovery.installable)
-                    })
+                    startKernel(session, match, onFailure = picker)
                 } else {
-                    dialog = WorkbenchDialog.KernelPicker(session.document.path, specs, discovery.installable)
+                    picker()
                 }
             }
         }
@@ -3497,11 +3578,12 @@ class WorkbenchController(private val context: Context) {
         // Debian's system Python refuses pip (PEP 668, "externally managed"): give it a venv in
         // ~/.venv, which the bridge discovers, instead of installing into the system.
         val systemPython = candidate.label == "system"
+        val uv = guestTool(GuestDependency.Uv) is DependencyState.Found
         val command = if (systemPython) {
-            "{ '${candidate.python}' -m venv --help >/dev/null 2>&1 && '${candidate.python}' -m ensurepip --version >/dev/null 2>&1 || " +
-                "sudo apt-get install -y python3-venv; } && '${candidate.python}' -m venv ~/.venv && ~/.venv/bin/pip install ipykernel && exit"
+            createVenvCommand(candidate.python, uv) + " && exit"
         } else {
-            "'${candidate.python}' -m pip install ipykernel && exit"
+            // uv-made environments have no pip; uv installs into them (and into pip ones) directly.
+            "{ '${candidate.python}' -m pip install ipykernel" + (if (uv) " || uv pip install --python '${candidate.python}' ipykernel" else "") + "; } && exit"
         }
         newTerminal(command, onExit = { code ->
             post {

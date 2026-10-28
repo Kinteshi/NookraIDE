@@ -15,6 +15,10 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.ListItem
@@ -46,6 +50,7 @@ fun SettingsScreen(controller: WorkbenchController) {
     val settings = controller.settings
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(rememberTopAppBarState())
     fun set(key: String, value: Any?) = controller.updateSetting(key, value)
+    LaunchedEffect(controller.connected) { if (controller.connected) controller.checkGuestTools() }
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
         Column(Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection)) {
             LargeTopAppBar(
@@ -211,6 +216,33 @@ fun SettingsScreen(controller: WorkbenchController) {
                     SwitchRow("Tab completes in notebooks", "After a name or a dot, Tab asks the kernel (as in Jupyter); Ctrl+Space always does", settings.notebookTabCompletion) {
                         set(WorkbenchSettings.NOTEBOOK_TAB_COMPLETION, it)
                     }
+                }
+                item { Section("Guest tools") }
+                items(GuestDependency.entries) { dependency ->
+                    val state = controller.guestTool(dependency)
+                    SettingRow(
+                        dependency.label,
+                        when (state) {
+                            is DependencyState.Found -> "${dependency.usedFor} · ${state.path}"
+                            DependencyState.Missing -> "${dependency.usedFor} · not installed"
+                            DependencyState.Unknown -> dependency.usedFor
+                        },
+                    ) {
+                        when (state) {
+                            DependencyState.Missing -> TextButton(onClick = {
+                                controller.settingsVisible = false
+                                controller.offerInstall(dependency)
+                            }) { Text("Install") }
+                            is DependencyState.Found -> Icon(Icons.Outlined.CheckCircle, contentDescription = "Installed", tint = MaterialTheme.colorScheme.primary)
+                            DependencyState.Unknown -> Unit
+                        }
+                    }
+                }
+                item {
+                    ActionRow(
+                        "Check guest tools again",
+                        if (controller.connected) "After installing something yourself" else "Connect to a guest to check",
+                    ) { controller.checkGuestTools() }
                 }
                 item { Section("Keyboard and advanced") }
                 item { ActionRow("Keyboard shortcuts", "VS Code defaults · Ctrl+K Ctrl+S") { controller.dialog = WorkbenchDialog.Keybindings } }

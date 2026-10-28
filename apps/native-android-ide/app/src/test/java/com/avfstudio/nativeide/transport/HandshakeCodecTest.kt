@@ -77,4 +77,40 @@ class HandshakeCodecTest {
         val broken = MessagePackVfsCodec.decode(pong("The guest's disk went read-only after an error")) as IncomingPacket.Stats
         assertEquals("The guest's disk went read-only after an error", broken.stats.diskProblem)
     }
+
+    @Test
+    fun readsWelcomeFeaturesAndProbeReplies() {
+        val welcome = MessagePackVfsCodec.decode(system("Welcome") {
+            packMapHeader(4)
+            packString("protocol_version"); packInt(2)
+            packString("daemon_version"); packString("0.1.0")
+            packString("pty_sessions"); packArrayHeader(0)
+            packString("features"); packArrayHeader(1); packString(PROBE_COMMANDS_FEATURE)
+        }) as IncomingPacket.Welcome
+        assertEquals(setOf(PROBE_COMMANDS_FEATURE), welcome.features)
+        // Daemons from before the field still say Welcome without it.
+        val older = MessagePackVfsCodec.decode(system("Welcome") {
+            packMapHeader(1)
+            packString("protocol_version"); packInt(2)
+        }) as IncomingPacket.Welcome
+        assertEquals(emptySet<String>(), older.features)
+
+        val probed = MessagePackVfsCodec.decode(system("CommandsProbed") {
+            packMapHeader(2)
+            packString("request_id"); packLong(4)
+            packString("commands"); packArrayHeader(2)
+            packMapHeader(2); packString("name"); packString("git"); packString("path"); packString("/usr/bin/git")
+            packMapHeader(2); packString("name"); packString("conda"); packString("path"); packNil()
+        })
+        assertEquals(IncomingPacket.CommandsProbed(4, mapOf("git" to "/usr/bin/git", "conda" to null)), probed)
+    }
+
+    @Test
+    fun encodesTheProbeRequest() {
+        val unpacked = MessagePack.newDefaultUnpacker(MessagePackVfsCodec.probeCommands(9, listOf("git", "uv"))).unpackValue()
+        val probe = unpacked.asMapValue().map().values.first().asMapValue().map().values.first().asMapValue().map()
+            .mapKeys { (key, _) -> key.asStringValue().asString() }
+        assertEquals(9L, probe.getValue("request_id").asIntegerValue().asLong())
+        assertEquals(listOf("git", "uv"), probe.getValue("names").asArrayValue().list().map { it.asStringValue().asString() })
+    }
 }

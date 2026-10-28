@@ -17,6 +17,15 @@ internal object MessagePackVfsCodec {
         stringField("timestamp", timestamp)
     }
 
+    /** Asks which of [names] the guest can run (daemons whose Welcome lists `probe_commands`). */
+    fun probeCommands(requestId: Long, names: List<String>): ByteArray = packet("System", "ProbeCommands") {
+        packMapHeader(2)
+        stringField("request_id", requestId)
+        packString("names")
+        packArrayHeader(names.size)
+        names.forEach(::packString)
+    }
+
     /** First packet of a pairing connection: trades a one-time code for the session token. */
     fun pair(code: String): ByteArray = packet("System", "Pair") {
         packMapHeader(3)
@@ -338,6 +347,18 @@ internal object MessagePackVfsCodec {
                                 rows = values["rows"]?.asLong()?.toInt() ?: 24,
                             )
                         }.orEmpty(),
+                    features = fields["features"]?.takeUnless { it.isNilValue }?.asArrayValue()?.list()
+                        ?.map { it.asStringValue().asString() }?.toSet().orEmpty(),
+                )
+            }
+            "CommandsProbed" -> {
+                val fields = variant.value.asMapValue().map().mapKeys { it.key.asString() }
+                IncomingPacket.CommandsProbed(
+                    requestId = fields.getValue("request_id").asLong(),
+                    paths = fields["commands"]?.asArrayValue()?.list().orEmpty().associate { command ->
+                        val values = command.asMapValue().map().mapKeys { it.key.asString() }
+                        values.getValue("name").asString() to values["path"]?.takeUnless { it.isNilValue }?.asString()
+                    },
                 )
             }
             "Rejected" -> {
@@ -454,7 +475,13 @@ data class GuestStats(
 }
 
 sealed interface IncomingPacket {
-    data class Welcome(val protocolVersion: Int, val ptySessions: List<PtySessionInfo> = emptyList()) : IncomingPacket
+    data class Welcome(
+        val protocolVersion: Int,
+        val ptySessions: List<PtySessionInfo> = emptyList(),
+        val features: Set<String> = emptySet(),
+    ) : IncomingPacket
+    /** Each probed command's path in the guest, or null when it isn't installed. */
+    data class CommandsProbed(val requestId: Long, val paths: Map<String, String?>) : IncomingPacket
     data class Rejected(val reason: String, val attemptsLeft: Int? = null) : IncomingPacket
     data class Paired(val token: String) : IncomingPacket
     data class Stats(val stats: GuestStats) : IncomingPacket

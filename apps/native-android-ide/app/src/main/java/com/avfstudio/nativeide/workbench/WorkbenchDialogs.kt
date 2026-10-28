@@ -46,6 +46,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Box
@@ -217,14 +218,48 @@ fun WorkbenchDialogHost(controller: WorkbenchController) {
         )
         WorkbenchDialog.GitClone -> GitCloneDialog(controller)
         WorkbenchDialog.GuestResources -> GuestResourcesDialog(controller)
-        is WorkbenchDialog.InterpreterPicker -> PaletteDialog(
-            placeholder = "Select a Python interpreter",
-            query = controller.commandFilter,
-            onQuery = { controller.commandFilter = it },
-            items = dialog.options.filter { fuzzyMatch(controller.commandFilter, it.first) },
-            onDismiss = { controller.dialog = null },
-            onPick = { (_, path) -> controller.selectInterpreter(path, dialog.then) },
-        ) { (label, path) -> PaletteRow(label.substringBefore(" ("), path) }
+        is WorkbenchDialog.InstallDependency -> AlertDialog(
+            onDismissRequest = { controller.dialog = null },
+            title = { Text("Install ${dialog.dependency.label}?") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(dialog.reason ?: "${dialog.dependency.label} isn't installed in the guest.")
+                    Text("Used for: ${dialog.dependency.usedFor}.", style = MaterialTheme.typography.bodySmall)
+                    Text("From ${dialog.dependency.source}. It runs in a new terminal, where you can follow it or answer sudo.", style = MaterialTheme.typography.bodySmall)
+                    Text(
+                        dialog.dependency.install,
+                        fontFamily = FontFamily.Monospace,
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 4,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            },
+            confirmButton = { TextButton(onClick = { controller.installDependency(dialog.dependency, dialog.then) }) { Text("Install") } },
+            dismissButton = { TextButton(onClick = { controller.dialog = null }) { Text("Not now") } },
+        )
+        is WorkbenchDialog.InterpreterPicker -> {
+            val choices: List<Any> = dialog.options + dialog.setup
+            PaletteDialog(
+                placeholder = "Select a Python interpreter",
+                query = controller.commandFilter,
+                onQuery = { controller.commandFilter = it },
+                items = choices.filter { choice ->
+                    @Suppress("UNCHECKED_CAST")
+                    fuzzyMatch(controller.commandFilter, if (choice is EnvironmentSetup) setupLabel(choice) else (choice as Pair<String, String>).first)
+                },
+                onDismiss = { controller.dialog = null },
+                onPick = { choice ->
+                    @Suppress("UNCHECKED_CAST")
+                    if (choice is EnvironmentSetup) controller.setUpEnvironment(choice, dialog.then)
+                    else controller.selectInterpreter((choice as Pair<String, String>).second, dialog.then)
+                },
+            ) { choice ->
+                @Suppress("UNCHECKED_CAST")
+                if (choice is EnvironmentSetup) SetupRow(setupLabel(choice), setupDetail(choice))
+                else (choice as Pair<String, String>).let { (label, path) -> PaletteRow(label.substringBefore(" ("), path) }
+            }
+        }
         is WorkbenchDialog.ConfirmDelete -> AlertDialog(
             onDismissRequest = { controller.dialog = null },
             title = { Text(if (dialog.isDirectory) "Delete folder?" else "Delete file?") },
@@ -346,7 +381,7 @@ fun WorkbenchDialogHost(controller: WorkbenchController) {
         )
         is WorkbenchDialog.KernelPicker -> {
             val session = controller.notebooks[dialog.path]
-            val choices: List<Any> = dialog.specs + dialog.installable
+            val choices: List<Any> = dialog.specs + dialog.installable + dialog.setup
             PaletteDialog(
                 placeholder = "Select a kernel",
                 query = controller.commandFilter,
@@ -357,6 +392,7 @@ fun WorkbenchDialogHost(controller: WorkbenchController) {
                         when (choice) {
                             is com.avfstudio.nativeide.notebook.KernelSpec -> choice.displayName
                             is com.avfstudio.nativeide.notebook.InstallableKernel -> choice.label
+                            is GuestDependency -> choice.label
                             else -> ""
                         },
                     )
@@ -369,25 +405,45 @@ fun WorkbenchDialogHost(controller: WorkbenchController) {
                     when (choice) {
                         is com.avfstudio.nativeide.notebook.KernelSpec -> session?.let { controller.startKernel(it, choice) }
                         is com.avfstudio.nativeide.notebook.InstallableKernel -> session?.let { controller.installKernelPackage(it, choice) }
+                        is GuestDependency -> session?.let { notebook -> controller.offerInstall(choice) { controller.chooseKernel(notebook) } }
                     }
                 },
             ) { choice ->
                 when (choice) {
                     is com.avfstudio.nativeide.notebook.KernelSpec -> PaletteRow(choice.displayName, choice.name)
-                    is com.avfstudio.nativeide.notebook.InstallableKernel -> ListItem(
-                        headlineContent = {
-                            Text(
-                                if (choice.label == "system") "Create ~/.venv with ipykernel (system Python is managed by apt)"
-                                else "Install ipykernel in Python (${choice.label})",
-                            )
-                        },
-                        supportingContent = { Text(choice.python, fontFamily = FontFamily.Monospace, maxLines = 1) },
-                        colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+                    is com.avfstudio.nativeide.notebook.InstallableKernel -> SetupRow(
+                        if (choice.label == "system") "Create ~/.venv with ipykernel (system Python is managed by apt)"
+                        else "Install ipykernel in Python (${choice.label})",
+                        choice.python,
+                        path = true,
                     )
+                    is GuestDependency -> SetupRow("Install ${choice.label} for conda environments", choice.usedFor)
                 }
             }
         }
     }
+}
+
+private fun setupLabel(setup: EnvironmentSetup): String = when (setup) {
+    EnvironmentSetup.CreateVenv -> "Create ~/.venv with ipykernel"
+    is EnvironmentSetup.Install -> "Install ${setup.dependency.label}"
+}
+
+private fun setupDetail(setup: EnvironmentSetup): String = when (setup) {
+    EnvironmentSetup.CreateVenv -> "A virtual environment for scripts, debugging and notebooks"
+    is EnvironmentSetup.Install -> setup.dependency.usedFor
+}
+
+/** A picker row that sets something up rather than choosing it, set apart by its background. */
+@Composable
+private fun SetupRow(headline: String, detail: String, path: Boolean = false) {
+    ListItem(
+        headlineContent = { Text(headline) },
+        supportingContent = {
+            Text(detail, fontFamily = if (path) FontFamily.Monospace else null, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        },
+        colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+    )
 }
 
 /** Command-palette style picker: a search field over a filtered list, Enter picks the first match. */

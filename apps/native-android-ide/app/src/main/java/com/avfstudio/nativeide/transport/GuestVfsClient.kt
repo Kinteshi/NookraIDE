@@ -40,6 +40,8 @@ class GuestRejectedException(val reason: String, val attemptsLeft: Int? = null) 
 )
 
 private const val NATIVE_APP_ORIGIN = "avf-native-android://localhost"
+/** Welcome feature of daemons that answer `ProbeCommands`. */
+const val PROBE_COMMANDS_FEATURE = "probe_commands"
 
 class GuestVfsClient(
     private val http: OkHttpClient = OkHttpClient.Builder()
@@ -55,6 +57,10 @@ class GuestVfsClient(
     private val searchListeners = ConcurrentHashMap<Long, (SearchEvent) -> Unit>()
     private val gitListeners = ConcurrentHashMap<Long, (GitEvent) -> Unit>()
     private val pendingPings = ConcurrentHashMap<Long, CompletableFuture<GuestStats>>()
+    private val pendingProbes = ConcurrentHashMap<Long, CompletableFuture<Map<String, String?>>>()
+    /** Optional requests the connected daemon understands (its Welcome `features`). */
+    @Volatile var guestFeatures: Set<String> = emptySet()
+        private set
     /** Terminal sessions the guest still runs, from the latest handshake; reattach to keep them. */
     @Volatile var guestPtySessions: List<PtySessionInfo> = emptyList()
         private set
@@ -164,6 +170,7 @@ class GuestVfsClient(
                                 )
                             } else {
                                 guestPtySessions = packet.ptySessions
+                                guestFeatures = packet.features
                                 handshake.complete(Unit)
                                 connectionStateListener?.invoke(true, null)
                             }
@@ -181,6 +188,7 @@ class GuestVfsClient(
                         is IncomingPacket.Rpc -> handleRpcEvent(packet.event)
                         is IncomingPacket.Search -> searchListeners[packet.event.requestId]?.invoke(packet.event)
                         is IncomingPacket.Git -> gitListeners[packet.event.requestId]?.invoke(packet.event)
+                        is IncomingPacket.CommandsProbed -> pendingProbes.remove(packet.requestId)?.complete(packet.paths)
                         is IncomingPacket.Stats -> pendingPings.remove(packet.stats.timestamp)?.complete(packet.stats)
                         is IncomingPacket.Pty -> ptyListeners[packet.event.sessionId]?.invoke(packet.event)
                         is IncomingPacket.Unexpected ->
@@ -400,6 +408,26 @@ class GuestVfsClient(
         return result
     }
 
+    /**
+     * Each of [names] mapped to where the guest has it, or null when missing. Fails with
+     * [UnsupportedOperationException] on a daemon too old to answer (it would drop the connection).
+     */
+    fun probeCommands(names: List<String>): CompletableFuture<Map<String, String?>> {
+        if (PROBE_COMMANDS_FEATURE !in guestFeatures) {
+            return CompletableFuture.failedFuture(UnsupportedOperationException("The guest daemon can't check for commands; update it from Settings → Set up guest"))
+        }
+        val requestId = requestIds.incrementAndGet()
+        val result = CompletableFuture<Map<String, String?>>()
+        pendingProbes[requestId] = result
+        if (!sendFrame(MessagePackVfsCodec.probeCommands(requestId, names))) {
+            pendingProbes.remove(requestId)
+            result.completeExceptionally(IOException("Guest is not connected"))
+        } else {
+            scheduler.schedule({ pendingProbes.remove(requestId)?.completeExceptionally(IOException("Command check timed out")) }, 10, TimeUnit.SECONDS)
+        }
+        return result
+    }
+
     fun answerGitPrompt(requestId: Long, promptId: Long, answer: String) {
         sendFrame(MessagePackVfsCodec.gitPromptAnswer(requestId, promptId, answer))
     }
@@ -468,6 +496,8 @@ class GuestVfsClient(
         pending.clear()
         pendingRpcStarts.values.forEach { it.completeExceptionally(error) }
         pendingRpcStarts.clear()
+        pendingProbes.values.forEach { it.completeExceptionally(error) }
+        pendingProbes.clear()
         searchListeners.entries.toList().forEach { (requestId, listener) ->
             listener(SearchEvent.Error(requestId, error.message ?: "Guest connection lost"))
         }
