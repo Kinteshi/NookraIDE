@@ -585,7 +585,7 @@ Registered list (10-27):
   by character, the file on disk was never changed (grep), and the tab was reopened from disk.
   Fixed in batch 13: tapping an ended terminal takes the keyboard from the editor.
 
-## 14. MaterialCode name and icon; key log removed (10-28 00:55; built, not installed yet)
+## 14. MaterialCode name and icon; key log removed (10-28 00:55; installed and checked 00:58)
 * The app is called MaterialCode (launcher label, top bar, welcome screen, notification,
   dialogs, the daemon's pairing instructions, the installer's notes and unit description). The
   package id stays com.avfstudio.nativeide so the tablet build updates in place and keeps its
@@ -595,8 +595,12 @@ Registered list (10-27):
   Android 13 themed icons) and PNG fallbacks for Android 7 rendered from
   `docs/branding/materialcode-icon.svg` (512 px preview next to it).
 * Backlog item 15 done: the AVFKEYS routing log is gone (KeyRouter.route is one line again).
-* Not installed: the user was training in private-notebook-1.ipynb (guest CPU 59%); an install
-  restarts the app and would stop the kernel.
+* Installed 00:56 with the user's go-ahead: the taskbar and the window caption show the new
+  icon, the top bar says MaterialCode. The scratch welcome.py keeps its saved text ("Welcome to
+  AVF Native IDE"); only a fresh install gets the new header.
+* The guest had stopped at 00:56:10, before the install (Linux Terminal was opened from the app
+  list at 00:55:19 and the VM stopped normally ~50 s later, likely the user closing Terminal or
+  starting the reset they planned); left alone.
 
 ## Next pass (registered 10-27 23:35, updated 10-28 00:55; not started)
 The small tests stay first; the user resets the guest before that pass.
