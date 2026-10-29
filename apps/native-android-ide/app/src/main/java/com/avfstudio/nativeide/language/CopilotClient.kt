@@ -6,7 +6,6 @@ import com.avfstudio.nativeide.transport.GuestVfsClient
 import com.google.gson.JsonArray
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
-import java.net.URI
 import java.util.concurrent.CompletableFuture
 
 const val COPILOT_LANGUAGE_SERVER_TOOL = "copilot-language-server"
@@ -62,7 +61,12 @@ class CopilotClient(
         }
     }
 
-    fun start(rootPath: String): CompletableFuture<Unit> = language.start(rootPath, COPILOT_LANGUAGE_SERVER_TOOL)
+    @Volatile private var workspaceRoot: String? = null
+
+    fun start(rootPath: String): CompletableFuture<Unit> {
+        workspaceRoot = rootPath
+        return language.start(rootPath, COPILOT_LANGUAGE_SERVER_TOOL)
+    }
 
     /** Starts the device flow; completes with null when the guest is already signed in. */
     fun signIn(): CompletableFuture<CopilotSignIn?> =
@@ -122,7 +126,8 @@ class CopilotClient(
             command.getAsJsonArray("arguments") ?: JsonArray(),
         )
 
-    private fun fileUri(path: String): String = URI("file", "", path, null).toASCIIString()
+    /** Untitled files go under the workspace's `.untitled/`, as for the language servers. */
+    private fun fileUri(path: String): String = lspDocumentUri(path, workspaceRoot)
 }
 
 internal fun parseSignIn(result: JsonElement): CopilotSignIn? {

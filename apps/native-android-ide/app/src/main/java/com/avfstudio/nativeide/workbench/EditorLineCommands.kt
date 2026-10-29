@@ -1,16 +1,23 @@
 package com.avfstudio.nativeide.workbench
 
 import com.avfstudio.nativeide.document.DocumentSession
-import io.github.rosemoe.sora.widget.CodeEditor
+import com.avfstudio.nativeide.editor.EditorSelection
+import com.avfstudio.nativeide.editor.EditorSurface
+import com.avfstudio.nativeide.editor.LspPosition
+import com.avfstudio.nativeide.editor.LspRange
+import com.avfstudio.nativeide.editor.LspTextEdit
+import com.avfstudio.nativeide.editor.selectionEnd
+import com.avfstudio.nativeide.editor.selectionStart
 
 internal fun editCurrentLine(
     document: DocumentSession,
-    editor: CodeEditor,
+    editor: EditorSurface,
     commandId: String,
 ): Boolean {
     val lines = document.text.split('\n').toMutableList()
-    val row = editor.cursor.leftLine.coerceIn(lines.indices)
-    val column = editor.cursor.leftColumn
+    val start = editor.selectionStart()
+    val row = start.line.coerceIn(lines.indices)
+    val column = start.character
     var targetRow = row
     when (commandId) {
         "editor.action.moveLinesUpAction" -> {
@@ -46,13 +53,13 @@ internal fun editCurrentLine(
     val updated = lines.joinToString("\n")
     document.updateText(updated)
     editor.setText(updated)
-    editor.setSelection(targetRow, column.coerceAtMost(lines[targetRow].length))
+    editor.moveCursor(LspPosition(targetRow, column.coerceAtMost(lines[targetRow].length)))
     return true
 }
 
-internal fun jumpToMatchingBracket(document: DocumentSession, editor: CodeEditor): Boolean {
+internal fun jumpToMatchingBracket(document: DocumentSession, editor: EditorSurface): Boolean {
     val text = document.text
-    val cursor = editor.cursor.right.coerceIn(0, text.length)
+    val cursor = editor.selectionOffsets.last.coerceIn(0, text.length)
     val pairs = mapOf('(' to ')', '[' to ']', '{' to '}')
     val bracketIndex = when {
         cursor < text.length && (text[cursor] in pairs || text[cursor] in pairs.values) -> cursor
@@ -82,8 +89,7 @@ internal fun jumpToMatchingBracket(document: DocumentSession, editor: CodeEditor
             val prefix = text.substring(0, index)
             val line = prefix.count { it == '\n' }
             val column = prefix.length - (prefix.lastIndexOf('\n') + 1)
-            editor.setSelection(line, column)
-            editor.ensureSelectionVisible()
+            editor.moveCursor(LspPosition(line, column))
             return true
         }
         index += step
@@ -104,29 +110,23 @@ internal fun tabInsertion(linePrefix: String, tabSize: Int, insertSpaces: Boolea
  * only touches at column 0, and not blank lines); otherwise the selection is replaced by
  * [tabInsertion].
  */
-internal fun indentOrInsertTab(editor: CodeEditor, tabSize: Int, insertSpaces: Boolean) {
-    val cursor = editor.cursor
-    val text = editor.text
-    if (!cursor.isSelected || cursor.leftLine == cursor.rightLine) {
-        val prefix = text.getLineString(cursor.leftLine).substring(0, cursor.leftColumn)
-        editor.commitText(tabInsertion(prefix, tabSize, insertSpaces))
+internal fun indentOrInsertTab(editor: EditorSurface, tabSize: Int, insertSpaces: Boolean) {
+    val start = editor.selectionStart()
+    val end = editor.selectionEnd()
+    if (start.line == end.line) {
+        val prefix = editor.lineText(start.line).substring(0, start.character)
+        editor.insertAtCursor(tabInsertion(prefix, tabSize, insertSpaces))
         return
     }
     val unit = if (insertSpaces) " ".repeat(tabSize) else "\t"
-    val (startLine, startColumn, endLine, endColumn) = listOf(cursor.leftLine, cursor.leftColumn, cursor.rightLine, cursor.rightColumn)
-    val lastLine = if (endColumn == 0) endLine - 1 else endLine
-    val indented = (startLine..lastLine).filter { text.getColumnCount(it) > 0 }
-    text.beginBatchEdit()
-    try {
-        indented.forEach { text.insert(it, 0, unit) }
-    } finally {
-        text.endBatchEdit()
-    }
-    editor.setSelectionRegion(
-        startLine,
-        startColumn + if (startLine in indented && startColumn > 0) unit.length else 0,
-        endLine,
-        endColumn + if (endLine in indented) unit.length else 0,
+    val lastLine = if (end.character == 0) end.line - 1 else end.line
+    val indented = (start.line..lastLine).filter { editor.lineText(it).isNotEmpty() }
+    editor.applyEdits(indented.map { line -> LspTextEdit(LspRange(LspPosition(line, 0), LspPosition(line, 0)), unit) })
+    editor.setSelection(
+        EditorSelection(
+            LspPosition(start.line, start.character + if (start.line in indented && start.character > 0) unit.length else 0),
+            LspPosition(end.line, end.character + if (end.line in indented) unit.length else 0),
+        ),
     )
 }
 

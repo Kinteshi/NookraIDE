@@ -105,7 +105,7 @@ fun CopilotChatPane(controller: WorkbenchController, modifier: Modifier = Modifi
             IconButton(onClick = { if (controller.showChatHistory) controller.showChatHistory = false else controller.openChatHistory() }) {
                 Icon(Icons.Outlined.History, contentDescription = "Past chats", tint = if (controller.showChatHistory) colors.primary else colors.onSurfaceVariant)
             }
-            if (controller.chatAgent.isStarted) {
+            if (controller.chatAgentRunning) {
                 IconButton(onClick = controller::endChatSession) { Icon(Icons.Outlined.Stop, contentDescription = "Stop the agent") }
             }
             onClose?.let { IconButton(onClick = it) { Icon(Icons.Outlined.Close, contentDescription = "Close chat") } }

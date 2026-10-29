@@ -834,6 +834,39 @@ User's pick from the backlog list: 1-4 and 6 (5, custom keybindings, skipped for
 * Tests: 155 app tests and all daemon tests pass. The tablet was left with welcome.py as it was,
   the test file deleted, type checking back to Default, and the app installed and connected.
 
+## 20. Chat Stop button, Copilot in untitled files, margin problem dots, editor-neutral controller (10-28 21:20–22:25; done, checked)
+User's pick: 1-3 and 5 of the list after batch 19. Also registered: sticky notebook cell
+headers and toolbar.
+* (1) The chat header's Stop button followed `AcpClient.isStarted`, which Compose can't
+  observe. The client now reports start, stop, exit and disconnect through `runningListener`,
+  into `chatAgentRunning`. Checked: Stop shows once Past chats starts the agent, and goes away
+  when tapped.
+* (2) Copilot inline suggestions in untitled files. The scratch gates are gone, and
+  `CopilotClient` maps `scratch:` paths to the same `.untitled/` URIs as the language servers
+  (`lspDocumentUri`). Checked: Untitled-1.py → `def fibonacci(n):` got a ghost-text body; Tab
+  inserted all 13 lines with the cursor at the end.
+* (3) Problem dots in the line-number margin: a dot in the line's worst problem colour; a
+  breakpoint wins on the same line. It follows `editor.renderValidationDecorations` (the
+  setting's text now says so). Fixed on the way: sora keeps line styles in the order they're
+  added and looks them up by line, so they're added in line order; line 1's dot was missing
+  before. Checked: a warning dot on `import os`, an error dot on `x = missing`; line 1's dot
+  turned red when indenting made it a syntax error.
+* (5) The controller no longer knows sora. It talks to `EditorSurface`, which gained the cursor,
+  offsets and positions, insert/delete, outdent, select all, undo/redo, focus, editor settings
+  (`EditorConfig`), line marks (`LineMarks`), problems and the ghost-text flag. The defaults
+  work from the text alone, so another engine only overrides what it does faster.
+  * `SoraEditorSurface` (workbench) holds all sora calls the workbench used, including the
+    problem drawing and the settings application.
+  * The neutral problem model moved to `editor/EditorProblems.kt`.
+  * `EditorLineCommands` (line moves, bracket jump, Tab indent) take a surface.
+  * sora is now only in the adapter, the editor pane (its view, theme and ghost text) and the
+    TextMate theme and grammar code: the pieces an Aardink switch replaces.
+  * New `EditorSurfaceDefaultsTest`: offsets, insert, outdent, select all, Tab indent.
+  * Checked on the tablet: Select All + Tab indented both lines and kept the selection,
+    Shift+Tab undid it, Find selected the match, and quick fix and completion still place the
+    cursor.
+* 159 tests pass. The test untitled file was closed without saving; the app is left installed.
+
 ## Next pass (registered 10-27 23:35, updated 10-28 13:06)
 * Batch 15 did the carried-over tests (Copilot signed out, the setup paths, reconnect cap,
   Copilot model list, prompt prefix). Left over:
@@ -881,6 +914,12 @@ To investigate (user, 10-28):
   (`AVF_WORKSPACE_ROOTS`, ~/Projects). Needs an Open Folder flow, recent workspaces, and the
   daemon's roots/permissions model (several roots or switching the root).
 
+* Sticky notebook cell headers and toolbar (user, 10-28): in a tall cell, its header (execution
+  count, language) and toolbar (run, and the cell actions) stay pinned at the top of the
+  notebook view while the cell scrolls, so the run button doesn't scroll away; like VS Code's
+  sticky cell toolbar. First thoughts: NotebookEditor is a LazyColumn of cells, so this needs an
+  overlay for the topmost partly visible cell (from `firstVisibleItemIndex` and its scroll
+  offset); evaluate a setting.
 * Refactor: replace sora-editor with Aardink (user, 10-28). **Decided (user, 10-28): it will be
   done, for the licence (Apache-2.0 instead of sora's LGPL-2.1); held for later.** Evaluated the
   same day (`docs/native-editor-evaluation.md`, "Re-evaluation 2026-10-28"); not ready yet,

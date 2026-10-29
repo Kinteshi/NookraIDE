@@ -1,14 +1,7 @@
-package com.avfstudio.nativeide.workbench
+package com.avfstudio.nativeide.editor
 
-import com.avfstudio.nativeide.editor.LspPosition
-import com.avfstudio.nativeide.editor.TagDecoration
 import com.avfstudio.nativeide.language.LanguageDiagnostic
 import com.google.gson.JsonElement
-import io.github.rosemoe.sora.lang.diagnostic.DiagnosticDetail
-import io.github.rosemoe.sora.lang.diagnostic.DiagnosticRegion
-import io.github.rosemoe.sora.lang.diagnostic.DiagnosticsContainer
-import io.github.rosemoe.sora.lang.diagnostic.Quickfix
-import io.github.rosemoe.sora.widget.style.DiagnosticIndicatorStyle
 
 /** A diagnostic clamped to the editor's text, in line/column terms. */
 data class EditorProblem(
@@ -70,14 +63,6 @@ private fun JsonElement.codeText(): String? = when {
     else -> null
 }
 
-/** sora's squiggle for a severity; hints get none (they only fade or strike code through). */
-fun soraSeverity(severity: Int): Short? = when (severity) {
-    1 -> DiagnosticRegion.SEVERITY_ERROR
-    2 -> DiagnosticRegion.SEVERITY_WARNING
-    3 -> DiagnosticRegion.SEVERITY_TYPO
-    else -> null
-}
-
 /** Per-line fade/strike-through ranges for tagged problems; a multi-line range covers each line. */
 fun tagDecorations(
     problems: List<EditorProblem>,
@@ -99,40 +84,6 @@ fun tagDecorations(
     }
 }
 
-/**
- * Shows [problems] in [editor]: wavy underlines, the tap/hover tooltip (message, source and
- * code, plus "Quick fix…" which asks the server for code actions there) and the faded or
- * struck-through tagged code.
- */
-internal fun showEditorProblems(
-    editor: NativeCodeEditor,
-    problems: List<EditorProblem>,
-    settings: WorkbenchSettings,
-    onQuickFix: (LspPosition) -> Unit,
-) {
-    val content = editor.text
-    val lineLengths = (0 until content.lineCount).map(content::getColumnCount)
-    val container = DiagnosticsContainer()
-    if (settings.problemUnderlines) {
-        problems.forEachIndexed { index, problem ->
-            val severity = soraSeverity(problem.severity) ?: return@forEachIndexed
-            val start = content.getCharIndex(problem.startLine, problem.startColumn)
-            val end = content.getCharIndex(problem.endLine, problem.endColumn)
-            val at = LspPosition(problem.startLine, problem.startColumn)
-            val detail = DiagnosticDetail(
-                problem.message,
-                problem.detail.takeIf { it.isNotEmpty() },
-                listOf(Quickfix("Quick fix…", 0L) { onQuickFix(at) }),
-                null,
-            )
-            container.addDiagnostic(DiagnosticRegion(start, end, severity, index.toLong(), detail))
-        }
-    }
-    editor.diagnosticIndicatorStyle = DiagnosticIndicatorStyle.WAVY_LINE
-    editor.diagnostics = container
-    editor.overlay?.setTagDecorations(tagDecorations(problems, lineLengths, settings.showUnused, settings.showDeprecated))
-}
-
 /** Where a problem sits along the scrollbar (0 top, 1 bottom) and its severity, worst first per line. */
 data class ProblemMark(val fraction: Float, val line: Int, val column: Int, val severity: Int)
 
@@ -144,3 +95,28 @@ fun problemMarks(problems: List<EditorProblem>, lineCount: Int): List<ProblemMar
             ProblemMark(line.toFloat() / lineCount.coerceAtLeast(1), line, worst.startColumn, worst.severity)
         }
         .sortedBy { it.line }
+
+/** What the line-number margin shows, all by 0-based line: breakpoints, the paused line, and each line's worst problem. */
+data class LineMarks(
+    val breakpoints: Set<Int> = emptySet(),
+    val pausedLine: Int? = null,
+    val problems: Map<Int, Int> = emptyMap(),
+)
+
+/** The worst severity per line, for the margin; hints (4) get no mark. */
+fun problemLines(problems: List<EditorProblem>): Map<Int, Int> =
+    problems.filter { it.severity <= 3 }.groupBy { it.startLine }.mapValues { (_, onLine) -> onLine.minOf { it.severity } }
+
+/** The editor options from the user's settings, as any editor engine applies them. */
+data class EditorConfig(
+    val fontSizeSp: Float = 14f,
+    val tabSize: Int = 4,
+    val insertSpaces: Boolean = true,
+    val autoIndent: Boolean = true,
+    val useTabStops: Boolean = true,
+    val wordWrap: Boolean = false,
+    val lineNumbers: Boolean = true,
+    val problemUnderlines: Boolean = true,
+    val showUnused: Boolean = true,
+    val showDeprecated: Boolean = true,
+)

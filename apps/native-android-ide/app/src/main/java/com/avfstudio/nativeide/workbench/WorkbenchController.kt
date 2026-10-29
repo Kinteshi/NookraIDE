@@ -67,6 +67,15 @@ import com.avfstudio.nativeide.language.JsonRpcException
 import com.avfstudio.nativeide.language.LanguageClient
 import com.avfstudio.nativeide.language.LanguageDiagnostic
 import com.avfstudio.nativeide.language.SettingsResolver
+import com.avfstudio.nativeide.editor.EditorConfig
+import com.avfstudio.nativeide.editor.EditorSelection
+import com.avfstudio.nativeide.editor.EditorSurface
+import com.avfstudio.nativeide.editor.LineMarks
+import com.avfstudio.nativeide.editor.ProblemMark
+import com.avfstudio.nativeide.editor.editorProblems
+import com.avfstudio.nativeide.editor.problemLines
+import com.avfstudio.nativeide.editor.problemMarks
+import com.avfstudio.nativeide.editor.selectionStart
 import com.avfstudio.nativeide.language.lspDocumentUri
 import com.avfstudio.nativeide.language.untitledPathFor
 import com.avfstudio.nativeide.notebook.CellType
@@ -94,10 +103,6 @@ import com.avfstudio.nativeide.transport.SharedPreferencesKeyValueStore
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
-import io.github.rosemoe.sora.lang.styling.line.LineSideIcon
-import io.github.rosemoe.sora.lang.styling.line.LineBackground
-import io.github.rosemoe.sora.lang.styling.color.ConstColor
-import io.github.rosemoe.sora.widget.CodeEditor
 import org.connectbot.terminal.TerminalEmulatorFactory
 import java.io.File
 import java.io.IOException
@@ -262,7 +267,8 @@ class WorkbenchController(private val context: Context) {
         private set
     var referenceLocations by mutableStateOf(emptyList<LanguageLocation>())
         private set
-    var editorView by mutableStateOf<CodeEditor?>(null)
+    /** The open text editor, whichever engine draws it; null while none is shown. */
+    var editorSurface by mutableStateOf<EditorSurface?>(null)
         private set
     private var pendingNavigation: EditorNavigationTarget? = null
     var inlineSuggestion by mutableStateOf<Pair<String, CopilotSuggestion>?>(null)
@@ -324,6 +330,9 @@ class WorkbenchController(private val context: Context) {
     // Chat ------------------------------------------------------------------------------------
     val chatEntries = mutableStateListOf<ChatEntry>()
     var chatBusy by mutableStateOf(false)
+        private set
+    /** Whether the chat agent runs in the guest (its Stop button); the client itself isn't observable. */
+    var chatAgentRunning by mutableStateOf(false)
         private set
     var chatAuthMethods by mutableStateOf(emptyList<AcpAuthMethod>())
     /** Files and excerpts attached to the next chat message. */
@@ -422,6 +431,7 @@ class WorkbenchController(private val context: Context) {
         // A silent resume replays the conversation the pane already shows; drop that replay.
         chatAgent.eventListener = { event -> if (!suppressChatReplay) post { appendChat(event) } }
         chatAgent.configListener = { options -> post { chatConfigOptions = options } }
+        chatAgent.runningListener = { running -> post { chatAgentRunning = running } }
         chatAgent.exitListener = { message ->
             post {
                 chatBusy = false
@@ -499,7 +509,7 @@ class WorkbenchController(private val context: Context) {
         val previousLintRules = settings.pythonLintRules
         userSettings = next
         updateLanguageSettings()
-        editorView?.let(::applyEditorSettings)
+        editorSurface?.applyConfig(editorConfig())
         refreshEditorProblems()
         terminals.forEach { /* font size is read by the composable */ }
         // Servers read these at start, so a change restarts them.
@@ -529,26 +539,20 @@ class WorkbenchController(private val context: Context) {
         }
     }
 
-    /**
-     * Runs on every recomposition of the editor (each edit), so it only touches what changed:
-     * sora rebuilds its layout on setTextSize/setTabWidth even for the same value, and measures
-     * the new one in the background; typing into it before that finished crashed sora
-     * (LineBreakLayout.afterInsert, ArrayIndexOutOfBounds).
-     */
-    fun applyEditorSettings(view: CodeEditor) {
-        val current = settings
-        val sizePx = android.util.TypedValue.applyDimension(
-            android.util.TypedValue.COMPLEX_UNIT_SP, current.editorFontSize, view.resources.displayMetrics,
+    /** The editor options from the settings, for [EditorSurface.applyConfig]. */
+    fun editorConfig(): EditorConfig = settings.let {
+        EditorConfig(
+            fontSizeSp = it.editorFontSize,
+            tabSize = it.tabSize,
+            insertSpaces = it.insertSpaces,
+            autoIndent = it.autoIndent,
+            useTabStops = it.useTabStops,
+            wordWrap = it.wordWrap,
+            lineNumbers = it.lineNumbers,
+            problemUnderlines = it.problemUnderlines,
+            showUnused = it.showUnused,
+            showDeprecated = it.showDeprecated,
         )
-        if (view.textSizePx != sizePx) view.setTextSize(current.editorFontSize)
-        if (view.tabWidth != current.tabSize) view.setTabWidth(current.tabSize)
-        (view as? NativeCodeEditor)?.let {
-            it.insertSpaces = current.insertSpaces
-            it.autoIndent = current.autoIndent
-            it.useTabStops = current.useTabStops
-        }
-        if (view.isWordwrap != current.wordWrap) view.setWordwrap(current.wordWrap)
-        if (view.isLineNumberEnabled != current.lineNumbers) view.setLineNumberEnabled(current.lineNumbers)
     }
 
     private fun updateLanguageSettings() {
@@ -722,10 +726,11 @@ class WorkbenchController(private val context: Context) {
 
     /** Ctrl+Shift+F: show Search, seeded with the editor selection as VS Code does. */
     fun showSearch() {
-        editorView?.takeIf { focusArea == FocusArea.Editor }?.let { view ->
-            val range = view.cursorRange
-            if (range.startIndex != range.endIndex && range.start.line == range.end.line) {
-                searchText = view.text.toString().substring(range.startIndex, range.endIndex)
+        editorSurface?.takeIf { focusArea == FocusArea.Editor }?.let { surface ->
+            val range = surface.selectionOffsets
+            val selected = surface.text.substring(range.first, range.last)
+            if (selected.isNotEmpty() && '\n' !in selected) {
+                searchText = selected
                 scheduleSearch(0)
             }
         }
@@ -918,7 +923,7 @@ class WorkbenchController(private val context: Context) {
     var executionPoint by mutableStateOf<Pair<String, Int>?>(null)
         private set
 
-    fun toggleBreakpoint(path: String? = activePath, line: Int? = editorView?.cursor?.leftLine?.plus(1)) {
+    fun toggleBreakpoint(path: String? = activePath, line: Int? = editorSurface?.selectionStart()?.line?.plus(1)) {
         if (path == null || line == null || path.startsWith("scratch:")) return
         val lines = breakpoints[path].orEmpty()
         val updated = if (line in lines) lines - line else lines + line
@@ -1188,27 +1193,16 @@ class WorkbenchController(private val context: Context) {
         then?.invoke()
     }
 
-    /** Draws breakpoints (gutter dots) and the paused line for [path]; called after each style publish. */
-    fun decorateEditorLines(view: CodeEditor, path: String) {
-        val styles = view.styles ?: return
-        styles.eraseAllLineStyles()
-        breakpoints[path]?.forEach { line ->
-            styles.addLineStyle(LineSideIcon(line - 1, breakpointIcon))
-        }
-        executionPoint?.takeIf { it.first == path }?.let { (_, line) ->
-            styles.addLineStyle(
-                LineBackground(line - 1, ConstColor(0x40FFCC00)),
-            )
-        }
-        view.invalidate()
-    }
-
-    private val breakpointIcon by lazy {
-        android.graphics.drawable.GradientDrawable().apply {
-            shape = android.graphics.drawable.GradientDrawable.OVAL
-            setColor(0xFFE51400.toInt())
-            setSize(24, 24)
-        }
+    /** Breakpoints, the paused line and problem dots beside the line numbers of [path]'s editor. */
+    fun refreshLineMarks(path: String? = activePath) {
+        if (path == null || path != activePath) return
+        editorSurface?.setLineMarks(
+            LineMarks(
+                breakpoints = breakpoints[path].orEmpty().map { it - 1 }.toSet(),
+                pausedLine = executionPoint?.takeIf { it.first == path }?.second?.minus(1),
+                problems = if (settings.problemUnderlines) editorProblemLines else emptyMap(),
+            ),
+        )
     }
 
     private fun lspRange(line: Int, character: Int) = JsonObject().apply {
@@ -2053,7 +2047,7 @@ class WorkbenchController(private val context: Context) {
             post {
                 dialog = null
                 documentRevision++
-                if (activePath == document.path) editorView?.setText(document.text)
+                if (activePath == document.path) editorSurface?.setText(document.text)
                 status = if (error == null) "Loaded guest version" else "Reload failed: ${error.message}"
             }
         }
@@ -2258,13 +2252,12 @@ class WorkbenchController(private val context: Context) {
 
     // Editor binding ----------------------------------------------------------------------------
 
-    fun editorReady(view: CodeEditor) {
-        val newlyBound = editorView !== view
-        editorView = view
+    fun editorReady(surface: EditorSurface) {
+        val newlyBound = editorSurface !== surface
+        editorSurface = surface
         val target = pendingNavigation
         if (target != null && target.path == activePath) {
-            view.setSelection(target.line, target.character)
-            view.ensureSelectionVisible()
+            surface.moveCursor(LspPosition(target.line, target.character))
             pendingNavigation = null
         }
         if (newlyBound) {
@@ -2277,19 +2270,21 @@ class WorkbenchController(private val context: Context) {
     var editorProblemMarks by mutableStateOf<List<ProblemMark>>(emptyList())
         private set
 
+    private var editorProblemLines: Map<Int, Int> = emptyMap()
+
     /** Redraws the active file's problems in the editor (underlines, tooltips, faded code, marks). */
     fun refreshEditorProblems() {
-        val view = editorView as? NativeCodeEditor ?: return
-        val path = activePath
-        val uri = path?.let(::diagnosticUri)
-        val content = view.text
-        val lineLengths = (0 until content.lineCount).map(content::getColumnCount)
+        val surface = editorSurface ?: return
+        val uri = activePath?.let(::diagnosticUri)
+        val lineLengths = (0 until surface.lineCount).map { surface.lineText(it).length }
         val problems = editorProblems(diagnostics.filter { it.uri == uri }, lineLengths)
-        showEditorProblems(view, problems, settings) { position ->
-            view.setSelection(position.line, position.character)
+        surface.setProblems(problems, editorConfig()) { position ->
+            surface.moveCursor(position, reveal = false)
             showCodeActions()
         }
-        editorProblemMarks = if (settings.problemUnderlines) problemMarks(problems, content.lineCount) else emptyList()
+        editorProblemLines = problemLines(problems)
+        editorProblemMarks = if (settings.problemUnderlines) problemMarks(problems, surface.lineCount) else emptyList()
+        refreshLineMarks()
     }
 
     /** The URI a language server reports a document's diagnostics under. */
@@ -2300,10 +2295,9 @@ class WorkbenchController(private val context: Context) {
 
     /** A tap on a scrollbar mark: put the cursor on that problem. */
     fun goToProblemMark(mark: ProblemMark) {
-        val view = editorView ?: return
-        view.setSelection(mark.line, mark.column)
-        view.ensureSelectionVisible()
-        view.requestFocus()
+        val surface = editorSurface ?: return
+        surface.moveCursor(LspPosition(mark.line, mark.column))
+        surface.focus()
     }
 
     private fun onEditorEvent(event: EditorEvent) {
@@ -2408,8 +2402,7 @@ class WorkbenchController(private val context: Context) {
                 client.didOpen(document.path, languageId, document.version, document.text)
             }
         }
-        // Copilot's suggestions stay with saved files.
-        if (copilot.language.isReady && !document.path.startsWith("scratch:")) {
+        if (copilot.language.isReady) {
             copilot.language.didOpen(document.path, copilotLanguageId(document.path), document.version, document.text)
         }
     }
@@ -2506,7 +2499,7 @@ class WorkbenchController(private val context: Context) {
             refreshOutline(document)
             refreshSemanticTokens(document)
         }
-        if (copilot.language.isReady) copilot.didFocus(activePath?.takeUnless { it.startsWith("scratch:") })
+        if (copilot.language.isReady) copilot.didFocus(activePath)
     }
 
     private fun refreshSemanticTokens(document: DocumentSession) {
@@ -2553,8 +2546,8 @@ class WorkbenchController(private val context: Context) {
             status = "Language intelligence requires a connected Python or TypeScript language server"
             return null
         }
-        val cursor = editorView?.cursor ?: return null
-        return document to LspPosition(cursor.leftLine, cursor.leftColumn)
+        val start = editorSurface?.selectionStart() ?: return null
+        return document to start
     }
 
     fun navigateToLocation(location: LanguageLocation) {
@@ -2563,10 +2556,7 @@ class WorkbenchController(private val context: Context) {
         val target = EditorNavigationTarget(path, start.get("line").asInt, start.get("character").asInt)
         compactDestination = CompactDestination.Editor
         if (activePath == path) {
-            editorView?.let { view ->
-                view.setSelection(target.line, target.character)
-                view.ensureSelectionVisible()
-            }
+            editorSurface?.moveCursor(LspPosition(target.line, target.character))
             pendingNavigation = null
         } else {
             pendingNavigation = target
@@ -2612,7 +2602,7 @@ class WorkbenchController(private val context: Context) {
         val edit = choice.edit ?: return
         editorHost.applyEdits(document.path, listOf(edit))
         val end = edit.endAfterInsert()
-        editorView?.setSelection(end.line, end.character)
+        editorSurface?.moveCursor(end)
         onDocumentEdited(document)
     }
 
@@ -2862,15 +2852,17 @@ class WorkbenchController(private val context: Context) {
     /** Ctrl+/ over every selected line (a selection ending at column 0 excludes that line, as in VS Code). */
     private fun toggleLineComment() {
         val document = activeDocument ?: return
-        val view = editorView ?: return
+        val surface = editorSurface ?: return
         val token = commentTokens(document.languageId).line ?: run {
             toggleBlockComment()
             return
         }
-        val range = view.cursorRange
-        val first = range.start.line
-        val last = if (range.end.line > first && range.end.column == 0) range.end.line - 1 else range.end.line
-        val lines = view.text.toString().split('\n')
+        val offsets = surface.selectionOffsets
+        val rangeStart = surface.positionAt(offsets.first)
+        val rangeEnd = surface.positionAt(offsets.last)
+        val first = rangeStart.line
+        val last = if (rangeEnd.line > first && rangeEnd.character == 0) rangeEnd.line - 1 else rangeEnd.line
+        val lines = surface.text.split('\n')
         val toggled = toggleLineComments(lines.subList(first, last + 1), token)
         val updated = (lines.subList(0, first) + toggled + lines.subList(last + 1, lines.size)).joinToString("\n")
         val offsetOf = { line: Int, column: Int -> (0 until line).sumOf { lines.getOrElse(it) { "" }.length + 1 } + column }
@@ -2878,30 +2870,33 @@ class WorkbenchController(private val context: Context) {
             val delta = toggled.getOrNull(line - first)?.let { it.length - lines[line].length } ?: 0
             offsetOf(line, maxOf(0, column + delta)) + (first until line).sumOf { toggled[it - first].length - lines[it].length }
         }
-        replaceEditorText(view, updated, shift(range.start.line, range.start.column), shift(range.end.line, range.end.column))
+        replaceEditorText(surface, updated, shift(rangeStart.line, rangeStart.character), shift(rangeEnd.line, rangeEnd.character))
     }
 
     private fun toggleBlockComment() {
         val document = activeDocument ?: return
-        val view = editorView ?: return
+        val surface = editorSurface ?: return
         val (open, close) = commentTokens(document.languageId).block ?: run {
             status = "No block comment syntax for this file type"
             return
         }
-        val range = view.cursorRange
-        val edit = toggleBlockComment(view.text.toString(), range.startIndex, range.endIndex, open, close)
-        replaceEditorText(view, edit.text, edit.selectionStart, edit.selectionEnd)
+        val range = surface.selectionOffsets
+        val edit = toggleBlockComment(surface.text, range.first, range.last, open, close)
+        replaceEditorText(surface, edit.text, edit.selectionStart, edit.selectionEnd)
     }
 
     /** Applies [updated] as one minimal replacement so undo and incremental highlighting keep working. */
-    private fun replaceEditorText(view: CodeEditor, updated: String, selectionStart: Int, selectionEnd: Int) {
-        val span = changedSpan(view.text.toString(), updated)
-        val from = view.text.indexer.getCharPosition(span.start)
-        val to = view.text.indexer.getCharPosition(span.oldEnd)
-        view.text.replace(from.line, from.column, to.line, to.column, updated.substring(span.start, span.newEnd))
-        val start = view.text.indexer.getCharPosition(selectionStart.coerceIn(0, updated.length))
-        val end = view.text.indexer.getCharPosition(selectionEnd.coerceIn(0, updated.length))
-        view.setSelectionRegion(start.line, start.column, end.line, end.column)
+    private fun replaceEditorText(surface: EditorSurface, updated: String, selectionStart: Int, selectionEnd: Int) {
+        val span = changedSpan(surface.text, updated)
+        val from = surface.positionAt(span.start)
+        val to = surface.positionAt(span.oldEnd)
+        surface.applyEdits(listOf(LspTextEdit(LspRange(from, to), updated.substring(span.start, span.newEnd))))
+        surface.setSelection(
+            EditorSelection(
+                surface.positionAt(selectionStart.coerceIn(0, updated.length)),
+                surface.positionAt(selectionEnd.coerceIn(0, updated.length)),
+            ),
+        )
     }
 
     /** F8 / Shift+F8: the next or previous diagnostic in the active file, wrapping around. */
@@ -2932,57 +2927,56 @@ class WorkbenchController(private val context: Context) {
     /** Ctrl+U: back to where the cursor was before its last move in this file. */
     private fun undoCursorMove() {
         val path = activePath ?: return
-        val view = editorView ?: return
+        val surface = editorSurface ?: return
         while (cursorHistory.isNotEmpty() && cursorHistory.last() == path to cursorPosition) cursorHistory.removeLast()
         val (historyPath, position) = cursorHistory.removeLastOrNull() ?: return
         if (historyPath != path || position == null) return
         restoringCursor = true
-        view.setSelection(position.line, position.character)
-        view.ensureSelectionVisible()
+        surface.moveCursor(position)
     }
 
     private fun copySelection(cut: Boolean) {
-        val view = editorView ?: return
-        val range = view.cursorRange
-        if (range.startIndex == range.endIndex) {
+        val surface = editorSurface ?: return
+        val range = surface.selectionOffsets
+        if (range.first == range.last) {
             status = if (cut) "Select text before cutting" else "Select text before copying"
             return
         }
         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        val text = view.text.toString().substring(range.startIndex, range.endIndex)
+        val text = surface.text.substring(range.first, range.last)
         clipboard.setPrimaryClip(ClipData.newPlainText("MaterialCode", text))
-        if (cut) view.deleteText()
+        if (cut) surface.deleteSelection()
     }
 
     private fun pasteClipboard() {
         val text = (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
             .primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)?.toString() ?: return
-        editorView?.insertText(text, text.length)
+        editorSurface?.insertAtCursor(text)
     }
 
     fun findInEditor(next: Boolean) {
         val document = activeDocument ?: return
-        val view = editorView ?: return
+        val surface = editorSurface ?: return
         if (findQuery.isEmpty()) {
             dialog = WorkbenchDialog.Find
             return
         }
-        val text = view.text.toString()
-        val start = view.cursor.right
+        val text = surface.text
+        val selected = surface.selectionOffsets
         val foundAt = if (next) {
-            text.indexOf(findQuery, start.coerceAtMost(text.length)).takeIf { it >= 0 } ?: text.indexOf(findQuery)
+            text.indexOf(findQuery, selected.last.coerceAtMost(text.length)).takeIf { it >= 0 } ?: text.indexOf(findQuery)
         } else {
-            val from = (view.cursor.left - 1).coerceAtLeast(0)
+            val from = (selected.first - 1).coerceAtLeast(0)
             text.lastIndexOf(findQuery, from).takeIf { it >= 0 } ?: text.lastIndexOf(findQuery)
         }
         if (foundAt < 0) {
             status = "No matches for \"$findQuery\" in ${document.path.substringAfterLast('/')}"
             return
         }
-        val begin = view.text.indexer.getCharPosition(foundAt)
-        val end = view.text.indexer.getCharPosition(foundAt + findQuery.length)
-        view.setSelectionRegion(begin.line, begin.column, end.line, end.column)
-        view.ensureSelectionVisible()
+        val end = surface.positionAt(foundAt + findQuery.length)
+        // Reveal the match first, then select it (moving the cursor would drop the selection).
+        surface.moveCursor(end)
+        surface.setSelection(EditorSelection(surface.positionAt(foundAt), end))
     }
 
     fun replaceAll() {
@@ -2990,18 +2984,16 @@ class WorkbenchController(private val context: Context) {
         if (findQuery.isEmpty()) return
         val count = document.text.windowed(findQuery.length).count { it == findQuery }
         document.updateText(document.text.replace(findQuery, replaceQuery))
-        editorView?.setText(document.text)
+        editorSurface?.setText(document.text)
         onDocumentEdited(document)
         status = "Replaced $count occurrence(s)"
     }
 
     fun goToLine() {
         val target = gotoLine.toIntOrNull()
-        val view = editorView
-        if (target != null && view != null) {
-            val line = (target - 1).coerceIn(0, view.lineCount - 1)
-            view.setSelection(line, 0)
-            view.ensureSelectionVisible()
+        val surface = editorSurface
+        if (target != null && surface != null) {
+            surface.moveCursor(LspPosition((target - 1).coerceIn(0, surface.lineCount - 1), 0))
         }
         dialog = null
     }
@@ -3021,7 +3013,7 @@ class WorkbenchController(private val context: Context) {
         val normalized = document.text.replace("\r\n", "\n").replace("\r", "\n").replace("\n", replacement)
         document.updateText(normalized)
         document.eol = replacement
-        editorView?.setText(normalized)
+        editorSurface?.setText(normalized)
         onDocumentEdited(document)
         dialog = null
         status = "Line endings set to $selected"
@@ -3090,7 +3082,7 @@ class WorkbenchController(private val context: Context) {
                     // A new server instance hasn't seen any notebook mirror yet.
                     notebookMirrors.clear()
                     documents.forEach(::notifyDocumentOpened)
-                    copilot.didFocus(activePath?.takeUnless { it.startsWith("scratch:") })
+                    copilot.didFocus(activePath)
                 }
             }
         }
@@ -3185,25 +3177,23 @@ class WorkbenchController(private val context: Context) {
 
     private fun requestInlineSuggestion(invoked: Boolean) {
         val document = activeDocument ?: return
-        val view = editorView ?: return
-        if (!copilotEnabled || !copilot.language.isReady || document.path.startsWith("scratch:")) {
+        val surface = editorSurface ?: return
+        if (!copilotEnabled || !copilot.language.isReady) {
             if (invoked) status = "Copilot is not ready; run GitHub Copilot: Sign In"
             return
         }
-        val cursor = view.cursor
-        if (cursor.isSelected) return
+        if (surface.selectionOffsets.let { it.first != it.last }) return
         val version = document.version
-        val position = LspPosition(cursor.leftLine, cursor.leftColumn)
+        val position = surface.selectionStart()
         copilotLog { "request ${document.path.substringAfterLast('/')} ${position.line}:${position.character} v$version invoked=$invoked" }
         copilot.inlineCompletion(document.path, version, position, settings.tabSize, settings.insertSpaces, invoked)
             .whenComplete { suggestions, error ->
                 post {
-                    val current = editorView?.cursor
-                    val stillCurrent = activePath == document.path && document.version == version &&
-                        current != null && current.leftLine == position.line && current.leftColumn == position.character
+                    val current = editorSurface?.selectionStart()
+                    val stillCurrent = activePath == document.path && document.version == version && current == position
                     val suggestion = suggestions?.firstOrNull { it.insertText.isNotBlank() }
                     copilotLog {
-                        "reply ${suggestions?.size} current=$stillCurrent (v${document.version} ${current?.leftLine}:${current?.leftColumn}) " +
+                        "reply ${suggestions?.size} current=$stillCurrent (v${document.version} ${current?.line}:${current?.character}) " +
                             "range=${suggestion?.range} text=${suggestion?.insertText?.take(60)?.replace("\n", "⏎")} error=${error?.cause?.message ?: error?.message}"
                     }
                     when {
@@ -3231,29 +3221,27 @@ class WorkbenchController(private val context: Context) {
     /** The part of the suggestion after the cursor, which is what the editor shows as ghost text. */
     fun inlineGhostText(): String? {
         val (path, suggestion) = inlineSuggestion ?: return null
-        val view = editorView ?: return null
+        val surface = editorSurface ?: return null
         if (path != activePath) return null
-        val cursor = view.cursor
-        if (cursor.leftLine != suggestion.range.start.line) return suggestion.insertText
-        val typed = view.text.getLineString(cursor.leftLine)
-            .substring(suggestion.range.start.character.coerceAtMost(cursor.leftColumn), cursor.leftColumn)
+        val cursor = surface.selectionStart()
+        if (cursor.line != suggestion.range.start.line) return suggestion.insertText
+        val typed = surface.lineText(cursor.line)
+            .substring(suggestion.range.start.character.coerceAtMost(cursor.character), cursor.character)
         return ghostAfterTyped(typed, suggestion.insertText) ?: suggestion.insertText
     }
 
     private fun acceptInlineSuggestion() {
         val (path, suggestion) = inlineSuggestion ?: return
-        val view = editorView ?: return
+        val surface = editorSurface ?: return
         inlineSuggestion = null
         if (activePath != path) return
         val range = suggestion.range
         try {
-            val endLine = range.end.line.coerceAtMost(view.lineCount - 1)
-            val endColumn = range.end.character.coerceAtMost(view.text.getColumnCount(endLine))
-            view.text.replace(range.start.line, range.start.character, endLine, endColumn, suggestion.insertText)
-            val inserted = suggestion.insertText.split('\n')
-            val caretLine = range.start.line + inserted.lastIndex
-            val caretColumn = if (inserted.size == 1) range.start.character + inserted.last().length else inserted.last().length
-            view.setSelection(caretLine, caretColumn)
+            val endLine = range.end.line.coerceAtMost(surface.lineCount - 1)
+            val endColumn = range.end.character.coerceAtMost(surface.lineText(endLine).length)
+            val edit = LspTextEdit(LspRange(range.start, LspPosition(endLine, endColumn)), suggestion.insertText)
+            surface.applyEdits(listOf(edit))
+            surface.moveCursor(edit.endAfterInsert(), reveal = false)
             copilot.accepted(suggestion)
         } catch (error: RuntimeException) {
             status = "Could not apply the Copilot suggestion: ${error.message}"
@@ -3588,17 +3576,14 @@ class WorkbenchController(private val context: Context) {
             attach(ChatReference(path, text = cell.source, detail = "cell ${index + 1}"))
             return
         }
-        val view = editorView ?: return
-        val range = view.cursorRange
-        val text = view.text.toString()
-        val hasSelection = range.startIndex != range.endIndex
-        val firstLine = range.start.line
-        val lastLine = if (hasSelection && range.end.line > firstLine && range.end.column == 0) range.end.line - 1 else range.end.line
-        val excerpt = if (hasSelection) {
-            text.substring(range.startIndex, range.endIndex)
-        } else {
-            view.text.getLineString(firstLine)
-        }
+        val surface = editorSurface ?: return
+        val range = surface.selectionOffsets
+        val hasSelection = range.first != range.last
+        val start = surface.positionAt(range.first)
+        val end = surface.positionAt(range.last)
+        val firstLine = start.line
+        val lastLine = if (hasSelection && end.line > firstLine && end.character == 0) end.line - 1 else end.line
+        val excerpt = if (hasSelection) surface.text.substring(range.first, range.last) else surface.lineText(firstLine)
         attach(ChatReference(path, firstLine + 1, lastLine + 1, excerpt))
     }
 
@@ -4444,7 +4429,7 @@ class WorkbenchController(private val context: Context) {
     }
 
     fun runCommand(commandId: String) {
-        val view = editorView
+        val surface = editorSurface
         when (commandId) {
             "workbench.action.files.save" -> saveActiveDocument()
             "workbench.action.files.newUntitledFile" -> newUntitledFile()
@@ -4523,17 +4508,14 @@ class WorkbenchController(private val context: Context) {
             "editor.action.fontZoomIn" -> zoomEditor(1f)
             "editor.action.fontZoomOut" -> zoomEditor(-1f)
             "workbench.action.connect" -> dialog = WorkbenchDialog.Connect
-            "undo" -> view?.undo()
-            "redo" -> view?.redo()
+            "undo" -> surface?.undo()
+            "redo" -> surface?.redo()
             "editor.action.clipboardCopyAction" -> copySelection(false)
             "editor.action.clipboardCutAction" -> copySelection(true)
             "editor.action.clipboardPasteAction" -> pasteClipboard()
-            "editor.action.selectAll" -> view?.let {
-                val lastLine = (it.lineCount - 1).coerceAtLeast(0)
-                it.setSelectionRegion(0, 0, lastLine, it.text.getColumnCount(lastLine))
-            }
-            "editor.action.indentLines" -> view?.let { indentOrInsertTab(it, settings.tabSize, settings.insertSpaces) }
-            "editor.action.outdentLines" -> view?.unindentSelection()
+            "editor.action.selectAll" -> surface?.selectAll()
+            "editor.action.indentLines" -> surface?.let { indentOrInsertTab(it, settings.tabSize, settings.insertSpaces) }
+            "editor.action.outdentLines" -> surface?.outdentSelection(settings.tabSize)
             "editor.action.commentLine" -> toggleLineComment()
             "editor.action.blockComment" -> toggleBlockComment()
             "editor.action.marker.next" -> goToProblem(forward = true)
@@ -4547,7 +4529,7 @@ class WorkbenchController(private val context: Context) {
             "editor.action.insertLineAfter",
             "editor.action.insertLineBefore",
             -> activeDocument?.let { document ->
-                if (view != null && editCurrentLine(document, view, commandId)) onDocumentEdited(document)
+                if (surface != null && editCurrentLine(document, surface, commandId)) onDocumentEdited(document)
             }
             "actions.find", "editor.action.startFindReplaceAction" -> {
                 replaceQuery = ""
@@ -4604,7 +4586,7 @@ class WorkbenchController(private val context: Context) {
             "jupyter.restartKernel" -> activeNotebook?.let(::restartKernel)
             "jupyter.interruptKernel" -> activeNotebook?.let(::interruptKernel)
             "editor.action.jumpToBracket" -> {
-                val matched = activeDocument?.let { document -> view?.let { jumpToMatchingBracket(document, it) } } ?: false
+                val matched = activeDocument?.let { document -> surface?.let { jumpToMatchingBracket(document, it) } } ?: false
                 if (!matched) status = "No matching bracket"
             }
             "editor.action.addSelectionToNextFindMatch",

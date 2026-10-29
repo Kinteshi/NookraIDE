@@ -54,7 +54,6 @@ import com.avfstudio.nativeide.assets.AssetPackGrammarLoader
 import com.avfstudio.nativeide.document.DocumentSession
 import com.avfstudio.nativeide.editor.AutoPairReplacement
 import com.avfstudio.nativeide.editor.SoraBracketColorizer
-import com.avfstudio.nativeide.editor.SoraEditorSurface
 import com.avfstudio.nativeide.editor.autoPairAfterInsertion
 import com.avfstudio.nativeide.editor.pairedCloserOffsetAfterDeletion
 import com.avfstudio.nativeide.editor.skipExistingCloserAfterInsertion
@@ -301,7 +300,6 @@ private fun NativeEditorView(controller: WorkbenchController, document: Document
                 setTypefaceText(Typeface.MONOSPACE)
                 setTypefaceLineNumber(Typeface.MONOSPACE)
                 setDisableSoftKbdIfHardKbdAvailable(false)
-                controller.applyEditorSettings(this)
                 val language = if (document.languageId in setOf("py", "pyi")) {
                     TextMateLanguage.create("source.python", true)
                 } else {
@@ -314,9 +312,12 @@ private fun NativeEditorView(controller: WorkbenchController, document: Document
                 props.symbolPairAutoCompletion = false
                 val bracketColorizer = SoraBracketColorizer(this, document.languageId)
                 overlay = bracketColorizer
+                val editorSurface = SoraEditorSurface(this, bracketColorizer)
+                surface = editorSurface
+                editorSurface.applyConfig(controller.editorConfig())
                 onStylesPublished = {
                     bracketColorizer.update()
-                    controller.decorateEditorLines(this, document.path)
+                    editorSurface.drawLineMarks()
                 }
                 // A tap in the line-number gutter toggles a breakpoint, as in VS Code.
                 subscribeAlways(io.github.rosemoe.sora.event.ClickEvent::class.java) { event ->
@@ -327,7 +328,7 @@ private fun NativeEditorView(controller: WorkbenchController, document: Document
                     }
                 }
                 setText(document.text)
-                controller.editorHost.open(document, SoraEditorSurface(this, bracketColorizer))
+                controller.editorHost.open(document, editorSurface)
                 startSelectionTracking()
                 var previousText = document.text
                 subscribeAlways(ContentChangeEvent::class.java) { event ->
@@ -352,7 +353,7 @@ private fun NativeEditorView(controller: WorkbenchController, document: Document
                     controller.onDocumentEdited(document)
                     previousText = text.toString()
                 }
-                controller.editorReady(this)
+                controller.editorReady(editorSurface)
             }
         },
         update = { view ->
@@ -360,15 +361,16 @@ private fun NativeEditorView(controller: WorkbenchController, document: Document
             // Reading these here re-runs `update` when breakpoints or the paused line change.
             controller.breakpoints[document.path]
             controller.executionPoint
-            controller.decorateEditorLines(view, document.path)
-            controller.applyEditorSettings(view)
+            val surface = (view as NativeCodeEditor).surface
+            controller.refreshLineMarks(document.path)
+            surface.applyConfig(controller.editorConfig())
             view.setEditable(true)
-            (view as NativeCodeEditor).hasInlineSuggestion = controller.inlineSuggestion != null
-            controller.editorReady(view)
+            surface.inlineSuggestionShown = controller.inlineSuggestion != null
+            controller.editorReady(surface)
         },
     )
     LaunchedEffect(dark, colors, themeRevision, settings.semanticHighlighting, settings.syntaxColors) {
-        controller.editorView?.let { applyEditorTheme(it, it.context, colors, dark, settings.syntaxColors) }
+        controller.soraEditor()?.let { applyEditorTheme(it, it.context, colors, dark, settings.syntaxColors) }
     }
     LaunchedEffect(document.path) { controller.onActiveDocumentChanged() }
     DisposableEffect(document.path) {
@@ -381,7 +383,7 @@ private fun NativeEditorView(controller: WorkbenchController, document: Document
 private fun InlineGhostText(controller: WorkbenchController) {
     controller.editorViewportTick
     val ghost = controller.inlineGhostText()?.takeIf { it.isNotEmpty() } ?: return
-    val view = controller.editorView ?: return
+    val view = controller.soraEditor() ?: return
     val cursor = view.cursor
     val density = LocalDensity.current
     val x = view.getCharOffsetX(cursor.leftLine, cursor.leftColumn)
@@ -447,6 +449,8 @@ internal class NativeCodeEditor(
     var onStylesPublished: (() -> Unit)? = null
     /** Bracket, semantic and problem-tag colours drawn over the analyzer's spans. */
     var overlay: SoraBracketColorizer? = null
+    /** This editor as the workbench sees it. */
+    lateinit var surface: SoraEditorSurface
     /** `editor.insertSpaces`; the tab size is the editor's tab width. */
     var insertSpaces = true
     /** `editor.autoIndent`; off leaves Enter to sora (a plain newline). */
@@ -554,3 +558,6 @@ internal class NativeCodeEditor(
         return super.dispatchKeyEvent(event)
     }
 }
+
+/** The sora view behind the open editor, for the pane's own drawing (theme, ghost text). */
+internal fun WorkbenchController.soraEditor(): NativeCodeEditor? = (editorSurface as? SoraEditorSurface)?.editor

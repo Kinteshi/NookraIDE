@@ -145,7 +145,7 @@ fun SettingsScreen(controller: WorkbenchController) {
                     }
                 }
                 item {
-                    SwitchRow("Problem underlines", "Wavy lines under problems, their message on tap or hover, and marks beside the scrollbar", settings.problemUnderlines) {
+                    SwitchRow("Problem underlines", "Wavy lines under problems, their message on tap or hover, and marks beside the line numbers and the scrollbar", settings.problemUnderlines) {
                         set(WorkbenchSettings.PROBLEM_UNDERLINES, if (it) "on" else "off")
                     }
                 }

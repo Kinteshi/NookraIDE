@@ -1,11 +1,6 @@
 package com.avfstudio.nativeide.editor
 
 import com.avfstudio.nativeide.document.DocumentSession
-import io.github.rosemoe.sora.event.ContentChangeEvent
-import io.github.rosemoe.sora.event.EditorFocusChangeEvent
-import io.github.rosemoe.sora.event.ScrollEvent
-import io.github.rosemoe.sora.event.SelectionChangeEvent
-import io.github.rosemoe.sora.widget.CodeEditor
 import java.io.Closeable
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArraySet
@@ -26,17 +21,73 @@ sealed interface EditorEvent {
     data class FocusChanged(override val uri: String, val focused: Boolean) : EditorEvent
 }
 
+/**
+ * What the workbench needs from a code editor, whichever engine draws it (sora-editor today,
+ * see `SoraEditorSurface`). The defaults work from [text] alone; engines override them with their
+ * own, cheaper versions.
+ */
 interface EditorSurface {
     val text: String
     val selection: EditorSelection
     val visibleLines: VisibleLines
+    val lineCount: Int get() = text.count { it == '\n' } + 1
+    fun lineText(line: Int): String = text.split('\n').getOrElse(line) { "" }.removeSuffix("\r")
+    /** The selection as character offsets, start first. */
+    val selectionOffsets: IntRange
+        get() {
+            val (anchor, active) = selection.let { positionToOffset(text, it.anchor) to positionToOffset(text, it.active) }
+            return minOf(anchor, active)..maxOf(anchor, active)
+        }
+    fun positionAt(offset: Int): LspPosition = offsetToPosition(text, offset)
     fun setText(value: String)
     /** Applies [edits] in place; editors that can keep the cursor and undo history do so. */
     fun applyEdits(edits: List<LspTextEdit>) = setText(applyLspTextEdits(text, edits))
     fun setSelection(selection: EditorSelection)
+    /** Puts the cursor at [position] and, with [reveal], scrolls it into view. */
+    fun moveCursor(position: LspPosition, reveal: Boolean = true) = setSelection(EditorSelection(position, position))
+    /** Types [value] at the cursor, replacing the selection. */
+    fun insertAtCursor(value: String) {
+        val range = selectionOffsets
+        val edit = LspTextEdit(LspRange(positionAt(range.first), positionAt(range.last)), value)
+        applyEdits(listOf(edit))
+        moveCursor(edit.endAfterInsert())
+    }
+    fun deleteSelection() = insertAtCursor("")
+    /** Shift+Tab: removes one indentation level from each selected line. */
+    fun outdentSelection(tabSize: Int) {
+        val first = positionAt(selectionOffsets.first).line
+        val last = positionAt(selectionOffsets.last).line
+        applyEdits(
+            (first..last).mapNotNull { line ->
+                val text = lineText(line)
+                val width = if (text.startsWith("\t")) 1 else text.takeWhile { it == ' ' }.length.coerceAtMost(tabSize)
+                width.takeIf { it > 0 }?.let { LspTextEdit(LspRange(LspPosition(line, 0), LspPosition(line, it)), "") }
+            },
+        )
+    }
+    fun selectAll() {
+        val last = lineCount - 1
+        setSelection(EditorSelection(LspPosition(0, 0), LspPosition(last, lineText(last).length)))
+    }
+    fun undo() {}
+    fun redo() {}
+    fun focus() {}
     fun setDecorations(decorations: List<EditorDecoration>)
+    /** Breakpoints, the paused line and problem severities beside the line numbers. */
+    fun setLineMarks(marks: LineMarks) {}
+    /** Problems drawn in the text; [onQuickFix] asks for code actions at a problem. */
+    fun setProblems(problems: List<EditorProblem>, config: EditorConfig, onQuickFix: (LspPosition) -> Unit) {}
+    fun applyConfig(config: EditorConfig) {}
+    /** A Copilot suggestion is shown: Tab accepts it and Escape dismisses it. */
+    var inlineSuggestionShown: Boolean
+        get() = false
+        set(_) {}
     fun observe(listener: (EditorEvent) -> Unit): Closeable
 }
+
+/** Where the selection starts (the cursor when nothing is selected) and ends. */
+fun EditorSurface.selectionStart(): LspPosition = positionAt(selectionOffsets.first)
+fun EditorSurface.selectionEnd(): LspPosition = positionAt(selectionOffsets.last)
 
 interface TextEditorHost {
     fun open(document: DocumentSession, surface: EditorSurface)
@@ -121,86 +172,6 @@ class SoraTextEditorHost : TextEditorHost {
     )
 }
 
-class SoraEditorSurface(
-    private val editor: CodeEditor,
-    private val styleOverlay: SoraBracketColorizer,
-) : EditorSurface {
-    override val text: String get() = editor.text.toString()
-    override val selection: EditorSelection
-        get() {
-            val cursor = editor.cursor
-            return EditorSelection(
-                LspPosition(cursor.leftLine, cursor.leftColumn),
-                LspPosition(cursor.rightLine, cursor.rightColumn),
-            )
-        }
-    override val visibleLines: VisibleLines
-        get() = VisibleLines(editor.firstVisibleLine, editor.lastVisibleLine)
-
-    override fun setText(value: String) {
-        editor.setText(value)
-    }
-
-    /** Replaces the edited ranges only (last first), so the cursor and undo history survive. */
-    override fun applyEdits(edits: List<LspTextEdit>) {
-        val content = editor.text
-        content.beginBatchEdit()
-        try {
-            edits.sortedWith(compareBy<LspTextEdit>({ it.range.start.line }, { it.range.start.character })).asReversed()
-                .forEach { edit ->
-                    val (start, end) = edit.range
-                    content.replace(start.line, start.character, end.line, end.character, edit.newText)
-                }
-        } finally {
-            content.endBatchEdit()
-        }
-    }
-
-    override fun setSelection(selection: EditorSelection) {
-        editor.setSelectionRegion(
-            selection.anchor.line,
-            selection.anchor.character,
-            selection.active.line,
-            selection.active.character,
-        )
-    }
-
-    override fun setDecorations(decorations: List<EditorDecoration>) {
-        styleOverlay.setSemanticDecorations(decorations)
-    }
-
-    override fun observe(listener: (EditorEvent) -> Unit): Closeable {
-        val contentReceipt = editor.subscribeAlways(ContentChangeEvent::class.java) { event ->
-            if (event.action != ContentChangeEvent.ACTION_SET_NEW_TEXT) {
-                listener(EditorEvent.ContentChanged("", 0L, text))
-            }
-        }
-        val selectionReceipt = editor.subscribeAlways(SelectionChangeEvent::class.java) { event ->
-            listener(
-                EditorEvent.SelectionChanged(
-                    "",
-                    EditorSelection(
-                        LspPosition(event.left.line, event.left.column),
-                        LspPosition(event.right.line, event.right.column),
-                    ),
-                ),
-            )
-        }
-        val scrollReceipt = editor.subscribeAlways(ScrollEvent::class.java) {
-            listener(EditorEvent.ViewportChanged("", visibleLines))
-        }
-        val focusReceipt = editor.subscribeAlways(EditorFocusChangeEvent::class.java) { event ->
-            listener(EditorEvent.FocusChanged("", event.isGainFocus))
-        }
-        return Closeable {
-            contentReceipt.unsubscribe()
-            selectionReceipt.unsubscribe()
-            scrollReceipt.unsubscribe()
-            focusReceipt.unsubscribe()
-        }
-    }
-}
-
 /** Where the cursor ends up after inserting [edit]: just past its new text. */
 fun LspTextEdit.endAfterInsert(): LspPosition {
     val lines = newText.split('\n')
@@ -225,7 +196,14 @@ fun applyLspTextEdits(text: String, edits: List<LspTextEdit>): String {
     return result.toString()
 }
 
-private fun positionToOffset(text: String, position: LspPosition): Int {
+/** The position of character [offset], clamped to the text. */
+fun offsetToPosition(text: String, offset: Int): LspPosition {
+    val clamped = offset.coerceIn(0, text.length)
+    val lineStart = text.lastIndexOf('\n', clamped - 1) + 1
+    return LspPosition(text.substring(0, lineStart).count { it == '\n' }, clamped - lineStart)
+}
+
+internal fun positionToOffset(text: String, position: LspPosition): Int {
     require(position.line >= 0 && position.character >= 0) { "LSP positions cannot be negative" }
     var lineStart = 0
     repeat(position.line) {

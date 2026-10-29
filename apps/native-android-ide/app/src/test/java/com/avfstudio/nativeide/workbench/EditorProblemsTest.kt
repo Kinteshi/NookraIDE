@@ -1,6 +1,11 @@
 package com.avfstudio.nativeide.workbench
 
+import com.avfstudio.nativeide.editor.ProblemMark
 import com.avfstudio.nativeide.editor.TagDecoration
+import com.avfstudio.nativeide.editor.editorProblems
+import com.avfstudio.nativeide.editor.problemLines
+import com.avfstudio.nativeide.editor.problemMarks
+import com.avfstudio.nativeide.editor.tagDecorations
 import com.avfstudio.nativeide.language.LanguageDiagnostic
 import com.google.gson.JsonParser
 import org.junit.Assert.assertEquals
@@ -71,7 +76,8 @@ class EditorProblemsTest {
             listOf(diagnostic(2, 0, 2, 1, severity = 2), diagnostic(2, 4, 2, 5, severity = 1), diagnostic(0, 0, 0, 1, severity = 4)),
             lines,
         )
-        // One mark per line, in the colour of its worst problem.
+        // One mark per line, in the colour of its worst problem; the margin shows the same.
         assertEquals(listOf(ProblemMark(2f / 3f, 2, 4, 1)), problemMarks(problems, 3))
+        assertEquals(mapOf(2 to 1), problemLines(problems))
     }
 }

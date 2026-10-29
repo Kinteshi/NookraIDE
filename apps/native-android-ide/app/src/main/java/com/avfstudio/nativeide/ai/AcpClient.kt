@@ -109,6 +109,8 @@ class AcpClient(transport: GuestVfsClient, private val tool: String = COPILOT_AG
         private set
     @Volatile var configListener: ((List<AcpConfigOption>) -> Unit)? = null
     @Volatile var exitListener: ((String) -> Unit)? = null
+    /** Told whether the agent runs, each time that may have changed (start, stop, exit, disconnect). */
+    @Volatile var runningListener: ((Boolean) -> Unit)? = null
     val isStarted: Boolean get() = connection.bridgeId != null
     val hasSession: Boolean get() = sessionId != null
     val currentSessionId: String? get() = sessionId
@@ -119,6 +121,7 @@ class AcpClient(transport: GuestVfsClient, private val tool: String = COPILOT_AG
         connection.exitListener = { code ->
             sessionId = null
             updateConfig(emptyList())
+            runningListener?.invoke(false)
             exitListener?.invoke("Agent exited (${code ?: "unknown"})")
         }
         connection.errorListener = { message -> exitListener?.invoke(message) }
@@ -145,7 +148,7 @@ class AcpClient(transport: GuestVfsClient, private val tool: String = COPILOT_AG
             }.getOrDefault(false)
             canLoadSession = runCatching { capabilities!!.get("loadSession").asBoolean }.getOrDefault(false)
             canListSessions = capabilities?.getAsJsonObject("sessionCapabilities")?.has("list") == true
-        }
+        }.whenComplete { _, _ -> runningListener?.invoke(isStarted) }
 
     /** The sessions the agent keeps for [cwd], newest first as the agent sends them (up to [maxPages] pages). */
     fun listSessions(cwd: String, maxPages: Int = 5): CompletableFuture<List<AcpSessionInfo>> {
@@ -233,12 +236,14 @@ class AcpClient(transport: GuestVfsClient, private val tool: String = COPILOT_AG
         sessionId = null
         updateConfig(emptyList())
         connection.stop()
+        runningListener?.invoke(false)
     }
 
     fun onDisconnected() {
         sessionId = null
         updateConfig(emptyList())
         connection.detach(java.io.IOException("Guest connection was lost"))
+        runningListener?.invoke(false)
     }
 
     private fun handleNotification(method: String, params: JsonObject) {
