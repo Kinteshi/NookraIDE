@@ -14,12 +14,15 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -30,6 +33,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.ArrowDownward
 import androidx.compose.material.icons.outlined.ArrowUpward
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.ClearAll
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.FastForward
@@ -68,6 +73,14 @@ import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.unit.IntOffset
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import com.avfstudio.nativeide.notebook.formatRunDuration
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -139,6 +152,7 @@ fun NotebookEditor(controller: WorkbenchController, session: NotebookSession) {
                 listState.animateScrollToItem(index)
             }
         }
+        Box(Modifier.fillMaxSize().clipToBounds()) {
         LazyColumn(
             Modifier.fillMaxSize(),
             state = listState,
@@ -160,6 +174,8 @@ fun NotebookEditor(controller: WorkbenchController, session: NotebookSession) {
                     }
                 }
             }
+        }
+        if (controller.settings.stickyCellHeader) StickyCellHeader(controller, session, listState)
         }
     }
 }
@@ -184,78 +200,209 @@ private val cellKeepsKeys = setOf(Key.DirectionLeft, Key.DirectionRight, Key.Dir
 private const val NOTEBOOK_LOG_TAG = "AVFNB"
 
 /** Notebook controls stay tappable but out of the arrow-key path, so Up/Down and Enter can't hit Delete. */
-private fun Modifier.noKeyFocus(): Modifier = focusProperties { canFocus = false }
+internal fun Modifier.noKeyFocus(): Modifier = focusProperties { canFocus = false }
 
 @Composable
 private fun NotebookCellView(controller: WorkbenchController, session: NotebookSession, cell: NotebookCell) {
     val colors = MaterialTheme.colorScheme
     val selected = session.selectedCell == cell.id
     val dark = LocalDarkTheme.current
-    Row(
+    Column(
         Modifier
             .widthIn(max = 1100.dp)
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 4.dp),
     ) {
-        Box(Modifier.width(56.dp).padding(top = 6.dp), contentAlignment = Alignment.TopCenter) {
-            when {
-                cell.type != CellType.Code -> Unit
-                // The bridge runs cells one at a time: only the first unfinished one is executing.
-                cell.running && session.notebook.cells.firstOrNull { it.running } === cell ->
-                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                cell.running || cell.queued -> Text(
-                    "[*]",
-                    fontFamily = FontFamily.Monospace,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = colors.primary,
-                )
-                selected -> IconButton(onClick = { controller.runCell(session, cell) }, modifier = Modifier.size(32.dp).noKeyFocus()) {
-                    Icon(Icons.Outlined.PlayArrow, contentDescription = "Run cell", tint = colors.primary)
+        Row {
+            Column(Modifier.width(CELL_GUTTER).padding(top = 6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                CellRunButton(controller, session, cell, selected)
+                if (cell.type == CellType.Code && controller.settings.cellStatistics) {
+                    CellRunStatus(controller, session, cell, Modifier.padding(top = 2.dp))
                 }
-                else -> Text(
-                    "[${cell.executionCount ?: " "}]",
-                    fontFamily = FontFamily.Monospace,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = colors.onSurfaceVariant,
-                )
+            }
+            Column(Modifier.weight(1f)) {
+                Surface(
+                    color = if (cell.type == CellType.Code) colors.surfaceContainerLow else colors.surface,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(
+                            width = if (selected) 1.5.dp else 1.dp,
+                            color = if (selected) colors.primary else colors.outlineVariant.copy(alpha = 0.5f),
+                            shape = RoundedCornerShape(12.dp),
+                        )
+                        .noKeyFocus()
+                        .clickable { session.selectedCell = cell.id },
+                ) {
+                    if (cell.type == CellType.Markdown && !selected) {
+                        MarkdownText(cell.source.ifBlank { "*Empty Markdown cell*" }, Modifier.padding(12.dp))
+                    } else {
+                        CellSourceEditor(controller, session, cell, dark, selected)
+                    }
+                }
+                if (selected) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.noKeyFocus()) {
+                        TextButton(modifier = Modifier.noKeyFocus(), onClick = {
+                            cell.type = if (cell.type == CellType.Code) CellType.Markdown else CellType.Code
+                            controller.onCellEdited(session)
+                        }) { Text(if (cell.type == CellType.Code) "Markdown" else "Code") }
+                        Spacer(Modifier.weight(1f))
+                        CellActions(controller, session, cell)
+                    }
+                }
             }
         }
-        Column(Modifier.weight(1f)) {
-            Surface(
-                color = if (cell.type == CellType.Code) colors.surfaceContainerLow else colors.surface,
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .border(
-                        width = if (selected) 1.5.dp else 1.dp,
-                        color = if (selected) colors.primary else colors.outlineVariant.copy(alpha = 0.5f),
-                        shape = RoundedCornerShape(12.dp),
-                    )
-                    .noKeyFocus()
-                    .clickable { session.selectedCell = cell.id },
-            ) {
-                if (cell.type == CellType.Markdown && !selected) {
-                    MarkdownText(cell.source.ifBlank { "*Empty Markdown cell*" }, Modifier.padding(12.dp))
-                } else {
-                    CellSourceEditor(controller, session, cell, dark, selected)
+        if (cell.type == CellType.Code) CellOutputs(controller, session, cell, selected)
+    }
+}
+
+/** Move, insert and delete: the selected cell's toolbar, and its sticky header. */
+@Composable
+private fun CellActions(controller: WorkbenchController, session: NotebookSession, cell: NotebookCell) {
+    IconButton(onClick = { controller.moveCell(session, cell, -1) }, modifier = Modifier.noKeyFocus()) { Icon(Icons.Outlined.ArrowUpward, "Move up") }
+    IconButton(onClick = { controller.moveCell(session, cell, 1) }, modifier = Modifier.noKeyFocus()) { Icon(Icons.Outlined.ArrowDownward, "Move down") }
+    IconButton(onClick = { controller.addCell(session, cell) }, modifier = Modifier.noKeyFocus()) { Icon(Icons.Outlined.Add, "Insert cell below") }
+    IconButton(onClick = { controller.deleteCell(session, cell) }, modifier = Modifier.noKeyFocus()) { Icon(Icons.Outlined.Delete, "Delete cell") }
+}
+
+/** The gutter's top: a spinner while it runs, `[*]` while queued, Run when selected, else `[n]`. */
+@Composable
+private fun CellRunButton(controller: WorkbenchController, session: NotebookSession, cell: NotebookCell, selected: Boolean) {
+    val colors = MaterialTheme.colorScheme
+    when {
+        cell.type != CellType.Code -> Unit
+        cell.running -> CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+        cell.queued -> Text(
+            "[*]",
+            fontFamily = FontFamily.Monospace,
+            style = MaterialTheme.typography.labelMedium,
+            color = colors.primary,
+        )
+        selected -> IconButton(onClick = { controller.runCell(session, cell) }, modifier = Modifier.size(32.dp).noKeyFocus()) {
+            Icon(Icons.Outlined.PlayArrow, contentDescription = "Run cell", tint = colors.primary)
+        }
+        else -> Text(
+            "[${cell.executionCount ?: " "}]",
+            fontFamily = FontFamily.Monospace,
+            style = MaterialTheme.typography.labelMedium,
+            color = colors.onSurfaceVariant,
+        )
+    }
+}
+
+/**
+ * How the cell's run went (VS Code's mark under a cell): a live timer while it runs, "queued"
+ * while it waits, then a check or a cross with the run time. A tap says when it finished.
+ */
+@Composable
+private fun CellRunStatus(controller: WorkbenchController, session: NotebookSession, cell: NotebookCell, modifier: Modifier = Modifier) {
+    val colors = MaterialTheme.colorScheme
+    val style = MaterialTheme.typography.labelSmall
+    val run = cell.lastRun
+    when {
+        cell.running -> {
+            val started = cell.runStartedAt ?: return
+            var now by remember(started) { mutableStateOf(System.currentTimeMillis()) }
+            LaunchedEffect(started) {
+                while (true) {
+                    // Tenths for the first minute, then whole seconds are all it shows.
+                    delay(if (now - started < 60_000) 100 else 1000)
+                    now = System.currentTimeMillis()
                 }
             }
-            if (selected) {
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.noKeyFocus()) {
-                    TextButton(modifier = Modifier.noKeyFocus(), onClick = {
-                        cell.type = if (cell.type == CellType.Code) CellType.Markdown else CellType.Code
-                        controller.onCellEdited(session)
-                    }) { Text(if (cell.type == CellType.Code) "Markdown" else "Code") }
-                    Spacer(Modifier.weight(1f))
-                    IconButton(onClick = { controller.moveCell(session, cell, -1) }, modifier = Modifier.noKeyFocus()) { Icon(Icons.Outlined.ArrowUpward, "Move up") }
-                    IconButton(onClick = { controller.moveCell(session, cell, 1) }, modifier = Modifier.noKeyFocus()) { Icon(Icons.Outlined.ArrowDownward, "Move down") }
-                    IconButton(onClick = { controller.addCell(session, cell) }, modifier = Modifier.noKeyFocus()) { Icon(Icons.Outlined.Add, "Insert cell below") }
-                    IconButton(onClick = { controller.deleteCell(session, cell) }, modifier = Modifier.noKeyFocus()) { Icon(Icons.Outlined.Delete, "Delete cell") }
-                }
-            }
-            cell.outputs.forEach { output -> CellOutput(output, controller.settings.renderPlotly, controller.settings.renderHtmlOutputs) }
+            Text(formatRunDuration(now - started), style = style, color = colors.primary, maxLines = 1, modifier = modifier)
+        }
+        cell.queued -> Text("queued", style = style, color = colors.onSurfaceVariant, maxLines = 1, modifier = modifier)
+        run != null -> Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = modifier.clip(RoundedCornerShape(4.dp)).noKeyFocus().clickable { controller.describeCellRun(session, cell) },
+        ) {
+            val tint = if (run.failed) colors.error else successColor(LocalDarkTheme.current)
+            Icon(
+                if (run.failed) Icons.Outlined.Close else Icons.Outlined.Check,
+                contentDescription = if (run.failed) "Failed" else "Done",
+                tint = tint,
+                modifier = Modifier.size(12.dp),
+            )
+            run.millis?.let { Text(formatRunDuration(it), style = style, color = colors.onSurfaceVariant, maxLines = 1) }
         }
     }
+}
+
+/** Material has no success role; a green that reads on both the light and the dark surfaces. */
+private fun successColor(dark: Boolean): Color = if (dark) Color(0xFF81C995) else Color(0xFF1E8E3E)
+
+/** Height of the sticky cell header. */
+private val STICKY_HEADER_HEIGHT = 40.dp
+
+/**
+ * A cell taller than the screen keeps a header at the top while it scrolls: Run (or its
+ * progress), the first line of its source (a tap goes back to its top), its run status and, when
+ * selected, its actions. The next cell's top pushes it out, like a sticky list header.
+ */
+@Composable
+private fun StickyCellHeader(controller: WorkbenchController, session: NotebookSession, listState: LazyListState) {
+    val colors = MaterialTheme.colorScheme
+    val density = LocalDensity.current
+    val headerPx = with(density) { STICKY_HEADER_HEIGHT.roundToPx() }
+    val sticky by remember(listState, headerPx) {
+        derivedStateOf {
+            val info = listState.layoutInfo
+            stickyCell(
+                info.visibleItemsInfo.map { StickyItem(it.index, it.offset, it.size) },
+                info.viewportStartOffset,
+                session.notebook.cells.size,
+                headerPx,
+            )
+        }
+    }
+    val (index, offset) = sticky ?: return
+    val cell = session.notebook.cells.getOrNull(index) ?: return
+    val selected = session.selectedCell == cell.id
+    val scope = rememberCoroutineScope()
+    Box(
+        Modifier.fillMaxWidth().offset { IntOffset(0, offset) },
+        contentAlignment = Alignment.TopCenter,
+    ) {
+        Surface(
+            color = colors.surfaceContainerHigh,
+            shadowElevation = 3.dp,
+            shape = RoundedCornerShape(bottomStart = 12.dp, bottomEnd = 12.dp),
+            modifier = Modifier.widthIn(max = 1100.dp).fillMaxWidth().padding(horizontal = 12.dp).height(STICKY_HEADER_HEIGHT),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.width(CELL_GUTTER), contentAlignment = Alignment.Center) {
+                    CellRunButton(controller, session, cell, selected = cell.type == CellType.Code)
+                }
+                Text(
+                    cellHeadline(cell),
+                    style = MaterialTheme.typography.labelLarge,
+                    fontFamily = if (cell.type == CellType.Code) FontFamily.Monospace else null,
+                    color = colors.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .weight(1f)
+                        .noKeyFocus()
+                        .clickable {
+                            session.selectedCell = cell.id
+                            scope.launch { listState.animateScrollToItem(index) }
+                        }
+                        .padding(vertical = 10.dp),
+                )
+                if (cell.type == CellType.Code && controller.settings.cellStatistics) {
+                    CellRunStatus(controller, session, cell, Modifier.padding(horizontal = 8.dp))
+                }
+                if (selected) CellActions(controller, session, cell)
+            }
+        }
+    }
+}
+
+/** A cell's first non-blank line, without Markdown's heading marks. */
+internal fun cellHeadline(cell: NotebookCell): String {
+    val line = cell.source.lineSequence().firstOrNull { it.isNotBlank() }?.trim() ?: return "Empty cell"
+    return if (cell.type == CellType.Markdown) line.trimStart('#', ' ') else line
 }
 
 @Composable
@@ -505,77 +652,9 @@ private fun CellSourceEditor(
     }
 }
 
-@Composable
-private fun CellOutput(output: JsonObject, renderPlotly: Boolean, renderHtml: Boolean) {
-    val colors = MaterialTheme.colorScheme
-    val type = output.get("output_type")?.asString
-    val modifier = Modifier.fillMaxWidth().padding(top = 6.dp, start = 4.dp)
-    when (type) {
-        "stream" -> {
-            val stderr = output.get("name")?.asString == "stderr"
-            OutputText(
-                NotebookDocument.multiline(output.get("text")).stripAnsi().trimEnd('\n'),
-                if (stderr) colors.error else colors.onSurface,
-                modifier.then(if (stderr) Modifier.background(colors.errorContainer.copy(alpha = 0.3f), RoundedCornerShape(6.dp)) else Modifier),
-            )
-        }
-        "error" -> OutputText(
-            buildString {
-                append(output.get("ename")?.asString.orEmpty())
-                append(": ")
-                appendLine(output.get("evalue")?.asString.orEmpty())
-                output.getAsJsonArray("traceback")?.forEach { appendLine(it.asString.stripAnsi()) }
-            }.trimEnd(),
-            colors.error,
-            modifier.background(colors.errorContainer.copy(alpha = 0.3f), RoundedCornerShape(6.dp)),
-        )
-        "execute_result", "display_data" -> {
-            val data = output.getAsJsonObject("data") ?: return
-            val image = data.get("image/png") ?: data.get("image/jpeg")
-            val bitmap = remember(image) {
-                image?.let {
-                    runCatching {
-                        val bytes = Base64.decode(NotebookDocument.multiline(it), Base64.DEFAULT)
-                        BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
-                    }.getOrNull()
-                }
-            }
-            when {
-                renderPlotly && data.get(PLOTLY_MIME)?.isJsonObject == true ->
-                    PlotlyOutput(data.getAsJsonObject(PLOTLY_MIME), LocalDarkTheme.current, modifier)
-                bitmap != null -> Image(
-                    bitmap,
-                    contentDescription = "Cell output image",
-                    contentScale = ContentScale.Fit,
-                    modifier = modifier.heightIn(max = 520.dp).background(Color.White, RoundedCornerShape(6.dp)),
-                )
-                renderHtml && data.has("text/html") && !htmlNeedsScript(NotebookDocument.multiline(data.get("text/html"))) ->
-                    HtmlOutput(NotebookDocument.multiline(data.get("text/html")), LocalDarkTheme.current, modifier)
-                data.has("text/markdown") -> MarkdownText(NotebookDocument.multiline(data.get("text/markdown")), modifier)
-                data.has("text/plain") -> OutputText(NotebookDocument.multiline(data.get("text/plain")).stripAnsi(), colors.onSurface, modifier)
-                else -> OutputText("[${data.keySet().joinToString()} output]", colors.onSurfaceVariant, modifier)
-            }
-        }
-    }
-}
-
-@Composable
-private fun OutputText(text: String, color: Color, modifier: Modifier) {
-    SelectionContainer(modifier) {
-        Text(
-            text.takeLast(200_000),
-            fontFamily = FontFamily.Monospace,
-            style = MaterialTheme.typography.bodySmall,
-            color = color,
-            softWrap = false,
-            modifier = Modifier.horizontalScroll(rememberScrollState()).padding(8.dp),
-        )
-    }
-}
-
 /** Headings, bullets, bold, italic and inline code; enough for notebook prose. */
 @Composable
-private fun MarkdownText(source: String, modifier: Modifier = Modifier) {
+internal fun MarkdownText(source: String, modifier: Modifier = Modifier) {
     val colors = MaterialTheme.colorScheme
     val typography = MaterialTheme.typography
     Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {

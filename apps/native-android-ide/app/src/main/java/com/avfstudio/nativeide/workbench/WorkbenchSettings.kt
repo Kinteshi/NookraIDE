@@ -58,6 +58,16 @@ data class WorkbenchSettings(
     val renderHtmlOutputs: Boolean = true,
     /** Jupyter-style Tab after a name or dot asks the kernel for completions (Ctrl+Space always does). */
     val notebookTabCompletion: Boolean = true,
+    /** A tall cell keeps its run button, first line and actions at the top while it scrolls. */
+    val stickyCellHeader: Boolean = true,
+    /** Each code cell's run time and how it ended (done, running, queued, failed) in its gutter. */
+    val cellStatistics: Boolean = true,
+    /** Save each run's start and end in the cell's metadata (JupyterLab's `execution`), so they show on reopen. */
+    val recordTiming: Boolean = false,
+    /** DataFrame outputs as native, sortable tables rather than their HTML. */
+    val nativeTables: Boolean = true,
+    /** Text outputs longer than this scroll in a box until expanded (VS Code's default is 30). */
+    val outputLineLimit: Int = 30,
     /** Problem counts beside Outline entries and its "Problems only" filter. */
     val outlineProblems: Boolean = true,
     /** Squiggles under problems in the editor and their marks beside the scrollbar. */
@@ -110,6 +120,11 @@ data class WorkbenchSettings(
         const val STATUS_BAR_GUEST = "avf.statusBar.guestResources"
         const val RENDER_HTML = "avf.notebook.htmlOutputs"
         const val NOTEBOOK_TAB_COMPLETION = "avf.notebook.tabCompletion"
+        const val STICKY_CELL_HEADER = "avf.notebook.stickyCellHeader"
+        const val CELL_STATISTICS = "avf.notebook.cellStatistics"
+        const val RECORD_TIMING = "avf.notebook.recordTiming"
+        const val NATIVE_TABLES = "avf.notebook.nativeTables"
+        const val OUTPUT_LINE_LIMIT = "notebook.output.textLineLimit"
         const val OUTLINE_PROBLEMS = "outline.problems.enabled"
         /** VS Code's enum (editable/on/off); only "off" hides them. */
         const val PROBLEM_UNDERLINES = "editor.renderValidationDecorations"
@@ -165,6 +180,11 @@ data class WorkbenchSettings(
                 statusBarGuestResources = bool(STATUS_BAR_GUEST, defaults.statusBarGuestResources),
                 renderHtmlOutputs = bool(RENDER_HTML, defaults.renderHtmlOutputs),
                 notebookTabCompletion = bool(NOTEBOOK_TAB_COMPLETION, defaults.notebookTabCompletion),
+                stickyCellHeader = bool(STICKY_CELL_HEADER, defaults.stickyCellHeader),
+                cellStatistics = bool(CELL_STATISTICS, defaults.cellStatistics),
+                recordTiming = bool(RECORD_TIMING, defaults.recordTiming),
+                nativeTables = bool(NATIVE_TABLES, defaults.nativeTables),
+                outputLineLimit = number(OUTPUT_LINE_LIMIT)?.toInt()?.coerceIn(5, 10_000) ?: defaults.outputLineLimit,
                 outlineProblems = bool(OUTLINE_PROBLEMS, defaults.outlineProblems),
                 problemUnderlines = string(PROBLEM_UNDERLINES)?.let { it != "off" } ?: defaults.problemUnderlines,
                 showUnused = bool(SHOW_UNUSED, defaults.showUnused),

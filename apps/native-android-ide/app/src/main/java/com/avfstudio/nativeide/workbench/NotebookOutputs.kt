@@ -1,0 +1,477 @@
+package com.avfstudio.nativeide.workbench
+
+import android.graphics.BitmapFactory
+import android.util.Base64
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.outlined.ExpandLess
+import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.avfstudio.nativeide.notebook.NotebookCell
+import com.avfstudio.nativeide.notebook.NotebookDocument
+import com.avfstudio.nativeide.notebook.OutputPresentation
+import com.avfstudio.nativeide.notebook.OutputTable
+import com.avfstudio.nativeide.notebook.OutputView
+import com.avfstudio.nativeide.notebook.SortDirection
+import com.avfstudio.nativeide.notebook.TableCell
+import com.avfstudio.nativeide.notebook.decodeHtmlText
+import com.avfstudio.nativeide.notebook.isEllipsisRow
+import com.avfstudio.nativeide.notebook.parseDataFrameHtml
+import com.avfstudio.nativeide.notebook.sortedBody
+import com.avfstudio.nativeide.notebook.tableNumber
+import com.avfstudio.nativeide.notebook.toTsv
+import com.google.gson.JsonObject
+
+/** The cells' gutter width; outputs line up with the source beside it. */
+internal val CELL_GUTTER = 56.dp
+
+/**
+ * A code cell's outputs. The gutter beside them folds them away (saved with the notebook) and,
+ * on the selected cell, opens each output's menu: copy, which view to draw it with, clear.
+ */
+@Composable
+internal fun CellOutputs(controller: WorkbenchController, session: NotebookSession, cell: NotebookCell, selected: Boolean) {
+    val colors = MaterialTheme.colorScheme
+    if (cell.outputs.isEmpty()) return
+    if (cell.outputsHidden) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
+            OutputsFoldButton(cell, hidden = true) { controller.setOutputsHidden(session, cell, false) }
+            Text(
+                if (cell.outputs.size == 1) "1 output hidden" else "${cell.outputs.size} outputs hidden",
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.onSurfaceVariant,
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(colors.surfaceContainerLow)
+                    .noKeyFocus()
+                    .clickable { controller.setOutputsHidden(session, cell, false) }
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+            )
+        }
+        return
+    }
+    cell.outputs.forEachIndexed { index, output ->
+        Row(Modifier.fillMaxWidth()) {
+            Row(Modifier.width(CELL_GUTTER).padding(top = 4.dp), horizontalArrangement = Arrangement.Center) {
+                if (index == 0) OutputsFoldButton(cell, hidden = false) { controller.setOutputsHidden(session, cell, true) }
+                if (selected) OutputMenuButton(controller, session, cell, index, output)
+            }
+            Box(Modifier.weight(1f)) { CellOutput(controller, cell, index, output) }
+        }
+    }
+}
+
+@Composable
+private fun OutputsFoldButton(cell: NotebookCell, hidden: Boolean, onClick: () -> Unit) {
+    IconButton(onClick = onClick, modifier = Modifier.size(28.dp).noKeyFocus()) {
+        Icon(
+            if (hidden) Icons.Outlined.ExpandMore else Icons.Outlined.ExpandLess,
+            contentDescription = if (hidden) "Show outputs" else "Hide outputs",
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(20.dp),
+        )
+    }
+}
+
+@Composable
+private fun OutputMenuButton(controller: WorkbenchController, session: NotebookSession, cell: NotebookCell, index: Int, output: JsonObject) {
+    var open by remember { mutableStateOf(false) }
+    val presentation = cell.outputPresentation[index] ?: OutputPresentation()
+    val views = remember(output) { outputViews(output) }
+    val shown = shownView(views, presentation, controller.settings)
+    Box {
+        IconButton(onClick = { open = true }, modifier = Modifier.size(28.dp).noKeyFocus()) {
+            Icon(Icons.Outlined.MoreVert, contentDescription = "Output actions", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            val text = outputCopyText(output, shown, presentation)
+            DropdownMenuItem(
+                text = { Text(if (shown == OutputView.Table) "Copy table (tab-separated)" else "Copy output") },
+                leadingIcon = { Icon(Icons.Outlined.ContentCopy, contentDescription = null) },
+                enabled = text != null,
+                onClick = { open = false; text?.let { controller.copyOutputText(it) } },
+            )
+            if (views.size > 1) {
+                HorizontalDivider()
+                views.forEach { view ->
+                    DropdownMenuItem(
+                        text = { Text("Show as ${view.label}") },
+                        leadingIcon = { if (view == shown) Icon(Icons.Outlined.Check, contentDescription = "Shown") },
+                        onClick = {
+                            open = false
+                            cell.outputPresentation[index] = presentation.copy(view = view)
+                        },
+                    )
+                }
+            }
+            HorizontalDivider()
+            DropdownMenuItem(text = { Text("Clear this output") }, onClick = { open = false; controller.clearOutput(session, cell, index) })
+            DropdownMenuItem(text = { Text("Clear cell outputs") }, onClick = { open = false; controller.clearCellOutputs(session, cell) })
+        }
+    }
+}
+
+/** The views a display output can be drawn with, in the order the default is picked. */
+internal fun outputViews(output: JsonObject): List<OutputView> {
+    val data = output.getAsJsonObject("data") ?: return emptyList()
+    val html = data.get("text/html")?.let(NotebookDocument::multiline)
+    return buildList {
+        if (data.get(PLOTLY_MIME)?.isJsonObject == true) add(OutputView.Plotly)
+        if (data.has("image/png") || data.has("image/jpeg")) add(OutputView.Image)
+        if (html != null && parseDataFrameHtml(html) != null) add(OutputView.Table)
+        if (html != null && !htmlNeedsScript(html)) add(OutputView.Html)
+        if (data.has("text/markdown")) add(OutputView.Markdown)
+        if (data.has("text/plain")) add(OutputView.Text)
+    }
+}
+
+/** The view picked from the menu, else the first one Settings allow; null when Settings allow none. */
+internal fun shownView(views: List<OutputView>, presentation: OutputPresentation, settings: WorkbenchSettings): OutputView? =
+    presentation.view?.takeIf { it in views } ?: views.firstOrNull { view ->
+        when (view) {
+            OutputView.Plotly -> settings.renderPlotly
+            OutputView.Table -> settings.nativeTables
+            OutputView.Html -> settings.renderHtmlOutputs
+            else -> true
+        }
+    }
+
+/** What Copy puts on the clipboard: the table as TSV (in its sort order), or the output's text. */
+internal fun outputCopyText(output: JsonObject, view: OutputView?, presentation: OutputPresentation): String? {
+    when (output.get("output_type")?.asString) {
+        "stream" -> return NotebookDocument.multiline(output.get("text")).stripAnsi().trimEnd('\n')
+        "error" -> return errorText(output)
+    }
+    val data = output.getAsJsonObject("data") ?: return null
+    fun mime(name: String) = data.get(name)?.let(NotebookDocument::multiline)
+    return when (view) {
+        OutputView.Table -> mime("text/html")?.let(::parseDataFrameHtml)?.let { table ->
+            val column = presentation.sortColumn
+            table.toTsv(if (column != null) table.sortedBody(column, presentation.sortDirection) else table.body)
+        }
+        OutputView.Markdown -> mime("text/markdown")
+        OutputView.Html -> mime("text/plain") ?: mime("text/html")?.replace(Regex("<[^>]*>"), " ")?.let(::decodeHtmlText)
+        else -> mime("text/plain")?.stripAnsi()
+    }
+}
+
+private fun errorText(output: JsonObject): String = buildString {
+    append(output.get("ename")?.asString.orEmpty())
+    append(": ")
+    appendLine(output.get("evalue")?.asString.orEmpty())
+    output.getAsJsonArray("traceback")?.forEach { appendLine(it.asString.stripAnsi()) }
+}.trimEnd()
+
+@Composable
+private fun CellOutput(controller: WorkbenchController, cell: NotebookCell, index: Int, output: JsonObject) {
+    val colors = MaterialTheme.colorScheme
+    val settings = controller.settings
+    val presentation = cell.outputPresentation[index] ?: OutputPresentation()
+    val modifier = Modifier.fillMaxWidth().padding(top = 6.dp, start = 4.dp)
+    val lineLimit = settings.outputLineLimit
+    fun expand(expanded: Boolean) {
+        cell.outputPresentation[index] = presentation.copy(expanded = expanded)
+    }
+    when (output.get("output_type")?.asString) {
+        "stream" -> {
+            val stderr = output.get("name")?.asString == "stderr"
+            OutputText(
+                NotebookDocument.multiline(output.get("text")).stripAnsi().trimEnd('\n'),
+                if (stderr) colors.error else colors.onSurface,
+                modifier.then(if (stderr) Modifier.background(colors.errorContainer.copy(alpha = 0.3f), RoundedCornerShape(6.dp)) else Modifier),
+                lineLimit, presentation.expanded, follow = cell.running, onExpand = ::expand,
+            )
+        }
+        "error" -> OutputText(
+            errorText(output),
+            colors.error,
+            modifier.background(colors.errorContainer.copy(alpha = 0.3f), RoundedCornerShape(6.dp)),
+            lineLimit, presentation.expanded, follow = false, onExpand = ::expand,
+        )
+        "execute_result", "display_data" -> {
+            val data = output.getAsJsonObject("data") ?: return
+            val views = remember(output) { outputViews(output) }
+            val image = data.get("image/png") ?: data.get("image/jpeg")
+            val bitmap = remember(image) {
+                image?.let {
+                    runCatching {
+                        val bytes = Base64.decode(NotebookDocument.multiline(it), Base64.DEFAULT)
+                        BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+                    }.getOrNull()
+                }
+            }
+            fun mime(name: String) = NotebookDocument.multiline(data.get(name))
+            when (shownView(views, presentation, settings)) {
+                OutputView.Plotly -> PlotlyOutput(data.getAsJsonObject(PLOTLY_MIME), LocalDarkTheme.current, modifier)
+                OutputView.Image -> if (bitmap != null) {
+                    Image(
+                        bitmap,
+                        contentDescription = "Cell output image",
+                        contentScale = ContentScale.Fit,
+                        modifier = modifier.heightIn(max = 520.dp).background(Color.White, RoundedCornerShape(6.dp)),
+                    )
+                } else {
+                    OutputText("[image that could not be decoded]", colors.onSurfaceVariant, modifier)
+                }
+                OutputView.Table -> {
+                    val table = remember(output) { parseDataFrameHtml(mime("text/html")) }
+                    if (table != null) {
+                        OutputTableView(table, presentation, modifier) { cell.outputPresentation[index] = it }
+                    } else {
+                        OutputText(mime("text/plain"), colors.onSurface, modifier)
+                    }
+                }
+                OutputView.Html -> HtmlOutput(mime("text/html"), LocalDarkTheme.current, modifier)
+                OutputView.Markdown -> MarkdownText(mime("text/markdown"), modifier)
+                OutputView.Text -> OutputText(mime("text/plain").stripAnsi(), colors.onSurface, modifier, lineLimit, presentation.expanded, follow = false, onExpand = ::expand)
+                null -> OutputText("[${data.keySet().joinToString()} output]", colors.onSurfaceVariant, modifier)
+            }
+        }
+    }
+}
+
+/**
+ * Monospace output text. Past [lineLimit] lines it scrolls in a box of that height (VS Code's
+ * `notebook.output.textLineLimit`) until expanded; while the cell runs ([follow]) the box stays
+ * at the newest line unless scrolled up.
+ */
+@Composable
+private fun OutputText(
+    text: String,
+    color: Color,
+    modifier: Modifier,
+    lineLimit: Int = 0,
+    expanded: Boolean = true,
+    follow: Boolean = false,
+    onExpand: ((Boolean) -> Unit)? = null,
+) {
+    val shown = text.takeLast(200_000)
+    val lines = remember(shown) { shown.count { it == '\n' } + 1 }
+    val long = lineLimit > 0 && lines > lineLimit && onExpand != null
+    val style = MaterialTheme.typography.bodySmall
+    val density = LocalDensity.current
+    val vertical = rememberScrollState()
+    if (long && !expanded) {
+        LaunchedEffect(vertical, follow) {
+            if (!follow) return@LaunchedEffect
+            var lastMax = vertical.maxValue
+            vertical.scrollTo(lastMax)
+            snapshotFlow { vertical.maxValue }.collect { max ->
+                if (vertical.value >= lastMax - 8) vertical.scrollTo(max)
+                lastMax = max
+            }
+        }
+    }
+    Column(modifier) {
+        SelectionContainer {
+            val lineHeight = style.lineHeight.takeIf { it.isSp } ?: 16.sp
+            val boxed = if (long && !expanded) {
+                Modifier.heightIn(max = with(density) { (lineHeight * lineLimit).toDp() } + 16.dp).verticalScroll(vertical)
+            } else Modifier
+            Text(
+                shown,
+                fontFamily = FontFamily.Monospace,
+                style = style,
+                color = color,
+                softWrap = false,
+                modifier = boxed.horizontalScroll(rememberScrollState()).padding(8.dp),
+            )
+        }
+        if (long) {
+            TextButton(onClick = { onExpand?.invoke(!expanded) }, modifier = Modifier.noKeyFocus()) {
+                Text(
+                    if (expanded) "Scroll in a box of $lineLimit lines" else "Show all ${"%,d".format(lines)} lines",
+                    style = MaterialTheme.typography.labelMedium,
+                )
+            }
+        }
+    }
+}
+
+/** Rows drawn at most; pandas shows 60 unless told otherwise. */
+private const val TABLE_ROW_LIMIT = 2000
+
+/** Rows measured for column widths. */
+private const val TABLE_MEASURED_ROWS = 200
+
+/**
+ * A DataFrame as a native table: theme colours, header rows that stay while the rows scroll,
+ * numbers aligned right, and a tap on a column header sorts by it (ascending, descending, off).
+ */
+@Composable
+private fun OutputTableView(
+    table: OutputTable,
+    presentation: OutputPresentation,
+    modifier: Modifier,
+    onPresentation: (OutputPresentation) -> Unit,
+) {
+    val colors = MaterialTheme.colorScheme
+    val style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = "tnum")
+    val headerStyle = style.copy(fontWeight = FontWeight.SemiBold)
+    val sortColumn = presentation.sortColumn?.takeIf { it < table.columnCount }
+    val rows = remember(table, sortColumn, presentation.sortDirection) {
+        if (sortColumn != null) table.sortedBody(sortColumn, presentation.sortDirection) else table.body
+    }
+    val widths = columnWidths(table, style, headerStyle)
+    val numeric = remember(table) {
+        List(table.columnCount) { column ->
+            table.body.filterNot(::isEllipsisRow).mapNotNull { it.getOrNull(column) }
+                .filter { !it.header && it.text.isNotBlank() }
+                .let { cells -> cells.isNotEmpty() && cells.all { tableNumber(it.text) != null || it.text == "NaN" } }
+        }
+    }
+    fun sortBy(column: Int) {
+        val next = when {
+            sortColumn != column -> presentation.copy(sortColumn = column, sortDirection = SortDirection.Ascending)
+            presentation.sortDirection == SortDirection.Ascending -> presentation.copy(sortDirection = SortDirection.Descending)
+            else -> presentation.copy(sortColumn = null)
+        }
+        onPresentation(next)
+    }
+    Column(modifier) {
+        Box(
+            Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .border(1.dp, colors.outlineVariant, RoundedCornerShape(8.dp)),
+        ) {
+            SelectionContainer {
+                Column(Modifier.horizontalScroll(rememberScrollState())) {
+                    table.head.forEachIndexed { r, line ->
+                        Row(Modifier.background(colors.surfaceContainerHigh)) {
+                            line.forEachIndexed { column, cell ->
+                                val arrow = if (r == table.head.lastIndex && column == sortColumn) {
+                                    if (presentation.sortDirection == SortDirection.Ascending) " ▲" else " ▼"
+                                } else ""
+                                TableCellText(
+                                    (if (cell.spanned) "" else cell.text) + arrow,
+                                    headerStyle,
+                                    colors.onSurface,
+                                    widths.getOrElse(column) { 48.dp },
+                                    if (numeric.getOrElse(column) { false }) TextAlign.End else TextAlign.Start,
+                                    Modifier.noKeyFocus().clickable { sortBy(column) },
+                                )
+                            }
+                        }
+                    }
+                    Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+                        rows.take(TABLE_ROW_LIMIT).forEachIndexed { r, line ->
+                            Row(Modifier.background(if (r % 2 == 0) colors.surface else colors.surfaceContainerLow)) {
+                                line.forEachIndexed { column, cell ->
+                                    TableCellText(
+                                        if (cell.spanned && sortColumn == null) "" else cell.text,
+                                        if (cell.header) headerStyle else style,
+                                        if (cell.header) colors.onSurfaceVariant else colors.onSurface,
+                                        widths.getOrElse(column) { 48.dp },
+                                        if (numeric.getOrElse(column) { false } && !cell.header) TextAlign.End else TextAlign.Start,
+                                        if (cell.header) Modifier.background(colors.surfaceContainer) else Modifier,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        val notes = listOfNotNull(
+            table.caption.takeIf { it.isNotEmpty() },
+            "first $TABLE_ROW_LIMIT rows shown".takeIf { rows.size > TABLE_ROW_LIMIT },
+            sortColumn?.let { "sorted by ${table.head.lastOrNull()?.getOrNull(it)?.text?.ifBlank { null } ?: "column ${it + 1}"} (the rows shown)" },
+        )
+        if (notes.isNotEmpty()) {
+            Text(
+                notes.joinToString(" · "),
+                style = MaterialTheme.typography.labelSmall,
+                color = colors.onSurfaceVariant,
+                modifier = Modifier.padding(start = 4.dp, top = 4.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun TableCellText(text: String, style: TextStyle, color: Color, width: Dp, align: TextAlign, modifier: Modifier) {
+    Text(
+        text,
+        style = style,
+        color = color,
+        textAlign = align,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = modifier.width(width).padding(horizontal = 8.dp, vertical = 5.dp),
+    )
+}
+
+/** Each column as wide as its widest text (of the first rows), between 40 and 280 dp. */
+@Composable
+private fun columnWidths(table: OutputTable, style: TextStyle, headerStyle: TextStyle): List<Dp> {
+    val measurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    return remember(table, style, density) {
+        val lines: List<List<TableCell>> = table.head + table.body.take(TABLE_MEASURED_ROWS)
+        List(table.columnCount) { column ->
+            val widest = lines.withIndex().maxOfOrNull { (row, line) ->
+                val head = row < table.head.size
+                val cell = line.getOrNull(column) ?: return@maxOfOrNull 0
+                // A header spanning several columns doesn't widen the first of them.
+                if (cell.text.isEmpty() || (head && (cell.spanned || line.getOrNull(column + 1)?.let { it.spanned && it.text == cell.text } == true))) {
+                    return@maxOfOrNull 0
+                }
+                // Room for the sort arrow beside a header.
+                val text = if (head) cell.text + " ▲" else cell.text
+                measurer.measure(text, if (cell.header || head) headerStyle else style, maxLines = 1).size.width
+            } ?: 0
+            with(density) { (widest.toDp() + 17.dp).coerceIn(40.dp, 280.dp) }
+        }
+    }
+}

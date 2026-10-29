@@ -867,6 +867,55 @@ headers and toolbar.
     cursor.
 * 159 tests pass. The test untitled file was closed without saving; the app is left installed.
 
+## 21. Sticky cell header, cell run statistics, native notebook outputs (10-29 08:50–09:10; done, checked)
+User's pick: 1, 2 and 4 of the backlog list after batch 20 (port 36601).
+* (1) Sticky cell header (`avf.notebook.stickyCellHeader`, on). When a cell taller than three
+  headers has its top scrolled away, a header stays at the top of the notebook. It shows Run (or
+  the spinner), the cell's first line (a tap goes back to the cell's top), its run status and,
+  on the selected cell, its actions. The cell's end pushes it out, like a sticky list header.
+  The choice is the pure `stickyCell` (NotebookSticky.kt). Checked: the tall cell's header
+  stayed with its spinner and live timer while it ran, and shows Run on the output-heavy cells.
+* (2) Cell run statistics (`avf.notebook.cellStatistics`, on). The gutter under `[n]` shows a
+  live timer while the cell runs, "queued" while it waits, then a check or a cross with the run
+  time. A tap puts the finish time in the status bar.
+  * Timing comes from the bridge's "busy" notice. It runs executes one at a time in the order
+    sent, so each notice starts the oldest waiting cell (`NotebookSession.executing`). The
+    bridge needed no change. This also fixes which cell shows the spinner when cells run out of
+    notebook order.
+  * Results: an `error` reply (an exception or an interrupt) is failed; `aborted` (skipped after
+    an earlier error) clears the mark; a kernel exit fails the running cell. Clearing outputs
+    clears the marks, as VS Code does.
+  * `avf.notebook.recordTiming` (off) saves each run's start and end in the cell's
+    `metadata.execution`, as JupyterLab's recordTiming does. Timings saved by either show
+    again on reopen. A new run drops a stale timing, as JupyterLab does.
+  * Checked: ✓ 1.9s, ✓ 4.0s for the tall cell, ✗ for `1 / 0`. With the setting on, the
+    marks were back after closing and reopening. The setting was turned off again afterwards.
+* (4) Native notebook outputs (NotebookOutputs.kt):
+  * DataFrames (pandas and polars `<table class="dataframe">`, parsed by `OutputTable.kt`)
+    draw as native tables in theme colours: header rows stay while the rows scroll, numbers
+    align right, rows are striped and the index is shaded. MultiIndex spans are blank as in
+    pandas, and filled in once sorted. A tap on a header sorts ascending, then descending, then
+    off; missing values stay last. The caption keeps pandas' "rows × columns" or polars' shape.
+    `avf.notebook.nativeTables` (on); off shows the HTML as before.
+  * The gutter beside the outputs folds them away. This is saved as JupyterLab's
+    `jupyter.outputs_hidden` plus classic `collapsed`, and both are read.
+  * On the selected cell, each output has a menu:
+    * Copy: the table as TSV in its sort order, or the text.
+    * Show as table, HTML, plain text, image or Markdown (whatever the output has); Settings
+      pick the default.
+    * Clear this output, or clear the cell's outputs.
+  * Text outputs longer than `notebook.output.textLineLimit` lines (VS Code's key, 30) scroll in
+    a box, with "Show all N lines". While the cell runs, the box follows the newest line unless
+    you scroll up.
+  * What stays a WebView: Plotly, and HTML that isn't a DataFrame (Stylers, rich HTML).
+  * Checked: the 25-row frame drew as a table, sorted by score both ways, and copied ("Output
+    copied"). Show as HTML switched it back. The MultiIndex frame drew with its spans. The
+    120-line loop scrolled after 30 lines. Folding saved `outputs_hidden` and survived a reopen.
+* 172 tests pass. New tests: OutputTableTest (pandas, MultiIndex, polars, other HTML, sorting,
+  TSV), CellRunsTest (JupyterLab timing, recording, folding keys, durations) and
+  NotebookViewTest (sticky choice, views per Settings, copy text, headlines). The test notebook
+  `~/Projects/batch21.ipynb` stays in the guest for trying these; the app is left installed.
+
 ## Next pass (registered 10-27 23:35, updated 10-28 13:06)
 * Batch 15 did the carried-over tests (Copilot signed out, the setup paths, reconnect cap,
   Copilot model list, prompt prefix). Left over:
@@ -894,7 +943,7 @@ To investigate (user, 10-28):
   update most likely appends a new output instead of replacing the one with that id: an app
   bug, not the notebook's. Check on the tablet, then keep display ids on outputs and replace by
   id (also `clear_output(wait=True)`).
-* Cell outputs drawn with Material You elements and interaction: native tables for DataFrames
+* (Done in batch 21, except widgets.) Cell outputs drawn with Material You elements and interaction: native tables for DataFrames
   (sortable, scrollable, theme colours) instead of an HTML WebView, collapsible/expandable
   outputs, copy and clear actions, maybe widgets later. Decide what stays a WebView (Plotly).
 * (Done in batch 19.) A tree view in Explorer (expandable folders in place, VS Code style) instead of one level at a
@@ -914,13 +963,13 @@ To investigate (user, 10-28):
   (`AVF_WORKSPACE_ROOTS`, ~/Projects). Needs an Open Folder flow, recent workspaces, and the
   daemon's roots/permissions model (several roots or switching the root).
 
-* Sticky notebook cell headers and toolbar (user, 10-28): in a tall cell, its header (execution
+* (Done in batch 21.) Sticky notebook cell headers and toolbar (user, 10-28): in a tall cell, its header (execution
   count, language) and toolbar (run, and the cell actions) stay pinned at the top of the
   notebook view while the cell scrolls, so the run button doesn't scroll away; like VS Code's
   sticky cell toolbar. First thoughts: NotebookEditor is a LazyColumn of cells, so this needs an
   overlay for the topmost partly visible cell (from `firstVisibleItemIndex` and its scroll
   offset); evaluate a setting.
-* Notebook cell statistics (user, 10-28): each code cell shows how long its last run took and
+* (Done in batch 21.) Notebook cell statistics (user, 10-28): each code cell shows how long its last run took and
   how it ended: done, in progress (queued or running, with a live timer) or failed; like VS
   Code's status mark and duration under the cell. First look: cells already track `running`
   and `queued` (NotebookModel) and the execute reply carries `status` ("ok"/"error"), so this

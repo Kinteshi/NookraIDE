@@ -2,6 +2,7 @@ package com.avfstudio.nativeide.notebook
 
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.google.gson.GsonBuilder
@@ -31,8 +32,24 @@ class NotebookCell(
     var source by mutableStateOf(source)
     val outputs = mutableStateListOf<JsonObject>().apply { addAll(outputs) }
     var executionCount by mutableStateOf(executionCount)
+    /** Started in the kernel (the bridge runs one cell at a time). */
     var running by mutableStateOf(false)
+    /** Sent and waiting for the cells before it, or for a kernel to start. */
     var queued by mutableStateOf(false)
+    /** When the running cell started (wall clock ms), for the live timer. */
+    var runStartedAt by mutableStateOf<Long?>(null)
+    /** How the last finished run went; null before one (or a saved timing) is known. */
+    var lastRun by mutableStateOf(savedRun(metadata, outputs))
+    /** Outputs folded away (JupyterLab's `jupyter.outputs_hidden`, saved with the notebook). */
+    var outputsHidden by mutableStateOf(savedOutputsHidden(metadata))
+        private set
+    /** Per output index: the view picked from its menu and whether a long text is shown in full. */
+    val outputPresentation = mutableStateMapOf<Int, OutputPresentation>()
+
+    fun hideOutputs(hidden: Boolean) {
+        outputsHidden = hidden
+        writeOutputsHidden(metadata, hidden)
+    }
 
     companion object {
         fun empty(type: CellType = CellType.Code) =

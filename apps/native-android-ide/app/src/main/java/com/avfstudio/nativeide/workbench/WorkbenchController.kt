@@ -78,6 +78,10 @@ import com.avfstudio.nativeide.editor.problemMarks
 import com.avfstudio.nativeide.editor.selectionStart
 import com.avfstudio.nativeide.language.lspDocumentUri
 import com.avfstudio.nativeide.language.untitledPathFor
+import com.avfstudio.nativeide.notebook.CellRun
+import com.avfstudio.nativeide.notebook.clearTiming
+import com.avfstudio.nativeide.notebook.formatRunDuration
+import com.avfstudio.nativeide.notebook.recordTiming
 import com.avfstudio.nativeide.notebook.CellType
 import com.avfstudio.nativeide.notebook.KernelClient
 import com.avfstudio.nativeide.notebook.generatedKernelName
@@ -3880,12 +3884,32 @@ class WorkbenchController(private val context: Context) {
         kernel.clearListener = { cellId, wait ->
             post { notebook.cells.firstOrNull { it.id == cellId }?.let { session.displays.clear(it, wait) } }
         }
-        kernel.busyListener = { busy -> post { session.busy = busy } }
+        // The bridge runs executes one at a time, in the order sent, and says "busy" as each
+        // starts: that starts the oldest cell still waiting (and its timer).
+        kernel.busyListener = { busy ->
+            post {
+                session.busy = busy
+                if (busy) {
+                    session.executing.firstOrNull { !it.running }?.let { cell ->
+                        cell.queued = false
+                        cell.running = true
+                        cell.runStartedAt = System.currentTimeMillis()
+                    }
+                }
+            }
+        }
         kernel.exitListener = { message ->
             post {
                 session.kernelState = message
                 session.kernelName = null
-                notebook.cells.forEach { it.running = false; it.queued = false }
+                val now = System.currentTimeMillis()
+                notebook.cells.forEach { cell ->
+                    if (cell.running) cell.lastRun = CellRun(failed = true, millis = cell.runStartedAt?.let { now - it }, finishedAt = now)
+                    cell.running = false
+                    cell.queued = false
+                    cell.runStartedAt = null
+                }
+                session.executing.clear()
             }
         }
         notebooks[document.path] = session
@@ -4049,24 +4073,87 @@ class WorkbenchController(private val context: Context) {
             return
         }
         cell.queued = true
+        cell.lastRun = null
         cell.outputs.clear()
+        cell.outputPresentation.clear()
+        // An earlier run's saved timing no longer applies (JupyterLab drops it too).
+        clearTiming(cell.metadata)
+        session.executing.addLast(cell)
         session.notebook.dirty = true
         documentRevision++
         session.kernel.execute(cell.id, cell.source).whenComplete { reply, error ->
             post {
+                val now = System.currentTimeMillis()
+                val started = cell.runStartedAt
+                session.executing.remove(cell)
                 cell.queued = false
                 cell.running = false
-                if (error != null) {
-                    status = "Execution failed: ${error.cause?.message ?: error.message}"
-                } else {
-                    cell.executionCount = reply.executionCount
+                cell.runStartedAt = null
+                val millis = started?.let { now - it }
+                when {
+                    error != null -> {
+                        status = "Execution failed: ${error.cause?.message ?: error.message}"
+                        cell.lastRun = CellRun(failed = true, millis = millis, finishedAt = now)
+                    }
+                    // Skipped after an earlier cell failed (stop_on_error): it didn't run.
+                    reply.status == "aborted" -> cell.lastRun = null
+                    else -> {
+                        cell.executionCount = reply.executionCount
+                        cell.lastRun = CellRun(failed = reply.status == "error", millis = millis, finishedAt = now)
+                        if (settings.recordTiming && started != null) recordTiming(cell.metadata, started, now)
+                    }
                 }
-                session.kernelState = "Idle"
+                session.kernelState = if (session.executing.isEmpty()) "Idle" else "Busy"
                 documentRevision++
             }
         }
-        cell.running = true
         session.kernelState = "Busy"
+    }
+
+    /** The status bar says when the cell's last run finished, how, and how long it took. */
+    fun describeCellRun(session: NotebookSession, cell: NotebookCell) {
+        val run = cell.lastRun ?: return
+        val number = session.notebook.cells.indexOf(cell) + 1
+        val at = run.finishedAt?.let {
+            " at " + java.text.DateFormat.getTimeInstance(java.text.DateFormat.MEDIUM).format(java.util.Date(it))
+        }.orEmpty()
+        val took = run.millis?.let { " in ${formatRunDuration(it)}" }.orEmpty()
+        status = "Cell $number ${if (run.failed) "failed" else "finished"}$at$took"
+    }
+
+    fun setOutputsHidden(session: NotebookSession, cell: NotebookCell, hidden: Boolean) {
+        cell.hideOutputs(hidden)
+        session.notebook.dirty = true
+        documentRevision++
+    }
+
+    fun copyOutputText(text: String) {
+        context.getSystemService(ClipboardManager::class.java)?.setPrimaryClip(ClipData.newPlainText("Cell output", text))
+        status = "Output copied"
+    }
+
+    fun clearOutput(session: NotebookSession, cell: NotebookCell, index: Int) {
+        if (index !in cell.outputs.indices) return
+        cell.outputs.removeAt(index)
+        // Picked views follow their outputs down by one.
+        val shifted = cell.outputPresentation.mapNotNull { (key, value) ->
+            when {
+                key < index -> key to value
+                key > index -> key - 1 to value
+                else -> null
+            }
+        }
+        cell.outputPresentation.clear()
+        cell.outputPresentation.putAll(shifted)
+        session.notebook.dirty = true
+        documentRevision++
+    }
+
+    fun clearCellOutputs(session: NotebookSession, cell: NotebookCell) {
+        cell.outputs.clear()
+        cell.outputPresentation.clear()
+        session.notebook.dirty = true
+        documentRevision++
     }
 
     fun runAllCells(session: NotebookSession) = session.notebook.cells.forEach { runCell(session, it) }
@@ -4086,7 +4173,14 @@ class WorkbenchController(private val context: Context) {
     }
 
     fun clearAllOutputs(session: NotebookSession) {
-        session.notebook.cells.forEach { it.outputs.clear(); it.executionCount = null }
+        session.notebook.cells.forEach { cell ->
+            cell.outputs.clear()
+            cell.outputPresentation.clear()
+            cell.executionCount = null
+            // As VS Code: clearing outputs also clears the run marks and their saved timing.
+            if (!cell.running && !cell.queued) cell.lastRun = null
+            clearTiming(cell.metadata)
+        }
         session.notebook.dirty = true
         documentRevision++
     }

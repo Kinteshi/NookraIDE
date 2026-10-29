@@ -329,9 +329,36 @@ fun SettingsScreen(controller: WorkbenchController) {
                     ) { set(WorkbenchSettings.PLOTLY_DISPLAY_IDS, it) }
                 }
                 item {
-                    SwitchRow("HTML outputs", "Tables and rich output as HTML (pandas DataFrames); scripts never run", settings.renderHtmlOutputs) {
+                    SwitchRow("Native tables", "pandas and polars DataFrames as sortable tables in the app's colours; off shows their HTML", settings.nativeTables) {
+                        set(WorkbenchSettings.NATIVE_TABLES, it)
+                    }
+                }
+                item {
+                    SwitchRow("HTML outputs", "Rich output as HTML (and DataFrames when native tables are off); scripts never run", settings.renderHtmlOutputs) {
                         set(WorkbenchSettings.RENDER_HTML, it)
                     }
+                }
+                item {
+                    SliderRow("Long text outputs scroll after", settings.outputLineLimit.toFloat().coerceAtMost(200f), 10f..200f, "%.0f lines", steps = 18) {
+                        set(WorkbenchSettings.OUTPUT_LINE_LIMIT, it.roundToInt())
+                    }
+                }
+                item {
+                    SwitchRow("Sticky cell header", "A tall cell keeps its run button and actions at the top while it scrolls", settings.stickyCellHeader) {
+                        set(WorkbenchSettings.STICKY_CELL_HEADER, it)
+                    }
+                }
+                item {
+                    SwitchRow("Cell run statistics", "Run time and how the run ended (done, queued, running, failed) beside each code cell", settings.cellStatistics) {
+                        set(WorkbenchSettings.CELL_STATISTICS, it)
+                    }
+                }
+                item {
+                    SwitchRow(
+                        "Save run times in notebooks",
+                        "Writes each run's start and end into the cell's metadata, as JupyterLab does, so they show after reopening; adds to Git diffs",
+                        settings.recordTiming,
+                    ) { set(WorkbenchSettings.RECORD_TIMING, it) }
                 }
                 item {
                     SwitchRow("Tab completes in notebooks", "After a name or a dot, Tab asks the kernel (as in Jupyter); Ctrl+Space always does", settings.notebookTabCompletion) {

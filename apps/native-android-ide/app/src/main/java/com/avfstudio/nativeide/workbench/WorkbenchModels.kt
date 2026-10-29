@@ -136,6 +136,8 @@ class NotebookSession(
 ) {
     /** Display ids and pending clear_output(wait=True) of the running kernel's outputs. */
     val displays = com.avfstudio.nativeide.notebook.NotebookDisplays()
+    /** Cells sent to the kernel and not answered yet, oldest first (the bridge runs them in this order). */
+    val executing = ArrayDeque<com.avfstudio.nativeide.notebook.NotebookCell>()
     var kernelName by mutableStateOf<String?>(null)
     var kernelState by mutableStateOf("No kernel")
     var busy by mutableStateOf(false)
