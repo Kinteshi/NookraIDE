@@ -920,6 +920,13 @@ To investigate (user, 10-28):
   sticky cell toolbar. First thoughts: NotebookEditor is a LazyColumn of cells, so this needs an
   overlay for the topmost partly visible cell (from `firstVisibleItemIndex` and its scroll
   offset); evaluate a setting.
+* Notebook cell statistics (user, 10-28): each code cell shows how long its last run took and
+  how it ended: done, in progress (queued or running, with a live timer) or failed; like VS
+  Code's status mark and duration under the cell. First look: cells already track `running`
+  and `queued` (NotebookModel) and the execute reply carries `status` ("ok"/"error"), so this
+  needs a start time and duration per run, a failed state, and a small status row; maybe keep
+  the timing in the cell's metadata (JupyterLab's `execution` timestamps) so it survives a
+  reopen. Evaluate a setting (show run statistics). Likely S-M.
 * Refactor: replace sora-editor with Aardink (user, 10-28). **Decided (user, 10-28): it will be
   done, for the licence (Apache-2.0 instead of sora's LGPL-2.1); held for later.** Evaluated the
   same day (`docs/native-editor-evaluation.md`, "Re-evaluation 2026-10-28"); not ready yet,
