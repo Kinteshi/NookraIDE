@@ -1026,6 +1026,48 @@ User's pick: 2 and 3 of the backlog list after 21b, and "clean up the behaviour 
 * 176 tests pass (new: script outputs and Bokeh pairing, per-folder sessions). The app is left
   installed.
 
+## 23. Parameter hints, symbol highlights, save clean-ups and format on paste (10-29 11:00–11:55; done, checked)
+User's pick: 6, 7 and 11 of the list after batch 22 (spec candidates 1, 2 and 6).
+* Parameter hints (`editor.parameterHints.enabled`, on; Ctrl+Shift+Space shows them):
+  * The client now advertises signatureHelp (context, label offsets, active parameter) and keeps
+    the server's trigger and retrigger characters.
+  * Typing a trigger (`(`, `,` for ty) asks for hints. While they show, any edit or cursor move
+    asks again, as a retrigger carrying the hints shown, so the bold parameter follows and the
+    card goes when the cursor leaves the call.
+  * The card sits above the cursor's line (below it on the first lines). It shows the signature
+    with the current parameter in bold in the theme's primary colour, its documentation (or the
+    signature's), and "1/3" for overloads. Escape closes it; switching files closes it too.
+  * Checked with ty: `result = scale(` showed `(values: list[float], factor: float = ..., *,
+    offset: float = ...) -> list[float]` with `values` in bold and the docstring under it.
+    After `x,` the bold moved to `factor`; Escape closed it.
+* Symbol highlights (`editor.occurrencesHighlight`, on; "off" or false turns it off):
+  * `textDocument/documentHighlight` runs 250 ms after the cursor rests, with an empty
+    selection. The uses get a background through the span overlay (a new background colour id in
+    the style bits); writes are stronger (VS Code's wordHighlightStrongBackground).
+  * Dark+/Light+ colours by default; Material themes use the primary for reads and the tertiary
+    for writes. An edit clears them until the next answer, and a stale answer is dropped.
+  * Checked: the cursor on `total` marked its four uses, with the two assignments lighter.
+* Save clean-ups, VS Code's keys, all off by default: `files.trimTrailingWhitespace` (Markdown
+  is left alone, since two spaces are a line break there), `files.insertFinalNewline` and
+  `files.trimFinalNewlines`.
+  * They run on every save, the auto ones included. An auto save leaves the cursor's line
+    untrimmed, as VS Code does. The open editor gets them as edits (so they undo); a file saved
+    in the background gets them in its text.
+  * The edits come from a pure function (`saveCleanupEdits`), which keeps `\r` of CRLF breaks.
+  * Checked: `notes23.txt` (trailing spaces, a tab, three blank lines at the end) saved as
+    exactly `line one\nline two\nlast line\n`.
+* Format on paste (`editor.formatOnPaste`, off): range formatting of what was pasted, when the
+  formatter offers it (Ruff does). It applies only if nothing was typed since the paste. Pastes
+  from sora's own menu and selection handles now go through the workbench too.
+  * Checked: pasting `y=[1,2 ,3]` gave `y = [1, 2, 3]`; the original line stayed.
+* Fixed while checking: opening Settings with an unsaved file and auto save on focus change
+  crashed. The auto save ran after the editor pane had gone, and the clean-up edits went to a
+  closed editor ("Document is not open"). `TextEditorHost.isOpen` now sends them to the text
+  instead. Checked: the same steps no longer crash.
+* The four new save and paste settings were switched back off after the checks. Test files
+  `~/Projects/batch23.py` and `notes23.txt` stay in the guest. 183 tests pass (new:
+  SignatureHelpTest, SaveCleanupsTest).
+
 ## Next pass (registered 10-27 23:35, updated 10-28 13:06)
 * Batch 15 did the carried-over tests (Copilot signed out, the setup paths, reconnect cap,
   Copilot model list, prompt prefix). Left over:
@@ -1115,14 +1157,14 @@ To investigate (user, 10-28):
 Candidates from the spec review (10-29; `docs/NATIVE-ANDROID-IDE-SPEC.md` against the app).
 Not picked yet. Effort: S about half a day, M about a day, L several days.
 * Editor and language intelligence (spec 4.2):
-  1. Signature help: parameter hints while typing a call (`textDocument/signatureHelp`). S-M.
-  2. Document highlights: other uses of the symbol under the cursor. S.
+  1. (Done in batch 23.) Signature help: parameter hints while typing a call (`textDocument/signatureHelp`). S-M.
+  2. (Done in batch 23.) Document highlights: other uses of the symbol under the cursor. S.
   3. Inlay hints: inferred types and parameter names, with a setting. M.
   4. Quick Open prefixes as in VS Code (`@` symbols in the file, `#` workspace symbols, `:`
      line, `>` commands). M.
   5. Snippets: VS Code snippet files from asset packs, and LSP snippet completions with tab
      stops. M-L.
-  6. `files.trimTrailingWhitespace`, `files.insertFinalNewline`, `editor.formatOnPaste`. S.
+  6. (Done in batch 23.) `files.trimTrailingWhitespace`, `files.insertFinalNewline`, `editor.formatOnPaste`. S.
   7. Code folding (LSP folding ranges or indentation). M; sora's support needs checking first.
   8. Markdown preview for `.md` files (toggle or side by side). M.
   9. Image viewer for image files (zoom, pan; SVG too). S-M.

@@ -82,6 +82,12 @@ interface EditorSurface {
     var inlineSuggestionShown: Boolean
         get() = false
         set(_) {}
+    /** Parameter hints are shown: Escape closes them. */
+    var parameterHintsShown: Boolean
+        get() = false
+        set(_) {}
+    /** The other uses of the symbol under the cursor, drawn behind the text ([write] ones stronger). */
+    fun setSymbolHighlights(highlights: List<Pair<LspRange, Boolean>>) {}
     fun observe(listener: (EditorEvent) -> Unit): Closeable
 }
 
@@ -93,6 +99,8 @@ interface TextEditorHost {
     fun open(document: DocumentSession, surface: EditorSurface)
     fun close(uri: String)
     fun applyEdits(uri: String, edits: List<LspTextEdit>)
+    /** Whether [uri] is shown in an editor now (the pane goes away behind Settings, for one). */
+    fun isOpen(uri: String): Boolean
     fun setDecorations(uri: String, decorations: List<EditorDecoration>)
     fun viewport(uri: String): VisibleLines?
     fun selection(uri: String): EditorSelection?
@@ -130,6 +138,8 @@ class SoraTextEditorHost : TextEditorHost {
     override fun close(uri: String) {
         bindings.remove(uri)?.subscription?.close()
     }
+
+    override fun isOpen(uri: String): Boolean = bindings.containsKey(uri)
 
     override fun applyEdits(uri: String, edits: List<LspTextEdit>) {
         val binding = requireNotNull(bindings[uri]) { "Document is not open: $uri" }

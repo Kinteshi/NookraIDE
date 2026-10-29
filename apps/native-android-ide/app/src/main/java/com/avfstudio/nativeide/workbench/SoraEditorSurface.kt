@@ -9,6 +9,10 @@ import com.avfstudio.nativeide.editor.EditorSelection
 import com.avfstudio.nativeide.editor.EditorSurface
 import com.avfstudio.nativeide.editor.LineMarks
 import com.avfstudio.nativeide.editor.LspPosition
+import com.avfstudio.nativeide.editor.LspRange
+import com.avfstudio.nativeide.editor.SYMBOL_HIGHLIGHT_COLOR_ID
+import com.avfstudio.nativeide.editor.SYMBOL_WRITE_HIGHLIGHT_COLOR_ID
+import com.avfstudio.nativeide.editor.TagDecoration
 import com.avfstudio.nativeide.editor.LspTextEdit
 import com.avfstudio.nativeide.editor.SoraBracketColorizer
 import com.avfstudio.nativeide.editor.VisibleLines
@@ -188,6 +192,26 @@ internal class SoraEditorSurface(
         view.useTabStops = config.useTabStops
         if (view.isWordwrap != config.wordWrap) view.setWordwrap(config.wordWrap)
         if (view.isLineNumberEnabled != config.lineNumbers) view.setLineNumberEnabled(config.lineNumbers)
+    }
+
+    override var parameterHintsShown: Boolean
+        get() = editor.hasParameterHints
+        set(value) {
+            editor.hasParameterHints = value
+        }
+
+    /** One background run per line the range covers (symbols rarely span lines). */
+    override fun setSymbolHighlights(highlights: List<Pair<LspRange, Boolean>>) {
+        val content = editor.text
+        val decorations = highlights.flatMap { (range, write) ->
+            val color = if (write) SYMBOL_WRITE_HIGHLIGHT_COLOR_ID else SYMBOL_HIGHLIGHT_COLOR_ID
+            (range.start.line..range.end.line).filter { it in 0 until content.lineCount }.map { line ->
+                val start = if (line == range.start.line) range.start.character else 0
+                val end = if (line == range.end.line) range.end.character else content.getColumnCount(line)
+                TagDecoration(line, start, end, background = color)
+            }
+        }
+        styleOverlay.setHighlightDecorations(decorations)
     }
 
     override var inlineSuggestionShown: Boolean

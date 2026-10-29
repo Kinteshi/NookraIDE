@@ -12,7 +12,15 @@ import java.util.IdentityHashMap
 data class BracketColorToken(val offset: Int, val depth: Int)
 
 /** Columns [start, end) on [line] drawn faded (unnecessary code) and/or struck through (deprecated). */
-data class TagDecoration(val line: Int, val start: Int, val end: Int, val faded: Boolean, val struck: Boolean)
+data class TagDecoration(
+    val line: Int,
+    val start: Int,
+    val end: Int,
+    val faded: Boolean = false,
+    val struck: Boolean = false,
+    /** A background colour id (symbol highlights); 0 keeps the text's own. */
+    val background: Int = 0,
+)
 
 fun bracketColorTokens(text: String, languageId: String): List<BracketColorToken> {
     val tokens = mutableListOf<BracketColorToken>()
@@ -123,6 +131,9 @@ private val LIGHT_SEMANTIC_COLORS = mapOf(
 )
 /** The colour of code a language server tags unnecessary (unused imports and variables). */
 const val UNNECESSARY_CODE_COLOR_ID = 500_090
+/** Backgrounds of a symbol's other uses (VS Code's wordHighlightBackground) and its writes (…StrongBackground). */
+const val SYMBOL_HIGHLIGHT_COLOR_ID = 500_091
+const val SYMBOL_WRITE_HIGHLIGHT_COLOR_ID = 500_092
 
 private val SEMANTIC_TOKEN_COLORS = mapOf(
     "class" to (500_010 to 0xFF4EC9B0.toInt()),
@@ -154,6 +165,7 @@ class SoraBracketColorizer(
     private val replaced = IdentityHashMap<Span, Span>()
     private var semanticDecorations: List<EditorDecoration> = emptyList()
     private var tagDecorations: List<TagDecoration> = emptyList()
+    private var highlightDecorations: List<TagDecoration> = emptyList()
 
     /** Called on the UI thread. */
     fun setSemanticDecorations(decorations: List<EditorDecoration>) {
@@ -165,6 +177,13 @@ class SoraBracketColorizer(
     fun setTagDecorations(decorations: List<TagDecoration>) {
         if (decorations == tagDecorations) return
         tagDecorations = decorations
+        update()
+    }
+
+    /** Called on the UI thread. */
+    fun setHighlightDecorations(decorations: List<TagDecoration>) {
+        if (decorations == highlightDecorations) return
+        highlightDecorations = decorations
         update()
     }
 
@@ -217,7 +236,7 @@ class SoraBracketColorizer(
             }
             Triple(range.start.line, range.start.character, range.end.character to colorId)
         }.groupBy({ it.first }, { it.second to it.third })
-        val tagsByLine = tagDecorations.groupBy(TagDecoration::line)
+        val tagsByLine = (tagDecorations + highlightDecorations).groupBy(TagDecoration::line)
 
         // Read every line before writing any: while the analyzer holds the span locks, sora's
         // reader returns a fresh placeholder list ([0:TEXT_NORMAL]) instead of the line's real
@@ -306,6 +325,9 @@ class SoraBracketColorizer(
             var style = styled.style
             if (tag.faded) style = withForeground(style, UNNECESSARY_CODE_COLOR_ID)
             if (tag.struck) style = style or TextStyle.STRIKETHROUGH_BIT
+            if (tag.background != 0) {
+                style = (style and TextStyle.BACKGROUND_BITS.inv()) or (tag.background.toLong() shl TextStyle.COLOR_ID_BIT_COUNT)
+            }
             styled.style = style
             output[index] = styled
         }
@@ -349,6 +371,9 @@ class SoraBracketColorizer(
             }
             // Unnecessary code: the line numbers' dim grey, as VS Code fades it (Material themes reset it).
             editor.colorScheme.setColor(UNNECESSARY_CODE_COLOR_ID, editor.colorScheme.getColor(EditorColorScheme.LINE_NUMBER))
+            // VS Code's Dark+/Light+ word highlights; Material themes set their own (WorkbenchTheme).
+            editor.colorScheme.setColor(SYMBOL_HIGHLIGHT_COLOR_ID, if (light) 0x40575757 else 0xB8575757.toInt())
+            editor.colorScheme.setColor(SYMBOL_WRITE_HIGHLIGHT_COLOR_ID, if (light) 0x400E639C else 0xB8004972.toInt())
             editor.setHighlightBracketPair(true)
             editor.colorScheme.setColor(
                 EditorColorScheme.HIGHLIGHTED_DELIMITERS_FOREGROUND,

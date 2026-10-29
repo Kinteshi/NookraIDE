@@ -160,6 +160,12 @@ fun SettingsScreen(controller: WorkbenchController) {
                     }
                 }
                 item { SwitchRow("Format on save", "Ruff for Python, the language server otherwise", settings.formatOnSave) { set(WorkbenchSettings.FORMAT_ON_SAVE, it) } }
+                item { SwitchRow("Format on paste", "Formats what you paste, where the formatter can format a range (Ruff, TypeScript)", settings.formatOnPaste) { set(WorkbenchSettings.FORMAT_ON_PASTE, it) } }
+                item { SwitchRow("Trim trailing whitespace on save", "Not on the cursor's line when saving automatically; Markdown files are left alone", settings.trimTrailingWhitespace) { set(WorkbenchSettings.TRIM_TRAILING_WHITESPACE, it) } }
+                item { SwitchRow("Insert final newline on save", "Ends the file with a line break", settings.insertFinalNewline) { set(WorkbenchSettings.INSERT_FINAL_NEWLINE, it) } }
+                item { SwitchRow("Trim final newlines on save", "Keeps a single line break at the end of the file", settings.trimFinalNewlines) { set(WorkbenchSettings.TRIM_FINAL_NEWLINES, it) } }
+                item { SwitchRow("Parameter hints", "The signature and the current parameter while typing a call (Ctrl+Shift+Space shows them)", settings.parameterHints) { set(WorkbenchSettings.PARAMETER_HINTS, it) } }
+                item { SwitchRow("Highlight symbol uses", "Marks the other uses of the symbol under the cursor; assignments stronger", settings.occurrencesHighlight) { set(WorkbenchSettings.OCCURRENCES_HIGHLIGHT, if (it) "singleFile" else "off") } }
                 item {
                     // Four choices don't fit beside the text at tablet width ("Focus change" was cut
                     // to "Focus"), so they get the row's full width below it.

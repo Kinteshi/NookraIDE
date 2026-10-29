@@ -26,6 +26,16 @@ data class WorkbenchSettings(
     val wordWrap: Boolean = false,
     val lineNumbers: Boolean = true,
     val formatOnSave: Boolean = false,
+    /** Ruff/TypeScript format what is pasted (range formatting), like `editor.formatOnPaste`. */
+    val formatOnPaste: Boolean = false,
+    /** Save-time clean-ups (`files.trimTrailingWhitespace`, `files.insertFinalNewline`, `files.trimFinalNewlines`). */
+    val trimTrailingWhitespace: Boolean = false,
+    val insertFinalNewline: Boolean = false,
+    val trimFinalNewlines: Boolean = false,
+    /** Parameter hints while typing a call (`editor.parameterHints.enabled`). */
+    val parameterHints: Boolean = true,
+    /** The other uses of the symbol under the cursor (`editor.occurrencesHighlight`). */
+    val occurrencesHighlight: Boolean = true,
     val autoSave: AutoSaveMode = AutoSaveMode.Off,
     val autoSaveDelayMs: Int = 1000,
     val semanticHighlighting: Boolean = true,
@@ -96,6 +106,13 @@ data class WorkbenchSettings(
         const val WORD_WRAP = "editor.wordWrap"
         const val LINE_NUMBERS = "editor.lineNumbers"
         const val FORMAT_ON_SAVE = "editor.formatOnSave"
+        const val FORMAT_ON_PASTE = "editor.formatOnPaste"
+        const val TRIM_TRAILING_WHITESPACE = "files.trimTrailingWhitespace"
+        const val INSERT_FINAL_NEWLINE = "files.insertFinalNewline"
+        const val TRIM_FINAL_NEWLINES = "files.trimFinalNewlines"
+        const val PARAMETER_HINTS = "editor.parameterHints.enabled"
+        /** VS Code's enum (off/singleFile/multiFile, a boolean before 1.84); only off/false turns it off. */
+        const val OCCURRENCES_HIGHLIGHT = "editor.occurrencesHighlight"
         const val AUTO_SAVE = "files.autoSave"
         const val AUTO_SAVE_DELAY = "files.autoSaveDelay"
         const val SEMANTIC_HIGHLIGHTING = "editor.semanticHighlighting.enabled"
@@ -156,6 +173,12 @@ data class WorkbenchSettings(
                 wordWrap = string(WORD_WRAP)?.let { it == "on" } ?: defaults.wordWrap,
                 lineNumbers = string(LINE_NUMBERS)?.let { it != "off" } ?: defaults.lineNumbers,
                 formatOnSave = bool(FORMAT_ON_SAVE, defaults.formatOnSave),
+                formatOnPaste = bool(FORMAT_ON_PASTE, defaults.formatOnPaste),
+                trimTrailingWhitespace = bool(TRIM_TRAILING_WHITESPACE, defaults.trimTrailingWhitespace),
+                insertFinalNewline = bool(INSERT_FINAL_NEWLINE, defaults.insertFinalNewline),
+                trimFinalNewlines = bool(TRIM_FINAL_NEWLINES, defaults.trimFinalNewlines),
+                parameterHints = bool(PARAMETER_HINTS, defaults.parameterHints),
+                occurrencesHighlight = string(OCCURRENCES_HIGHLIGHT)?.let { it != "off" && it != "false" } ?: defaults.occurrencesHighlight,
                 autoSave = AutoSaveMode.entries.firstOrNull { it.key == string(AUTO_SAVE) } ?: defaults.autoSave,
                 autoSaveDelayMs = number(AUTO_SAVE_DELAY)?.toInt()?.coerceIn(200, 60_000) ?: defaults.autoSaveDelayMs,
                 semanticHighlighting = bool(SEMANTIC_HIGHLIGHTING, defaults.semanticHighlighting),

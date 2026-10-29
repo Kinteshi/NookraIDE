@@ -1,5 +1,10 @@
 package com.avfstudio.nativeide.workbench
 
+import androidx.compose.runtime.remember
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.layout.layout
 import android.content.Context
 import android.graphics.Typeface
 import android.view.KeyEvent as AndroidKeyEvent
@@ -84,7 +89,10 @@ fun EditorArea(controller: WorkbenchController, modifier: Modifier = Modifier) {
                 activeDocument != null -> key(activeDocument.path) { NativeEditorView(controller, activeDocument) }
                 else -> EmptyEditor(controller)
             }
-            if (notebook == null && paged == null) InlineGhostText(controller)
+            if (notebook == null && paged == null) {
+                InlineGhostText(controller)
+                ParameterHints(controller)
+            }
             if (notebook == null && paged == null && activeDocument != null) {
                 ProblemScrollMarks(controller, Modifier.align(Alignment.TopEnd))
             }
@@ -407,6 +415,69 @@ private fun NativeEditorView(controller: WorkbenchController, document: Document
     }
 }
 
+/**
+ * VS Code's parameter hints: the signature with the current parameter in bold, its
+ * documentation, and "1/3" when there are overloads. Drawn above the cursor's line (below it on
+ * the first lines), inside the editor's width; Escape closes it.
+ */
+@Composable
+private fun ParameterHints(controller: WorkbenchController) {
+    controller.editorViewportTick
+    val hint = controller.signatureHint ?: return
+    val view = controller.soraEditor() ?: return
+    val cursor = view.cursor
+    val density = LocalDensity.current
+    val colors = MaterialTheme.colorScheme
+    val x = view.getCharOffsetX(cursor.leftLine, cursor.leftColumn)
+    val lineTop = view.getCharOffsetY(cursor.leftLine, cursor.leftColumn) - view.rowHeight
+    val gap = with(density) { 4.dp.roundToPx() }
+    val label = remember(hint) {
+        buildAnnotatedString {
+            append(hint.label)
+            if (hint.activeStart in 0 until hint.activeEnd) {
+                addStyle(SpanStyle(fontWeight = FontWeight.Bold, color = colors.primary), hint.activeStart, hint.activeEnd)
+            }
+        }
+    }
+    Surface(
+        color = colors.surfaceContainerHigh,
+        shape = RoundedCornerShape(8.dp),
+        shadowElevation = 3.dp,
+        modifier = Modifier
+            .widthIn(max = 560.dp)
+            .layout { measurable, constraints ->
+                val placeable = measurable.measure(constraints.copy(minWidth = 0, minHeight = 0))
+                val left = x.roundToInt().coerceIn(0, (constraints.maxWidth - placeable.width).coerceAtLeast(0))
+                val above = lineTop.roundToInt() - placeable.height - gap
+                val top = if (above >= 0) above else (lineTop + view.rowHeight).roundToInt() + gap
+                layout(constraints.maxWidth, constraints.maxHeight) { placeable.place(left, top) }
+            },
+    ) {
+        Column(Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (hint.count > 1) {
+                    Text(
+                        "${hint.index + 1}/${hint.count}  ",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = colors.onSurfaceVariant,
+                    )
+                }
+                Text(label, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall, color = colors.onSurface)
+            }
+            (hint.parameterDocumentation ?: hint.documentation)?.let { doc ->
+                Text(
+                    doc,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.onSurfaceVariant,
+                    maxLines = 4,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
+        }
+    }
+}
+
 /** Copilot's suggestion drawn after the cursor in the editor's font, dimmed, like VS Code ghost text. */
 @Composable
 private fun InlineGhostText(controller: WorkbenchController) {
@@ -499,6 +570,13 @@ internal class NativeCodeEditor(
 
     /** While a Copilot suggestion is shown, Tab accepts it and Escape dismisses it. */
     var hasInlineSuggestion: Boolean = false
+    /** While parameter hints are shown, Escape closes them. */
+    var hasParameterHints: Boolean = false
+
+    /** Paste goes through the workbench (shortcut, menu, selection handles) so format on paste applies. */
+    override fun pasteText() {
+        onCommand("editor.action.clipboardPasteAction")
+    }
     var selectionBeforeChange: IntRange = 0 until 0
         private set
     var isApplyingAutoPair: Boolean = false
@@ -570,6 +648,12 @@ internal class NativeCodeEditor(
                     return true
                 }
             }
+        }
+        if (hasParameterHints && event.action == AndroidKeyEvent.ACTION_DOWN && event.hasNoModifiers() &&
+            event.keyCode == AndroidKeyEvent.KEYCODE_ESCAPE
+        ) {
+            onCommand("closeParameterHints")
+            return true
         }
         if (event.action == AndroidKeyEvent.ACTION_DOWN && event.repeatCount == 0 && onKey(event)) return true
         // Enter keeps the indentation (the TextMate grammar has no indentation rules), unless the

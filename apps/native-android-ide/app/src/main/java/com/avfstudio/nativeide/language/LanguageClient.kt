@@ -80,6 +80,17 @@ class LanguageClient(
      * such as TypeScript 7; servers that push (ty, ruff) stop it at their first publish.
      */
     @Volatile private var pullDiagnostics = false
+    /** What the server offers, from its initialize reply. */
+    @Volatile var signatureTriggerCharacters: Set<String> = emptySet()
+        private set
+    @Volatile var signatureRetriggerCharacters: Set<String> = emptySet()
+        private set
+    @Volatile var supportsSignatureHelp = false
+        private set
+    @Volatile var supportsDocumentHighlight = false
+        private set
+    @Volatile var supportsRangeFormatting = false
+        private set
     private val diagnosticPulls = ConcurrentHashMap<String, Boolean>()
     @Volatile var messageListener: ((String) -> Unit)? = null
     /** Receives notifications this client does not handle itself, such as Copilot status. */
@@ -116,6 +127,13 @@ class LanguageClient(
                 semanticTokenModifiers =
                     legend?.getAsJsonArray("tokenModifiers")?.mapNotNull { it.asString }.orEmpty()
                 pullDiagnostics = capabilities?.has("diagnosticProvider") == true
+                val signatureProvider = capabilities?.get("signatureHelpProvider")?.takeIf { it.isJsonObject }?.asJsonObject
+                fun characters(name: String) = signatureProvider?.getAsJsonArray(name)?.mapNotNull { it.takeIf { c -> c.isJsonPrimitive }?.asString }?.toSet().orEmpty()
+                signatureTriggerCharacters = characters("triggerCharacters")
+                signatureRetriggerCharacters = characters("retriggerCharacters")
+                supportsSignatureHelp = signatureProvider != null
+                supportsDocumentHighlight = capabilities?.provides("documentHighlightProvider") == true
+                supportsRangeFormatting = capabilities?.provides("documentRangeFormattingProvider") == true
                 notify("initialized", JsonObject())
                 notify("workspace/didChangeConfiguration", JsonObject().apply {
                     add("settings", gson.toJsonTree(configuredSettings))
@@ -194,6 +212,24 @@ class LanguageClient(
             })
         }
     }
+
+    /** Parameter hints at [position]; [context] is LSP's SignatureHelpContext (trigger kind, retrigger, the hints shown). */
+    fun signatureHelp(path: String, position: LspPosition, context: JsonObject): CompletableFuture<JsonElement> =
+        request("textDocument/signatureHelp", positionParams(path, position).apply { add("context", context) })
+
+    /** The symbol's other uses in the file (`textDocument/documentHighlight`). */
+    fun documentHighlights(path: String, position: LspPosition): CompletableFuture<JsonElement> =
+        request("textDocument/documentHighlight", positionParams(path, position))
+
+    fun rangeFormatting(path: String, range: LspRange, tabSize: Int, insertSpaces: Boolean): CompletableFuture<List<LspTextEdit>> =
+        request("textDocument/rangeFormatting", JsonObject().apply {
+            add("textDocument", JsonObject().apply { addProperty("uri", fileUri(path)) })
+            add("range", gson.toJsonTree(range))
+            add("options", JsonObject().apply {
+                addProperty("tabSize", tabSize)
+                addProperty("insertSpaces", insertSpaces)
+            })
+        }).thenApply(::textEdits)
 
     fun completion(path: String, position: LspPosition): CompletableFuture<JsonElement> =
         request("textDocument/completion", positionParams(path, position))
@@ -369,6 +405,17 @@ class LanguageClient(
                     add("completionItem", JsonObject().apply { addProperty("snippetSupport", false) })
                 })
                 add("hover", JsonObject().apply { addProperty("dynamicRegistration", false) })
+                add("signatureHelp", JsonObject().apply {
+                    addProperty("dynamicRegistration", false)
+                    addProperty("contextSupport", true)
+                    add("signatureInformation", JsonObject().apply {
+                        add("documentationFormat", JsonArray().apply { add("plaintext"); add("markdown") })
+                        add("parameterInformation", JsonObject().apply { addProperty("labelOffsetSupport", true) })
+                        addProperty("activeParameterSupport", true)
+                    })
+                })
+                add("documentHighlight", JsonObject().apply { addProperty("dynamicRegistration", false) })
+                add("rangeFormatting", JsonObject().apply { addProperty("dynamicRegistration", false) })
                 add("definition", JsonObject().apply { addProperty("dynamicRegistration", false) })
                 add("references", JsonObject().apply { addProperty("dynamicRegistration", false) })
                 add("rename", JsonObject().apply { addProperty("dynamicRegistration", false) })
@@ -461,4 +508,14 @@ class LanguageClient(
         return stopped
     }
 
+}
+
+/** A capability given as `true` or an options object (`false`, null or absent means no). */
+private fun JsonObject.provides(name: String): Boolean {
+    val value = get(name) ?: return false
+    return when {
+        value.isJsonObject -> true
+        value.isJsonPrimitive && value.asJsonPrimitive.isBoolean -> value.asBoolean
+        else -> false
+    }
 }

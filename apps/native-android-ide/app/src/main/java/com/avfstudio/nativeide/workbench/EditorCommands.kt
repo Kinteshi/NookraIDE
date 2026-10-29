@@ -58,6 +58,7 @@ object EditorCommands {
 
     val language: List<EditorCommand> = listOf(
         command("editor.action.triggerSuggest", "Trigger Suggest", "Ctrl+Space"),
+        command("editor.action.triggerParameterHints", "Trigger Parameter Hints", "Ctrl+Shift+Space"),
         command("editor.action.showHover", "Show Hover", "Ctrl+K Ctrl+I"),
         command("editor.action.quickFix", "Quick Fix...", "Ctrl+."),
         command("workbench.action.openSettings", "Open Settings", "Ctrl+,"),

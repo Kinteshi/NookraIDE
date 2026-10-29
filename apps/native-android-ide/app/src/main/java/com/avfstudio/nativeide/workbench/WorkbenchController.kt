@@ -78,6 +78,12 @@ import com.avfstudio.nativeide.editor.problemMarks
 import com.avfstudio.nativeide.editor.selectionStart
 import com.avfstudio.nativeide.language.lspDocumentUri
 import com.avfstudio.nativeide.language.untitledPathFor
+import com.avfstudio.nativeide.editor.saveCleanupEdits
+import com.avfstudio.nativeide.editor.SaveCleanups
+import com.avfstudio.nativeide.language.signatureContext
+import com.avfstudio.nativeide.language.parseDocumentHighlights
+import com.avfstudio.nativeide.language.parseSignatureHelp
+import com.avfstudio.nativeide.language.SignatureHint
 import com.avfstudio.nativeide.notebook.CellRun
 import com.avfstudio.nativeide.notebook.clearTiming
 import com.avfstudio.nativeide.notebook.formatRunDuration
@@ -2222,7 +2228,7 @@ class WorkbenchController(private val context: Context) {
         val session = notebooks[path]
         when {
             session != null -> if (session.notebook.dirty) saveNotebook(session)
-            else -> documents.firstOrNull { it.path == path }?.takeIf { it.dirty }?.let(::saveDocument)
+            else -> documents.firstOrNull { it.path == path }?.takeIf { it.dirty }?.let { saveDocument(it, automatic = true) }
         }
     }
 
@@ -2252,7 +2258,9 @@ class WorkbenchController(private val context: Context) {
         }
     }
 
-    private fun saveDocument(document: DocumentSession) {
+    /** [automatic]: an auto save, which leaves the cursor's line untrimmed (as VS Code does). */
+    private fun saveDocument(document: DocumentSession, automatic: Boolean = false) {
+        applySaveCleanups(document, automatic)
         status = "Saving ${document.path}"
         repository.save(document).whenComplete { result, error ->
             post {
@@ -2560,6 +2568,11 @@ class WorkbenchController(private val context: Context) {
                     restoringCursor = false
                     cursorPosition = event.selection.active
                 }
+                if (event.uri == activePath) {
+                    scheduleSymbolHighlights(event.uri, event.selection)
+                    // The cursor left the call, or moved to another argument.
+                    if (signatureHint != null) requestSignature(event.uri, trigger = null, delayMs = 80)
+                }
                 val shown = inlineSuggestion
                 if (shown != null && (shown.first != event.uri || event.selection.active != shown.second.range.end &&
                         !cursorWithinSuggestion(shown.second, event.selection.active))
@@ -2573,6 +2586,7 @@ class WorkbenchController(private val context: Context) {
                     if (activePath == event.uri) {
                         scheduleOutlineRefresh(event.uri)
                         scheduleInlineSuggestion()
+                        afterEditForHints(event.uri)
                     }
                 }
             }
@@ -2743,6 +2757,8 @@ class WorkbenchController(private val context: Context) {
     fun onActiveDocumentChanged() {
         outlineSymbols = emptyList()
         clearInlineSuggestion()
+        closeParameterHints()
+        clearSymbolHighlights()
         refreshEditorProblems()
         activeDocument?.let { document ->
             refreshOutline(document)
@@ -3200,7 +3216,139 @@ class WorkbenchController(private val context: Context) {
     private fun pasteClipboard() {
         val text = (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
             .primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)?.toString() ?: return
-        editorSurface?.insertAtCursor(text)
+        val surface = editorSurface ?: return
+        val start = surface.selectionOffsets.first
+        surface.insertAtCursor(text)
+        if (settings.formatOnPaste) formatPasted(start, start + text.length)
+    }
+
+    /** `editor.formatOnPaste`: range-formats what was just pasted, when the formatter can format a range. */
+    private fun formatPasted(startOffset: Int, endOffset: Int) {
+        val document = activeDocument ?: return
+        val surface = editorSurface ?: return
+        val client = formattingClientFor(document.path)?.takeIf { it.isReady && it.supportsRangeFormatting } ?: return
+        val range = LspRange(surface.positionAt(startOffset), surface.positionAt(endOffset))
+        val version = document.version
+        client.rangeFormatting(document.path, range, settings.tabSize, settings.insertSpaces).whenComplete { edits, error ->
+            post {
+                // Typing on since the paste: the edits no longer fit the text.
+                if (error != null || edits.isNullOrEmpty() || document.version != version || !editorHost.isOpen(document.path)) return@post
+                editorHost.applyEdits(document.path, edits)
+                onDocumentEdited(document)
+            }
+        }
+    }
+
+    /**
+     * VS Code's save participants: trailing whitespace, final newline, final newlines. The open
+     * editor gets them as edits (so they undo); a file saved in the background gets them in its text.
+     */
+    private fun applySaveCleanups(document: DocumentSession, automatic: Boolean) {
+        // Two trailing spaces are a line break in Markdown.
+        val markdown = document.path.substringAfterLast('.', "").lowercase() in setOf("md", "markdown")
+        val cleanups = SaveCleanups(
+            trimTrailingWhitespace = settings.trimTrailingWhitespace && !markdown,
+            insertFinalNewline = settings.insertFinalNewline,
+            trimFinalNewlines = settings.trimFinalNewlines,
+        )
+        if (!cleanups.any || document.path in notebooks) return
+        // An auto save on leaving the editor (Settings) runs after its pane has gone.
+        val surface = editorSurface?.takeIf { activeNotebook == null && activePath == document.path && editorHost.isOpen(document.path) }
+        val keepLine = if (automatic) surface?.selection?.active?.line else null
+        val edits = saveCleanupEdits(document.text, cleanups, document.eol, keepLine)
+        if (edits.isEmpty()) return
+        if (surface != null) {
+            editorHost.applyEdits(document.path, edits)
+            onDocumentEdited(document)
+        } else {
+            document.updateText(applyLspTextEdits(document.text, edits))
+        }
+    }
+
+    // Parameter hints and symbol highlights ---------------------------------------------------
+
+    /** The signature shown above the cursor while typing a call (in [activePath]). */
+    var signatureHint by mutableStateOf<SignatureHint?>(null)
+        private set
+    private var scheduledSignature: ScheduledFuture<*>? = null
+    private var signatureRequest = 0L
+    private var scheduledHighlights: ScheduledFuture<*>? = null
+    private var highlightRequest = 0L
+
+    /** After an edit: a trigger character (`(`, `,`) asks for hints; while they show, any edit updates them. */
+    private fun afterEditForHints(path: String) {
+        clearSymbolHighlights()
+        if (!settings.parameterHints) return
+        val surface = editorSurface ?: return
+        val client = languageClientFor(path)?.takeIf { it.isReady && it.supportsSignatureHelp } ?: return
+        val cursor = surface.selection.active
+        val typed = surface.lineText(cursor.line).getOrNull(cursor.character - 1)?.toString()
+        when {
+            typed != null && typed in client.signatureTriggerCharacters -> requestSignature(path, typed)
+            signatureHint != null -> requestSignature(path, typed?.takeIf { it in client.signatureRetriggerCharacters }, delayMs = 80)
+        }
+    }
+
+    private fun requestSignature(path: String, trigger: String?, invoked: Boolean = false, delayMs: Long = 0) {
+        scheduledSignature?.cancel(false)
+        scheduledSignature = timer.schedule({
+            post {
+                if (activePath != path) return@post
+                val client = languageClientFor(path)?.takeIf { it.isReady && it.supportsSignatureHelp } ?: run {
+                    if (invoked) status = "Parameter hints need a language server for this file"
+                    return@post
+                }
+                val position = editorSurface?.selection?.active ?: return@post
+                val id = ++signatureRequest
+                client.signatureHelp(path, position, signatureContext(trigger, signatureHint, invoked)).whenComplete { result, error ->
+                    post {
+                        if (id != signatureRequest || activePath != path) return@post
+                        val hint = if (error == null) parseSignatureHelp(result) else null
+                        signatureHint = hint
+                        editorSurface?.parameterHintsShown = hint != null
+                        if (invoked && hint == null) status = "No parameter hints here"
+                    }
+                }
+            }
+        }, delayMs, TimeUnit.MILLISECONDS)
+    }
+
+    fun closeParameterHints() {
+        scheduledSignature?.cancel(false)
+        signatureRequest++
+        signatureHint = null
+        editorSurface?.parameterHintsShown = false
+    }
+
+    /** Highlights the symbol's other uses once the cursor rests (VS Code waits about as long). */
+    private fun scheduleSymbolHighlights(path: String, selection: EditorSelection) {
+        scheduledHighlights?.cancel(false)
+        if (!settings.occurrencesHighlight || selection.anchor != selection.active) {
+            clearSymbolHighlights()
+            return
+        }
+        scheduledHighlights = timer.schedule({ post { requestSymbolHighlights(path) } }, 250, TimeUnit.MILLISECONDS)
+    }
+
+    private fun requestSymbolHighlights(path: String) {
+        val document = activeDocument?.takeIf { it.path == path && activeNotebook == null } ?: return
+        val client = languageClientFor(path)?.takeIf { it.isReady && it.supportsDocumentHighlight } ?: return
+        val position = editorSurface?.selection?.active ?: return
+        val version = document.version
+        val id = ++highlightRequest
+        client.documentHighlights(path, position).whenComplete { result, error ->
+            post {
+                if (id != highlightRequest || activePath != path || document.version != version) return@post
+                val highlights = if (error == null) parseDocumentHighlights(result) else emptyList()
+                editorSurface?.setSymbolHighlights(highlights.map { it.range to it.write })
+            }
+        }
+    }
+
+    private fun clearSymbolHighlights() {
+        scheduledHighlights?.cancel(false)
+        highlightRequest++
+        editorSurface?.setSymbolHighlights(emptyList())
     }
 
     fun findInEditor(next: Boolean) {
@@ -4886,6 +5034,8 @@ class WorkbenchController(private val context: Context) {
             "editor.action.goToReferences" -> findReferences()
             "editor.action.rename" -> beginRename()
             "editor.action.triggerSuggest" -> showCompletion()
+            "editor.action.triggerParameterHints" -> activePath?.let { requestSignature(it, trigger = null, invoked = true) }
+            "closeParameterHints" -> closeParameterHints()
             "editor.action.showHover" -> showHover()
             "editor.action.quickFix" -> showCodeActions()
             "editor.action.inlineSuggest.trigger" -> requestInlineSuggestion(invoked = true)
