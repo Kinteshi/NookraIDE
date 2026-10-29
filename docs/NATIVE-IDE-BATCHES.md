@@ -916,6 +916,40 @@ User's pick: 1, 2 and 4 of the backlog list after batch 20 (port 36601).
   NotebookViewTest (sticky choice, views per Settings, copy text, headlines). The test notebook
   `~/Projects/batch21.ipynb` stays in the guest for trying these; the app is left installed.
 
+## 21b. Output menu on hover; why the daemon "dies" (10-29 09:15–09:40)
+* The output menu (⋮ beside each output) now also shows while a mouse or touchpad pointer
+  rests over the output, not only on the selected cell. Its open state is kept by the output
+  row, because the open menu takes the pointer and ends the hover. Checked on the tablet: the
+  selected cell still shows it. Not checked with a real pointer: the `hid` virtual mouse
+  registered but moved no pointer on this tablet.
+* Investigation (user: the daemon stops during various tasks; reopening the guest fixes it).
+  **The daemon never died.** The guest journal shows no unexpected exit, no OOM kill and no
+  restart of `avf-native.service`.
+  * What fails is Linux Terminal's port forwarder in the guest,
+    `forwarder-guest-launcher.service` (`/usr/bin/forwarder_guest_launcher`, root). It reads
+    `/usr/sbin/tcpstates-libbpf` (package libbpf-tools), which prints
+    `SKADDR PID COMM LADDR LPORT RADDR RPORT OLDSTATE -> NEWSTATE MS`, and splits each line
+    on whitespace.
+  * When a process or thread name (COMM) has a space, LPORT shifts onto text and the launcher
+    exits: `Error: Invalid LPORT format / invalid digit found in string`. systemd restarts it
+    in a second, and it reports 19870 as "already opened". But the host never forwards it again
+    (no `executing forwarder_guest` afterwards), so the app can't reach a daemon that is still
+    running. Only a guest restart recovers.
+  * Seen mid-session on 10-28 00:01, 02:38, 10-29 03:13 and 03:16 UTC. The last two were when
+    the user reopened the guest.
+  * Names with spaces are common now. Python 3.14 copies thread names to the OS (`Thread-2
+    (_watc`, ipykernel's `Shell channel`), so Django's dev server threads, a notebook's
+    threads and others trigger it. The 03:16 crash came seconds after Django's port 8000 was
+    used.
+  * Reproduced on 10-29 12:25 UTC: one `listen()` from a Python thread named `name with space`
+    crashed the launcher and cut the forward (`/health` stopped answering). Stopping and
+    starting the daemon did not bring it back; a guest restart did.
+  * Proposed fix (not applied, waiting for the user): divert `/usr/sbin/tcpstates-libbpf` with
+    `dpkg-divert` and put a small Perl wrapper in its place. It runs the real tool line-buffered
+    and joins a spaced COMM with `_`. It takes effect at the next guest start and is undone
+    with `dpkg-divert --remove --rename`. Tested on the captured format. Also worth reporting
+    upstream (AOSP Virtualization, Terminal app).
+
 ## Next pass (registered 10-27 23:35, updated 10-28 13:06)
 * Batch 15 did the carried-over tests (Copilot signed out, the setup paths, reconnect cap,
   Copilot model list, prompt prefix). Left over:

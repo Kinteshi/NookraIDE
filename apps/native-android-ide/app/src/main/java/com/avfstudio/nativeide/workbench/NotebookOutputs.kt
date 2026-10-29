@@ -7,6 +7,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -37,6 +40,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -76,8 +80,9 @@ import com.google.gson.JsonObject
 internal val CELL_GUTTER = 56.dp
 
 /**
- * A code cell's outputs. The gutter beside them folds them away (saved with the notebook) and,
- * on the selected cell, opens each output's menu: copy, which view to draw it with, clear.
+ * A code cell's outputs. The gutter beside them folds them away (saved with the notebook) and
+ * opens each output's menu (copy, which view to draw it with, clear), shown on the selected cell
+ * and wherever a mouse or touchpad pointer rests over an output.
  */
 @Composable
 internal fun CellOutputs(controller: WorkbenchController, session: NotebookSession, cell: NotebookCell, selected: Boolean) {
@@ -102,12 +107,22 @@ internal fun CellOutputs(controller: WorkbenchController, session: NotebookSessi
         return
     }
     cell.outputs.forEachIndexed { index, output ->
-        Row(Modifier.fillMaxWidth()) {
-            Row(Modifier.width(CELL_GUTTER).padding(top = 4.dp), horizontalArrangement = Arrangement.Center) {
-                if (index == 0) OutputsFoldButton(cell, hidden = false) { controller.setOutputsHidden(session, cell, true) }
-                if (selected) OutputMenuButton(controller, session, cell, index, output)
+        key(index) {
+            val hover = remember { MutableInteractionSource() }
+            val hovered by hover.collectIsHoveredAsState()
+            // Kept here: the open menu takes the pointer, which ends the hover that showed its button.
+            var menuOpen by remember { mutableStateOf(false) }
+            Row(Modifier.fillMaxWidth().hoverable(hover)) {
+                Row(Modifier.width(CELL_GUTTER).padding(top = 4.dp)) {
+                    Box(Modifier.size(28.dp)) {
+                        if (index == 0) OutputsFoldButton(cell, hidden = false) { controller.setOutputsHidden(session, cell, true) }
+                    }
+                    if (selected || hovered || menuOpen) {
+                        OutputMenuButton(controller, session, cell, index, output, menuOpen) { menuOpen = it }
+                    }
+                }
+                Box(Modifier.weight(1f)) { CellOutput(controller, cell, index, output) }
             }
-            Box(Modifier.weight(1f)) { CellOutput(controller, cell, index, output) }
         }
     }
 }
@@ -125,22 +140,29 @@ private fun OutputsFoldButton(cell: NotebookCell, hidden: Boolean, onClick: () -
 }
 
 @Composable
-private fun OutputMenuButton(controller: WorkbenchController, session: NotebookSession, cell: NotebookCell, index: Int, output: JsonObject) {
-    var open by remember { mutableStateOf(false) }
+private fun OutputMenuButton(
+    controller: WorkbenchController,
+    session: NotebookSession,
+    cell: NotebookCell,
+    index: Int,
+    output: JsonObject,
+    open: Boolean,
+    onOpenChange: (Boolean) -> Unit,
+) {
     val presentation = cell.outputPresentation[index] ?: OutputPresentation()
     val views = remember(output) { outputViews(output) }
     val shown = shownView(views, presentation, controller.settings)
     Box {
-        IconButton(onClick = { open = true }, modifier = Modifier.size(28.dp).noKeyFocus()) {
+        IconButton(onClick = { onOpenChange(true) }, modifier = Modifier.size(28.dp).noKeyFocus()) {
             Icon(Icons.Outlined.MoreVert, contentDescription = "Output actions", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
         }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+        DropdownMenu(expanded = open, onDismissRequest = { onOpenChange(false) }) {
             val text = outputCopyText(output, shown, presentation)
             DropdownMenuItem(
                 text = { Text(if (shown == OutputView.Table) "Copy table (tab-separated)" else "Copy output") },
                 leadingIcon = { Icon(Icons.Outlined.ContentCopy, contentDescription = null) },
                 enabled = text != null,
-                onClick = { open = false; text?.let { controller.copyOutputText(it) } },
+                onClick = { onOpenChange(false); text?.let { controller.copyOutputText(it) } },
             )
             if (views.size > 1) {
                 HorizontalDivider()
@@ -149,15 +171,15 @@ private fun OutputMenuButton(controller: WorkbenchController, session: NotebookS
                         text = { Text("Show as ${view.label}") },
                         leadingIcon = { if (view == shown) Icon(Icons.Outlined.Check, contentDescription = "Shown") },
                         onClick = {
-                            open = false
+                            onOpenChange(false)
                             cell.outputPresentation[index] = presentation.copy(view = view)
                         },
                     )
                 }
             }
             HorizontalDivider()
-            DropdownMenuItem(text = { Text("Clear this output") }, onClick = { open = false; controller.clearOutput(session, cell, index) })
-            DropdownMenuItem(text = { Text("Clear cell outputs") }, onClick = { open = false; controller.clearCellOutputs(session, cell) })
+            DropdownMenuItem(text = { Text("Clear this output") }, onClick = { onOpenChange(false); controller.clearOutput(session, cell, index) })
+            DropdownMenuItem(text = { Text("Clear cell outputs") }, onClick = { onOpenChange(false); controller.clearCellOutputs(session, cell) })
         }
     }
 }
