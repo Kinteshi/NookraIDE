@@ -931,8 +931,8 @@ To investigate (user, 10-28):
     semantic tokens and ghost text (planned for 0.9), and host decorations (breakpoints, the
     paused line, bracket colours).
   * Effort if done: XL, about 2-3 weeks of batches:
-    * Route the controller's 29 direct `editorView` uses through `EditorSurface` (M; worth
-      doing anyway).
+    * (Done in batch 20.) Route the controller's 29 direct `editorView` uses through
+      `EditorSurface`. An Aardink switch now replaces `SoraEditorSurface` and the editor pane.
     * A Compose editor pane with keys, auto-pairing, tab stops, comment and line commands, and
       IME (L).
     * A TextMate tokenizer adapter on tm4e (L), or a hand-written grammar per language that drops
