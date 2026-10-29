@@ -1112,6 +1112,46 @@ To investigate (user, 10-28):
     find/replace, folding, minimap, sticky scroll and snippets. Notebook cells could share the
     same editor.
 
+Candidates from the spec review (10-29; `docs/NATIVE-ANDROID-IDE-SPEC.md` against the app).
+Not picked yet. Effort: S about half a day, M about a day, L several days.
+* Editor and language intelligence (spec 4.2):
+  1. Signature help: parameter hints while typing a call (`textDocument/signatureHelp`). S-M.
+  2. Document highlights: other uses of the symbol under the cursor. S.
+  3. Inlay hints: inferred types and parameter names, with a setting. M.
+  4. Quick Open prefixes as in VS Code (`@` symbols in the file, `#` workspace symbols, `:`
+     line, `>` commands). M.
+  5. Snippets: VS Code snippet files from asset packs, and LSP snippet completions with tab
+     stops. M-L.
+  6. `files.trimTrailingWhitespace`, `files.insertFinalNewline`, `editor.formatOnPaste`. S.
+  7. Code folding (LSP folding ranges or indentation). M; sora's support needs checking first.
+  8. Markdown preview for `.md` files (toggle or side by side). M.
+  9. Image viewer for image files (zoom, pan; SVG too). S-M.
+  10. Pinch to zoom the editor font, persisted. S.
+* Workbench:
+  11. Replace across files in Search, with a preview and per-match accept. M.
+  12. Explorer decorations: Git status colours and problem badges on files and folders. S-M.
+  13. Tabs: preview tabs (a single tap opens a replaceable tab) and pinning. S-M.
+  14. Git: a merge-conflict helper (accept current/incoming/both on conflict markers) and a
+      side-by-side diff. M-L.
+  15. Ports view: the daemon's detected listening ports, opened in the browser. M.
+  16. Terminal: links (file:line opens in the editor, URLs in the browser) and find in
+      scrollback. M.
+* Notebooks (spec 5.9):
+  17. ANSI colours in outputs (they are stripped today) and clickable traceback lines. S-M.
+  18. More output types: `image/svg+xml`, `application/json` as a tree, `text/latex` (KaTeX). M.
+  19. Cell reordering by drag, and undo for a deleted cell. M.
+  20. Variable explorer (`%whos`-style, opening DataFrames in the native table). L.
+  21. Interactive window: run `# %%` cells of a `.py` file in a kernel. L.
+* Device and quality (spec 10, 11):
+  22. Launcher shortcuts for recent folders, and "Open with" for code files from other apps. S-M.
+  23. Touch modifier bar (Ctrl, Alt, Tab, Esc, arrows) above the soft keyboard. M.
+  24. Measure the spec's budgets on the tablet (cold start, RSS, keystroke latency, a
+      200-cell notebook). S-M.
+  25. Debugging extras: conditional and log breakpoints, watch expressions, `launch.json`. M.
+* Left out on purpose: multi-cursor (sora is single-cursor; comes with the Aardink switch),
+  split editor groups and the 3-way merge editor (L, little use on a tablet), tasks.json
+  (L, the terminal covers it), MCP and other AI providers (Copilot only, by the user's choice).
+
 To investigate (user, 10-28, second set; planned for 10-29):
 * (Done in batch 19: untitled files reach the servers.) Inline suggestions, completion and hover not working on some files; the Output shows
   "Language intelligence requires a connected Python or TypeScript language server". First look:
