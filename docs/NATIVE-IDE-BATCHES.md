@@ -1128,6 +1128,14 @@ To investigate (user, 10-28):
   needs a start time and duration per run, a failed state, and a small status row; maybe keep
   the timing in the cell's metadata (JupyterLab's `execution` timestamps) so it survives a
   reopen. Evaluate a setting (show run statistics). Likely S-M.
+* Next edit suggestions (user, 10-29): Copilot proposes the next change near or away from the
+  cursor, based on the edits just made, as VS Code does
+  (`github.copilot.nextEditSuggestions.enabled`). The suggestion is shown as a diff in place
+  (removed text struck through, new text beside it) or as a gutter arrow when it is elsewhere
+  in the file. Tab jumps to it, then accepts it; Escape dismisses it. Not looked at yet: whether
+  copilot-language-server offers it over LSP (open-source editor plugins use a
+  `textDocument/copilotInlineEdit` request) and what the account allows. It needs a diff
+  decoration in sora, and a setting (on by default when Copilot is signed in). Likely M-L.
 * Refactor: replace sora-editor with Aardink (user, 10-28). **Decided (user, 10-28): it will be
   done, for the licence (Apache-2.0 instead of sora's LGPL-2.1); held for later.** Evaluated the
   same day (`docs/native-editor-evaluation.md`, "Re-evaluation 2026-10-28"); not ready yet,
