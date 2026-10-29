@@ -89,6 +89,46 @@ be settled before shipping. Aardink is the fallback to revisit if LGPL is
 rejected, once it gains TextMate-compatible grammars and passes the scroll and
 memory budgets.
 
+## Re-evaluation 2026-10-28: replace sora with Aardink?
+
+The user asked to evaluate replacing sora-editor with Aardink. The same tablet was used, under
+today's load (the guest VM running, load average about 24). Both editors ran in the
+`:aardink-lab` app, which now has a sora screen (`SoraLabActivity`) with the app's TextMate
+Python grammar and dark theme. The test was the same 10,000-line document, three cold starts
+each, then 12 pairs of swipes. Two rounds each, back to back:
+
+| Metric | sora-editor 0.23.6 + TextMate | Aardink 0.7.0 (0.6.2 the same) |
+| --- | --- | --- |
+| First editor frame | 441-456 ms | 356-393 ms |
+| PSS / RSS, one editor | 195-201 / 294-302 MB | 324-334 / 422-433 MB |
+| Frame deadlines missed while scrolling | 1 of 3,834-4,106 | 22-25 of 904-1,106 |
+| Frame p90 / p95 | 16-17 / 17-18 ms | 20-21 / 24-26 ms |
+
+What Aardink 0.7.0 adds since 0.6.2 is incremental: diagnostic tags, hover cards, a keyboard
+toolbar and editor commands. It already has built-in diagnostics with tags, hover, a completion
+list, snippets, find/replace, folding, a minimap, sticky scroll, multi-cursor and an LSP client.
+The app's toolchain (Kotlin 2.4.20, Compose BOM 2026.09) now fits it. It is Apache-2.0, with
+one main author and one star, very active, and a minor version may break the API.
+
+Gaps that matter to this app, from the 0.7.0 classes and the project's own roadmap
+(`docs/AARDINK_ROADMAP.md`):
+* **No TextMate.** It uses a declarative (Monarch-like) grammar, and Python isn't built in. The
+  app's VS Code grammar packs, imported VS Code themes and generated Material You syntax themes
+  all depend on TextMate. Keeping them means writing a tokenizer adapter on tm4e (EPL-2.0)
+  ourselves.
+* **No semantic tokens, ghost text or inlay hints** until the planned 0.9. Copilot inline
+  suggestions and semantic highlighting depend on these.
+* **No host decorations** ("Nothing for hosts"; no overview ruler). Breakpoint icons, the
+  paused line and bracket colours need them. Document change events are `internal`.
+* **A data-loss risk** their own roadmap notes: the accessibility node's `setText` replaces the
+  whole document.
+
+Verdict: **not viable now.** It would cost about 130 MB more on the tablet for one editor, which
+is RAM this project is short of; host memory pressure has corrupted the guest. It scrolls
+visibly worse, and Copilot ghost text, semantic tokens and breakpoints would regress.
+Revisit when Aardink ships 0.9 (semantic tokens, ghost text, decorations), by re-running the lab
+(`adb shell am start -n com.avfstudio.aardinklab/.LabActivity`, or `.SoraLabActivity`).
+
 Build and run the available checks from the repository root:
 
 ```sh

@@ -881,6 +881,31 @@ To investigate (user, 10-28):
   (`AVF_WORKSPACE_ROOTS`, ~/Projects). Needs an Open Folder flow, recent workspaces, and the
   daemon's roots/permissions model (several roots or switching the root).
 
+* Refactor: replace sora-editor with Aardink (user, 10-28). Evaluated the same day
+  (`docs/native-editor-evaluation.md`, "Re-evaluation 2026-10-28"); **not viable yet**,
+  revisit at Aardink 0.9.
+  * Measured on the tablet against sora: about 130 MB more PSS per editor (324-334 vs
+    195-201 MB), 22-25 missed frame deadlines per ~1,000 scroll frames (sora: 1 per ~4,000),
+    first frame about 80 ms faster.
+  * Missing for parity: TextMate (grammar packs, imported themes, Material You syntax themes),
+    semantic tokens and ghost text (planned for 0.9), and host decorations (breakpoints, the
+    paused line, bracket colours).
+  * Effort if done: XL, about 2-3 weeks of batches:
+    * Route the controller's 29 direct `editorView` uses through `EditorSurface` (M; worth
+      doing anyway).
+    * A Compose editor pane with keys, auto-pairing, tab stops, comment and line commands, and
+      IME (L).
+    * A TextMate tokenizer adapter on tm4e (L), or a hand-written grammar per language that drops
+      VS Code grammar packs.
+    * Themes mapped to Aardink's `EditorTheme` (M).
+    * Semantic and bracket colours merged into its tokens (M-L).
+    * Problems onto its built-in diagnostics (S-M).
+    * Ghost text, breakpoints and the paused line, which need its 0.9 APIs (M, blocked).
+    * The large-file view (S), and tests and tablet checks (M).
+  * Gains: Apache-2.0 (settles the open LGPL question), Compose-native, and built-in
+    find/replace, folding, minimap, sticky scroll and snippets. Notebook cells could share the
+    same editor.
+
 To investigate (user, 10-28, second set; planned for 10-29):
 * (Done in batch 19: untitled files reach the servers.) Inline suggestions, completion and hover not working on some files; the Output shows
   "Language intelligence requires a connected Python or TypeScript language server". First look:
