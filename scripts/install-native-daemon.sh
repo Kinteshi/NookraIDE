@@ -134,6 +134,15 @@ if ! $remote && [ -e /etc/systemd/system/avf-page-reporting.service ] && sudo -n
   echo 9 | sudo -n tee /sys/module/page_reporting/parameters/page_reporting_order >/dev/null 2>&1 || true
 fi
 
+# Linux Terminal's port forwarder exits when a process or thread name has a space (Python 3.14
+# thread names), and the app can't reach the daemon until the guest restarts. The daemon carries a
+# wrapper for the tool the forwarder reads; it takes effect at the next guest start (Settings ->
+# Guest tools -> Port forwarding fix shows it and can undo it).
+if ! $remote && [ -x /usr/bin/forwarder_guest_launcher ] && sudo -n true 2>/dev/null; then
+  sudo -n "$HOME/.local/bin/avf-native-daemon" guest fix-port-forwarding ||
+    echo "warning: the port forwarding fix wasn't installed; apply it from the app's Settings" >&2
+fi
+
 # The AVF Debian image ships /etc/resolv.conf from its build machine (a cloud resolver that doesn't
 # answer here). glibc goes through systemd-resolved and works, but programs that read the file
 # directly (Go tools such as the GitHub CLI) time out on every lookup. Point the file at

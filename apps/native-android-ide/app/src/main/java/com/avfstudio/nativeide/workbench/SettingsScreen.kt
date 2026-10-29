@@ -386,6 +386,22 @@ fun SettingsScreen(controller: WorkbenchController) {
                         }
                     }
                 }
+                controller.forwarderFix?.let { fix ->
+                    item {
+                        SettingRow("Port forwarding fix", fix.summary) {
+                            when (fix) {
+                                ForwarderFix.Missing -> FilledTonalButton(onClick = {
+                                    controller.settingsVisible = false
+                                    controller.offerForwarderFix(install = true)
+                                }) { Text("Apply") }
+                                ForwarderFix.AfterRestart, ForwarderFix.Active -> TextButton(onClick = {
+                                    controller.settingsVisible = false
+                                    controller.offerForwarderFix(install = false)
+                                }) { Text("Undo") }
+                            }
+                        }
+                    }
+                }
                 controller.tmpPlacement?.let { placement ->
                     item {
                         SettingRow("Temp files (/tmp)", placement.summary) {

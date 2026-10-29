@@ -401,6 +401,8 @@ internal object MessagePackVfsCodec {
                         diskTotalMb = mb("disk_total_mb"),
                         tmpInMemory = fields["tmp_in_memory"]?.takeIf { it.isBooleanValue }?.asBooleanValue()?.boolean,
                         tmpMountMasked = fields["tmp_mount_masked"]?.takeIf { it.isBooleanValue }?.asBooleanValue()?.boolean,
+                        forwarderFixInstalled = fields["forwarder_fix_installed"]?.takeIf { it.isBooleanValue }?.asBooleanValue()?.boolean,
+                        forwarderFixActive = fields["forwarder_fix_active"]?.takeIf { it.isBooleanValue }?.asBooleanValue()?.boolean,
                     ),
                 )
             }
@@ -486,6 +488,10 @@ data class GuestStats(
     val tmpInMemory: Boolean? = null,
     /** Whether systemd's tmp.mount is masked, which puts /tmp on disk from the next boot. */
     val tmpMountMasked: Boolean? = null,
+    /** Whether the fix for Linux Terminal's port forwarder is installed; null outside an AVF Terminal guest. */
+    val forwarderFixInstalled: Boolean? = null,
+    /** Whether the running forwarder uses the fix yet (it starts with the guest). */
+    val forwarderFixActive: Boolean? = null,
 ) {
     val footprintMb: Long get() = if (freeMb > 0) (totalMb - freeMb - balloonMb).coerceAtLeast(0) else usedMb
     /** The footprint without cache, so programs + cache + free + balloon add up to the total. */

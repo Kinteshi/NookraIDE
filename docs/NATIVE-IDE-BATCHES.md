@@ -916,7 +916,7 @@ User's pick: 1, 2 and 4 of the backlog list after batch 20 (port 36601).
   NotebookViewTest (sticky choice, views per Settings, copy text, headlines). The test notebook
   `~/Projects/batch21.ipynb` stays in the guest for trying these; the app is left installed.
 
-## 21b. Output menu on hover; why the daemon "dies" (10-29 09:15–09:40)
+## 21b. Output menu on hover; why the daemon "dies", and the fix (10-29 09:15–10:05)
 * The output menu (⋮ beside each output) now also shows while a mouse or touchpad pointer
   rests over the output, not only on the selected cell. Its open state is kept by the output
   row, because the open menu takes the pointer and ends the hover. Checked on the tablet: the
@@ -944,11 +944,28 @@ User's pick: 1, 2 and 4 of the backlog list after batch 20 (port 36601).
   * Reproduced on 10-29 12:25 UTC: one `listen()` from a Python thread named `name with space`
     crashed the launcher and cut the forward (`/health` stopped answering). Stopping and
     starting the daemon did not bring it back; a guest restart did.
-  * Proposed fix (not applied, waiting for the user): divert `/usr/sbin/tcpstates-libbpf` with
-    `dpkg-divert` and put a small Perl wrapper in its place. It runs the real tool line-buffered
-    and joins a spaced COMM with `_`. It takes effect at the next guest start and is undone
-    with `dpkg-divert --remove --rename`. Tested on the captured format. Also worth reporting
-    upstream (AOSP Virtualization, Terminal app).
+  * Fix (user's pick: a Settings row, and apply it; done and checked the same morning):
+    * The wrapper is `guest/tools/tcpstates-space-safe.pl`. It runs the real tool through
+      `stdbuf -oL` and joins a spaced COMM with `_`.
+    * The daemon embeds the wrapper. `sudo avf-native-daemon guest fix-port-forwarding [--undo]`
+      (forwarder.rs) diverts the tool with `dpkg-divert --local --rename` and installs the
+      wrapper in its place; undo reverses both. It doesn't restart the forwarder, since a
+      restart is what loses the forwards, so the fix applies from the next guest start. The
+      subcommand runs before any daemon set-up, so as root it creates nothing.
+    * The stats report `forwarder_fix_installed` / `forwarder_fix_active`. Active means a
+      process runs `tcpstates-libbpf.real`, i.e. the forwarder started through the wrapper.
+    * Settings → Guest tools → Port forwarding fix shows Off with Apply, then "takes effect when
+      the guest restarts", then On, with Undo. It runs in a visible terminal, like /tmp.
+    * `scripts/install-native-daemon.sh` applies it on new guests when sudo works without a
+      password.
+    * Checked on the tablet: Apply ran in the terminal, and the diversion was added. After a
+      guest restart the row reads "On (installed by MaterialCode)". The reproduction then used
+      threads named `name with space` and `Thread-9 (serve)`. The forwarder didn't restart and
+      logged no error, `/health` still answered through the forward, and the forwarder logged
+      the ports as `name_with` and `Thread-9_(` in real time.
+  * Upstream report draft: [docs/upstream/terminal-port-forwarder-space-in-name.md](upstream/terminal-port-forwarder-space-in-name.md),
+    not filed yet. Its dependency-free reproduction (`nc` copied to `/tmp/my nc`) was checked:
+    the column read as LPORT holds `127.0.0.1`.
 
 ## Next pass (registered 10-27 23:35, updated 10-28 13:06)
 * Batch 15 did the carried-over tests (Copilot signed out, the setup paths, reconnect cap,

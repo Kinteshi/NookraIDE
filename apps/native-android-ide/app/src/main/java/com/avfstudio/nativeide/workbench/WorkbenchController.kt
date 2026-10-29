@@ -1285,6 +1285,34 @@ class WorkbenchController(private val context: Context) {
         }
     }
 
+    /** The port forwarding fix's state in the guest, when the daemon reports it. */
+    val forwarderFix: ForwarderFix?
+        get() = guestStats?.let { forwarderFix(it.forwarderFixInstalled, it.forwarderFixActive) }
+
+    /** Offers to install (or remove) the fix for Linux Terminal's port forwarder. */
+    fun offerForwarderFix(install: Boolean) {
+        dialog = if (install) {
+            WorkbenchDialog.GuestCommand(
+                title = "Fix Linux Terminal's port forwarding?",
+                text = "Linux Terminal's port forwarder in the guest exits when a program names a process or thread with " +
+                    "a space (Python 3.14 names threads like \"Thread-1 (run)\"). From then on the app can't reach the " +
+                    "guest until it restarts. This diverts /usr/sbin/tcpstates-libbpf, the tool the forwarder reads, and " +
+                    "puts a small wrapper in its place that joins such names with \"_\". It takes effect when the guest " +
+                    "restarts, and Undo puts the original back. It runs in a new terminal; enter your password if sudo asks.",
+                command = FORWARDER_FIX_COMMAND,
+                done = "Port forwarding fix installed; it takes effect when the guest restarts (close Linux Terminal and open it again)",
+            )
+        } else {
+            WorkbenchDialog.GuestCommand(
+                title = "Remove the port forwarding fix?",
+                text = "This puts the original /usr/sbin/tcpstates-libbpf back from the next guest restart. Linux Terminal's " +
+                    "forwarder can then stop again when a thread name has a space. It runs in a new terminal.",
+                command = FORWARDER_UNDO_COMMAND,
+                done = "Port forwarding fix removed; the original is back when the guest restarts",
+            )
+        }
+    }
+
     fun runGuestCommand(command: WorkbenchDialog.GuestCommand) {
         if (dialog == command) dialog = null
         newTerminal("${command.command} && exit", onExit = { code ->

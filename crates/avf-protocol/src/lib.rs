@@ -155,6 +155,12 @@ pub enum SystemMessage {
         /// Whether systemd's tmp.mount is masked, which puts /tmp on disk from the next boot.
         #[serde(default)]
         tmp_mount_masked: Option<bool>,
+        /// Whether the fix for Linux Terminal's port forwarder is installed (None outside an AVF
+        /// Terminal guest), and whether the running forwarder uses it yet (it starts with the guest).
+        #[serde(default)]
+        forwarder_fix_installed: Option<bool>,
+        #[serde(default)]
+        forwarder_fix_active: Option<bool>,
     },
     /// Which of `names` the daemon could run, for offering to install what a feature needs.
     ProbeCommands {
@@ -781,6 +787,8 @@ mod tests {
                 disk_total_mb: 64000,
                 tmp_in_memory: Some(true),
                 tmp_mount_masked: Some(false),
+                forwarder_fix_installed: Some(true),
+                forwarder_fix_active: Some(false),
             }),
             MultiplexedPacket::System(SystemMessage::PortOpened {
                 port: 8000,

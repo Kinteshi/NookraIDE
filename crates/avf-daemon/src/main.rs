@@ -7,6 +7,15 @@ use tracing_subscriber::EnvFilter;
 mod tools;
 
 fn main() -> Result<(), Box<dyn Error>> {
+    // `guest …` runs as root through sudo and starts nothing: no temp dir, runtime or logging.
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().is_some_and(|arg| arg == "guest") {
+        if let Err(error) = avf_daemon::forwarder::run_cli(&args[1..]) {
+            eprintln!("avf-daemon: {error}");
+            std::process::exit(2);
+        }
+        return Ok(());
+    }
     // Before the runtime starts any thread: this changes the environment children inherit.
     let disk_tmpdir = avf_daemon::tmpdir::prefer_disk_tmpdir();
     tokio::runtime::Builder::new_multi_thread()

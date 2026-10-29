@@ -5,6 +5,7 @@ mod lsp;
 mod ports;
 mod probe;
 pub mod tmpdir;
+pub mod forwarder;
 mod pairing;
 mod tls;
 mod pty;
@@ -735,6 +736,8 @@ async fn process_packet(
                             disk_total_mb: sample.disk_total_mb,
                             tmp_in_memory: sample.tmp_in_memory,
                             tmp_mount_masked: sample.tmp_mount_masked,
+                            forwarder_fix_installed: sample.forwarder_fix_installed,
+                            forwarder_fix_active: sample.forwarder_fix_active,
                         }),
                     )
                     .await
@@ -2249,6 +2252,8 @@ struct SystemSample {
     disk_total_mb: u64,
     tmp_in_memory: Option<bool>,
     tmp_mount_masked: Option<bool>,
+    forwarder_fix_installed: Option<bool>,
+    forwarder_fix_active: Option<bool>,
 }
 
 impl Telemetry {
@@ -2284,6 +2289,7 @@ impl Telemetry {
         };
         let mebibyte = 1024 * 1024;
         let (tmp_in_memory, tmp_mount_masked) = tmpdir::tmp_state();
+        let (forwarder_fix_installed, forwarder_fix_active) = forwarder::state();
         let disk_usage = storage_usage_mb(&env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/")));
         Ok(SystemSample {
             cpu_usage,
@@ -2298,6 +2304,8 @@ impl Telemetry {
             disk_total_mb: disk_usage.1,
             tmp_in_memory,
             tmp_mount_masked,
+            forwarder_fix_installed,
+            forwarder_fix_active,
         })
     }
 }

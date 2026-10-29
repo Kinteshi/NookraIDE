@@ -62,6 +62,15 @@ class GuestDependenciesTest {
     }
 
     @Test
+    fun forwarderFixFollowsTheDaemonsReport() {
+        assertEquals(null, forwarderFix(null, null))
+        assertEquals(ForwarderFix.Missing, forwarderFix(false, false))
+        assertEquals(ForwarderFix.AfterRestart, forwarderFix(true, false))
+        assertEquals(ForwarderFix.Active, forwarderFix(true, true))
+        assertEquals("sudo \"\$HOME/.local/bin/avf-native-daemon\" guest fix-port-forwarding --undo", FORWARDER_UNDO_COMMAND)
+    }
+
+    @Test
     fun interpretersMapToTheEnvironmentTyReads() {
         assertEquals(listOf("CONDA_PREFIX" to "/home/droid/miniconda3/envs/fourteen"), pythonEnvironmentVariables("/home/droid/miniconda3/envs/fourteen/bin/python"))
         assertEquals(listOf("CONDA_PREFIX" to "/home/droid/miniforge3"), pythonEnvironmentVariables("/home/droid/miniforge3/bin/python"))

@@ -167,6 +167,28 @@ internal fun tmpPlacement(inMemory: Boolean?, masked: Boolean?): TmpPlacement? =
     else -> TmpPlacement.Disk
 }
 
+/**
+ * The fix for Linux Terminal's port forwarder, from the daemon's stats. The forwarder exits when
+ * a process or thread name has a space (Python 3.14 thread names), and the app can't reach the
+ * guest until it restarts; the fix (`avf-native-daemon guest fix-port-forwarding`) wraps the tool
+ * it reads.
+ */
+enum class ForwarderFix(val summary: String) {
+    Missing("Off. Linux Terminal stops forwarding the app's connection when a program names a thread with a space (Python 3.14 does), until the guest restarts"),
+    AfterRestart("Installed; takes effect when the guest restarts: close Linux Terminal and open it again"),
+    Active("On (installed by MaterialCode)"),
+}
+
+internal fun forwarderFix(installed: Boolean?, active: Boolean?): ForwarderFix? = when (installed) {
+    null -> null
+    false -> ForwarderFix.Missing
+    true -> if (active == true) ForwarderFix.Active else ForwarderFix.AfterRestart
+}
+
+/** Runs as root: it diverts `/usr/sbin/tcpstates-libbpf` and installs the daemon's wrapper there. */
+internal const val FORWARDER_FIX_COMMAND = "sudo \"\$HOME/.local/bin/avf-native-daemon\" guest fix-port-forwarding"
+internal const val FORWARDER_UNDO_COMMAND = "$FORWARDER_FIX_COMMAND --undo"
+
 /** Debian's tmpfs /tmp comes from systemd's tmp.mount; masked, /tmp stays on the root filesystem. */
 internal const val TMP_TO_DISK_COMMAND = "sudo systemctl mask tmp.mount"
 internal const val TMP_TO_MEMORY_COMMAND = "sudo systemctl unmask tmp.mount"
