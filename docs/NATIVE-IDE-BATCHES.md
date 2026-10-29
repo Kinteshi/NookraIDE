@@ -881,8 +881,9 @@ To investigate (user, 10-28):
   (`AVF_WORKSPACE_ROOTS`, ~/Projects). Needs an Open Folder flow, recent workspaces, and the
   daemon's roots/permissions model (several roots or switching the root).
 
-* Refactor: replace sora-editor with Aardink (user, 10-28). Evaluated the same day
-  (`docs/native-editor-evaluation.md`, "Re-evaluation 2026-10-28"); **not viable yet**,
+* Refactor: replace sora-editor with Aardink (user, 10-28). **Decided (user, 10-28): it will be
+  done, for the licence (Apache-2.0 instead of sora's LGPL-2.1); held for later.** Evaluated the
+  same day (`docs/native-editor-evaluation.md`, "Re-evaluation 2026-10-28"); not ready yet,
   revisit at Aardink 0.9.
   * Measured on the tablet against sora: about 130 MB more PSS per editor (324-334 vs
     195-201 MB), 22-25 missed frame deadlines per ~1,000 scroll frames (sora: 1 per ~4,000),
