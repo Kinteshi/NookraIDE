@@ -226,6 +226,7 @@ private fun EmptyEditor(controller: WorkbenchController) {
         Text("MaterialCode", style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.onSurface)
         Spacer(Modifier.height(16.dp))
         listOf(
+            "Open Folder" to "Ctrl+K Ctrl+O",
             "Quick Open" to "Ctrl+P",
             "Command Palette" to "Ctrl+Shift+P",
             "Toggle Terminal" to "Ctrl+`",
@@ -237,10 +238,38 @@ private fun EmptyEditor(controller: WorkbenchController) {
                 Text(keys, color = MaterialTheme.colorScheme.primary, fontFamily = FontFamily.Monospace)
             }
         }
-        if (!controller.connected) {
+        Spacer(Modifier.height(20.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (controller.connected) {
+                androidx.compose.material3.FilledTonalButton(onClick = { controller.showOpenFolder() }) { Text("Open folder…") }
+            } else {
+                androidx.compose.material3.FilledTonalButton(onClick = { controller.dialog = WorkbenchDialog.Connect }) {
+                    Text("Connect to guest")
+                }
+            }
+            androidx.compose.material3.OutlinedButton(onClick = { controller.newUntitledFile() }) { Text("New untitled file") }
+        }
+        // VS Code's Start page: the last folders, a tap away.
+        val recent = controller.recentWorkspaceChoices.takeIf { controller.connected }.orEmpty().take(5)
+        if (recent.isNotEmpty()) {
             Spacer(Modifier.height(20.dp))
-            androidx.compose.material3.FilledTonalButton(onClick = { controller.dialog = WorkbenchDialog.Connect }) {
-                Text("Connect to guest")
+            Column(Modifier.widthIn(max = 360.dp).fillMaxWidth()) {
+                Text("Recent folders", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                recent.forEach { path ->
+                    Row(
+                        Modifier.fillMaxWidth().clickable { controller.openWorkspace(path) }.padding(vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(path.substringAfterLast('/').ifEmpty { path }, color = MaterialTheme.colorScheme.onSurface)
+                        Text(
+                            "  " + path.substringBeforeLast('/'),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        )
+                    }
+                }
             }
         }
     }

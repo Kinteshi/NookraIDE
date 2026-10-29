@@ -13,8 +13,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 
 /**
  * A `text/html` cell output (pandas tables, styled reprs) with styles that follow the app theme.
- * Scripts stay off: outputs from other people's notebooks can't run code in the app; outputs that
- * need JavaScript show their `text/plain` form instead (see [htmlNeedsScript]).
+ * Scripts stay off here; output that needs them goes to [ScriptOutput] when Settings allow.
  */
 internal fun htmlOutputPage(html: String, dark: Boolean): String {
     val text = if (dark) "#d4d4d4" else "#1f1f1f"

@@ -48,6 +48,13 @@ workspace=${positional[1]:-$HOME/Projects}
 config="$HOME/.config/avf-native"
 unit="$HOME/.config/systemd/user/avf-native.service"
 
+# The app opens ~/Projects first; on the tablet's own guest the rest of home can be opened too
+# (File > Open Folder). Its terminal reaches all of it anyway. A LAN host serves only the workspace.
+roots=$workspace
+if ! $remote && [[ "$workspace" != "$HOME" ]]; then
+  roots="$workspace:$HOME"
+fi
+
 if $remote; then
   # Beyond loopback the daemon requires TLS; it creates a self-signed certificate on first start
   # and the connection string carries its fingerprint for the app to pin.
@@ -95,7 +102,7 @@ Type=simple
 ExecStart=%h/.local/bin/avf-native-daemon
 WorkingDirectory=$workspace
 EnvironmentFile=%h/.config/avf-native/env
-Environment=AVF_WORKSPACE_ROOTS=$workspace
+Environment=AVF_WORKSPACE_ROOTS=$roots
 Environment=AVF_BIND_ADDR=$bind
 $tls_line
 Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin

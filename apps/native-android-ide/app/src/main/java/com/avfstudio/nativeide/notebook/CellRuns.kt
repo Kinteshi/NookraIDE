@@ -17,6 +17,7 @@ data class OutputPresentation(
 /** The views an output can be drawn with; [label] reads after "Show as". */
 enum class OutputView(val label: String) {
     Plotly("Plotly chart"),
+    Vega("Vega chart"),
     Image("image"),
     Table("table"),
     Html("HTML"),

@@ -64,6 +64,8 @@ data class WorkbenchSettings(
     val cellStatistics: Boolean = true,
     /** Save each run's start and end in the cell's metadata (JupyterLab's `execution`), so they show on reopen. */
     val recordTiming: Boolean = false,
+    /** Outputs that need JavaScript (Altair/Vega, Bokeh, folium) in an isolated WebView, as VS Code runs them. */
+    val scriptOutputs: Boolean = true,
     /** DataFrame outputs as native, sortable tables rather than their HTML. */
     val nativeTables: Boolean = true,
     /** Text outputs longer than this scroll in a box until expanded (VS Code's default is 30). */
@@ -124,6 +126,7 @@ data class WorkbenchSettings(
         const val CELL_STATISTICS = "avf.notebook.cellStatistics"
         const val RECORD_TIMING = "avf.notebook.recordTiming"
         const val NATIVE_TABLES = "avf.notebook.nativeTables"
+        const val SCRIPT_OUTPUTS = "avf.notebook.scriptOutputs"
         const val OUTPUT_LINE_LIMIT = "notebook.output.textLineLimit"
         const val OUTLINE_PROBLEMS = "outline.problems.enabled"
         /** VS Code's enum (editable/on/off); only "off" hides them. */
@@ -184,6 +187,7 @@ data class WorkbenchSettings(
                 cellStatistics = bool(CELL_STATISTICS, defaults.cellStatistics),
                 recordTiming = bool(RECORD_TIMING, defaults.recordTiming),
                 nativeTables = bool(NATIVE_TABLES, defaults.nativeTables),
+                scriptOutputs = bool(SCRIPT_OUTPUTS, defaults.scriptOutputs),
                 outputLineLimit = number(OUTPUT_LINE_LIMIT)?.toInt()?.coerceIn(5, 10_000) ?: defaults.outputLineLimit,
                 outlineProblems = bool(OUTLINE_PROBLEMS, defaults.outlineProblems),
                 problemUnderlines = string(PROBLEM_UNDERLINES)?.let { it != "off" } ?: defaults.problemUnderlines,

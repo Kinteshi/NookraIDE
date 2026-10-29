@@ -339,6 +339,13 @@ fun SettingsScreen(controller: WorkbenchController) {
                     }
                 }
                 item {
+                    SwitchRow(
+                        "Outputs with scripts",
+                        "Altair/Vega charts, Bokeh, folium and other output that runs JavaScript, in an isolated web view (no access to the app or its files); loads their libraries from the internet",
+                        settings.scriptOutputs,
+                    ) { set(WorkbenchSettings.SCRIPT_OUTPUTS, it) }
+                }
+                item {
                     SliderRow("Long text outputs scroll after", settings.outputLineLimit.toFloat().coerceAtMost(200f), 10f..200f, "%.0f lines", steps = 18) {
                         set(WorkbenchSettings.OUTPUT_LINE_LIMIT, it.roundToInt())
                     }

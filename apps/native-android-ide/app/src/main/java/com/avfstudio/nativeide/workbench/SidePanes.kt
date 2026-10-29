@@ -127,7 +127,9 @@ fun ExplorerList(controller: WorkbenchController) {
             }
             item {
                 val parent = directory.substringBeforeLast('/', "")
-                val atRoot = controller.roots.any { it.trimEnd('/') == directory.trimEnd('/') }
+                // The open workspace is the top, as in VS Code (the daemon may serve folders above it).
+                val atRoot = controller.workspaceRoot?.let { it.trimEnd('/') == directory.trimEnd('/') }
+                    ?: controller.roots.any { it.trimEnd('/') == directory.trimEnd('/') }
                 PaneRow(
                     Icons.AutoMirrored.Outlined.ArrowBack,
                     if (atRoot) directory else "..",

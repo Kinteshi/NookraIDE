@@ -39,6 +39,7 @@ import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Keyboard
 import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.MoreVert
@@ -200,7 +201,12 @@ private fun TopBar(controller: WorkbenchController, expanded: Boolean) {
                 Icon(Icons.Outlined.Menu, contentDescription = "Toggle side bar")
             }
         }
-        Column(Modifier.widthIn(max = 220.dp).padding(horizontal = 6.dp)) {
+        // The workspace name opens Open Folder (switch to another or a recent one).
+        Column(
+            Modifier.widthIn(max = 220.dp).clip(RoundedCornerShape(8.dp))
+                .clickable { if (controller.connected) controller.showOpenFolder() else controller.dialog = WorkbenchDialog.Connect }
+                .padding(horizontal = 6.dp),
+        ) {
             Text("MaterialCode", style = MaterialTheme.typography.titleMedium, maxLines = 1)
             Text(
                 controller.workspaceRoot?.substringAfterLast('/') ?: "No workspace",
@@ -254,6 +260,7 @@ private fun TopBar(controller: WorkbenchController, expanded: Boolean) {
             IconButton(onClick = { menu = true }) { Icon(Icons.Outlined.MoreVert, contentDescription = "More") }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                 MenuItem("Command palette", "Ctrl+Shift+P", Icons.Outlined.Widgets) { menu = false; controller.runCommand("workbench.action.showCommands") }
+                MenuItem("Open folder…", "Ctrl+K Ctrl+O", Icons.Outlined.FolderOpen) { menu = false; controller.showOpenFolder() }
                 MenuItem("New file…", "", Icons.Outlined.NoteAdd) { menu = false; controller.beginNewEntry(folder = false) }
                 MenuItem("New untitled file", "Ctrl+N", Icons.Outlined.NoteAdd) { menu = false; controller.newUntitledFile() }
                 MenuItem("New terminal", "Ctrl+Shift+`", Icons.Outlined.Terminal) { menu = false; controller.newTerminal() }

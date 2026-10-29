@@ -70,6 +70,10 @@ class NotebookDocument(
     val kernelName: String?
         get() = metadata.getAsJsonObject("kernelspec")?.get("name")?.takeIf { it.isJsonPrimitive }?.asString
 
+    /** The kernel the notebook was saved with, as its kernelspec names it ("Python (fourteen)"). */
+    val kernelDisplayName: String?
+        get() = metadata.getAsJsonObject("kernelspec")?.get("display_name")?.takeIf { it.isJsonPrimitive }?.asString
+
     fun setKernel(name: String, displayName: String, language: String) {
         metadata.add("kernelspec", JsonObject().apply {
             addProperty("name", name)

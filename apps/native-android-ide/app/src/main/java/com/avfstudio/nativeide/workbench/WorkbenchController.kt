@@ -117,7 +117,13 @@ import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 
-private const val SCRATCH_WELCOME_PATH = "scratch:/welcome.py"
+/** How long a status bar message stays. */
+private const val STATUS_SECONDS = 10L
+/** Recently opened workspace folders, newest first. */
+private const val RECENT_WORKSPACES_KEY = "recent-workspaces"
+private const val RECENT_WORKSPACES_LIMIT = 10
+/** Untitled (scratch:) files open at the last stop; their text is in the document cache. */
+private const val SESSION_UNTITLED_KEY = "session-untitled"
 
 /** Copilot starts again after 3, 6 and 12 s when its server fails to start. */
 private const val COPILOT_START_RETRIES = 3
@@ -144,7 +150,15 @@ private const val LINUX_TERMINAL_PACKAGE = "com.android.virtualization.terminal"
 private val skippedDirectories = setOf(
     ".git", "node_modules", "__pycache__", ".venv", "venv", ".mypy_cache", ".ruff_cache", ".pytest_cache",
     ".ipynb_checkpoints", "dist", "build", "target", ".gradle", ".idea", ".tox",
+    // A home folder opened as the workspace: environments, not the user's files.
+    "miniconda3", "miniforge3", "anaconda3", "mambaforge", "micromamba",
 )
+
+/** Hidden folders Quick Open still walks (project configuration, not caches). */
+private val walkedHiddenDirectories = setOf(".github", ".vscode", ".devcontainer")
+
+private fun walksIntoForQuickOpen(name: String): Boolean =
+    name !in skippedDirectories && (!name.startsWith('.') || name in walkedHiddenDirectories)
 
 /**
  * All workbench state and behaviour. Composables only read this state and call its methods,
@@ -187,12 +201,22 @@ class WorkbenchController(private val context: Context) {
 
     // Status and output log -------------------------------------------------------------------
     private var statusText by mutableStateOf("Guest disconnected")
+    private var statusClear: ScheduledFuture<*>? = null
+    /**
+     * The status bar's message. Like VS Code's status messages it goes after a few seconds; the
+     * Output panel (a tap on the status bar) keeps every one.
+     */
     var status: String
         get() = statusText
         set(value) {
             statusText = value
             outputLog.add(value)
             while (outputLog.size > MAX_OUTPUT_LINES) outputLog.removeAt(0)
+            statusClear?.cancel(false)
+            // After dispose() the timer refuses work; the message just stays then.
+            statusClear = runCatching {
+                timer.schedule({ post { if (statusText == value) statusText = "" } }, STATUS_SECONDS, TimeUnit.SECONDS)
+            }.getOrNull()
         }
     val outputLog = mutableStateListOf<String>()
 
@@ -237,6 +261,14 @@ class WorkbenchController(private val context: Context) {
     val expandedFolders = mutableStateListOf<String>()
     val folderChildren = mutableStateMapOf<String, List<FileEntry>>()
     val documents = mutableStateListOf<DocumentSession>()
+    /** Folders opened before, newest first (VS Code's Open Recent). */
+    var recentWorkspaces by mutableStateOf(emptyList<String>())
+        private set
+    /** The workspace whose tabs [persistSession] records; set as soon as one is chosen. */
+    private var sessionWorkspace: String? = null
+    /** Set while switching: closing the old tabs must not overwrite their saved session. */
+    private var switchingWorkspace = false
+
     private val closedDocuments = mutableListOf<DocumentSession>()
     private var activePathState by mutableStateOf<String?>(null)
     var activePath: String?
@@ -303,10 +335,41 @@ class WorkbenchController(private val context: Context) {
     private var copilotStatusKind by mutableStateOf<String?>(null)
 
     // Layout ----------------------------------------------------------------------------------
-    var sidebar by mutableStateOf<SidebarView?>(SidebarView.Explorer)
-    var panelVisible by mutableStateOf(false)
-    var panelTab by mutableStateOf(PanelTab.Terminal)
-    var chatVisible by mutableStateOf(false)
+    // The views shown come back on the next launch, as VS Code restores its layout
+    // (`avf.session.restore` off starts from the defaults).
+    private val restoreLayout = settings.restoreSession
+    private val sidebarState = mutableStateOf(
+        if (restoreLayout) layoutValue("layout-sidebar", SidebarView.Explorer.name).let { name -> SidebarView.entries.firstOrNull { it.name == name } } else SidebarView.Explorer,
+    )
+    var sidebar: SidebarView?
+        get() = sidebarState.value
+        set(value) {
+            sidebarState.value = value
+            saveLayout("layout-sidebar", value?.name.orEmpty())
+        }
+    private val panelVisibleState = mutableStateOf(restoreLayout && layoutValue("layout-panel", "") == "shown")
+    var panelVisible: Boolean
+        get() = panelVisibleState.value
+        set(value) {
+            panelVisibleState.value = value
+            saveLayout("layout-panel", if (value) "shown" else "")
+        }
+    private val panelTabState = mutableStateOf(
+        PanelTab.entries.firstOrNull { restoreLayout && it.name == layoutValue("layout-panel-tab", "") } ?: PanelTab.Terminal,
+    )
+    var panelTab: PanelTab
+        get() = panelTabState.value
+        set(value) {
+            panelTabState.value = value
+            saveLayout("layout-panel-tab", value.name)
+        }
+    private val chatVisibleState = mutableStateOf(restoreLayout && layoutValue("layout-chat", "") == "shown")
+    var chatVisible: Boolean
+        get() = chatVisibleState.value
+        set(value) {
+            chatVisibleState.value = value
+            saveLayout("layout-chat", if (value) "shown" else "")
+        }
     var settingsVisible by mutableStateOf(false)
     var compactDestination by mutableStateOf(CompactDestination.Editor)
     private var focusAreaState by mutableStateOf(FocusArea.Other)
@@ -354,17 +417,11 @@ class WorkbenchController(private val context: Context) {
     private val editorSubscription = editorHost.observe(::onEditorEvent)
 
     init {
-        val welcome = cache.load(SCRATCH_WELCOME_PATH)?.let {
-            DocumentSession(it.path, it.text, it.modifiedTs, it.dirty, encoding = it.encoding, eol = it.eol)
-        } ?: DocumentSession(
-            SCRATCH_WELCOME_PATH,
-            "# Welcome to MaterialCode\n# Edit this scratch file offline, or connect to a guest workspace.\n\n" +
-                "def greet(name: str) -> str:\n    return f\"Hello, {name}!\"\n",
-            baseModifiedTs = null,
-            dirty = false,
-        )
-        documents.add(welcome)
-        activePath = welcome.path
+        // Untitled files come back with their text (VS Code's hot exit); saved files reopen once a
+        // workspace connects (restoreSession). Nothing opens by default: the empty editor offers
+        // folders and files.
+        recentWorkspaces = loadRecentWorkspaces()
+        restoreUntitledFiles()
         profiles.firstOrNull { it.id == profileStore.lastUsedId() }?.let(::selectProfile)
         preferences.getString("grammar-load-errors", null)
             ?.takeIf(String::isNotBlank)?.let { status = "Asset-pack grammar load failed: $it" }
@@ -702,7 +759,7 @@ class WorkbenchController(private val context: Context) {
                     guestRoots.isEmpty() -> "Connected; guest has no workspace roots"
                     else -> "Guest connected"
                 }
-                guestRoots.firstOrNull()?.let { workspace -> onWorkspaceConnected(workspace) }
+                if (workspaceRoot == null) chooseWorkspace(guestRoots, ::onWorkspaceConnected) else onWorkspaceConnected(workspaceRoot!!)
                 reattachTerminals()
                 documents.filter { it.dirty && !it.path.startsWith("scratch:") }.forEach(::reconcileDocument)
             }
@@ -1684,35 +1741,193 @@ class WorkbenchController(private val context: Context) {
     // Session restore ------------------------------------------------------------------------
 
     /** Remembers open guest files, the active one and the Explorer folder for the next launch. */
+    private fun layoutValue(key: String, fallback: String): String = preferences.getString(key, fallback) ?: fallback
+
+    private fun saveLayout(key: String, value: String) {
+        if (preferences.getString(key, null) != value) preferences.edit().putString(key, value).apply()
+    }
+
     private fun persistSession() {
-        if (!sessionRestored && !connected) return
-        val open = documents.map { it.path }.filterNot { it.startsWith("scratch:") }
-        preferences.edit()
-            .putString("session-open", com.google.gson.Gson().toJson(open))
-            .putString("session-active", activePath?.takeUnless { it.startsWith("scratch:") })
-            .putString("session-directory", currentDirectory.ifEmpty { null })
-            .putString("session-expanded", com.google.gson.Gson().toJson(expandedFolders.toList()))
-            .apply()
+        val gson = com.google.gson.Gson()
+        val untitled = documents.map { it.path }.filter { it.startsWith("scratch:") }
+        preferences.edit().putString(SESSION_UNTITLED_KEY, gson.toJson(untitled)).apply()
+        // Before a workspace's tabs are restored the list is partial, and while switching the old
+        // tabs close one by one: neither may overwrite what was saved.
+        val workspace = sessionWorkspace ?: return
+        if (!sessionRestored || switchingWorkspace) return
+        val session = WorkspaceSession(
+            open = documents.map { it.path }.filterNot { it.startsWith("scratch:") },
+            active = activePath?.takeUnless { it.startsWith("scratch:") },
+            directory = currentDirectory.ifEmpty { null },
+            expanded = expandedFolders.toList(),
+        )
+        preferences.edit().putString(workspaceSessionKey(workspace), gson.toJson(session)).apply()
     }
 
     private fun restoreSession(workspace: String) {
         if (sessionRestored) return
         sessionRestored = true
         if (!settings.restoreSession) return
-        val open = runCatching {
-            com.google.gson.Gson().fromJson(preferences.getString("session-open", "[]"), Array<String>::class.java).toList()
-        }.getOrDefault(emptyList()).filter { it.startsWith(workspace) }
-        val active = preferences.getString("session-active", null)
-        open.sortedBy { it == active }.forEach(::openPath)
-        preferences.getString("session-directory", null)
-            ?.takeIf { it.startsWith(workspace) && it != workspace }
-            ?.let(::loadDirectory)
-        runCatching {
-            com.google.gson.Gson().fromJson(preferences.getString("session-expanded", "[]"), Array<String>::class.java).toList()
-        }.getOrDefault(emptyList()).filter { it.startsWith(workspace) }.forEach { path ->
+        val gson = com.google.gson.Gson()
+        val saved = preferences.getString(workspaceSessionKey(workspace), null)
+            ?.let { runCatching { gson.fromJson(it, WorkspaceSession::class.java) }.getOrNull() }
+            ?: legacySession(workspace)
+        val open = saved.open.orEmpty().filter { isPathWithinRoot(it, workspace) }
+        open.sortedBy { it == saved.active }.forEach(::openPath)
+        saved.directory?.takeIf { isPathWithinRoot(it, workspace) && it != workspace }?.let(::loadDirectory)
+        saved.expanded.orEmpty().filter { isPathWithinRoot(it, workspace) }.forEach { path ->
             expandedFolders.add(path)
             loadFolderChildren(path)
         }
+    }
+
+    /** The single session earlier versions kept for whichever workspace was open. */
+    private fun legacySession(workspace: String): WorkspaceSession {
+        val gson = com.google.gson.Gson()
+        fun list(key: String) = runCatching {
+            gson.fromJson(preferences.getString(key, "[]"), Array<String>::class.java).toList()
+        }.getOrDefault(emptyList()).filter { isPathWithinRoot(it, workspace) }
+        return WorkspaceSession(
+            open = list("session-open"),
+            active = preferences.getString("session-active", null),
+            directory = preferences.getString("session-directory", null),
+            expanded = list("session-expanded"),
+        )
+    }
+
+    private fun restoreUntitledFiles() {
+        if (!settings.restoreSession) return
+        val paths = runCatching {
+            com.google.gson.Gson().fromJson(preferences.getString(SESSION_UNTITLED_KEY, "[]"), Array<String>::class.java).toList()
+        }.getOrDefault(emptyList())
+        paths.filter { it.startsWith("scratch:") }.forEach { path ->
+            val cached = cache.load(path) ?: return@forEach
+            documents.add(DocumentSession(cached.path, cached.text, cached.modifiedTs, cached.dirty, encoding = cached.encoding, eol = cached.eol))
+        }
+        activePath = documents.lastOrNull()?.path
+    }
+
+    // Workspaces ------------------------------------------------------------------------------
+
+    private fun loadRecentWorkspaces(): List<String> = runCatching {
+        com.google.gson.Gson().fromJson(preferences.getString(RECENT_WORKSPACES_KEY, "[]"), Array<String>::class.java).toList()
+    }.getOrDefault(emptyList())
+
+    /** Recent folders this guest serves, the open one left out. */
+    val recentWorkspaceChoices: List<String>
+        get() = recentWorkspaces.filter { recent -> recent != workspaceRoot && roots.any { isPathWithinRoot(recent, it) } }
+
+    private fun rememberWorkspace(path: String) {
+        recentWorkspaces = (listOf(path) + recentWorkspaces.filterNot { it == path }).take(RECENT_WORKSPACES_LIMIT)
+        preferences.edit().putString(RECENT_WORKSPACES_KEY, com.google.gson.Gson().toJson(recentWorkspaces)).apply()
+    }
+
+    fun forgetRecentWorkspace(path: String) {
+        recentWorkspaces = recentWorkspaces.filterNot { it == path }
+        preferences.edit().putString(RECENT_WORKSPACES_KEY, com.google.gson.Gson().toJson(recentWorkspaces)).apply()
+    }
+
+    /** The folder to open on connecting: the last one, if this guest still has it, else its first root. */
+    private fun chooseWorkspace(guestRoots: List<String>, then: (String) -> Unit) {
+        val last = recentWorkspaces.firstOrNull { recent -> guestRoots.any { isPathWithinRoot(recent, it) } }
+        if (last == null) {
+            guestRoots.firstOrNull()?.let(then)
+            return
+        }
+        vfs.stat(last).whenComplete { entry, error ->
+            post { (if (error == null && entry?.isDirectory == true) last else guestRoots.firstOrNull())?.let(then) }
+        }
+    }
+
+    /** File > Open Folder: browses the guest's roots for a folder to open as the workspace. */
+    fun showOpenFolder(path: String? = null) {
+        if (!connected) {
+            status = "Connect to a guest to open a folder"
+            dialog = WorkbenchDialog.Connect
+            return
+        }
+        val start = path
+            ?: workspaceRoot?.substringBeforeLast('/')?.takeIf { parent -> roots.any { isPathWithinRoot(parent, it) } }
+            ?: roots.firstOrNull()
+            ?: return
+        dialog = WorkbenchDialog.OpenFolder(start)
+        vfs.listDir(start).whenComplete { result, error ->
+            post {
+                val shown = dialog as? WorkbenchDialog.OpenFolder ?: return@post
+                if (shown.path != start) return@post
+                dialog = shown.copy(
+                    folders = result?.let { sortedEntries(it).filter(FileEntry::isDirectory) },
+                    error = error?.let { it.cause?.message ?: it.message ?: "Could not list the folder" },
+                )
+            }
+        }
+    }
+
+    /** Creates [name] inside the folder the Open Folder dialog shows, then shows the new folder. */
+    fun createFolderToOpen(parent: String, name: String) {
+        val clean = name.trim().trim('/')
+        if (clean.isEmpty() || clean.contains('/')) {
+            (dialog as? WorkbenchDialog.OpenFolder)?.let { dialog = it.copy(error = "Type a folder name without slashes") }
+            return
+        }
+        val target = "${parent.trimEnd('/')}/$clean"
+        vfs.create(target, directory = true).whenComplete { _, error ->
+            post {
+                if (error != null) {
+                    (dialog as? WorkbenchDialog.OpenFolder)?.let { dialog = it.copy(error = error.cause?.message ?: error.message) }
+                } else {
+                    showOpenFolder(target)
+                }
+            }
+        }
+    }
+
+    /**
+     * Makes [path] the workspace, as VS Code's Open Folder does in its window. Tabs close with
+     * their drafts kept, so unsaved work comes back with its folder; language servers, Copilot and
+     * the chat agent restart in the new folder. Terminals keep running where they are.
+     */
+    fun openWorkspace(path: String) {
+        val target = normalizeGuestPath(path) ?: return
+        if (dialog is WorkbenchDialog.OpenFolder) dialog = null
+        if (!connected) {
+            status = "Connect to a guest to open a folder"
+            return
+        }
+        if (roots.none { isPathWithinRoot(target, it) }) {
+            status = "$target is outside the folders the guest daemon serves"
+            return
+        }
+        if (target == workspaceRoot) return
+        persistSession()
+        switchingWorkspace = true
+        documents.map { it.path }.filterNot { it.startsWith("scratch:") }.forEach { open ->
+            notebooks[open]?.takeIf { it.notebook.dirty }?.let { session -> session.document.updateText(session.notebook.toJson()) }
+            documents.firstOrNull { it.path == open }?.let { document -> io.execute { repository.persistDraft(document) } }
+            closeDocument(open)
+        }
+        switchingWorkspace = false
+        languageClients.values.filter { it.isStarted }.forEach(LanguageClient::close)
+        copilot.language.close()
+        newChat()
+        chatAgent.stop()
+        if (debugState != DebugState.Idle) stopDebugging()
+        diagnostics.clear()
+        languageServerIssues = emptyList()
+        expandedFolders.clear()
+        folderChildren.clear()
+        entries = emptyList()
+        currentDirectory = ""
+        quickOpenIndex = emptyList()
+        searchResults.clear()
+        searchSummary = null
+        gitStatus = null
+        gitProblem = null
+        gitNotARepository = false
+        workspaceRoot = null
+        sessionRestored = false
+        onWorkspaceConnected(target)
+        status = "Opened ${target.substringAfterLast('/').ifEmpty { target }}"
     }
 
     private fun startKeepAlive(state: String) {
@@ -1727,6 +1942,8 @@ class WorkbenchController(private val context: Context) {
 
     private fun onWorkspaceConnected(workspace: String) {
         autoConnecting = false
+        sessionWorkspace = workspace
+        rememberWorkspace(workspace)
         loadDirectory(workspace)
         restoreSession(workspace)
         loadWorkspaceSettings(workspace).whenComplete { loaded, settingsError ->
@@ -1798,7 +2015,7 @@ class WorkbenchController(private val context: Context) {
             vfs.listDir(path).thenCompose { children ->
                 children.filterNot(FileEntry::isDirectory).forEach(files::add)
                 if (files.size > MAX_QUICK_OPEN_FILES || depth >= 8) return@thenCompose CompletableFuture.completedFuture(Unit)
-                val nested = children.filter { it.isDirectory && it.name !in skippedDirectories }.map { walk(it.path, depth + 1) }
+                val nested = children.filter { it.isDirectory && walksIntoForQuickOpen(it.name) }.map { walk(it.path, depth + 1) }
                 CompletableFuture.allOf(*nested.toTypedArray()).thenApply { }
             }.exceptionally { }
         walk(root, 0).whenComplete { _, _ ->
@@ -4554,6 +4771,7 @@ class WorkbenchController(private val context: Context) {
         val surface = editorSurface
         when (commandId) {
             "workbench.action.files.save" -> saveActiveDocument()
+            "workbench.action.files.openFolder", "workbench.action.openRecent" -> showOpenFolder()
             "workbench.action.files.newUntitledFile" -> newUntitledFile()
             "workbench.action.files.saveAs" -> beginSaveAs()
             "workbench.action.debug.start" -> startOrContinueDebugging()

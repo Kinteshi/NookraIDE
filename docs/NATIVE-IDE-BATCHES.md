@@ -967,6 +967,65 @@ User's pick: 1, 2 and 4 of the backlog list after batch 20 (port 36601).
     not filed yet. Its dependency-free reproduction (`nc` copied to `/tmp/my nc`) was checked:
     the column read as LPORT holds `127.0.0.1`.
 
+## 22. Open folders and recent ones, outputs with scripts, app clean-up (10-29 10:10–10:50; done, checked)
+User's pick: 2 and 3 of the backlog list after 21b, and "clean up the behaviour of the app
+(welcome.py always open, for example)".
+* (2) Open Folder and Open Recent.
+  * File > Open Folder (Ctrl+K Ctrl+O; also in the ⋮ menu, from a tap on the workspace name in
+    the top bar, and on the empty editor) opens a dialog:
+    * Recent folders, each removable, then the guest's roots as chips.
+    * A folder browser: up stays inside the roots, hidden folders come last, and a new folder can
+      be made in place.
+  * Opening a folder makes it the workspace, as VS Code does in its window:
+    * Tabs close with their drafts kept (hot exit), and come back with that folder.
+    * Language servers, Copilot and the chat agent restart in the new folder, and Explorer, Search,
+      Quick Open, Git and Problems reset. Terminals keep running.
+    * The app reopens the last folder on the next connect, or the guest's first root if the
+      folder is gone.
+  * Sessions are saved per folder (`session:<path>`); the old single session is read once as a
+    fallback. Recent folders: `recent-workspaces`, at most 10.
+  * The Explorer treats the open folder as its top, even when the daemon serves folders above it.
+  * Quick Open no longer walks hidden folders (except `.github`, `.vscode`, `.devcontainer`) or
+    conda installs, so a home folder stays fast.
+  * Daemon: a local guest now serves `~/Projects:~` (`AVF_WORKSPACE_ROOTS`, installer); a LAN
+    host still serves only its workspace. The tablet's unit was updated (the old one is kept as
+    `avf-native.service.before-home-root`).
+  * Checked: Projects → django_example (tabs closed, README.md from the old session) → app
+    restart (django_example came back) → Open Recent → Projects (all five tabs and the expanded
+    folders back).
+* (3) Outputs with scripts (`avf.notebook.scriptOutputs`, on). As in VS Code, they run in their
+  own WebView: JavaScript and network on, no bridge into the app, no file or content access, and
+  the view grows with its content.
+  * Vega and Vega-Lite types (`application/vnd.vega(lite).vN+json`) draw with vega-embed from
+    jsDelivr (v6 specs get the 6.x libraries).
+  * HTML with scripts runs: Altair's HTML renderer (what Altair emits outside JupyterLab), folium
+    and pyvis.
+  * Bokeh 3 splits a plot into an HTML `<div>` and a JavaScript-only output with
+    `bokehjs_exec`. A JavaScript-only output now runs inside the HTML output before it. The
+    loader from `output_notebook()` runs first; without one, BokehJS loads from Bokeh's CDN at
+    the output's version.
+  * Live ipywidgets need the kernel's comm messages, which the bridge doesn't carry. They show
+    their text form and a note, and are a new backlog item.
+  * Checked with `~/Projects/batch22.ipynb`, made by nbclient in a throwaway `uv run` environment
+    (altair, bokeh 3.10.1, ipywidgets; the user's environments untouched): the Altair bar chart,
+    "BokehJS 3.10.1 successfully loaded", the Bokeh line plot with its toolbar, the Altair HTML
+    chart, and the slider's text with the note. nbclient's timing showed as run marks, which
+    also confirms reading saved timings.
+* Clean-up:
+  * No scratch welcome.py any more. Nothing opens by default. The empty editor offers Open
+    folder (or Connect), New untitled file and the last five folders.
+  * Untitled files come back after a restart with their text, as VS Code's hot exit does
+    (`session-untitled`). Checked: Untitled-1 survived a force-stop.
+  * The side bar view, the panel (shown, and its tab) and the chat pane come back on the next
+    launch, under `avf.session.restore`.
+  * Status bar messages clear after 10 seconds, as VS Code's do; Output keeps them all.
+  * A notebook that names its kernel shows it ("Python 3 · Not started") until it starts,
+    instead of "Select kernel".
+  * Settings toggles: script outputs got one; the rest follow `avf.session.restore` or need none
+    (Output keeps the status history).
+* 176 tests pass (new: script outputs and Bokeh pairing, per-folder sessions). The app is left
+  installed.
+
 ## Next pass (registered 10-27 23:35, updated 10-28 13:06)
 * Batch 15 did the carried-over tests (Copilot signed out, the setup paths, reconnect cap,
   Copilot model list, prompt prefix). Left over:
@@ -1010,7 +1069,7 @@ To investigate (user, 10-28):
   part is likely S-M.
 * (Done in batch 18.) Outline from problems: can diagnostics feed the Outline (problems grouped per symbol, markers
   next to outline entries) or a problems-by-file tree.
-* Open different workspaces, folders or projects: today the workspace is the daemon's root
+* (Done in batch 22.) Open different workspaces, folders or projects: today the workspace is the daemon's root
   (`AVF_WORKSPACE_ROOTS`, ~/Projects). Needs an Open Folder flow, recent workspaces, and the
   daemon's roots/permissions model (several roots or switching the root).
 
@@ -1080,7 +1139,11 @@ Bugs (user, 10-28): both fixed and checked in batch 15.
   seen once in two tries, cause unknown. Batch 19: not reproduced in five restarts; the app now
   retries three times and the daemon logs exits with stderr. Look in
   `journalctl --user -u avf-native` if it happens again.
-* Notebook gap: script-based outputs (widgets, bokeh, altair) still show their text form.
+* (Done in batch 22, except live widgets.) Notebook gap: script-based outputs (widgets, bokeh, altair) still show their text form.
+* Live ipywidgets (registered 10-29): sliders, dropdowns and interact() need the kernel's comm
+  messages (comm_open/comm_msg/comm_close) both ways. Work: the bridge forwards them, and one
+  widget manager per notebook (@jupyter-widgets/html-manager in a WebView) is shared by its
+  widget outputs. Saved widget state (`metadata.widgets`) could draw static widgets first. L.
 * Customisable keybindings (`keybindings.json`).
 * (Done in batch 17: TypeScript 7 as the default TypeScript server; compact layout reaches
   Source Control, Search, Debug, Output and extra terminals.)

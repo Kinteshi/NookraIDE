@@ -107,6 +107,8 @@ internal fun CellOutputs(controller: WorkbenchController, session: NotebookSessi
         return
     }
     cell.outputs.forEachIndexed { index, output ->
+        // A script output runs inside the HTML output before it (Bokeh's div, then its embed code).
+        if (attachedToPrevious(cell.outputs, index)) return@forEachIndexed
         key(index) {
             val hover = remember { MutableInteractionSource() }
             val hovered by hover.collectIsHoveredAsState()
@@ -121,7 +123,7 @@ internal fun CellOutputs(controller: WorkbenchController, session: NotebookSessi
                         OutputMenuButton(controller, session, cell, index, output, menuOpen) { menuOpen = it }
                     }
                 }
-                Box(Modifier.weight(1f)) { CellOutput(controller, cell, index, output) }
+                Box(Modifier.weight(1f)) { CellOutput(controller, session, cell, index, output, attachedScript(cell.outputs, index)) }
             }
         }
     }
@@ -151,7 +153,7 @@ private fun OutputMenuButton(
 ) {
     val presentation = cell.outputPresentation[index] ?: OutputPresentation()
     val views = remember(output) { outputViews(output) }
-    val shown = shownView(views, presentation, controller.settings)
+    val shown = shownView(views, presentation, controller.settings, remember(output) { outputHtmlScripted(output) })
     Box {
         IconButton(onClick = { onOpenChange(true) }, modifier = Modifier.size(28.dp).noKeyFocus()) {
             Icon(Icons.Outlined.MoreVert, contentDescription = "Output actions", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
@@ -190,24 +192,33 @@ internal fun outputViews(output: JsonObject): List<OutputView> {
     val html = data.get("text/html")?.let(NotebookDocument::multiline)
     return buildList {
         if (data.get(PLOTLY_MIME)?.isJsonObject == true) add(OutputView.Plotly)
+        if (vegaSpec(data) != null) add(OutputView.Vega)
         if (data.has("image/png") || data.has("image/jpeg")) add(OutputView.Image)
         if (html != null && parseDataFrameHtml(html) != null) add(OutputView.Table)
-        if (html != null && !htmlNeedsScript(html)) add(OutputView.Html)
+        if (html != null) add(OutputView.Html)
         if (data.has("text/markdown")) add(OutputView.Markdown)
         if (data.has("text/plain")) add(OutputView.Text)
     }
 }
 
-/** The view picked from the menu, else the first one Settings allow; null when Settings allow none. */
-internal fun shownView(views: List<OutputView>, presentation: OutputPresentation, settings: WorkbenchSettings): OutputView? =
+/**
+ * The view picked from the menu, else the first one Settings allow; null when Settings allow
+ * none. HTML that runs scripts ([scripted]) needs "Outputs with scripts" as well.
+ */
+internal fun shownView(views: List<OutputView>, presentation: OutputPresentation, settings: WorkbenchSettings, scripted: Boolean = false): OutputView? =
     presentation.view?.takeIf { it in views } ?: views.firstOrNull { view ->
         when (view) {
             OutputView.Plotly -> settings.renderPlotly
+            OutputView.Vega -> settings.scriptOutputs
             OutputView.Table -> settings.nativeTables
-            OutputView.Html -> settings.renderHtmlOutputs
+            OutputView.Html -> settings.renderHtmlOutputs && (!scripted || settings.scriptOutputs)
             else -> true
         }
     }
+
+/** Whether [output]'s HTML runs scripts (Bokeh, folium, Altair's html renderer). */
+internal fun outputHtmlScripted(output: JsonObject): Boolean =
+    output.getAsJsonObject("data")?.get("text/html")?.let { htmlNeedsScript(NotebookDocument.multiline(it)) } == true
 
 /** What Copy puts on the clipboard: the table as TSV (in its sort order), or the output's text. */
 internal fun outputCopyText(output: JsonObject, view: OutputView?, presentation: OutputPresentation): String? {
@@ -236,7 +247,14 @@ private fun errorText(output: JsonObject): String = buildString {
 }.trimEnd()
 
 @Composable
-private fun CellOutput(controller: WorkbenchController, cell: NotebookCell, index: Int, output: JsonObject) {
+private fun CellOutput(
+    controller: WorkbenchController,
+    session: NotebookSession,
+    cell: NotebookCell,
+    index: Int,
+    output: JsonObject,
+    attachedScript: String? = null,
+) {
     val colors = MaterialTheme.colorScheme
     val settings = controller.settings
     val presentation = cell.outputPresentation[index] ?: OutputPresentation()
@@ -264,6 +282,7 @@ private fun CellOutput(controller: WorkbenchController, cell: NotebookCell, inde
         "execute_result", "display_data" -> {
             val data = output.getAsJsonObject("data") ?: return
             val views = remember(output) { outputViews(output) }
+            val scripted = remember(output, attachedScript) { attachedScript != null || outputHtmlScripted(output) }
             val image = data.get("image/png") ?: data.get("image/jpeg")
             val bitmap = remember(image) {
                 image?.let {
@@ -274,8 +293,26 @@ private fun CellOutput(controller: WorkbenchController, cell: NotebookCell, inde
                 }
             }
             fun mime(name: String) = NotebookDocument.multiline(data.get(name))
-            when (shownView(views, presentation, settings)) {
-                OutputView.Plotly -> PlotlyOutput(data.getAsJsonObject(PLOTLY_MIME), LocalDarkTheme.current, modifier)
+            val dark = LocalDarkTheme.current
+            if (data.has(WIDGET_VIEW_MIME)) {
+                // ipywidgets: their text form, and why the widget itself isn't drawn.
+                Column(modifier) {
+                    if (data.has("text/plain")) OutputText(mime("text/plain").stripAnsi(), colors.onSurface, Modifier)
+                    Text(
+                        "Interactive widget (ipywidgets): drawing it needs the kernel's widget messages, which MaterialCode doesn't support yet",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = colors.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 8.dp, top = 2.dp),
+                    )
+                }
+                return
+            }
+            when (shownView(views, presentation, settings, scripted)) {
+                OutputView.Plotly -> PlotlyOutput(data.getAsJsonObject(PLOTLY_MIME), dark, modifier)
+                OutputView.Vega -> {
+                    val page = remember(output, dark) { vegaSpec(data)?.let { (kind, version, spec) -> vegaPage(kind, version, spec, dark) } }
+                    if (page != null) ScriptOutput(page, modifier, minHeightDp = 120) else OutputText(mime("text/plain"), colors.onSurface, modifier)
+                }
                 OutputView.Image -> if (bitmap != null) {
                     Image(
                         bitmap,
@@ -294,7 +331,17 @@ private fun CellOutput(controller: WorkbenchController, cell: NotebookCell, inde
                         OutputText(mime("text/plain"), colors.onSurface, modifier)
                     }
                 }
-                OutputView.Html -> HtmlOutput(mime("text/html"), LocalDarkTheme.current, modifier)
+                OutputView.Html -> if (scripted && settings.scriptOutputs) {
+                    val html = mime("text/html") + attachedScript?.let { "<script>${it.replace("</", "<\\/")}</script>" }.orEmpty()
+                    // The cell that ran output_notebook() carries the loader itself.
+                    val loader = remember(output, attachedScript) {
+                        if ("Bokeh" in html && cell.outputs.none { it.getAsJsonObject("data")?.has(BOKEH_LOAD_MIME) == true }) bokehLoader(session) else null
+                    }
+                    val page = remember(output, dark, loader) { scriptHtmlPage(html, dark, loader) }
+                    ScriptOutput(page, modifier)
+                } else {
+                    HtmlOutput(mime("text/html"), dark, modifier)
+                }
                 OutputView.Markdown -> MarkdownText(mime("text/markdown"), modifier)
                 OutputView.Text -> OutputText(mime("text/plain").stripAnsi(), colors.onSurface, modifier, lineLimit, presentation.expanded, follow = false, onExpand = ::expand)
                 null -> OutputText("[${data.keySet().joinToString()} output]", colors.onSurfaceVariant, modifier)
@@ -497,3 +544,26 @@ private fun columnWidths(table: OutputTable, style: TextStyle, headerStyle: Text
         }
     }
 }
+
+/** The BokehJS loader `output_notebook()` published most recently in the notebook, if any. */
+private fun bokehLoader(session: NotebookSession): String? =
+    session.notebook.cells.asReversed().asSequence()
+        .flatMap { it.outputs.asReversed().asSequence() }
+        .firstNotNullOfOrNull { output -> output.getAsJsonObject("data")?.get(BOKEH_LOAD_MIME)?.let(NotebookDocument::multiline) }
+
+private fun isScriptOnly(output: JsonObject): Boolean {
+    val data = output.getAsJsonObject("data") ?: return false
+    return data.has("application/javascript") && data.keySet().none { it.startsWith("text/") || it.startsWith("image/") }
+}
+
+/** The JavaScript of the output after [index] when that output is only a script (Bokeh's embed code). */
+internal fun attachedScript(outputs: List<JsonObject>, index: Int): String? {
+    val output = outputs.getOrNull(index) ?: return null
+    if (output.getAsJsonObject("data")?.has("text/html") != true) return null
+    val next = outputs.getOrNull(index + 1)?.takeIf(::isScriptOnly) ?: return null
+    return NotebookDocument.multiline(next.getAsJsonObject("data").get("application/javascript"))
+}
+
+/** A script-only output that [attachedScript] runs with the HTML output before it. */
+internal fun attachedToPrevious(outputs: List<JsonObject>, index: Int): Boolean =
+    index > 0 && attachedScript(outputs, index - 1) != null

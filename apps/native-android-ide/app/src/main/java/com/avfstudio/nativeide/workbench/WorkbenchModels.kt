@@ -87,6 +87,8 @@ sealed interface WorkbenchDialog {
     /** Offers to install a missing guest tool; [then] continues what needed it. */
     data class InstallDependency(val dependency: GuestDependency, val reason: String?, val then: (() -> Unit)?) : WorkbenchDialog
     /** Confirms a guest command that runs in a new terminal; [done] is the status when it exits 0. */
+    /** Open Folder: the folder shown, its subfolders once listed, and a listing or create error. */
+    data class OpenFolder(val path: String, val folders: List<com.avfstudio.nativeide.transport.FileEntry>? = null, val error: String? = null) : WorkbenchDialog
     data class GuestCommand(val title: String, val text: String, val command: String, val done: String) : WorkbenchDialog
     data class CopilotSignInCode(val signIn: CopilotSignIn) : WorkbenchDialog
     data class KernelPicker(
@@ -161,3 +163,13 @@ class SearchFileResult(val path: String) {
     val matches = mutableStateListOf<com.avfstudio.nativeide.transport.SearchEvent.Match>()
     var expanded by mutableStateOf(true)
 }
+
+/** A workspace's open tabs and Explorer state, saved per folder (Gson fills what the JSON has). */
+data class WorkspaceSession(
+    val open: List<String>? = null,
+    val active: String? = null,
+    val directory: String? = null,
+    val expanded: List<String>? = null,
+)
+
+internal fun workspaceSessionKey(workspace: String) = "session:$workspace"

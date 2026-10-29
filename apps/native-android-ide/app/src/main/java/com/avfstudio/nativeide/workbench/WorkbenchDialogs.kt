@@ -261,6 +261,7 @@ fun WorkbenchDialogHost(controller: WorkbenchController) {
             confirmButton = { Button(onClick = { controller.installDependency(dialog.dependency, dialog.then) }) { Text("Install") } },
             dismissButton = { TextButton(onClick = { controller.dialog = null }) { Text("Not now") } },
         )
+        is WorkbenchDialog.OpenFolder -> OpenFolderDialog(controller, dialog)
         is WorkbenchDialog.GuestCommand -> AlertDialog(
             onDismissRequest = { controller.dialog = null },
             icon = { Icon(Icons.Outlined.Terminal, contentDescription = null) },

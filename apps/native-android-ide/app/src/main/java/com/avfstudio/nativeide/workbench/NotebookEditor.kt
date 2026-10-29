@@ -126,11 +126,12 @@ fun NotebookEditor(controller: WorkbenchController, session: NotebookSession) {
             AssistChip(
                 modifier = Modifier.noKeyFocus(),
                 onClick = { controller.chooseKernel(session) },
-                label = { Text(session.kernelName ?: "Select kernel") },
+                // Before a run: the kernel the notebook names (it starts on the first run), as in VS Code.
+                label = { Text(session.kernelName ?: session.notebook.kernelDisplayName ?: "Select kernel") },
                 leadingIcon = { Icon(Icons.Outlined.Memory, contentDescription = null, modifier = Modifier.size(18.dp)) },
             )
             Text(
-                session.kernelState,
+                if (session.kernelName == null && session.kernelState == "No kernel" && session.notebook.kernelDisplayName != null) "Not started" else session.kernelState,
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 10.dp),
