@@ -19,6 +19,8 @@ sealed interface EditorEvent {
     data class SelectionChanged(override val uri: String, val selection: EditorSelection) : EditorEvent
     data class ViewportChanged(override val uri: String, val visibleLines: VisibleLines) : EditorEvent
     data class FocusChanged(override val uri: String, val focused: Boolean) : EditorEvent
+    /** The user pinched the editor to [fontSizeSp]. */
+    data class Zoomed(override val uri: String, val fontSizeSp: Float) : EditorEvent
 }
 
 /**
@@ -98,6 +100,10 @@ fun EditorSurface.selectionEnd(): LspPosition = positionAt(selectionOffsets.last
 interface TextEditorHost {
     fun open(document: DocumentSession, surface: EditorSurface)
     fun close(uri: String)
+    /** Closes [uri] only while [surface] shows it: a view going away after another took the document over leaves that one bound. */
+    fun close(uri: String, surface: EditorSurface) {
+        close(uri)
+    }
     fun applyEdits(uri: String, edits: List<LspTextEdit>)
     /** Whether [uri] is shown in an editor now (the pane goes away behind Settings, for one). */
     fun isOpen(uri: String): Boolean
@@ -120,6 +126,7 @@ class SoraTextEditorHost : TextEditorHost {
                 is EditorEvent.SelectionChanged -> event.copy(uri = document.path)
                 is EditorEvent.ViewportChanged -> event.copy(uri = document.path)
                 is EditorEvent.FocusChanged -> event.copy(uri = document.path)
+                is EditorEvent.Zoomed -> event.copy(uri = document.path)
             }
             when (normalized) {
                 is EditorEvent.ContentChanged -> {
@@ -137,6 +144,17 @@ class SoraTextEditorHost : TextEditorHost {
 
     override fun close(uri: String) {
         bindings.remove(uri)?.subscription?.close()
+    }
+
+    override fun close(uri: String, surface: EditorSurface) {
+        bindings.computeIfPresent(uri) { _, binding ->
+            if (binding.surface === surface) {
+                binding.subscription.close()
+                null
+            } else {
+                binding
+            }
+        }
     }
 
     override fun isOpen(uri: String): Boolean = bindings.containsKey(uri)

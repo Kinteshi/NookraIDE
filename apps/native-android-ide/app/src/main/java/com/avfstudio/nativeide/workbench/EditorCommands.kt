@@ -61,6 +61,8 @@ object EditorCommands {
         command("editor.action.triggerParameterHints", "Trigger Parameter Hints", "Ctrl+Shift+Space"),
         command("editor.action.showHover", "Show Hover", "Ctrl+K Ctrl+I"),
         command("editor.action.quickFix", "Quick Fix...", "Ctrl+."),
+        command("markdown.showPreview", "Markdown: Open Preview", "Ctrl+Shift+V"),
+        command("markdown.showPreviewToSide", "Markdown: Open Preview to the Side", "Ctrl+K V"),
         command("workbench.action.openSettings", "Open Settings", "Ctrl+,"),
     )
 
@@ -125,6 +127,11 @@ object EditorCommands {
         command("github.signIn", "GitHub: Sign In (Copilot Chat and Git)", ""),
         command("github.copilot.chat.signIn", "GitHub Copilot: Sign In to Chat", ""),
         command("github.copilot.chat.signInCli", "Copilot: Sign In to Chat with copilot login", ""),
+        command("avf.chat.selectCopilot", "Chat: Use Copilot", ""),
+        command("avf.chat.selectClaudeCode", "Chat: Use Claude Code", ""),
+        command("avf.chat.selectGemini", "Chat: Use Gemini", ""),
+        command("avf.chat.signIn", "Chat: Sign In to the Chat Agent", ""),
+        command("workbench.action.files.openLocalFile", "File: Open File from Device...", ""),
     )
 
     /** Jupyter-style cell keys; honoured while a notebook is the active editor. */

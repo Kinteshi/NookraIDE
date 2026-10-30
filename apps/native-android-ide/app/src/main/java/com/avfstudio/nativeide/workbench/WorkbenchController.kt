@@ -27,6 +27,14 @@ import com.avfstudio.nativeide.ai.ChatReference
 import com.avfstudio.nativeide.ai.COPILOT_LOGIN_COMMAND
 import com.avfstudio.nativeide.ai.GITHUB_SIGN_IN_COMMAND
 import com.avfstudio.nativeide.ai.stripAnsi
+import com.avfstudio.nativeide.ai.ChatAgentKind
+import com.avfstudio.nativeide.ai.parseSignInLink
+import com.avfstudio.nativeide.document.ContentResolverFileStore
+import com.avfstudio.nativeide.document.devicePath
+import com.avfstudio.nativeide.document.isDevicePath
+import com.avfstudio.nativeide.document.isGuestPath
+import com.avfstudio.nativeide.language.endOfLineHints
+import com.avfstudio.nativeide.language.parseInlayHints
 import com.avfstudio.nativeide.ai.parseDeviceCodePrompt
 import com.avfstudio.nativeide.assets.AssetPackGrammarLoader
 import com.avfstudio.nativeide.assets.AssetPackInstaller
@@ -117,6 +125,7 @@ import org.connectbot.terminal.TerminalEmulatorFactory
 import java.io.File
 import java.io.IOException
 import java.util.UUID
+import kotlin.math.roundToInt
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CompletionException
 import java.util.concurrent.Executors
@@ -130,6 +139,11 @@ private const val RECENT_WORKSPACES_KEY = "recent-workspaces"
 private const val RECENT_WORKSPACES_LIMIT = 10
 /** Untitled (scratch:) files open at the last stop; their text is in the document cache. */
 private const val SESSION_UNTITLED_KEY = "session-untitled"
+/** Device files open at the last stop, read again through their content URI. */
+private const val SESSION_DEVICE_KEY = "session-device"
+/** Per folder, the guest files this device has a copy of (the document cache), for Explorer offline. */
+private const val OFFLINE_FILES_PREFIX = "offline-files:"
+private const val OFFLINE_FILES_LIMIT = 200
 
 /** Copilot starts again after 3, 6 and 12 s when its server fails to start. */
 private const val COPILOT_START_RETRIES = 3
@@ -181,12 +195,14 @@ class WorkbenchController(private val context: Context) {
     private val appVersion =
         runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull() ?: "0"
     val copilot = CopilotClient(vfs, appVersion)
-    val chatAgent = AcpClient(vfs)
+    /** The Chat view's agent; switching agents ([selectChatAgent]) replaces it. */
+    var chatAgent = AcpClient(vfs)
+        private set
     private val defaultSettings =
         JsonParser.parseString("""{"editor":{"fontSize":14,"tabSize":4,"insertSpaces":true}}""").asJsonObject
     private val preferences = context.getSharedPreferences("native-ide-settings", Context.MODE_PRIVATE)
     private val cache = EncryptedDocumentCache(context)
-    val repository = DocumentRepository(vfs, cache)
+    val repository = DocumentRepository(vfs, cache, ContentResolverFileStore(context))
     val editorHost = SoraTextEditorHost()
     private val io = Executors.newSingleThreadExecutor()
     private val timer = Executors.newSingleThreadScheduledExecutor()
@@ -408,6 +424,11 @@ class WorkbenchController(private val context: Context) {
     var chatAgentRunning by mutableStateOf(false)
         private set
     var chatAuthMethods by mutableStateOf(emptyList<AcpAuthMethod>())
+    /** Which agent [chatAgent] is (`avf.chat.agent`). */
+    var chatAgentKind by mutableStateOf(ChatAgentKind.Copilot)
+        private set
+    /** The agent turned a message down for want of a sign-in; the pane offers one. */
+    var chatSignInNeeded by mutableStateOf(false)
     /** Files and excerpts attached to the next chat message. */
     val chatAttachments = mutableStateListOf<ChatReference>()
     /** When set, Quick Open attaches the picked file to chat instead of opening it. */
@@ -428,6 +449,10 @@ class WorkbenchController(private val context: Context) {
         // folders and files.
         recentWorkspaces = loadRecentWorkspaces()
         restoreUntitledFiles()
+        if (settings.chatAgent != ChatAgentKind.Copilot) {
+            chatAgent = AcpClient(vfs, settings.chatAgent.tool)
+            chatAgentKind = settings.chatAgent
+        }
         profiles.firstOrNull { it.id == profileStore.lastUsedId() }?.let(::selectProfile)
         preferences.getString("grammar-load-errors", null)
             ?.takeIf(String::isNotBlank)?.let { status = "Asset-pack grammar load failed: $it" }
@@ -436,6 +461,8 @@ class WorkbenchController(private val context: Context) {
         if (settings.autoConnect && endpoint.isNotBlank() && token.isNotBlank()) {
             autoConnecting = true
             connectGuest()
+        } else if (settings.offlineWorkspace) {
+            openOfflineWorkspace()
         }
     }
 
@@ -478,6 +505,9 @@ class WorkbenchController(private val context: Context) {
                 }
             }
             client.messageListener = { message -> post { status = message } }
+            client.inlayHintRefreshListener = {
+                post { activePath?.takeIf { languageClientFor(it) === client }?.let { scheduleInlayHints(it, delayMs = 100) } }
+            }
         }
         copilot.language.messageListener = { message -> post { status = message } }
         copilot.language.showDocumentHandler = { uri -> openExternal(uri) }
@@ -495,14 +525,21 @@ class WorkbenchController(private val context: Context) {
                 }
             }
         }
+        bindChatAgent()
+    }
+
+    private fun bindChatAgent() {
+        val agent = chatAgent
         // A silent resume replays the conversation the pane already shows; drop that replay.
-        chatAgent.eventListener = { event -> if (!suppressChatReplay) post { appendChat(event) } }
-        chatAgent.configListener = { options -> post { chatConfigOptions = options } }
-        chatAgent.runningListener = { running -> post { chatAgentRunning = running } }
-        chatAgent.exitListener = { message ->
+        agent.eventListener = { event -> if (!suppressChatReplay) post { appendChat(event) } }
+        agent.configListener = { options -> post { if (agent === chatAgent) chatConfigOptions = options } }
+        agent.runningListener = { running -> post { if (agent === chatAgent) chatAgentRunning = running } }
+        agent.exitListener = { message ->
             post {
-                chatBusy = false
-                chatEntries.add(ChatEntry.Notice(message))
+                if (agent === chatAgent) {
+                    chatBusy = false
+                    chatEntries.add(ChatEntry.Notice(message))
+                }
             }
         }
     }
@@ -574,6 +611,7 @@ class WorkbenchController(private val context: Context) {
         val previousTypescriptServer = settings.typescriptLanguageServer
         val previousTypeChecking = settings.pythonTypeChecking
         val previousLintRules = settings.pythonLintRules
+        val previousInlayHints = settings.inlayHints
         userSettings = next
         updateLanguageSettings()
         editorSurface?.applyConfig(editorConfig())
@@ -585,6 +623,8 @@ class WorkbenchController(private val context: Context) {
         }
         if (settings.pythonLintRules != previousLintRules) restartLanguageServer("python-format")
         if (settings.typescriptLanguageServer != previousTypescriptServer) restartLanguageServer("typescript")
+        if (settings.chatAgent != chatAgentKind) switchChatAgent(settings.chatAgent)
+        if (settings.inlayHints != previousInlayHints) activePath?.let { scheduleInlayHints(it, delayMs = 0) }
     }
 
     /**
@@ -619,6 +659,7 @@ class WorkbenchController(private val context: Context) {
             problemUnderlines = it.problemUnderlines,
             showUnused = it.showUnused,
             showDeprecated = it.showDeprecated,
+            pinchToZoom = it.pinchToZoom,
         )
     }
 
@@ -765,9 +806,12 @@ class WorkbenchController(private val context: Context) {
                     guestRoots.isEmpty() -> "Connected; guest has no workspace roots"
                     else -> "Guest connected"
                 }
+                // A folder opened offline may belong to another guest than this one.
+                if (workspaceRoot?.let { root -> guestRoots.none { isPathWithinRoot(root, it) } } == true) workspaceRoot = null
                 if (workspaceRoot == null) chooseWorkspace(guestRoots, ::onWorkspaceConnected) else onWorkspaceConnected(workspaceRoot!!)
                 reattachTerminals()
-                documents.filter { it.dirty && !it.path.startsWith("scratch:") }.forEach(::reconcileDocument)
+                documents.filter { it.dirty && isGuestPath(it.path) }.forEach(::reconcileDocument)
+                refreshCleanDocuments()
             }
         }
     }
@@ -952,7 +996,7 @@ class WorkbenchController(private val context: Context) {
                 add(if (language == "python") "${settings.pythonLanguageServer} (Python)" else languageServerTool(language))
             }
             if (copilot.language.isStarted) add("Copilot language server (~280 MB)")
-            if (chatAgent.isStarted) add("Copilot chat agent (~290 MB)")
+            if (chatAgent.isStarted) add("${chatAgentKind.label} chat agent (${chatAgentKind.memoryNote})")
             notebooks.values.count { it.kernel.isStarted }.takeIf { it > 0 }?.let { add("$it Jupyter kernel${if (it == 1) "" else "s"}") }
             if (debugger.isStarted) add("Python debugger")
             terminals.count { !it.exited }.takeIf { it > 0 }?.let { add("$it terminal${if (it == 1) "" else "s"}") }
@@ -991,7 +1035,7 @@ class WorkbenchController(private val context: Context) {
         private set
 
     fun toggleBreakpoint(path: String? = activePath, line: Int? = editorSurface?.selectionStart()?.line?.plus(1)) {
-        if (path == null || line == null || path.startsWith("scratch:")) return
+        if (path == null || line == null || !isGuestPath(path)) return
         val lines = breakpoints[path].orEmpty()
         val updated = if (line in lines) lines - line else lines + line
         if (updated.isEmpty()) breakpoints.remove(path) else breakpoints[path] = updated
@@ -1018,7 +1062,7 @@ class WorkbenchController(private val context: Context) {
             status = "Connect to a guest and open a Python file to debug"
             return
         }
-        if (document.path.startsWith("scratch:") || document.languageId != "py") {
+        if (!isGuestPath(document.path) || document.languageId != "py") {
             status = "Debugging runs saved Python files; open a .py file in the workspace"
             return
         }
@@ -1404,7 +1448,8 @@ class WorkbenchController(private val context: Context) {
     private fun runGit(label: String?, operation: GitOperation, then: (GitResult) -> Unit = {}) {
         val repo = workspaceRoot
         if (repo == null || !vfs.isConnected()) {
-            status = "Connect to a guest to use Git"
+            // Only when asked for: background refreshes (after a save, offline) stay quiet.
+            if (label != null) status = "Connect to a guest to use Git"
             return
         }
         if (label != null) gitBusy = label
@@ -1584,6 +1629,7 @@ class WorkbenchController(private val context: Context) {
     }
 
     private fun onConnectFailed(error: Throwable) {
+        if (workspaceRoot == null && settings.offlineWorkspace) openOfflineWorkspace()
         val causes = generateSequence(error) { it.cause }.toList()
         val rejected = causes.filterIsInstance<GuestRejectedException>().firstOrNull()
         val unreachable = causes.any { it is java.net.ConnectException || it is java.net.SocketTimeoutException }
@@ -1756,14 +1802,18 @@ class WorkbenchController(private val context: Context) {
     private fun persistSession() {
         val gson = com.google.gson.Gson()
         val untitled = documents.map { it.path }.filter { it.startsWith("scratch:") }
-        preferences.edit().putString(SESSION_UNTITLED_KEY, gson.toJson(untitled)).apply()
+        val device = documents.map { it.path }.filter(::isDevicePath)
+        preferences.edit()
+            .putString(SESSION_UNTITLED_KEY, gson.toJson(untitled))
+            .putString(SESSION_DEVICE_KEY, gson.toJson(device))
+            .apply()
         // Before a workspace's tabs are restored the list is partial, and while switching the old
         // tabs close one by one: neither may overwrite what was saved.
         val workspace = sessionWorkspace ?: return
         if (!sessionRestored || switchingWorkspace) return
         val session = WorkspaceSession(
-            open = documents.map { it.path }.filterNot { it.startsWith("scratch:") },
-            active = activePath?.takeUnless { it.startsWith("scratch:") },
+            open = documents.map { it.path }.filter(::isGuestPath),
+            active = activePath?.takeIf(::isGuestPath),
             directory = currentDirectory.ifEmpty { null },
             expanded = expandedFolders.toList(),
         )
@@ -1780,6 +1830,8 @@ class WorkbenchController(private val context: Context) {
             ?: legacySession(workspace)
         val open = saved.open.orEmpty().filter { isPathWithinRoot(it, workspace) }
         open.sortedBy { it == saved.active }.forEach(::openPath)
+        // Offline there is no folder to list; Explorer shows the files this device has instead.
+        if (!vfs.isConnected()) return
         saved.directory?.takeIf { isPathWithinRoot(it, workspace) && it != workspace }?.let(::loadDirectory)
         saved.expanded.orEmpty().filter { isPathWithinRoot(it, workspace) }.forEach { path ->
             expandedFolders.add(path)
@@ -1811,6 +1863,101 @@ class WorkbenchController(private val context: Context) {
             documents.add(DocumentSession(cached.path, cached.text, cached.modifiedTs, cached.dirty, encoding = cached.encoding, eol = cached.eol))
         }
         activePath = documents.lastOrNull()?.path
+        runCatching {
+            com.google.gson.Gson().fromJson(preferences.getString(SESSION_DEVICE_KEY, "[]"), Array<String>::class.java).toList()
+        }.getOrDefault(emptyList()).filter(::isDevicePath).forEach(::openPath)
+    }
+
+    // Offline ---------------------------------------------------------------------------------
+
+    /** A folder is open but no guest is connected: tabs come from this device's copies. */
+    val offline: Boolean get() = workspaceRoot != null && !connected
+
+    /** Set by the activity: Android's file picker, whose choice comes back as [openDeviceFile]. */
+    var pickLocalFile: (() -> Unit)? = null
+
+    /**
+     * Without a guest, opens a recent folder ([path], else the last one) from this device's
+     * copies: its tabs as they were, editable; saves wait for the guest (the offline queue).
+     */
+    fun openOfflineWorkspace(path: String? = null) {
+        if (connected) return
+        val target = path ?: recentWorkspaces.firstOrNull() ?: return
+        if (workspaceRoot == target) return
+        // Another folder's tabs close as on switching folders: unsaved edits stay as drafts.
+        persistSession()
+        documents.filter { isGuestPath(it.path) }.forEach { document ->
+            io.execute { repository.persistDraft(document) }
+            closeDocument(document.path)
+        }
+        workspaceRoot = target
+        sessionWorkspace = target
+        sessionRestored = false
+        restoreSession(target)
+        status = "Offline: ${target.substringAfterLast('/')} from this device; saves wait for the guest"
+    }
+
+    /** The guest files of [workspace] this device keeps a copy of, for Explorer offline: the ones opened since, and its tabs. */
+    fun offlineFiles(workspace: String? = workspaceRoot): List<String> {
+        if (workspace == null) return emptyList()
+        val remembered = runCatching {
+            com.google.gson.Gson().fromJson(preferences.getString(OFFLINE_FILES_PREFIX + workspace, "[]"), Array<String>::class.java).toList()
+        }.getOrDefault(emptyList())
+        val tabs = runCatching {
+            com.google.gson.Gson().fromJson(preferences.getString(workspaceSessionKey(workspace), null), WorkspaceSession::class.java).open.orEmpty()
+        }.getOrDefault(emptyList())
+        return (remembered + tabs).distinct().filter(repository::hasCopy)
+    }
+
+    private fun rememberOfflineFile(path: String) {
+        val workspace = workspaceRoot?.takeIf { isPathWithinRoot(path, it) } ?: return
+        val files = (listOf(path) + offlineFiles(workspace).filterNot { it == path }).take(OFFLINE_FILES_LIMIT)
+        preferences.edit().putString(OFFLINE_FILES_PREFIX + workspace, com.google.gson.Gson().toJson(files)).apply()
+    }
+
+    private fun forgetOfflineFile(path: String) {
+        val workspace = workspaceRoot ?: return
+        val files = offlineFiles(workspace)
+        if (path in files) preferences.edit().putString(OFFLINE_FILES_PREFIX + workspace, com.google.gson.Gson().toJson(files - path)).apply()
+    }
+
+    /** A file picked in Android's picker: kept readable and writable across restarts, then opened. */
+    fun openDeviceFile(uri: android.net.Uri) {
+        val resolver = context.contentResolver
+        val flags = android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+        runCatching { resolver.takePersistableUriPermission(uri, flags) }
+            .recoverCatching { resolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+        val name = runCatching {
+            resolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) cursor.getString(0) else null
+            }
+        }.getOrNull() ?: uri.lastPathSegment?.substringAfterLast('/') ?: "file"
+        openPath(devicePath(uri.toString(), name))
+    }
+
+    /**
+     * After (re)connecting: clean tabs whose file changed in the guest meanwhile (opened offline
+     * from an older copy, or edited elsewhere) are read again. Edited tabs go through
+     * [reconcileDocument] and its conflict check instead.
+     */
+    private fun refreshCleanDocuments() {
+        documents.filter { isGuestPath(it.path) && !it.dirty && it.path !in notebooks }.forEach { document ->
+            vfs.stat(document.path).whenComplete { entry, error ->
+                if (error != null || entry.isDirectory || entry.modifiedTs == document.baseModifiedTs) return@whenComplete
+                repository.open(document.path).whenComplete { result, _ ->
+                    val fresh = (result as? OpenDocument.Editable)?.document ?: return@whenComplete
+                    post {
+                        if (document.dirty || documents.none { it === document } || fresh.text == document.text) return@post
+                        document.baseModifiedTs = fresh.baseModifiedTs
+                        document.updateText(fresh.text)
+                        document.markSaved(fresh.text)
+                        if (activePath == document.path) editorSurface?.setText(fresh.text)
+                        documentRevision++
+                        status = "Reloaded ${document.path.substringAfterLast('/')}: it changed in the guest"
+                    }
+                }
+            }
+        }
     }
 
     // Workspaces ------------------------------------------------------------------------------
@@ -1907,7 +2054,7 @@ class WorkbenchController(private val context: Context) {
         if (target == workspaceRoot) return
         persistSession()
         switchingWorkspace = true
-        documents.map { it.path }.filterNot { it.startsWith("scratch:") }.forEach { open ->
+        documents.map { it.path }.filter(::isGuestPath).forEach { open ->
             notebooks[open]?.takeIf { it.notebook.dirty }?.let { session -> session.document.updateText(session.notebook.toJson()) }
             documents.firstOrNull { it.path == open }?.let { document -> io.execute { repository.persistDraft(document) } }
             closeDocument(open)
@@ -2071,7 +2218,8 @@ class WorkbenchController(private val context: Context) {
     }
 
     fun openPath(path: String) {
-        if (!vfs.isConnected()) {
+        // Offline, a guest file opens from this device's copy if there is one.
+        if (!vfs.isConnected() && isGuestPath(path) && !repository.hasCopy(path)) {
             status = "Connect to a guest before opening files"
             return
         }
@@ -2092,6 +2240,7 @@ class WorkbenchController(private val context: Context) {
         }
         when (result) {
             is OpenDocument.Editable -> {
+                if (isGuestPath(result.document.path) && vfs.isConnected()) rememberOfflineFile(result.document.path)
                 val existing = documents.firstOrNull { it.path == result.document.path }
                 val session = existing ?: result.document.also(documents::add)
                 if (session.path.endsWith(".ipynb", ignoreCase = true) && !openNotebook(session)) {
@@ -2175,6 +2324,7 @@ class WorkbenchController(private val context: Context) {
         dialog = null
         closeDocument(path)
         repository.forget(path)
+        forgetOfflineFile(path)
         continueClosing()
     }
 
@@ -2191,11 +2341,59 @@ class WorkbenchController(private val context: Context) {
         documents.firstOrNull { it.path == path }?.let(closedDocuments::add)
         notifyDocumentClosed(path)
         notebooks.remove(path)?.kernel?.stop()
+        markdownPreviews.remove(path)
         closeNotebookMirror(path)
         documents.removeAll { it.path == path }
         if (activePath == path) activePath = documents.lastOrNull()?.path
         persistSession()
         scheduleIdleServerStop()
+    }
+
+    // Markdown preview ----------------------------------------------------------------------------
+
+    /** Markdown files shown with their preview, beside the editor or instead of it. */
+    val markdownPreviews = mutableStateMapOf<String, MarkdownPreviewMode>()
+
+    /** Ctrl+Shift+V and Ctrl+K V; the same again goes back to the editor alone. */
+    fun toggleMarkdownPreview(mode: MarkdownPreviewMode, path: String? = activePath) {
+        if (path == null || !isMarkdownPath(path)) {
+            status = "The preview is for Markdown files"
+            return
+        }
+        if (markdownPreviews[path] == mode) markdownPreviews.remove(path) else markdownPreviews[path] = mode
+    }
+
+    /**
+     * A link tapped in the preview. Relative links resolve against the file's folder under
+     * [MARKDOWN_BASE_HOST]: guest files open in the editor (folders in Explorer); web links open
+     * in the browser.
+     */
+    fun openMarkdownLink(url: String) {
+        val uri = android.net.Uri.parse(url)
+        if (uri.host == MARKDOWN_BASE_HOST) {
+            val path = uri.path?.takeIf { it.startsWith("/") } ?: return
+            if (roots.none { isPathWithinRoot(path, it) }) {
+                status = "$path is outside the guest's folders"
+                return
+            }
+            vfs.stat(path).whenComplete { entry, error ->
+                post {
+                    when {
+                        error != null -> status = "No file at $path"
+                        entry.isDirectory -> navigateToDirectory(path)
+                        else -> openPath(path)
+                    }
+                }
+            }
+        } else if (uri.scheme in setOf("http", "https", "mailto")) {
+            openLink(url)
+        }
+    }
+
+    /** An image the preview shows, read from the guest (on the WebView's loader thread). */
+    fun readPreviewImage(path: String): ByteArray? {
+        if (!vfs.isConnected() || roots.none { isPathWithinRoot(path, it) }) return null
+        return runCatching { repository.readBytes(path, MAX_PREVIEW_IMAGE_BYTES).get(15, TimeUnit.SECONDS) }.getOrNull()
     }
 
     fun onDocumentEdited(document: DocumentSession) {
@@ -2365,7 +2563,7 @@ class WorkbenchController(private val context: Context) {
     }
 
     fun beginRenameEntry(path: String? = activePath) {
-        if (path == null || path.startsWith("scratch:")) {
+        if (path == null || !isGuestPath(path)) {
             status = "Open or select a saved file to rename"
             return
         }
@@ -2373,7 +2571,7 @@ class WorkbenchController(private val context: Context) {
     }
 
     fun beginDeleteEntry(path: String? = activePath, isDirectory: Boolean = false) {
-        if (path == null || path.startsWith("scratch:")) {
+        if (path == null || !isGuestPath(path)) {
             status = "Open or select a saved file to delete"
             return
         }
@@ -2542,6 +2740,9 @@ class WorkbenchController(private val context: Context) {
         editorProblemLines = problemLines(problems)
         editorProblemMarks = if (settings.problemUnderlines) problemMarks(problems, surface.lineCount) else emptyList()
         refreshLineMarks()
+        // A problem dot can widen the gutter, which moves the text: the overlays drawn at text
+        // positions (inlay hints, ghost text) follow once the editor has laid it out again.
+        mainHandler.postDelayed({ editorViewportTick++ }, 50)
     }
 
     /** The URI a language server reports a document's diagnostics under. */
@@ -2587,15 +2788,43 @@ class WorkbenchController(private val context: Context) {
                         scheduleOutlineRefresh(event.uri)
                         scheduleInlineSuggestion()
                         afterEditForHints(event.uri)
+                        // Hints are kept by line; once lines come or go they'd sit on the wrong ones.
+                        if (editorSurface?.lineCount != inlayHintLineCount) inlayHintLines = emptyMap()
+                        scheduleInlayHints(event.uri)
                     }
                 }
             }
-            is EditorEvent.ViewportChanged -> post { editorViewportTick++ }
+            is EditorEvent.ViewportChanged -> post {
+                editorViewportTick++
+                // Hints are asked for around the visible lines; scrolling past them asks again.
+                val window = inlayHintWindow
+                if (event.uri == activePath && settings.inlayHints && (window == null ||
+                        event.visibleLines.first < window.first || event.visibleLines.last > window.last)
+                ) {
+                    scheduleInlayHints(event.uri, delayMs = 150)
+                }
+            }
             is EditorEvent.FocusChanged -> post {
                 if (event.focused) focusArea = FocusArea.Editor else if (focusArea == FocusArea.Editor) focusArea = FocusArea.Other
             }
+            is EditorEvent.Zoomed -> post {
+                editorViewportTick++
+                // Saved once the fingers stop, rounded like the Settings slider.
+                val size = event.fontSizeSp.roundToInt().coerceIn(8, 40)
+                scheduledZoomSave?.cancel(false)
+                scheduledZoomSave = timer.schedule({
+                    post {
+                        if (size.toFloat() != settings.editorFontSize) {
+                            updateSetting(WorkbenchSettings.EDITOR_FONT_SIZE, size)
+                            status = "Editor font size $size"
+                        }
+                    }
+                }, 600, TimeUnit.MILLISECONDS)
+            }
         }
     }
+
+    private var scheduledZoomSave: ScheduledFuture<*>? = null
 
     private fun cursorWithinSuggestion(suggestion: CopilotSuggestion, position: LspPosition): Boolean =
         position.line == suggestion.range.start.line && position.character >= suggestion.range.start.character
@@ -2603,14 +2832,14 @@ class WorkbenchController(private val context: Context) {
     // Language servers ------------------------------------------------------------------------
 
     fun languageClientFor(path: String): LanguageClient? =
-        when (path.substringAfterLast('.', "").lowercase()) {
+        if (isDevicePath(path)) null else when (path.substringAfterLast('.', "").lowercase()) {
             "py", "pyi" -> languageClients["python"]
             "ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs" -> languageClients["typescript"]
             else -> null
         }
 
     private fun languageClientsFor(path: String): List<LanguageClient> =
-        listOfNotNull(
+        if (isDevicePath(path)) emptyList() else listOfNotNull(
             languageClientFor(path),
             if (path.substringAfterLast('.', "").lowercase() in setOf("py", "pyi")) languageClients["python-format"] else null,
         ).distinct()
@@ -2658,7 +2887,8 @@ class WorkbenchController(private val context: Context) {
         }
 
     private fun notifyDocumentOpened(document: DocumentSession) {
-        if (document.path in notebooks) return
+        // Device files have no guest path for the servers (or Copilot) to know them by.
+        if (document.path in notebooks || isDevicePath(document.path)) return
         lspLanguageId(document.path)?.let { languageId ->
             languageClientsFor(document.path).filter { it.isReady }.forEach { client ->
                 lspLog { "didOpen ${document.path} v${document.version} (${document.text.length} chars) in ${languageClients.entries.firstOrNull { it.value === client }?.key}" }
@@ -2671,11 +2901,13 @@ class WorkbenchController(private val context: Context) {
     }
 
     private fun notifyDocumentChanged(path: String, version: Long, text: String) {
+        if (isDevicePath(path)) return
         languageClientsFor(path).filter { it.isReady }.forEach { client -> client.didChange(path, version, text) }
         if (copilot.language.isReady) copilot.language.didChange(path, version, text)
     }
 
     private fun notifyDocumentClosed(path: String) {
+        if (isDevicePath(path)) return
         languageClientsFor(path).forEach { it.didClose(path) }
         copilot.language.didClose(path)
     }
@@ -2717,6 +2949,7 @@ class WorkbenchController(private val context: Context) {
                         if (activePath == document.path) {
                             refreshOutline(document)
                             refreshSemanticTokens(document)
+                            scheduleInlayHints(document.path, delayMs = 0)
                         }
                     }
                 }
@@ -2759,10 +2992,12 @@ class WorkbenchController(private val context: Context) {
         clearInlineSuggestion()
         closeParameterHints()
         clearSymbolHighlights()
+        clearInlayHints()
         refreshEditorProblems()
         activeDocument?.let { document ->
             refreshOutline(document)
             refreshSemanticTokens(document)
+            scheduleInlayHints(document.path, delayMs = 0)
         }
         if (copilot.language.isReady) copilot.didFocus(activePath)
     }
@@ -3345,6 +3580,60 @@ class WorkbenchController(private val context: Context) {
         }
     }
 
+    // Inlay hints ---------------------------------------------------------------------------------
+
+    /** The active file's inlay hints as their line-end text, by line. */
+    var inlayHintLines by mutableStateOf<Map<Int, List<String>>>(emptyMap())
+        private set
+    /** The lines the shown hints were asked for. */
+    private var inlayHintWindow: IntRange? = null
+    private var scheduledInlayHints: ScheduledFuture<*>? = null
+    private var inlayHintRequest = 0L
+    private var inlayHintLineCount = 0
+
+    private fun scheduleInlayHints(path: String, delayMs: Long = 400) {
+        scheduledInlayHints?.cancel(false)
+        if (!settings.inlayHints) {
+            clearInlayHints()
+            return
+        }
+        scheduledInlayHints = timer.schedule({ post { requestInlayHints(path) } }, delayMs, TimeUnit.MILLISECONDS)
+    }
+
+    /** Asks for the visible lines and 100 on either side, so a short scroll needs no new request. */
+    private fun requestInlayHints(path: String) {
+        val document = activeDocument?.takeIf { it.path == path && activeNotebook == null } ?: return
+        val client = languageClientFor(path)?.takeIf { it.isReady && it.supportsInlayHints } ?: return
+        val surface = editorSurface ?: return
+        val visible = surface.visibleLines
+        val lastLine = surface.lineCount - 1
+        val first = (visible.first - 100).coerceIn(0, lastLine)
+        val last = (visible.last + 100).coerceIn(first, lastLine)
+        val range = LspRange(LspPosition(first, 0), LspPosition(last, surface.lineText(last).length))
+        val version = document.version
+        val id = ++inlayHintRequest
+        client.inlayHints(path, range).whenComplete { result, error ->
+            post {
+                if (id != inlayHintRequest || activePath != path) return@post
+                // ContentModified: a newer edit is on its way, and so is the request after it.
+                if (error != null || document.version != version) return@post
+                val current = editorSurface ?: return@post
+                inlayHintWindow = first..last
+                inlayHintLineCount = current.lineCount
+                inlayHintLines = parseInlayHints(result).groupBy { it.position.line }
+                    .filterKeys { it < current.lineCount }
+                    .mapValues { (line, hints) -> endOfLineHints(current.lineText(line), hints) }
+            }
+        }
+    }
+
+    private fun clearInlayHints() {
+        scheduledInlayHints?.cancel(false)
+        inlayHintRequest++
+        inlayHintWindow = null
+        inlayHintLines = emptyMap()
+    }
+
     private fun clearSymbolHighlights() {
         scheduledHighlights?.cancel(false)
         highlightRequest++
@@ -3573,6 +3862,7 @@ class WorkbenchController(private val context: Context) {
     }
 
     private fun requestInlineSuggestion(invoked: Boolean) {
+        if (activePath?.let(::isDevicePath) == true) return
         val document = activeDocument ?: return
         val surface = editorSurface ?: return
         if (!copilotEnabled || !copilot.language.isReady) {
@@ -3697,17 +3987,40 @@ class WorkbenchController(private val context: Context) {
                 chatAuthMethods = chatAgent.authMethods.takeIf { !chatAgent.hasSession }.orEmpty()
                 val cause = (error as? CompletionException)?.cause ?: error
                 when {
-                    cause is JsonRpcException && cause.code == -32000 -> chatEntries.add(
-                        ChatEntry.Notice(
-                            "Copilot chat needs its own GitHub sign-in (separate from inline suggestions). " +
-                                "Tap “Sign in” for one GitHub login shared with Git, then send again. " +
-                                "If chat still asks, run “Copilot: Sign In to Chat with copilot login” from the command palette.",
-                        ),
-                    )
-                    cause != null -> chatEntries.add(ChatEntry.Notice("Agent error: ${cause.message}"))
+                    cause is JsonRpcException && cause.code == -32000 -> {
+                        chatSignInNeeded = true
+                        chatEntries.add(ChatEntry.Notice(signInNotice(chatAgentKind)))
+                    }
+                    cause != null -> chatProblem(cause, "Agent error")
                     stopReason != "end_turn" -> chatEntries.add(ChatEntry.Notice("Turn ended: $stopReason"))
                 }
             }
+        }
+    }
+
+    /** What the pane says when the agent wants a sign-in first. */
+    private fun signInNotice(kind: ChatAgentKind): String = when (kind) {
+        ChatAgentKind.Copilot ->
+            "Copilot chat needs its own GitHub sign-in (separate from inline suggestions). " +
+                "Tap “Sign in” for one GitHub login shared with Git, then send again. " +
+                "If chat still asks, run “Copilot: Sign In to Chat with copilot login” from the command palette."
+        ChatAgentKind.ClaudeCode ->
+            "Claude Code needs a sign-in with your Claude account. Tap “Sign in”, open the page, and paste the code it shows."
+        ChatAgentKind.Gemini ->
+            "Gemini needs a sign-in with your Google account. Tap “Sign in”, open the page, and paste the code it shows. " +
+                "An API key works too: put GEMINI_API_KEY=… in ~/.gemini/.env in the guest."
+    }
+
+    /** A failed chat request: when the agent isn't installed, the notice comes with an offer to install it. */
+    private fun chatProblem(error: Throwable, prefix: String) {
+        val cause = (error as? CompletionException)?.cause ?: error
+        val message = cause.message.orEmpty()
+        val missing = missingDependencyIn(message)
+        if (missing != null) {
+            chatEntries.add(ChatEntry.Notice("${missing.label} isn't installed in the guest yet."))
+            offerInstall(missing, "${missing.label} answers in the Chat view")
+        } else {
+            chatEntries.add(ChatEntry.Notice("$prefix: $message"))
         }
     }
 
@@ -3838,9 +4151,51 @@ class WorkbenchController(private val context: Context) {
 
     private fun chatSessionName(id: String): String? = preferences.getString("chat-title-$id", null)
 
-    /** Copilot CLI reads the reasoning effort at launch only; ACP has no option for it. */
+    /** Copilot CLI reads the reasoning effort at launch only; ACP has no option for it. Claude Code offers effort as a session option instead. */
     private fun chatAgentArgs(): List<String> =
-        settings.chatReasoningEffort.takeIf { it.isNotEmpty() }?.let { listOf("--reasoning-effort", it) }.orEmpty()
+        settings.chatReasoningEffort.takeIf { it.isNotEmpty() && chatAgentKind == ChatAgentKind.Copilot }
+            ?.let { listOf("--reasoning-effort", it) }.orEmpty()
+
+    /** Each agent remembers its own choices; Copilot keeps the keys it had before there were others. */
+    private fun chatOptionKey(id: String): String =
+        if (chatAgentKind == ChatAgentKind.Copilot) "chat-option-$id" else "chat-option-${chatAgentKind.key}-$id"
+
+    /** Saves the agent choice; [switchChatAgent] follows from the settings change. */
+    fun selectChatAgent(kind: ChatAgentKind) {
+        if (kind == chatAgentKind) return
+        if (chatBusy) {
+            status = "Wait for the current reply, or stop it, before switching agents"
+            return
+        }
+        updateSetting(WorkbenchSettings.CHAT_AGENT, kind.key)
+    }
+
+    /**
+     * Another agent answers from the next message on. The chat shown belongs to the old agent,
+     * which keeps it in its own history, so the pane starts empty.
+     */
+    private fun switchChatAgent(kind: ChatAgentKind) {
+        val previous = chatAgent
+        previous.eventListener = null
+        previous.configListener = null
+        previous.runningListener = null
+        previous.exitListener = null
+        previous.stop()
+        scheduledChatStop?.cancel(false)
+        chatAgent = AcpClient(vfs, kind.tool)
+        chatAgentKind = kind
+        bindChatAgent()
+        chatAgentRunning = false
+        chatBusy = false
+        chatConfigOptions = emptyList()
+        chatAuthMethods = emptyList()
+        chatSignInNeeded = false
+        chatShownSession = null
+        chatSessions = emptyList()
+        showChatHistory = false
+        chatEntries.clear()
+        status = "Chat uses ${kind.label}"
+    }
 
     /** Saves the effort; a running agent ends so the next message starts one with it. */
     fun setChatReasoningEffort(effort: String) {
@@ -3857,7 +4212,7 @@ class WorkbenchController(private val context: Context) {
     private fun applyRememberedChatOptions(): CompletableFuture<Unit> {
         var chain = CompletableFuture.completedFuture(Unit)
         chatAgent.configOptions.filter { it.category in rememberedChatCategories }.forEach { option ->
-            val saved = preferences.getString("chat-option-${option.id}", null)
+            val saved = preferences.getString(chatOptionKey(option.id), null)
             // The agent's own name for the saved value, for the picker before the next session.
             option.choices.firstOrNull { it.value == saved }?.let { rememberChatChoice(option.id, it.value, it.name) }
             if (saved != null && saved != option.current && option.choices.any { it.value == saved }) {
@@ -3876,7 +4231,7 @@ class WorkbenchController(private val context: Context) {
             post {
                 chatOptionsLoading = false
                 scheduleChatStop()
-                if (error != null) status = "Copilot chat: ${(error.cause ?: error).message}"
+                if (error != null) chatProblem(error, "${chatAgentKind.label} chat")
             }
         }
     }
@@ -3894,19 +4249,19 @@ class WorkbenchController(private val context: Context) {
     /** Saves a choice to re-apply; the name is kept with the value it names, so it can't go stale. */
     private fun rememberChatChoice(id: String, value: String, name: String?) {
         preferences.edit()
-            .putString("chat-option-$id", value)
+            .putString(chatOptionKey(id), value)
             .apply {
-                if (name != null) putString("chat-option-$id-name", name).putString("chat-option-$id-name-of", value)
-                else remove("chat-option-$id-name").remove("chat-option-$id-name-of")
+                if (name != null) putString("${chatOptionKey(id)}-name", name).putString("${chatOptionKey(id)}-name-of", value)
+                else remove("${chatOptionKey(id)}-name").remove("${chatOptionKey(id)}-name-of")
             }
             .apply()
     }
 
     /** What the picker shows before a session exists: the remembered choice's name, if it will be re-applied. */
     fun rememberedChatChoice(id: String): String? {
-        val value = preferences.getString("chat-option-$id", null)?.takeUnless { it.endsWith("#autopilot") } ?: return null
-        return preferences.getString("chat-option-$id-name", null)
-            ?.takeIf { preferences.getString("chat-option-$id-name-of", null) == value }
+        val value = preferences.getString(chatOptionKey(id), null)?.takeUnless { it.endsWith("#autopilot") } ?: return null
+        return preferences.getString("${chatOptionKey(id)}-name", null)
+            ?.takeIf { preferences.getString("${chatOptionKey(id)}-name-of", null) == value }
             ?: chatValueLabel(value)
     }
 
@@ -3950,11 +4305,11 @@ class WorkbenchController(private val context: Context) {
         chatAttachments.removeAll { it.path == reference.path && it.startLine == reference.startLine && it.detail == reference.detail }
         chatAttachments.add(reference)
         chatVisible = true
-        status = "Added ${reference.label} to Copilot chat"
+        status = "Added ${reference.label} to chat"
     }
 
     fun attachFileToChat(path: String? = activePath) {
-        if (path == null || path.startsWith("scratch:")) {
+        if (path == null || !isGuestPath(path)) {
             status = "Save the file to the guest before adding it to chat"
             return
         }
@@ -3963,7 +4318,7 @@ class WorkbenchController(private val context: Context) {
 
     /** The editor selection (or the cursor's line), or the selected notebook cell, as an excerpt. */
     fun attachSelectionToChat() {
-        val path = activePath?.takeUnless { it.startsWith("scratch:") } ?: run {
+        val path = activePath?.takeIf(::isGuestPath) ?: run {
             status = "Save the file to the guest before adding it to chat"
             return
         }
@@ -3996,6 +4351,64 @@ class WorkbenchController(private val context: Context) {
 
     fun removeChatAttachment(reference: ChatReference) {
         chatAttachments.remove(reference)
+    }
+
+    /** The pane's and Settings' Sign in: Copilot through the GitHub CLI, the others with their own CLI. */
+    fun signInChatAgent() {
+        val kind = chatAgentKind
+        if (kind == ChatAgentKind.Copilot) {
+            signInGitHubInTerminal()
+            return
+        }
+        val dependency = GuestDependency.forAgent(kind)
+        if (dependency != null && guestTool(dependency) == DependencyState.Missing) {
+            offerInstall(dependency, "${kind.label} answers in the Chat view") { signInChatAgent() }
+            return
+        }
+        chatAgent.stop()
+        chatAuthMethods = emptyList()
+        chatSignInNeeded = false
+        chatVisible = true
+        val output = StringBuilder()
+        var shown = false
+        var terminal: UUID? = null
+        terminal = newTerminal(
+            kind.loginCommand,
+            onOutput = { text ->
+                if (!shown) {
+                    output.append(text)
+                    if (output.length > 32_768) output.delete(0, output.length - 8_192)
+                    val id = terminal
+                    parseSignInLink(output.toString())?.takeIf { id != null }?.let { link ->
+                        shown = true
+                        post { chatEntries.add(ChatEntry.SignInLink(kind.label, link.url, id!!, quitAfterCode = kind == ChatAgentKind.Gemini)) }
+                    }
+                }
+            },
+            onExit = { code ->
+                post {
+                    if (code == 0) finishChatSignIn(true, "Signed in to ${kind.label}. Send your message again.")
+                    else finishChatSignIn(false, "${kind.label} sign-in did not finish; the terminal shows why.")
+                }
+            },
+        )
+        chatLoginTerminal = terminal
+        if (terminal != null) chatEntries.add(ChatEntry.Notice("Signing in to ${kind.label} in the terminal…"))
+    }
+
+    /** Types the code the sign-in page showed into the waiting login. */
+    fun sendSignInCode(entry: ChatEntry.SignInLink, code: String) {
+        val trimmed = code.trim()
+        if (trimmed.isEmpty()) return
+        vfs.ptyInput(entry.terminal, (trimmed + "\r").toByteArray())
+        val index = chatEntries.indexOf(entry)
+        if (index >= 0) chatEntries[index] = entry.copy(codeSent = true)
+    }
+
+    /** Gemini stays open after signing in; this quits it, which ends the login's shell. */
+    fun closeSignInAgent(entry: ChatEntry.SignInLink) {
+        vfs.ptyInput(entry.terminal, "/quit".toByteArray())
+        timer.schedule({ vfs.ptyInput(entry.terminal, "\r".toByteArray()) }, 400, TimeUnit.MILLISECONDS)
     }
 
     /** Copilot CLI keeps its own credentials, so chat sign-in runs `copilot login` in a terminal
@@ -4089,9 +4502,13 @@ class WorkbenchController(private val context: Context) {
     private fun finishChatSignIn(success: Boolean, notice: String) {
         if (chatLoginTerminal == null) return
         chatLoginTerminal = null
-        val index = chatEntries.indexOfLast { it is ChatEntry.DeviceCode }
+        val index = chatEntries.indexOfLast { it is ChatEntry.DeviceCode || it is ChatEntry.SignInLink }
         if (success && index >= 0) {
-            chatEntries[index] = (chatEntries[index] as ChatEntry.DeviceCode).copy(done = true)
+            chatEntries[index] = when (val entry = chatEntries[index]) {
+                is ChatEntry.DeviceCode -> entry.copy(done = true)
+                is ChatEntry.SignInLink -> entry.copy(done = true)
+                else -> entry
+            }
         } else if (index >= 0) {
             chatEntries.removeAt(index)
         }
@@ -4236,7 +4653,7 @@ class WorkbenchController(private val context: Context) {
 
     private fun runActiveFile() {
         val document = activeDocument ?: return
-        if (document.path.startsWith("scratch:")) {
+        if (!isGuestPath(document.path)) {
             status = "Save the file to the guest workspace before running it"
             return
         }
@@ -5049,6 +5466,13 @@ class WorkbenchController(private val context: Context) {
             }
             "github.copilot.chat.signIn" -> signInGitHubInTerminal()
             "github.copilot.chat.signInCli" -> signInChatInTerminal()
+            "avf.chat.selectCopilot" -> selectChatAgent(ChatAgentKind.Copilot)
+            "avf.chat.selectClaudeCode" -> selectChatAgent(ChatAgentKind.ClaudeCode)
+            "avf.chat.selectGemini" -> selectChatAgent(ChatAgentKind.Gemini)
+            "avf.chat.signIn" -> signInChatAgent()
+            "markdown.showPreview" -> toggleMarkdownPreview(MarkdownPreviewMode.Only)
+            "markdown.showPreviewToSide" -> toggleMarkdownPreview(MarkdownPreviewMode.Side)
+            "workbench.action.files.openLocalFile" -> pickLocalFile?.invoke()
             "github.signIn" -> signInGitHubInTerminal()
             "github.copilot.chat.attachFile" -> attachFileToChat()
             "github.copilot.chat.attachSelection" -> attachSelectionToChat()

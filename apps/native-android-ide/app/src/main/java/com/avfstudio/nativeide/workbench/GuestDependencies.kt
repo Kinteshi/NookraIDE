@@ -1,5 +1,7 @@
 package com.avfstudio.nativeide.workbench
 
+import com.avfstudio.nativeide.ai.ChatAgentKind
+
 /** Miniforge pinned like the tool catalog: a release at least a few weeks old, checksum per architecture. */
 private const val MINIFORGE_VERSION = "26.7.2-0"
 private const val MINIFORGE_SHA256_AARCH64 = "89b786c8d2c8b0fda7553914c1314ae4ddaa094503802f279377b19ac4463cb2"
@@ -75,10 +77,32 @@ enum class GuestDependency(
         "the MaterialCode tool catalog (pinned, checksum-verified)",
         "avf-native-daemon tools install ripgrep",
     ),
+    // The setup writes these commands into ~/.local/bin, so finding them means it finished.
+    ClaudeCode(
+        "Claude Code",
+        listOf("claude-agent-acp"),
+        "Claude Code in the Chat view (and `claude` in terminals)",
+        "npm: Claude Code's ACP adapter 0.91.0 on Node.js 24.22.0 (checksum-verified), in ~/.local/share/materialcode; about 330 MB, plus 205 MB for Node.js (shared with Gemini)",
+        "avf-native-daemon tools install claude-code",
+    ),
+    Gemini(
+        "Gemini CLI",
+        listOf("gemini"),
+        "Gemini in the Chat view (and `gemini` in terminals)",
+        "npm: Gemini CLI 0.64.0 on Node.js 24.22.0 (checksum-verified), in ~/.local/share/materialcode; about 100 MB, plus 205 MB for Node.js (shared with Claude Code)",
+        "avf-native-daemon tools install gemini",
+    ),
     ;
 
     companion object {
         val allCommands: List<String> get() = entries.flatMap { it.commands }.distinct()
+
+        /** What a chat agent needs installed; Copilot CLI comes with the daemon's installer. */
+        fun forAgent(kind: ChatAgentKind): GuestDependency? = when (kind) {
+            ChatAgentKind.Copilot -> null
+            ChatAgentKind.ClaudeCode -> ClaudeCode
+            ChatAgentKind.Gemini -> Gemini
+        }
     }
 }
 
@@ -111,6 +135,10 @@ internal fun missingDependencyIn(message: String): GuestDependency? {
         "tool 'jupyter' is not installed" in lower -> GuestDependency.JupyterBridge
         "tool 'gh' is not installed" in lower -> GuestDependency.GitHubCli
         "tool 'typescript' is not installed" in lower -> GuestDependency.TypeScript
+        "tool 'claude-code' is not installed" in lower -> GuestDependency.ClaudeCode
+        "tool 'gemini' is not installed" in lower -> GuestDependency.Gemini
+        "claude-code is not set up" in lower -> GuestDependency.ClaudeCode
+        "gemini is not set up" in lower -> GuestDependency.Gemini
         "could not start ripgrep" in lower && notFound -> GuestDependency.Ripgrep
         "could not start git" in lower && notFound -> GuestDependency.Git
         "unable to find git executable" in lower -> GuestDependency.Git

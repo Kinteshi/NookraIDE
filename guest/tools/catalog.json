@@ -146,6 +146,40 @@
       "initializationOptions": {}
     },
     {
+      "name": "claude-code",
+      "version": "0.91.0",
+      "kind": "acp-agent",
+      "languages": ["*"],
+      "command": ["avf-node-agent", "claude-code"],
+      "install": {
+        "script": {
+          "binary": "avf-node-agent",
+          "asset": "avf-node-agent.sh",
+          "setup": ["setup", "claude-code"]
+        }
+      },
+      "settingsSection": "claude-code",
+      "env_allowlist": [],
+      "initializationOptions": {}
+    },
+    {
+      "name": "gemini",
+      "version": "0.64.0",
+      "kind": "acp-agent",
+      "languages": ["*"],
+      "command": ["avf-node-agent", "gemini", "--acp"],
+      "install": {
+        "script": {
+          "binary": "avf-node-agent",
+          "asset": "avf-node-agent.sh",
+          "setup": ["setup", "gemini"]
+        }
+      },
+      "settingsSection": "gemini",
+      "env_allowlist": [],
+      "initializationOptions": {}
+    },
+    {
       "name": "jupyter",
       "version": "bridge-5",
       "kind": "kernel",

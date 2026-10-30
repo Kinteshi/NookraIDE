@@ -30,10 +30,13 @@ fun lspDocumentPath(path: String, workspaceRoot: String?): String =
         path
     }
 
-/** The URI a server knows a document by; an untitled one before any workspace keeps its own name. */
+/**
+ * The URI a server knows a document by. Only guest files (absolute paths) become `file://`
+ * URIs; an untitled one before any workspace, or a device file (`device:/…`), keeps its own name.
+ */
 fun lspDocumentUri(path: String, workspaceRoot: String?): String {
     val lspPath = lspDocumentPath(path, workspaceRoot)
-    return if (lspPath.startsWith(UNTITLED_PREFIX)) lspPath else URI("file", "", lspPath, null).toASCIIString()
+    return if (!lspPath.startsWith("/")) lspPath else URI("file", "", lspPath, null).toASCIIString()
 }
 
 /** The untitled document [lspPath] stands for, or null for a real file. */
@@ -91,6 +94,10 @@ class LanguageClient(
         private set
     @Volatile var supportsRangeFormatting = false
         private set
+    @Volatile var supportsInlayHints = false
+        private set
+    /** Called when the server asks for fresh inlay hints (`workspace/inlayHint/refresh`). */
+    @Volatile var inlayHintRefreshListener: (() -> Unit)? = null
     private val diagnosticPulls = ConcurrentHashMap<String, Boolean>()
     @Volatile var messageListener: ((String) -> Unit)? = null
     /** Receives notifications this client does not handle itself, such as Copilot status. */
@@ -134,6 +141,7 @@ class LanguageClient(
                 supportsSignatureHelp = signatureProvider != null
                 supportsDocumentHighlight = capabilities?.provides("documentHighlightProvider") == true
                 supportsRangeFormatting = capabilities?.provides("documentRangeFormattingProvider") == true
+                supportsInlayHints = capabilities?.provides("inlayHintProvider") == true
                 notify("initialized", JsonObject())
                 notify("workspace/didChangeConfiguration", JsonObject().apply {
                     add("settings", gson.toJsonTree(configuredSettings))
@@ -231,6 +239,13 @@ class LanguageClient(
             })
         }).thenApply(::textEdits)
 
+    /** Inferred types and parameter names in [range] (`textDocument/inlayHint`). */
+    fun inlayHints(path: String, range: LspRange): CompletableFuture<JsonElement> =
+        request("textDocument/inlayHint", JsonObject().apply {
+            add("textDocument", JsonObject().apply { addProperty("uri", fileUri(path)) })
+            add("range", gson.toJsonTree(range))
+        })
+
     fun completion(path: String, position: LspPosition): CompletableFuture<JsonElement> =
         request("textDocument/completion", positionParams(path, position))
 
@@ -326,6 +341,10 @@ class LanguageClient(
                 val shown = uri != null && showDocumentHandler?.invoke(uri) == true
                 CompletableFuture.completedFuture(JsonObject().apply { addProperty("success", shown) })
             }
+            "workspace/inlayHint/refresh" -> {
+                inlayHintRefreshListener?.invoke()
+                CompletableFuture.completedFuture(JsonNull.INSTANCE)
+            }
             "window/workDoneProgress/create", "client/registerCapability", "client/unregisterCapability" ->
                 CompletableFuture.completedFuture(JsonNull.INSTANCE)
             else -> null
@@ -389,6 +408,7 @@ class LanguageClient(
                 addProperty("configuration", true)
                 addProperty("workspaceFolders", true)
                 add("workspaceEdit", JsonObject().apply { addProperty("documentChanges", true) })
+                add("inlayHint", JsonObject().apply { addProperty("refreshSupport", true) })
             })
             add("textDocument", JsonObject().apply {
                 add("publishDiagnostics", JsonObject().apply {
@@ -416,6 +436,7 @@ class LanguageClient(
                 })
                 add("documentHighlight", JsonObject().apply { addProperty("dynamicRegistration", false) })
                 add("rangeFormatting", JsonObject().apply { addProperty("dynamicRegistration", false) })
+                add("inlayHint", JsonObject().apply { addProperty("dynamicRegistration", false) })
                 add("definition", JsonObject().apply { addProperty("dynamicRegistration", false) })
                 add("references", JsonObject().apply { addProperty("dynamicRegistration", false) })
                 add("rename", JsonObject().apply { addProperty("dynamicRegistration", false) })

@@ -44,6 +44,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.avfstudio.nativeide.ai.ChatAgentKind
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -118,6 +119,7 @@ fun SettingsScreen(controller: WorkbenchController) {
                 item {
                     SliderRow("Font size", settings.editorFontSize, 8f..32f, "%.0f sp") { set(WorkbenchSettings.EDITOR_FONT_SIZE, it.roundToInt()) }
                 }
+                item { SwitchRow("Pinch to zoom", "Two fingers change the editor's font size, kept as the font size above", settings.pinchToZoom) { set(WorkbenchSettings.PINCH_TO_ZOOM, it) } }
                 item {
                     SliderRow("Tab size", settings.tabSize.toFloat(), 1f..8f, "%.0f", steps = 6) { set(WorkbenchSettings.TAB_SIZE, it.roundToInt()) }
                 }
@@ -165,6 +167,8 @@ fun SettingsScreen(controller: WorkbenchController) {
                 item { SwitchRow("Insert final newline on save", "Ends the file with a line break", settings.insertFinalNewline) { set(WorkbenchSettings.INSERT_FINAL_NEWLINE, it) } }
                 item { SwitchRow("Trim final newlines on save", "Keeps a single line break at the end of the file", settings.trimFinalNewlines) { set(WorkbenchSettings.TRIM_FINAL_NEWLINES, it) } }
                 item { SwitchRow("Parameter hints", "The signature and the current parameter while typing a call (Ctrl+Shift+Space shows them)", settings.parameterHints) { set(WorkbenchSettings.PARAMETER_HINTS, it) } }
+                item { SwitchRow("Inlay hints", "Inferred types and parameter names at the end of the line, from the language server", settings.inlayHints) { set(WorkbenchSettings.INLAY_HINTS, if (it) "on" else "off") } }
+                item { SwitchRow("Markdown preview follows the editor", "Scrolling a Markdown file scrolls its preview to the same place", settings.markdownScrollSync) { set(WorkbenchSettings.MARKDOWN_SCROLL_SYNC, it) } }
                 item { SwitchRow("Highlight symbol uses", "Marks the other uses of the symbol under the cursor; assignments stronger", settings.occurrencesHighlight) { set(WorkbenchSettings.OCCURRENCES_HIGHLIGHT, if (it) "singleFile" else "off") } }
                 item {
                     // Four choices don't fit beside the text at tablet width ("Focus change" was cut
@@ -256,6 +260,26 @@ fun SettingsScreen(controller: WorkbenchController) {
                 item {
                     SliderRow("Stop idle servers after", settings.languageServerIdleSeconds.toFloat(), 10f..600f, "%.0f s") {
                         set(WorkbenchSettings.LANGUAGE_SERVER_IDLE, it.roundToInt())
+                    }
+                }
+
+                item { Section("Chat") }
+                item {
+                    SettingRow("Chat agent", "Who answers in the Chat view; each runs in the guest and signs in once") {
+                        SingleChoiceSegmentedButtonRow {
+                            ChatAgentKind.entries.forEachIndexed { index, kind ->
+                                SegmentedButton(
+                                    selected = settings.chatAgent == kind,
+                                    onClick = { controller.selectChatAgent(kind) },
+                                    shape = SegmentedButtonDefaults.itemShape(index, ChatAgentKind.entries.size),
+                                ) { Text(kind.label) }
+                            }
+                        }
+                    }
+                }
+                item {
+                    ActionRow("Sign in to ${settings.chatAgent.label}", "Runs the agent's own sign-in in a terminal") {
+                        controller.signInChatAgent(); controller.settingsVisible = false
                     }
                 }
 
@@ -441,6 +465,11 @@ fun SettingsScreen(controller: WorkbenchController) {
                 item { Section("Keyboard and advanced") }
                 item { ActionRow("Keyboard shortcuts", "VS Code defaults · Ctrl+K Ctrl+S") { controller.dialog = WorkbenchDialog.Keybindings } }
                 item { ActionRow("Edit settings.json", "Every setting, in VS Code's format") { controller.openSettingsJson() } }
+                item {
+                    SwitchRow("Open the last folder offline", "Without a guest, its tabs come back from this device's copies; saves wait for the guest", settings.offlineWorkspace) {
+                        set(WorkbenchSettings.OFFLINE_WORKSPACE, it)
+                    }
+                }
                 item { ActionRow("Connections", controller.profileName.ifEmpty { "Manage guest connection profiles" }) { controller.dialog = WorkbenchDialog.Connect } }
                 item { androidx.compose.foundation.layout.Spacer(Modifier.padding(bottom = 48.dp)) }
             }

@@ -30,6 +30,8 @@ class LanguageClientTest {
         assertEquals(null, untitledPathFor("/root/Projects/a.py", "/root/Projects"))
         // Before a workspace (not connected yet) an untitled URI stays as it is, without throwing.
         assertEquals("scratch:/welcome.py", lspDocumentUri("scratch:/welcome.py", null))
+        // A device file has no guest path; it must not become a (rejected) relative file URI.
+        assertEquals("device:/content%3A%2F%2Fa/notes.txt", lspDocumentUri("device:/content%3A%2F%2Fa/notes.txt", "/root/Projects"))
         assertEquals("file:///root/Projects/.untitled/welcome.py", lspDocumentUri("scratch:/welcome.py", "/root/Projects"))
     }
 

@@ -1,5 +1,6 @@
 package com.avfstudio.nativeide.workbench
 
+import com.avfstudio.nativeide.ai.ChatAgentKind
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import com.google.gson.JsonPrimitive
@@ -36,6 +37,12 @@ data class WorkbenchSettings(
     val parameterHints: Boolean = true,
     /** The other uses of the symbol under the cursor (`editor.occurrencesHighlight`). */
     val occurrencesHighlight: Boolean = true,
+    /** Inferred types and parameter names from the language server (`editor.inlayHints.enabled`). */
+    val inlayHints: Boolean = true,
+    /** Pinching the editor changes `editor.fontSize`. */
+    val pinchToZoom: Boolean = true,
+    /** The Markdown preview follows the editor's scrolling (`markdown.preview.scrollPreviewWithEditor`). */
+    val markdownScrollSync: Boolean = true,
     val autoSave: AutoSaveMode = AutoSaveMode.Off,
     val autoSaveDelayMs: Int = 1000,
     val semanticHighlighting: Boolean = true,
@@ -46,6 +53,8 @@ data class WorkbenchSettings(
     val languageServerIdleSeconds: Int = 60,
     val inlineSuggestDelayMs: Int = 350,
     val chatIdleMinutes: Int = 5,
+    /** Which agent the Chat view talks to (see [ChatAgentKind]). */
+    val chatAgent: ChatAgentKind = ChatAgentKind.Copilot,
     /** Copilot CLI's `--reasoning-effort`; empty leaves the CLI's default. */
     val chatReasoningEffort: String = "",
     /** After the agent stops (idle, reconnect, effort change) the next message reloads the chat shown. */
@@ -54,6 +63,8 @@ data class WorkbenchSettings(
     val autoConnect: Boolean = true,
     val pythonInterpreter: String = "",
     val restoreSession: Boolean = true,
+    /** Without a guest, reopen the last folder's tabs from this device's copies. */
+    val offlineWorkspace: Boolean = true,
     /** Enter keeps the indentation (one level more after a block opener). */
     val autoIndent: Boolean = true,
     /** Backspace in leading spaces goes back to the previous tab stop (one indentation level). */
@@ -113,6 +124,10 @@ data class WorkbenchSettings(
         const val PARAMETER_HINTS = "editor.parameterHints.enabled"
         /** VS Code's enum (off/singleFile/multiFile, a boolean before 1.84); only off/false turns it off. */
         const val OCCURRENCES_HIGHLIGHT = "editor.occurrencesHighlight"
+        /** VS Code's enum (on/off/onUnlessPressed/offUnlessPressed); there is no key to press here, so off* is off. */
+        const val INLAY_HINTS = "editor.inlayHints.enabled"
+        const val PINCH_TO_ZOOM = "avf.editor.pinchToZoom"
+        const val MARKDOWN_SCROLL_SYNC = "markdown.preview.scrollPreviewWithEditor"
         const val AUTO_SAVE = "files.autoSave"
         const val AUTO_SAVE_DELAY = "files.autoSaveDelay"
         const val SEMANTIC_HIGHLIGHTING = "editor.semanticHighlighting.enabled"
@@ -122,6 +137,7 @@ data class WorkbenchSettings(
         const val LANGUAGE_SERVER_IDLE = "avf.languageServers.idleStopSeconds"
         const val INLINE_SUGGEST_DELAY = "avf.copilot.inlineSuggestDelayMs"
         const val CHAT_IDLE_MINUTES = "avf.copilot.chatIdleMinutes"
+        const val CHAT_AGENT = "avf.chat.agent"
         const val CHAT_REASONING_EFFORT = "avf.copilot.chatReasoningEffort"
         const val CHAT_RESUME = "avf.copilot.chatResume"
         /** The levels Copilot CLI 1.0.105 accepts for `--reasoning-effort`. */
@@ -130,6 +146,7 @@ data class WorkbenchSettings(
         const val AUTO_CONNECT = "avf.connection.autoConnect"
         const val PYTHON_INTERPRETER = "python.defaultInterpreterPath"
         const val RESTORE_SESSION = "avf.session.restore"
+        const val OFFLINE_WORKSPACE = "avf.offline.openLastFolder"
         /** VS Code's enum (none/keep/brackets/advanced/full); anything but "none" is on here. */
         const val AUTO_INDENT = "editor.autoIndent"
         const val USE_TAB_STOPS = "editor.useTabStops"
@@ -179,6 +196,9 @@ data class WorkbenchSettings(
                 trimFinalNewlines = bool(TRIM_FINAL_NEWLINES, defaults.trimFinalNewlines),
                 parameterHints = bool(PARAMETER_HINTS, defaults.parameterHints),
                 occurrencesHighlight = string(OCCURRENCES_HIGHLIGHT)?.let { it != "off" && it != "false" } ?: defaults.occurrencesHighlight,
+                inlayHints = string(INLAY_HINTS)?.let { !it.startsWith("off") && it != "false" } ?: defaults.inlayHints,
+                pinchToZoom = bool(PINCH_TO_ZOOM, defaults.pinchToZoom),
+                markdownScrollSync = bool(MARKDOWN_SCROLL_SYNC, defaults.markdownScrollSync),
                 autoSave = AutoSaveMode.entries.firstOrNull { it.key == string(AUTO_SAVE) } ?: defaults.autoSave,
                 autoSaveDelayMs = number(AUTO_SAVE_DELAY)?.toInt()?.coerceIn(200, 60_000) ?: defaults.autoSaveDelayMs,
                 semanticHighlighting = bool(SEMANTIC_HIGHLIGHTING, defaults.semanticHighlighting),
@@ -192,12 +212,14 @@ data class WorkbenchSettings(
                 inlineSuggestDelayMs = number(INLINE_SUGGEST_DELAY)?.toInt()?.coerceIn(0, 5000)
                     ?: defaults.inlineSuggestDelayMs,
                 chatIdleMinutes = number(CHAT_IDLE_MINUTES)?.toInt()?.coerceIn(1, 120) ?: defaults.chatIdleMinutes,
+                chatAgent = ChatAgentKind.entries.firstOrNull { it.key == string(CHAT_AGENT) } ?: defaults.chatAgent,
                 chatReasoningEffort = string(CHAT_REASONING_EFFORT)?.takeIf { it in REASONING_EFFORTS } ?: defaults.chatReasoningEffort,
                 chatResume = bool(CHAT_RESUME, defaults.chatResume),
                 jupyterDefaultKernel = string(JUPYTER_DEFAULT_KERNEL) ?: defaults.jupyterDefaultKernel,
                 autoConnect = bool(AUTO_CONNECT, defaults.autoConnect),
                 pythonInterpreter = string(PYTHON_INTERPRETER)?.trim() ?: defaults.pythonInterpreter,
                 restoreSession = bool(RESTORE_SESSION, defaults.restoreSession),
+                offlineWorkspace = bool(OFFLINE_WORKSPACE, defaults.offlineWorkspace),
                 autoIndent = string(AUTO_INDENT)?.let { it != "none" } ?: defaults.autoIndent,
                 useTabStops = bool(USE_TAB_STOPS, defaults.useTabStops),
                 notebookCopilot = bool(NOTEBOOK_COPILOT, defaults.notebookCopilot),

@@ -1,6 +1,10 @@
 package com.avfstudio.nativeide.workbench
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.draw.clip
+import com.avfstudio.nativeide.ai.ChatAgentKind
+import com.avfstudio.nativeide.document.isGuestPath
 import com.avfstudio.nativeide.ai.ChatReference
 import androidx.compose.material3.InputChip
 import androidx.compose.material3.DropdownMenuItem
@@ -96,11 +100,11 @@ fun CopilotChatPane(controller: WorkbenchController, modifier: Modifier = Modifi
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(Icons.Outlined.AutoAwesome, contentDescription = null, tint = colors.primary, modifier = Modifier.size(20.dp))
-            Text(
-                if (controller.showChatHistory) "Past chats" else "Copilot Chat",
-                style = MaterialTheme.typography.titleSmall,
-                modifier = Modifier.padding(start = 8.dp).weight(1f),
-            )
+            if (controller.showChatHistory) {
+                Text("Past chats", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(start = 8.dp).weight(1f))
+            } else {
+                Box(Modifier.weight(1f)) { ChatAgentPicker(controller) }
+            }
             IconButton(onClick = controller::newChat) { Icon(Icons.Outlined.Add, contentDescription = "New chat") }
             IconButton(onClick = { if (controller.showChatHistory) controller.showChatHistory = false else controller.openChatHistory() }) {
                 Icon(Icons.Outlined.History, contentDescription = "Past chats", tint = if (controller.showChatHistory) colors.primary else colors.onSurfaceVariant)
@@ -110,18 +114,23 @@ fun CopilotChatPane(controller: WorkbenchController, modifier: Modifier = Modifi
             }
             onClose?.let { IconButton(onClick = it) { Icon(Icons.Outlined.Close, contentDescription = "Close chat") } }
         }
-        if (controller.chatAuthMethods.isNotEmpty()) {
+        if (controller.chatAuthMethods.isNotEmpty() || controller.chatSignInNeeded) {
+            val kind = controller.chatAgentKind
             Card(
                 colors = CardDefaults.cardColors(containerColor = colors.secondaryContainer),
                 modifier = Modifier.fillMaxWidth().padding(12.dp),
             ) {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Sign in to Copilot chat", style = MaterialTheme.typography.titleSmall)
+                    Text("Sign in to ${kind.label}", style = MaterialTheme.typography.titleSmall)
                     Text(
-                        "Chat signs in through the GitHub CLI, which Git then uses too. This runs `gh auth login` in a terminal and shows a one-time code here.",
+                        when (kind) {
+                            ChatAgentKind.Copilot -> "Chat signs in through the GitHub CLI, which Git then uses too. This runs `gh auth login` in a terminal and shows a one-time code here."
+                            ChatAgentKind.ClaudeCode -> "Uses your Claude subscription. This runs Claude Code's sign-in in a terminal; open the page it gives here and paste the code back."
+                            ChatAgentKind.Gemini -> "Uses your Google account. This runs Gemini CLI's sign-in in a terminal; open the page it gives here and paste the code back."
+                        },
                         style = MaterialTheme.typography.bodySmall,
                     )
-                    FilledTonalButton(onClick = controller::signInGitHubInTerminal) { Text("Sign in") }
+                    FilledTonalButton(onClick = controller::signInChatAgent) { Text("Sign in") }
                 }
             }
         }
@@ -137,7 +146,7 @@ fun CopilotChatPane(controller: WorkbenchController, modifier: Modifier = Modifi
             if (entries.isEmpty()) {
                 item {
                     Text(
-                        "Ask Copilot about this workspace. The agent runs in the guest and asks before it edits files or runs commands.",
+                        "Ask ${controller.chatAgentKind.label} about this workspace. The agent runs in the guest and asks before it edits files or runs commands.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = colors.onSurfaceVariant,
                         modifier = Modifier.padding(vertical = 12.dp),
@@ -175,13 +184,13 @@ fun CopilotChatPane(controller: WorkbenchController, modifier: Modifier = Modifi
                     DropdownMenuItem(
                         text = { Text("Active file") },
                         leadingIcon = { Icon(Icons.AutoMirrored.Outlined.InsertDriveFile, contentDescription = null) },
-                        enabled = controller.activePath?.startsWith("scratch:") == false,
+                        enabled = controller.activePath?.let(::isGuestPath) == true,
                         onClick = { attachMenu = false; controller.attachFileToChat() },
                     )
                     DropdownMenuItem(
                         text = { Text(if (controller.activeNotebook != null) "Current cell" else "Selection or current line") },
                         leadingIcon = { Icon(Icons.Outlined.ShortText, contentDescription = null) },
-                        enabled = controller.activePath?.startsWith("scratch:") == false,
+                        enabled = controller.activePath?.let(::isGuestPath) == true,
                         onClick = { attachMenu = false; controller.attachSelectionToChat() },
                     )
                     DropdownMenuItem(
@@ -210,7 +219,7 @@ fun CopilotChatPane(controller: WorkbenchController, modifier: Modifier = Modifi
                             false
                         }
                     },
-                placeholder = { Text("Ask Copilot") },
+                placeholder = { Text("Ask ${controller.chatAgentKind.label}") },
                 shape = RoundedCornerShape(20.dp),
             )
             if (controller.chatBusy) {
@@ -305,6 +314,7 @@ private fun ChatEntryView(entry: ChatEntry, controller: WorkbenchController) {
                 }
             }
         }
+        is ChatEntry.SignInLink -> SignInLinkCard(entry, controller)
         is ChatEntry.Permission -> Card(colors = CardDefaults.cardColors(containerColor = colors.tertiaryContainer)) {
             Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(entry.title, style = MaterialTheme.typography.titleSmall, color = colors.onTertiaryContainer)
@@ -320,6 +330,82 @@ private fun ChatEntryView(entry: ChatEntry, controller: WorkbenchController) {
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+/** The chat's title, which picks the agent: Copilot, Claude Code or Gemini. */
+@Composable
+private fun ChatAgentPicker(controller: WorkbenchController) {
+    var open by remember { mutableStateOf(false) }
+    Row(
+        Modifier.clip(RoundedCornerShape(8.dp)).clickable { open = true }.padding(start = 8.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(controller.chatAgentKind.label, style = MaterialTheme.typography.titleSmall)
+        Icon(Icons.Outlined.ArrowDropDown, contentDescription = "Choose the chat agent", modifier = Modifier.size(20.dp))
+    }
+    DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+        ChatAgentKind.entries.forEach { kind ->
+            DropdownMenuItem(
+                text = { Text(kind.label) },
+                leadingIcon = {
+                    if (kind == controller.chatAgentKind) Icon(Icons.Outlined.Check, contentDescription = "Selected")
+                    else Spacer(Modifier.size(24.dp))
+                },
+                enabled = !controller.chatBusy,
+                onClick = {
+                    open = false
+                    controller.selectChatAgent(kind)
+                },
+            )
+        }
+    }
+}
+
+/** A Claude Code or Gemini sign-in: the page to open, then the code it shows, typed into the waiting login. */
+@Composable
+private fun SignInLinkCard(entry: ChatEntry.SignInLink, controller: WorkbenchController) {
+    val colors = MaterialTheme.colorScheme
+    var code by remember(entry.url) { mutableStateOf("") }
+    Card(colors = CardDefaults.cardColors(containerColor = colors.secondaryContainer)) {
+        Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                when {
+                    entry.done -> "Signed in to ${entry.agent}"
+                    entry.codeSent && entry.quitAfterCode -> "When the terminal shows Gemini's prompt, you're signed in"
+                    entry.codeSent -> "Checking the code…"
+                    else -> "Sign in to ${entry.agent}"
+                },
+                style = MaterialTheme.typography.titleSmall,
+                color = colors.onSecondaryContainer,
+            )
+            if (!entry.done && !entry.codeSent) {
+                Text(
+                    "Open the page, sign in, and paste the code it shows here.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.onSecondaryContainer,
+                )
+                FilledTonalButton(onClick = { controller.openLink(entry.url) }) { Text("Open sign-in page") }
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = code,
+                        onValueChange = { code = it },
+                        singleLine = true,
+                        placeholder = { Text("Code") },
+                        modifier = Modifier.weight(1f),
+                    )
+                    FilledTonalButton(onClick = { controller.sendSignInCode(entry, code) }, enabled = code.isNotBlank()) { Text("Send") }
+                }
+            }
+            if (!entry.done) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (entry.codeSent && entry.quitAfterCode) {
+                        FilledTonalButton(onClick = { controller.closeSignInAgent(entry) }) { Text("Done") }
+                    }
+                    OutlinedButton(onClick = controller::cancelChatSignIn) { Text("Cancel") }
                 }
             }
         }
@@ -375,7 +461,7 @@ private fun ChatOptionsRow(controller: WorkbenchController) {
                 )
             }
         }
-        ReasoningEffortChip(controller)
+        if (controller.chatAgentKind == ChatAgentKind.Copilot) ReasoningEffortChip(controller)
         options.forEach { option ->
             var open by remember(option.id) { mutableStateOf(false) }
             Box {
@@ -415,8 +501,8 @@ private fun ChatOptionsRow(controller: WorkbenchController) {
     confirmAllowAll?.let { (option, value) ->
         AlertDialog(
             onDismissRequest = { confirmAllowAll = null },
-            title = { Text("Let Copilot act without asking?") },
-            text = { Text("Copilot will run commands, edit files and fetch URLs in the guest without asking first, for this session.") },
+            title = { Text("Let ${controller.chatAgentKind.label} act without asking?") },
+            text = { Text("${controller.chatAgentKind.label} will run commands, edit files and fetch URLs in the guest without asking first, for this session.") },
             confirmButton = { TextButton(onClick = { confirmAllowAll = null; controller.setChatOption(option, value) }) { Text("Allow all") } },
             dismissButton = { TextButton(onClick = { confirmAllowAll = null }) { Text("Cancel") } },
         )
@@ -511,7 +597,7 @@ private fun ChatHistoryList(controller: WorkbenchController, modifier: Modifier 
                     value = name,
                     onValueChange = { name = it },
                     singleLine = true,
-                    supportingText = { Text("Empty goes back to Copilot's title") },
+                    supportingText = { Text("Empty goes back to ${controller.chatAgentKind.label}'s title") },
                 )
             },
             confirmButton = { TextButton(onClick = { controller.renameChatSession(row, name); renaming = null }) { Text("Rename") } },

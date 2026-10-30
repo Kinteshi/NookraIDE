@@ -73,6 +73,12 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.google.code.gson:gson:2.13.1")
     implementation("org.msgpack:msgpack-core:0.9.8")
+    // Markdown preview: CommonMark plus the GitHub extensions VS Code's preview renders.
+    implementation("org.commonmark:commonmark:0.30.1")
+    implementation("org.commonmark:commonmark-ext-gfm-tables:0.30.1")
+    implementation("org.commonmark:commonmark-ext-gfm-strikethrough:0.30.1")
+    implementation("org.commonmark:commonmark-ext-task-list-items:0.30.1")
+    implementation("org.commonmark:commonmark-ext-autolink:0.30.1")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     testImplementation("junit:junit:4.13.2")

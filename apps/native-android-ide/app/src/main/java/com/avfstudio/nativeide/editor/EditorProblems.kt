@@ -119,4 +119,6 @@ data class EditorConfig(
     val problemUnderlines: Boolean = true,
     val showUnused: Boolean = true,
     val showDeprecated: Boolean = true,
+    /** Pinching changes the font size; the editor reports it as [EditorEvent.Zoomed]. */
+    val pinchToZoom: Boolean = true,
 )

@@ -1068,6 +1068,78 @@ User's pick: 6, 7 and 11 of the list after batch 22 (spec candidates 1, 2 and 6)
   `~/Projects/batch23.py` and `notes23.txt` stay in the guest. 183 tests pass (new:
   SignatureHelpTest, SaveCleanupsTest).
 
+## 24. Claude Code and Gemini, offline mode, inlay hints, Markdown preview, pinch to zoom (10-29 21:20–22:30; done, checked except pinch)
+User's pick: 3, 5, 7, 13 and 11 of the list after batch 23 (port 36601).
+* Chat agents (`avf.chat.agent`: copilot, claude-code or gemini; a picker in the chat's title and
+  in Settings → Chat, plus "Chat: Use …" commands):
+  * Catalog tools `claude-code` and `gemini` (ACP agents). Both install through one bundled guest
+    script, `avf-node-agent`, which fetches Node.js 24.22.0 (official tarball, SHA-256 pinned)
+    and the pinned npm package into ~/.local/share/materialcode: Claude Code's ACP adapter
+    `@agentclientprotocol/claude-agent-acp@0.91.0` (it carries the Claude Code CLI) and
+    `@google/gemini-cli@0.64.0` (`gemini --acp`). Nothing is global; `claude-agent-acp`,
+    `claude` and `gemini` commands are written to ~/.local/bin unless the user has their own.
+  * Daemon: script installs can name `setup` arguments, which the installed script runs once
+    (output in the installer's terminal); a failing setup fails the install.
+  * Not installed: the first message says so and offers the install (Guest dependencies rows
+    too). Sign-in: both answer -32000 "Authentication required" like Copilot; the pane's Sign in
+    runs `avf-node-agent login <agent>` in a terminal and lifts the sign-in link into a chat card
+    with "Open sign-in page" and a code field that types into the waiting login. Gemini then
+    needs `/quit`, which the card's Done sends. Gemini also takes `GEMINI_API_KEY` in
+    ~/.gemini/.env.
+  * Each agent keeps its own model and mode choices; the reasoning-effort chip is Copilot-only
+    (Claude Code lists effort as a session option). Switching agents starts an empty chat.
+  * Checked on the tablet (aarch64): both installed from the chat's offer (Claude Code ~330 MB,
+    Gemini ~100 MB, Node.js 205 MB shared), started, listed their options (Claude Code: Mode
+    Manual, Model, Effort, Fast mode) and asked for a sign-in; the cards showed the claude.com
+    and accounts.google.com links and the terminals waited for the code. Sign-in itself needs
+    the user's accounts and was left to the user (both cancelled). Running: Claude Code 312 MB
+    (Node 94 + CLI 217), Gemini 375 MB (it restarts itself as a second Node process).
+  * Fixed while checking: Gemini's login chose Google sign-in in a new ~/.gemini/settings.json;
+    after a cancelled sign-in, `gemini --acp` then printed its sign-in prompt into the protocol
+    stream and read the app's first request as the code. The login now takes that choice back
+    when no credentials were saved (and the tablet's stray file was removed).
+* Offline mode (`avf.offline.openLastFolder`, on):
+  * Without a guest (auto-connect fails, or no connection set up), the last folder opens from
+    this device's copies (the encrypted document cache): its tabs as they were, editable. Saves
+    queue as before ("Saved locally; queued until guest reconnects") and go to the guest on
+    reconnect; clean tabs that changed in the guest meanwhile are read again.
+  * Explorer offline lists the folder's files this device has a copy of (opened since, plus the
+    session's tabs); the start page lists recent folders to open offline.
+  * Files on the device: "Open from device…" (start page) and "File: Open File from Device..."
+    use Android's file picker. They open and save through their content URI (persisted
+    permission), come back after a restart, and have no language servers or Copilot (path
+    `device:/<encoded URI>/<name>`; the crumb reads "This device").
+  * Checked: with the daemon stopped and the app restarted, the tabs and the offline Explorer
+    came back; an edit to batch24.py saved locally and was written to the guest after Retry
+    ("Reconnected and saved …"). `device24.txt` from Downloads opened, survived a restart, and
+    its edit landed in the file on the device.
+  * Fixed while checking: a device file crashed the app (its path went into a `file://` URI for
+    the problem list). `lspDocumentUri` now keeps anything but absolute guest paths as is. Also
+    quieted the "Connect to a guest to use Git" message from background refreshes.
+* Inlay hints (`editor.inlayHints.enabled`, on; off/offUnlessPressed turn it off):
+  `textDocument/inlayHint` for the visible lines ±100 (again on scrolling past them, on edits
+  after 400 ms, on `workspace/inlayHint/refresh`). sora 0.23.6 has inlay-hint classes but no
+  renderer and can't open a gap in a line, so the hints are chips at the line's end, each with
+  its code: `total: int`, `values=data`. Checked with ty on batch24.py. Fixed: a problem dot
+  widened the gutter and left the chips over the code until the next scroll.
+* Markdown preview (Ctrl+K V to the side, Ctrl+Shift+V instead of the editor; two buttons at the
+  breadcrumbs' end): commonmark-java 0.30.1 with GitHub tables, strikethrough, task lists and
+  autolinks, in a WebView in the app's colours. Raw HTML passes as in VS Code, but a content
+  security policy lets only the page's own script run. Relative images come from the guest,
+  links to files open them, web links the browser. It scrolls with the editor
+  (`markdown.preview.scrollPreviewWithEditor`, on) through each block's source line. Checked:
+  table, tasks, code, the local PNG, and the `<script>` in the quote did not run. Fixed: the
+  side layout's new editor lost its events (the old view's cleanup closed the new binding), so
+  scroll sync, inlay hints and LSP changes stopped; `TextEditorHost.close(uri, surface)`.
+* Pinch to zoom (`avf.editor.pinchToZoom`, on): sora's own pinch, bounded to 8–40, and the size
+  is saved as `editor.fontSize` 600 ms after the fingers stop. Not checked: adb can't inject two
+  fingers here (`sendevent` is denied on the touchscreen).
+* Guest lesson: `cp` from /mnt/shared made crosvm's virtio-fs panic and killed the VM (the new
+  daemon was left at 0 bytes); updates now read the share with `cat`.
+* Test files `~/Projects/batch24.{py,md,png}` and `/sdcard/Download/device24.txt` stay. The chat
+  is back on Copilot. 198 tests pass (new: InlayHintsTest, ChatAgentsTest, MarkdownRendererTest,
+  device and offline repository tests), plus 2 daemon tests.
+
 ## Next pass (registered 10-27 23:35, updated 10-28 13:06)
 * Batch 15 did the carried-over tests (Copilot signed out, the setup paths, reconnect cap,
   Copilot model list, prompt prefix). Left over:
@@ -1077,13 +1149,13 @@ User's pick: 6, 7 and 11 of the list after batch 22 (spec candidates 1, 2 and 6)
 
 ## Mapped for later (user, 10-27)
 * Chat adjustments beyond the model/mode picker (batch 11). (Reasoning effort done in batch 16.)
-* Claude Code and Gemini support alongside Copilot (chat agents; ACP where they speak it).
+* (Done in batch 24.) Claude Code and Gemini support alongside Copilot (chat agents; ACP where they speak it).
 * (Done in batch 19.) AI chat session history and management (user, 10-28): keep past conversations (title, date,
   workspace), reopen one (ACP `session/load` where the agent supports it, else read-only
   history), rename and delete them, start a new one beside the current; check what Copilot CLI
   keeps itself (it lists sessions in its own store) before storing anything in the app.
 * (Done in batch 11: auto-save modes after a delay, on focus change and on window change.)
-* Offline experience: the editor alone when no guest is reachable (open/edit local and cached
+* (Done in batch 24.) Offline experience: the editor alone when no guest is reachable (open/edit local and cached
   files, no tools).
 
 ## Backlog
@@ -1167,16 +1239,16 @@ Not picked yet. Effort: S about half a day, M about a day, L several days.
 * Editor and language intelligence (spec 4.2):
   1. (Done in batch 23.) Signature help: parameter hints while typing a call (`textDocument/signatureHelp`). S-M.
   2. (Done in batch 23.) Document highlights: other uses of the symbol under the cursor. S.
-  3. Inlay hints: inferred types and parameter names, with a setting. M.
+  3. (Done in batch 24, at the line end.) Inlay hints: inferred types and parameter names, with a setting. M.
   4. Quick Open prefixes as in VS Code (`@` symbols in the file, `#` workspace symbols, `:`
      line, `>` commands). M.
   5. Snippets: VS Code snippet files from asset packs, and LSP snippet completions with tab
      stops. M-L.
   6. (Done in batch 23.) `files.trimTrailingWhitespace`, `files.insertFinalNewline`, `editor.formatOnPaste`. S.
   7. Code folding (LSP folding ranges or indentation). M; sora's support needs checking first.
-  8. Markdown preview for `.md` files (toggle or side by side). M.
+  8. (Done in batch 24.) Markdown preview for `.md` files (toggle or side by side). M.
   9. Image viewer for image files (zoom, pan; SVG too). S-M.
-  10. Pinch to zoom the editor font, persisted. S.
+  10. (Done in batch 24; not checked by touch.) Pinch to zoom the editor font, persisted. S.
 * Workbench:
   11. Replace across files in Search, with a preview and per-match accept. M.
   12. Explorer decorations: Git status colours and problem badges on files and folders. S-M.

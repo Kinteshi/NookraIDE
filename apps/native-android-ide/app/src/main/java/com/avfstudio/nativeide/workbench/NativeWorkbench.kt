@@ -106,12 +106,16 @@ fun NativeWorkbench() {
     val assetPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let { controller.installAssetPack(it, assetMode) }
     }
+    val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let(controller::openDeviceFile)
+    }
     DisposableEffect(lifecycleOwner) {
         controller.requestNotificationPermission = { permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) }
         controller.pickAssetPack = { mode ->
             assetMode = mode
             assetPicker.launch(if (mode == "theme") arrayOf("application/json", "text/*", "*/*") else arrayOf("*/*"))
         }
+        controller.pickLocalFile = { filePicker.launch(arrayOf("*/*")) }
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_STOP -> {
@@ -126,6 +130,7 @@ fun NativeWorkbench() {
         KeyRouter.handler = controller::routeHardwareKey
         onDispose {
             KeyRouter.handler = null
+            controller.pickLocalFile = null
             lifecycleOwner.lifecycle.removeObserver(observer)
             controller.dispose()
         }

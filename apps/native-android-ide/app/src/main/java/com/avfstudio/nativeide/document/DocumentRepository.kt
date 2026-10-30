@@ -28,6 +28,8 @@ interface DocumentCache {
     fun load(path: String): DocumentSnapshot?
     fun save(snapshot: DocumentSnapshot)
     fun delete(path: String)
+    /** Whether a copy of [path] is kept, without reading it. */
+    fun contains(path: String): Boolean = load(path) != null
 }
 
 sealed interface OpenDocument {
@@ -98,8 +100,12 @@ sealed interface SaveResult {
 class DocumentRepository(
     private val vfs: GuestVfs,
     private val cache: DocumentCache,
+    private val deviceFiles: DeviceFileStore? = null,
 ) {
     fun open(path: String): CompletableFuture<OpenDocument> =
+        if (isDevicePath(path)) openDeviceFile(path) else openGuestFile(path)
+
+    private fun openGuestFile(path: String): CompletableFuture<OpenDocument> =
         vfs.stat(path).thenCompose { entry ->
             if (entry.isDirectory) {
                 return@thenCompose CompletableFuture.failedFuture(
@@ -212,6 +218,7 @@ class DocumentRepository(
                 eol = document.eol,
             ),
         )
+        if (isDevicePath(document.path)) return saveDeviceFile(document, savingText, bytes)
         if (!vfs.isConnected()) {
             return CompletableFuture.completedFuture(SaveResult.QueuedOffline)
         }
@@ -246,6 +253,72 @@ class DocumentRepository(
                     CompletableFuture.failedFuture<SaveResult>(cause)
                 }
             }
+    }
+
+    /** Whether this device keeps a copy of [path], so it opens without the guest. */
+    fun hasCopy(path: String): Boolean = cache.contains(path)
+
+    /** A whole file's bytes, for files the editor doesn't open (preview images); fails past [limit]. */
+    fun readBytes(path: String, limit: Int): CompletableFuture<ByteArray> =
+        vfs.stat(path).thenCompose { entry ->
+            if (entry.isDirectory || entry.size > limit) {
+                return@thenCompose CompletableFuture.failedFuture<ByteArray>(IOException("$path is not a file under ${limit / (1024 * 1024)} MiB"))
+            }
+            val output = ByteArrayOutputStream(entry.size.toInt())
+            fun readNext(offset: Long): CompletableFuture<ByteArray> =
+                vfs.read(path, offset, minOf(VFS_CHUNK_SIZE.toLong(), entry.size - offset).toInt().coerceAtLeast(1)).thenCompose { response ->
+                    output.write(response.content)
+                    val next = offset + response.content.size
+                    when {
+                        response.eof || next >= entry.size -> CompletableFuture.completedFuture(output.toByteArray())
+                        response.content.isEmpty() -> CompletableFuture.failedFuture(IOException("Guest returned an empty non-final file chunk"))
+                        else -> readNext(next)
+                    }
+                }
+            readNext(0)
+        }
+
+    /**
+     * A device file, read through its content URI. An unsaved draft wins, as for guest files;
+     * without access any more (the file moved, the permission went), the last copy opens.
+     */
+    private fun openDeviceFile(path: String): CompletableFuture<OpenDocument> {
+        val store = deviceFiles ?: return CompletableFuture.failedFuture(IOException("Device files can't be opened here"))
+        val uri = deviceUri(path) ?: return CompletableFuture.failedFuture(IllegalArgumentException("Not a device file: $path"))
+        return CompletableFuture.supplyAsync {
+            val cached = cache.load(path)
+            if (cached?.dirty == true) {
+                return@supplyAsync OpenDocument.Editable(
+                    DocumentSession(path, cached.text, null, dirty = true, encoding = cached.encoding, eol = cached.eol),
+                )
+            }
+            val read = runCatching { store.read(uri) }
+            val bytes = read.getOrNull()
+            when {
+                bytes != null -> {
+                    if (bytes.size > MAX_EDITABLE_FILE_SIZE) throw IOException("Device files over 16 MiB can't be opened")
+                    val decoded = decodeDocument(bytes)
+                    val eol = if (decoded.text.contains("\r\n")) "\r\n" else "\n"
+                    cache.save(DocumentSnapshot(path, decoded.text, null, dirty = false, encoding = decoded.encoding, eol = eol))
+                    OpenDocument.Editable(DocumentSession(path, decoded.text, null, dirty = false, encoding = decoded.encoding, eol = eol))
+                }
+                cached != null -> OpenDocument.Editable(
+                    DocumentSession(path, cached.text, null, dirty = false, encoding = cached.encoding, eol = cached.eol),
+                )
+                else -> throw read.exceptionOrNull() ?: IOException("Can't read $path")
+            }
+        }
+    }
+
+    private fun saveDeviceFile(document: DocumentSession, savingText: String, bytes: ByteArray): CompletableFuture<SaveResult> {
+        val store = deviceFiles ?: return CompletableFuture.failedFuture(IOException("Device files can't be saved here"))
+        val uri = deviceUri(document.path) ?: return CompletableFuture.failedFuture(IllegalArgumentException("Not a device file"))
+        return CompletableFuture.supplyAsync {
+            store.write(uri, bytes)
+            document.markSaved(savingText)
+            cache.save(DocumentSnapshot(document.path, document.text, null, dirty = document.dirty, encoding = document.encoding, eol = document.eol))
+            SaveResult.Saved(System.currentTimeMillis())
+        }
     }
 
     /** Drops the cached draft for a document that was renamed, deleted or saved elsewhere. */

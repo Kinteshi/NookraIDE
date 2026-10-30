@@ -100,6 +100,16 @@ sealed interface WorkbenchDialog {
     ) : WorkbenchDialog
 }
 
+/** How a Markdown file shows its preview (VS Code's Ctrl+K V and Ctrl+Shift+V). */
+enum class MarkdownPreviewMode { Side, Only }
+
+/** The preview resolves relative links and images against this host plus the file's folder. */
+const val MARKDOWN_BASE_HOST = "workspace.invalid"
+const val MAX_PREVIEW_IMAGE_BYTES = 16 * 1024 * 1024
+
+fun isMarkdownPath(path: String): Boolean =
+    path.substringAfterLast('.', "").lowercase() in setOf("md", "markdown")
+
 sealed interface ChatEntry {
     data class User(val text: String, val references: List<com.avfstudio.nativeide.ai.ChatReference> = emptyList()) : ChatEntry
     data class Agent(val text: String) : ChatEntry
@@ -109,6 +119,16 @@ sealed interface ChatEntry {
     data class Notice(val text: String) : ChatEntry
     /** `copilot login --device-code` is waiting for [code] to be entered at [url]. */
     data class DeviceCode(val url: String, val code: String, val done: Boolean = false) : ChatEntry
+    /** A Claude Code or Gemini login in [terminal] waits for the code the page at [url] shows. */
+    data class SignInLink(
+        val agent: String,
+        val url: String,
+        val terminal: UUID,
+        /** Gemini stays open after signing in and needs `/quit`. */
+        val quitAfterCode: Boolean = false,
+        val codeSent: Boolean = false,
+        val done: Boolean = false,
+    ) : ChatEntry
     data class Permission(
         val title: String,
         val options: List<AcpPermissionOption>,

@@ -13,6 +13,50 @@ import java.util.concurrent.CompletableFuture
 
 class DocumentRepositoryTest {
     @Test
+    fun deviceFilesOpenAndSaveThroughTheirUriWithoutAGuest() {
+        val vfs = FakeGuestVfs(ByteArray(0), 1).apply { connected = false }
+        val store = MemoryDeviceFiles(mutableMapOf("content://downloads/7" to "# Notes\r\n".toByteArray()))
+        val cache = MemoryDocumentCache()
+        val repository = DocumentRepository(vfs, cache, store)
+        val path = devicePath("content://downloads/7", "notes.md")
+        assertTrue(isDevicePath(path))
+        assertFalse(isGuestPath(path))
+        assertEquals("notes.md", path.substringAfterLast('/'))
+        assertEquals("content://downloads/7", deviceUri(path))
+
+        val document = (repository.open(path).join() as OpenDocument.Editable).document
+        assertEquals("# Notes\r\n", document.text)
+        assertEquals("\r\n", document.eol)
+        document.updateText("# Notes\r\nmore\r\n")
+        assertTrue(repository.save(document).join() is SaveResult.Saved)
+        assertFalse(document.dirty)
+        assertEquals("# Notes\r\nmore\r\n", store.files.getValue("content://downloads/7").toString(StandardCharsets.UTF_8))
+        assertTrue(repository.hasCopy(path))
+    }
+
+    @Test
+    fun aDeviceFileWithoutAccessOpensFromItsLastCopy() {
+        val store = MemoryDeviceFiles(mutableMapOf("content://a" to "first\n".toByteArray()))
+        val cache = MemoryDocumentCache()
+        val repository = DocumentRepository(FakeGuestVfs(ByteArray(0), 1), cache, store)
+        val path = devicePath("content://a", "a.txt")
+        repository.open(path).join()
+        store.files.clear()
+        assertEquals("first\n", (repository.open(path).join() as OpenDocument.Editable).document.text)
+    }
+
+    @Test
+    fun offlineAGuestFileOpensFromItsCopy() {
+        val vfs = FakeGuestVfs("cached\n".toByteArray(), 5)
+        val repository = DocumentRepository(vfs, MemoryDocumentCache())
+        repository.open("/workspace/main.py").join()
+        vfs.connected = false
+        assertTrue(repository.hasCopy("/workspace/main.py"))
+        assertFalse(repository.hasCopy("/workspace/other.py"))
+        assertEquals("cached\n", (repository.open("/workspace/main.py").join() as OpenDocument.Editable).document.text)
+    }
+
+    @Test
     fun offlineEditsSurviveReconnectAndSaveWithOptimisticTimestamp() {
         val vfs = FakeGuestVfs("hello\n".toByteArray(), 10)
         val cache = MemoryDocumentCache()
@@ -161,6 +205,13 @@ class DocumentRepositoryTest {
         draft.updateText("xy")
         draft.updateText("x")
         assertTrue(draft.dirty)
+    }
+}
+
+private class MemoryDeviceFiles(val files: MutableMap<String, ByteArray>) : DeviceFileStore {
+    override fun read(uri: String): ByteArray = files[uri] ?: throw java.io.IOException("No access to $uri")
+    override fun write(uri: String, bytes: ByteArray) {
+        files[uri] = bytes
     }
 }
 

@@ -15,6 +15,10 @@ const BUNDLED_SCRIPTS: &[(&str, &str)] = &[
         include_str!("../../../guest/tools/avf-jupyter-bridge.py"),
     ),
     ("avf-debugpy.py", include_str!("../../../guest/tools/avf-debugpy.py")),
+    (
+        "avf-node-agent.sh",
+        include_str!("../../../guest/tools/avf-node-agent.sh"),
+    ),
 ];
 const UV_INSTALL_GUIDANCE: &str =
     "Install uv (https://docs.astral.sh/uv/getting-started/installation/) and rerun `avf-daemon tools install";
@@ -61,6 +65,10 @@ pub struct ScriptSpec {
     pub binary: String,
     /// Name of a script bundled into the daemon binary.
     pub asset: String,
+    /// Arguments the installed script runs with once, to finish the install (fetch what it
+    /// launches); output goes to the installer's terminal.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub setup: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -295,6 +303,13 @@ fn validate_install_spec(name: &str, install: &InstallSpec) -> Result<(), String
             return Err(format!(
                 "Tool '{name}' script install needs a bare executable name and a bundled script."
             ));
+        }
+        if script.setup.len() > 8
+            || script.setup.iter().any(|argument| {
+                argument.is_empty() || argument.len() > 64 || argument.contains('\0')
+            })
+        {
+            return Err(format!("Tool '{name}' has invalid script setup arguments."));
         }
     }
     Ok(())
@@ -578,7 +593,19 @@ fn install_script(home: &Path, name: &str, script: &ScriptSpec) -> Result<(), St
     install_executable(name, &bin_dir, &script.binary, |staged| {
         fs::write(staged, contents)
             .map_err(|error| format!("Cannot write the '{name}' script: {error}"))
-    })
+    })?;
+    if script.setup.is_empty() {
+        return Ok(());
+    }
+    let status = Command::new(bin_dir.join(&script.binary))
+        .args(&script.setup)
+        .stdin(Stdio::null())
+        .status()
+        .map_err(|error| format!("Could not run the '{name}' setup: {error}."))?;
+    if !status.success() {
+        return Err(format!("The '{name}' setup failed with {status}."));
+    }
+    Ok(())
 }
 
 fn local_bin_directory(home: &Path) -> Result<PathBuf, String> {
@@ -1202,6 +1229,28 @@ mod tests {
                 0o755
             );
         }
+    }
+
+    #[test]
+    fn script_setup_runs_after_writing_and_its_failure_fails_the_install() {
+        let mut manifest = catalog_lookup("claude-code").unwrap();
+        assert_eq!(manifest.kind, "acp-agent");
+        let script = manifest.install.script.as_mut().unwrap();
+        assert_eq!(script.setup, ["setup", "claude-code"]);
+        // An argument the launcher rejects at once, so the test never downloads Node.js.
+        script.setup = vec!["not-a-mode".into()];
+        let home = tempdir().unwrap();
+        let error = install_from_catalog(home.path(), &manifest).unwrap_err();
+        assert!(error.contains("setup failed"), "{error}");
+        let installed = fs::read_to_string(home.path().join(".local/bin/avf-node-agent")).unwrap();
+        assert!(installed.starts_with("#!/usr/bin/env bash"));
+    }
+
+    #[test]
+    fn script_setup_arguments_are_bounded() {
+        let mut manifest = catalog_lookup("gemini").unwrap();
+        manifest.install.script.as_mut().unwrap().setup = vec![String::new()];
+        assert!(validate_manifest(&manifest).unwrap_err().contains("setup arguments"));
     }
 
     #[test]

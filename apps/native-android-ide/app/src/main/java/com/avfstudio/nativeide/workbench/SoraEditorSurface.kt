@@ -21,6 +21,7 @@ import io.github.rosemoe.sora.event.ContentChangeEvent
 import io.github.rosemoe.sora.event.EditorFocusChangeEvent
 import io.github.rosemoe.sora.event.ScrollEvent
 import io.github.rosemoe.sora.event.SelectionChangeEvent
+import io.github.rosemoe.sora.event.TextSizeChangeEvent
 import io.github.rosemoe.sora.lang.diagnostic.DiagnosticDetail
 import io.github.rosemoe.sora.lang.diagnostic.DiagnosticRegion
 import io.github.rosemoe.sora.lang.diagnostic.DiagnosticsContainer
@@ -182,16 +183,39 @@ internal class SoraEditorSurface(
      */
     override fun applyConfig(config: EditorConfig) {
         val view = editor
-        val sizePx = android.util.TypedValue.applyDimension(
-            android.util.TypedValue.COMPLEX_UNIT_SP, config.fontSizeSp, view.resources.displayMetrics,
-        )
-        if (view.textSizePx != sizePx) view.setTextSize(config.fontSizeSp)
+        // Only a changed setting sets the size, so a pinch in progress isn't undone by a recomposition.
+        if (config.fontSizeSp != appliedFontSizeSp) {
+            appliedFontSizeSp = config.fontSizeSp
+            if (view.textSizePx != spToPx(config.fontSizeSp)) view.setTextSize(config.fontSizeSp)
+        }
+        if (view.isScalable != config.pinchToZoom) view.isScalable = config.pinchToZoom
+        if (config.pinchToZoom && !scaleBoundsSet) {
+            scaleBoundsSet = true
+            view.setScaleTextSizes(spToPx(MIN_FONT_SP), spToPx(MAX_FONT_SP))
+        }
         if (view.tabWidth != config.tabSize) view.setTabWidth(config.tabSize)
         view.insertSpaces = config.insertSpaces
         view.autoIndent = config.autoIndent
         view.useTabStops = config.useTabStops
         if (view.isWordwrap != config.wordWrap) view.setWordwrap(config.wordWrap)
         if (view.isLineNumberEnabled != config.lineNumbers) view.setLineNumberEnabled(config.lineNumbers)
+    }
+
+    private var appliedFontSizeSp = Float.NaN
+    private var scaleBoundsSet = false
+
+    private fun spToPx(sp: Float): Float =
+        android.util.TypedValue.applyDimension(android.util.TypedValue.COMPLEX_UNIT_SP, sp, editor.resources.displayMetrics)
+
+    /** The inverse of [spToPx]; Android 14 scales large fonts non-linearly. */
+    private fun pxToSp(px: Float): Float {
+        val metrics = editor.resources.displayMetrics
+        return if (android.os.Build.VERSION.SDK_INT >= 34) {
+            android.util.TypedValue.deriveDimension(android.util.TypedValue.COMPLEX_UNIT_SP, px, metrics)
+        } else {
+            @Suppress("DEPRECATION")
+            px / metrics.scaledDensity
+        }
     }
 
     override var parameterHintsShown: Boolean
@@ -243,15 +267,23 @@ internal class SoraEditorSurface(
         val focusReceipt = editor.subscribeAlways(EditorFocusChangeEvent::class.java) { event ->
             listener(EditorEvent.FocusChanged("", event.isGainFocus))
         }
+        // Our own setTextSize fires this too; only a size the setting didn't ask for is a pinch.
+        val zoomReceipt = editor.subscribeAlways(TextSizeChangeEvent::class.java) { event ->
+            if (event.newTextSize != spToPx(appliedFontSizeSp)) listener(EditorEvent.Zoomed("", pxToSp(event.newTextSize)))
+        }
         return Closeable {
             contentReceipt.unsubscribe()
             selectionReceipt.unsubscribe()
             scrollReceipt.unsubscribe()
             focusReceipt.unsubscribe()
+            zoomReceipt.unsubscribe()
         }
     }
 
     private companion object {
+        /** The bounds settings.json allows for `editor.fontSize`. */
+        const val MIN_FONT_SP = 8f
+        const val MAX_FONT_SP = 40f
         val breakpointIcon by lazy {
             GradientDrawable().apply {
                 shape = GradientDrawable.OVAL

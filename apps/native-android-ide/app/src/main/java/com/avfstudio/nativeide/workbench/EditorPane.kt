@@ -34,6 +34,8 @@ import androidx.compose.material.icons.outlined.ChevronLeft
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Code
+import androidx.compose.material.icons.outlined.Preview
+import androidx.compose.material.icons.outlined.VerticalSplit
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -46,6 +48,7 @@ import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
@@ -57,6 +60,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.avfstudio.nativeide.PythonTextMate
 import com.avfstudio.nativeide.assets.AssetPackGrammarLoader
 import com.avfstudio.nativeide.document.DocumentSession
+import com.avfstudio.nativeide.document.isDevicePath
 import com.avfstudio.nativeide.editor.AutoPairReplacement
 import com.avfstudio.nativeide.editor.SoraBracketColorizer
 import com.avfstudio.nativeide.editor.autoPairAfterInsertion
@@ -78,26 +82,77 @@ fun EditorArea(controller: WorkbenchController, modifier: Modifier = Modifier) {
     val paged = controller.pagedDocument
     Column(modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
         if (controller.documents.isNotEmpty() || paged != null) EditorTabs(controller)
+        val preview = activeDocument?.let { controller.markdownPreviews[it.path] }
         activeDocument?.takeUnless { it.path.startsWith("scratch:") }?.let { document ->
-            Breadcrumbs(document.path, controller::navigateToDirectory)
+            // A device file has no folders to go to; its crumb says where it is.
+            val device = isDevicePath(document.path)
+            Breadcrumbs(
+                if (device) "/This device/${document.path.substringAfterLast('/')}" else document.path,
+                if (device) { _ -> } else controller::navigateToDirectory,
+            ) {
+                if (isMarkdownPath(document.path)) MarkdownPreviewButtons(controller, preview)
+            }
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             val notebook = controller.activeNotebook
             when {
                 paged != null -> LargeFileView(controller)
                 notebook != null -> NotebookEditor(controller, notebook)
+                activeDocument != null && preview == MarkdownPreviewMode.Only -> key(activeDocument.path) {
+                    MarkdownPreview(controller, activeDocument, followEditor = false, Modifier.fillMaxSize())
+                }
+                activeDocument != null && preview == MarkdownPreviewMode.Side -> key(activeDocument.path) {
+                    Row(Modifier.fillMaxSize()) {
+                        Box(Modifier.weight(1f).fillMaxHeight()) {
+                            NativeEditorView(controller, activeDocument)
+                            EditorOverlays(controller)
+                        }
+                        androidx.compose.material3.VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        MarkdownPreview(
+                            controller,
+                            activeDocument,
+                            followEditor = controller.settings.markdownScrollSync,
+                            Modifier.weight(1f).fillMaxHeight(),
+                        )
+                    }
+                }
                 activeDocument != null -> key(activeDocument.path) { NativeEditorView(controller, activeDocument) }
                 else -> EmptyEditor(controller)
             }
-            if (notebook == null && paged == null) {
-                InlineGhostText(controller)
-                ParameterHints(controller)
-            }
-            if (notebook == null && paged == null && activeDocument != null) {
+            if (notebook == null && paged == null && preview == null) EditorOverlays(controller)
+            if (notebook == null && paged == null && activeDocument != null && preview == null) {
                 ProblemScrollMarks(controller, Modifier.align(Alignment.TopEnd))
             }
         }
     }
+}
+
+/** What the pane draws over the code: inlay hints, Copilot's ghost text and parameter hints. */
+@Composable
+private fun EditorOverlays(controller: WorkbenchController) {
+    InlayHintsOverlay(controller)
+    InlineGhostText(controller)
+    ParameterHints(controller)
+}
+
+/** For a Markdown file: its preview beside the editor (Ctrl+K V) or instead of it (Ctrl+Shift+V). */
+@Composable
+private fun MarkdownPreviewButtons(controller: WorkbenchController, preview: MarkdownPreviewMode?) {
+    val colors = MaterialTheme.colorScheme
+    @Composable
+    fun button(mode: MarkdownPreviewMode, icon: androidx.compose.ui.graphics.vector.ImageVector, label: String) {
+        val on = preview == mode
+        Box(
+            Modifier.size(26.dp).clip(RoundedCornerShape(6.dp))
+                .background(if (on) colors.secondaryContainer else androidx.compose.ui.graphics.Color.Transparent)
+                .clickable { controller.toggleMarkdownPreview(mode) },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(icon, contentDescription = label, modifier = Modifier.size(16.dp), tint = if (on) colors.onSecondaryContainer else colors.onSurfaceVariant)
+        }
+    }
+    button(MarkdownPreviewMode.Side, Icons.Outlined.VerticalSplit, "Open preview to the side")
+    button(MarkdownPreviewMode.Only, Icons.Outlined.Preview, "Open preview")
 }
 
 /**
@@ -193,34 +248,37 @@ private fun EditorTabs(controller: WorkbenchController) {
 }
 
 @Composable
-private fun Breadcrumbs(path: String, onNavigate: (String) -> Unit) {
+private fun Breadcrumbs(path: String, onNavigate: (String) -> Unit, actions: @Composable () -> Unit = {}) {
     val segments = path.split('/').filter(String::isNotEmpty)
-    Row(
-        Modifier.fillMaxWidth().height(26.dp).padding(horizontal = 14.dp).horizontalScroll(rememberScrollState()),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(2.dp),
-    ) {
-        var directory = ""
-        segments.forEachIndexed { index, segment ->
-            directory += "/$segment"
-            val target = directory
-            val last = index == segments.lastIndex
-            Text(
-                segment,
-                style = MaterialTheme.typography.labelMedium,
-                color = if (last) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = if (last) Modifier else Modifier.clip(RoundedCornerShape(4.dp)).clickable { onNavigate(target) }
-                    .padding(horizontal = 2.dp),
-            )
-            if (!last) {
-                Icon(
-                    Icons.Outlined.ChevronRight,
-                    contentDescription = null,
-                    modifier = Modifier.size(14.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+    Row(Modifier.fillMaxWidth().height(26.dp).padding(end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier.weight(1f).padding(horizontal = 14.dp).horizontalScroll(rememberScrollState()),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            var directory = ""
+            segments.forEachIndexed { index, segment ->
+                directory += "/$segment"
+                val target = directory
+                val last = index == segments.lastIndex
+                Text(
+                    segment,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (last) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = if (last) Modifier else Modifier.clip(RoundedCornerShape(4.dp)).clickable { onNavigate(target) }
+                        .padding(horizontal = 2.dp),
                 )
+                if (!last) {
+                    Icon(
+                        Icons.Outlined.ChevronRight,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) { actions() }
     }
 }
 
@@ -256,16 +314,28 @@ private fun EmptyEditor(controller: WorkbenchController) {
                 }
             }
             androidx.compose.material3.OutlinedButton(onClick = { controller.newUntitledFile() }) { Text("New untitled file") }
+            androidx.compose.material3.OutlinedButton(onClick = { controller.pickLocalFile?.invoke() }) { Text("Open from device…") }
         }
-        // VS Code's Start page: the last folders, a tap away.
-        val recent = controller.recentWorkspaceChoices.takeIf { controller.connected }.orEmpty().take(5)
+        // VS Code's Start page: the last folders, a tap away (without a guest, from this device's copies).
+        val offlineFolders = !controller.connected && controller.settings.offlineWorkspace
+        val recent = when {
+            controller.connected -> controller.recentWorkspaceChoices
+            offlineFolders -> controller.recentWorkspaces.filter { it != controller.workspaceRoot }
+            else -> emptyList()
+        }.take(5)
         if (recent.isNotEmpty()) {
             Spacer(Modifier.height(20.dp))
             Column(Modifier.widthIn(max = 360.dp).fillMaxWidth()) {
-                Text("Recent folders", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                Text(
+                    if (offlineFolders) "Recent folders · offline" else "Recent folders",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                )
                 recent.forEach { path ->
                     Row(
-                        Modifier.fillMaxWidth().clickable { controller.openWorkspace(path) }.padding(vertical = 6.dp),
+                        Modifier.fillMaxWidth()
+                            .clickable { if (offlineFolders) controller.openOfflineWorkspace(path) else controller.openWorkspace(path) }
+                            .padding(vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(path.substringAfterLast('/').ifEmpty { path }, color = MaterialTheme.colorScheme.onSurface)
@@ -329,6 +399,9 @@ private fun NativeEditorView(controller: WorkbenchController, document: Document
     val dark = LocalDarkTheme.current
     val settings = controller.settings
     val themeRevision = controller.editorThemeRevision
+    // The preview's layouts replace this view with another for the same document; the old one
+    // must not close the binding the new one made.
+    val shown = remember { arrayOfNulls<SoraEditorSurface>(1) }
     AndroidView(
         modifier = Modifier.fillMaxSize(),
         factory = { context ->
@@ -351,6 +424,7 @@ private fun NativeEditorView(controller: WorkbenchController, document: Document
                 overlay = bracketColorizer
                 val editorSurface = SoraEditorSurface(this, bracketColorizer)
                 surface = editorSurface
+                shown[0] = editorSurface
                 editorSurface.applyConfig(controller.editorConfig())
                 onStylesPublished = {
                     bracketColorizer.update()
@@ -411,7 +485,7 @@ private fun NativeEditorView(controller: WorkbenchController, document: Document
     }
     LaunchedEffect(document.path) { controller.onActiveDocumentChanged() }
     DisposableEffect(document.path) {
-        onDispose { controller.editorHost.close(document.path) }
+        onDispose { shown[0]?.let { controller.editorHost.close(document.path, it) } ?: controller.editorHost.close(document.path) }
     }
 }
 
@@ -473,6 +547,56 @@ private fun ParameterHints(controller: WorkbenchController) {
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(top = 2.dp),
                 )
+            }
+        }
+    }
+}
+
+/**
+ * Inlay hints at the end of their line, as small chips in the editor's font (sora can't open a
+ * gap inside a line). The cursor's line drops them while a Copilot suggestion is drawn there.
+ */
+@Composable
+private fun InlayHintsOverlay(controller: WorkbenchController) {
+    controller.editorViewportTick
+    controller.documentRevision
+    val lines = controller.inlayHintLines
+    if (lines.isEmpty()) return
+    val view = controller.soraEditor() ?: return
+    val density = LocalDensity.current
+    val colors = MaterialTheme.colorScheme
+    val fontSize = with(density) { (view.textSizePx * 0.86f).toSp() }
+    val rowHeight = view.rowHeight
+    val gap = with(density) { 12.dp.toPx() }
+    val ghostLine = view.cursor.leftLine.takeIf { controller.inlineGhostText() != null }
+    val content = view.text
+    Box(Modifier.fillMaxSize().clipToBounds()) {
+        for (line in view.firstVisibleLine..view.lastVisibleLine) {
+            val hints = lines[line] ?: continue
+            if (line == ghostLine || line >= content.lineCount) continue
+            val column = content.getColumnCount(line)
+            val x = view.getCharOffsetX(line, column) + gap
+            val top = view.getCharOffsetY(line, column) - rowHeight
+            Row(
+                Modifier
+                    .offset { IntOffset(x.roundToInt(), top.roundToInt()) }
+                    .height(with(density) { rowHeight.toDp() }),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                hints.forEach { hint ->
+                    Text(
+                        hint,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = fontSize,
+                        color = colors.onSurfaceVariant.copy(alpha = 0.8f),
+                        maxLines = 1,
+                        softWrap = false,
+                        modifier = Modifier
+                            .background(colors.surfaceContainerHighest.copy(alpha = 0.7f), RoundedCornerShape(4.dp))
+                            .padding(horizontal = 4.dp),
+                    )
+                }
             }
         }
     }

@@ -90,6 +90,8 @@ class EncryptedDocumentCache(context: Context) : DocumentCache {
         }
     }
 
+    override fun contains(path: String): Boolean = cacheFile(path).isFile
+
     override fun delete(path: String) {
         val file = cacheFile(path)
         if (file.exists() && !file.delete()) error("Could not remove cached document")

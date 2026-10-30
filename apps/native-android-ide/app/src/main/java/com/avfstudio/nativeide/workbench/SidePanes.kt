@@ -108,10 +108,35 @@ fun SidebarContent(controller: WorkbenchController, view: SidebarView, modifier:
     }
 }
 
+/** Explorer without a guest: the open folder's files this device has a copy of. */
+@Composable
+private fun OfflineFilesList(controller: WorkbenchController) {
+    val workspace = controller.workspaceRoot ?: return
+    val files = remember(workspace, controller.documents.size) { controller.offlineFiles(workspace).sorted() }
+    Column(Modifier.fillMaxSize()) {
+        Text(
+            "Offline · ${workspace.substringAfterLast('/')}: the files this device has a copy of. Edits are saved here and go to the guest when it's back.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+        )
+        if (files.isEmpty()) {
+            EmptyMessage("No copies yet: files opened while connected are kept for offline use.")
+        } else {
+            LazyColumn {
+                items(files) { path ->
+                    PaneRow(Icons.AutoMirrored.Outlined.InsertDriveFile, path.removePrefix(workspace.trimEnd('/') + "/")) { controller.openPath(path) }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 fun ExplorerList(controller: WorkbenchController) {
     val directory = controller.currentDirectory
     when {
+        controller.offline -> OfflineFilesList(controller)
         !controller.connected && controller.roots.isEmpty() -> EmptyMessage("Connect to a guest to browse its workspace.")
         directory.isEmpty() -> LazyColumn {
             items(controller.roots) { root ->
