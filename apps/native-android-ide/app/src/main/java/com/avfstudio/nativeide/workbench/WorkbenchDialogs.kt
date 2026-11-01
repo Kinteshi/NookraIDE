@@ -57,6 +57,8 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Box
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.ui.text.input.VisualTransformation
@@ -625,18 +627,24 @@ private fun DataViewerDialog(controller: WorkbenchController, dialog: WorkbenchD
         controller.loadDataViewer(dialog.copy(query = query, offset = 0))
     }
     val table = dialog.table
+    // One size whatever the page holds: a dialog window that resizes while the filter is typed
+    // restarts the keyboard's input, which garbled the word being typed.
+    val height = (androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp * 0.62f).dp
     AlertDialog(
         onDismissRequest = { controller.dialog = null },
         properties = DialogProperties(usePlatformDefaultWidth = false),
-        modifier = Modifier.padding(24.dp),
+        modifier = Modifier.padding(24.dp).widthIn(max = 1100.dp).fillMaxWidth(),
         title = {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(dialog.name, fontFamily = FontFamily.Monospace)
-                if (dialog.loading) androidx.compose.material3.CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                androidx.compose.material3.CircularProgressIndicator(
+                    Modifier.size(18.dp).alpha(if (dialog.loading) 1f else 0f),
+                    strokeWidth = 2.dp,
+                )
             }
         },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.fillMaxWidth().height(height), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (table == null || table.pages) {
                     OutlinedTextField(
                         value = query,
@@ -666,8 +674,10 @@ private fun DataViewerDialog(controller: WorkbenchController, dialog: WorkbenchD
                         )
                     }
                     else -> {
-                        DataViewerTable(table.table, dialog.sort, dialog.ascending, maxBodyHeight = 480.dp) { column, ascending ->
-                            controller.loadDataViewer(dialog.copy(sort = column, ascending = ascending, offset = 0))
+                        Box(Modifier.weight(1f)) {
+                            DataViewerTable(table.table, dialog.sort, dialog.ascending, maxBodyHeight = height - 190.dp) { column, ascending ->
+                                controller.loadDataViewer(dialog.copy(sort = column, ascending = ascending, offset = 0))
+                            }
                         }
                         val pageSize = table.table.body.size
                         Row(verticalAlignment = Alignment.CenterVertically) {

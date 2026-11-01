@@ -168,7 +168,12 @@ fun NativeWorkbench() {
                     if (controller.settingsVisible) SettingsScreen(controller) else WorkbenchLayout(controller)
                     controller.explorerUndo?.let { undo ->
                         Snackbar(
-                            action = { TextButton(onClick = controller::undoExplorerChange) { Text("Undo") } },
+                            action = {
+                                TextButton(
+                                    onClick = controller::undoExplorerChange,
+                                    colors = androidx.compose.material3.ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.inversePrimary),
+                                ) { Text("Undo") }
+                            },
                             dismissAction = {
                                 IconButton(onClick = controller::dismissExplorerUndo) { Icon(Icons.Outlined.Close, contentDescription = "Dismiss") }
                             },

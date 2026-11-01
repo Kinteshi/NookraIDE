@@ -2300,6 +2300,8 @@ class WorkbenchController(private val context: Context) {
         }.filter { it.scheme == "content" || it.scheme == "file" }
         val text = intent.getCharSequenceExtra(android.content.Intent.EXTRA_TEXT)?.toString()
         compactDestination = CompactDestination.Editor
+        // The plot viewer's own Share can land here; what comes in shows in the editor behind it.
+        closePlotViewer()
         if (streams.isEmpty()) {
             if (text.isNullOrEmpty()) return
             val name = nextUntitledName(documents.map { it.path })
@@ -5096,7 +5098,7 @@ class WorkbenchController(private val context: Context) {
         editorSurface?.applyConfig(editorConfig())
         documentRevision++
         dialog = null
-        status = "Converted indentation to ${target.label.lowercase()}"
+        status = if (target.insertSpaces) "Converted indentation to spaces (${target.tabSize})" else "Converted indentation to tabs (width ${target.tabSize})"
     }
 
     private fun zoomEditor(delta: Float) {
@@ -6776,6 +6778,9 @@ class WorkbenchController(private val context: Context) {
         val width = svg.documentWidth.takeIf { it > 0 } ?: box?.width()?.takeIf { it > 0 } ?: 640f
         val height = svg.documentHeight.takeIf { it > 0 } ?: box?.height()?.takeIf { it > 0 } ?: 480f
         if (box == null) svg.setDocumentViewBox(0f, 0f, width, height)
+        // A set width and height draw at that size whatever the canvas; 100% fills the bitmap.
+        svg.setDocumentWidth("100%")
+        svg.setDocumentHeight("100%")
         val scale = minOf(2f, 4096f / maxOf(width, height))
         val bitmap = android.graphics.Bitmap.createBitmap((width * scale).toInt().coerceAtLeast(1), (height * scale).toInt().coerceAtLeast(1), android.graphics.Bitmap.Config.ARGB_8888)
         bitmap.eraseColor(android.graphics.Color.WHITE)

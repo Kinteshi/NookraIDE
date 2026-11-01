@@ -1432,39 +1432,86 @@ User's pick: 6, 7, 20 and 23 of the backlog list after batch 28 (spec-review ite
 * Test files `~/Projects/batch29.{py,ipynb}`, `batch29-plot-1.svg`, and
   `Pictures/MaterialCode/batch29-plot-*.png` on the tablet.
 
-## 30. Edit commands, LSP extras, indentation, Explorer, notebook find and outline, data viewer, device extras (11-01 from 14:10; in progress)
+## 30. Edit commands, LSP extras, indentation, Explorer, notebook find and outline, data viewer, device extras (11-01 14:10–20:20; done, checked)
 User's pick: 2, 3, 4, 11, 12, 16, 17, 21 of the backlog list after batch 29 (spec-review items 4, 5, 6,
-11, 12, 17, 19, 21).
+11, 12, 17, 19, 21). 275 unit tests pass. The guest daemon was rebuilt (it carries the Jupyter
+bridge) and installed on the tablet (`~/.local/bin/avf-native-daemon.previous` kept; "Installed
+jupyter bridge-5").
 * (4) Indentation detection (`editor.detectIndentation`, setting "Detect indentation", on): each
   file's indentation is guessed when it opens, as VS Code does (tabs or spaces by which more lines
   start with; the tab size from the most common step between neighbouring lines, docstrings left
-  out). The status bar shows "Spaces: 4" / "Tab Size: 4"; it opens a picker for spaces or tabs and
-  the size (this file only), Detect from content, and Convert to tabs/spaces. Tab, Shift+Tab,
-  Enter's indentation, Format Document/Selection, format on paste and Copilot use it. Commands
-  Indent Using Spaces/Tabs, Detect Indentation from Content, Convert Indentation to Spaces/Tabs.
-  Built, unit-tested; tablet check pending.
+  out). The status bar shows "Spaces: 4" / "Tab Size: 4" and opens a picker: spaces or tabs and the
+  size (this file only), Detect from content, Convert to tabs/spaces. Tab, Shift+Tab, Enter,
+  Format Document/Selection, format on paste and Copilot use it. Palette: Indent Using
+  Spaces/Tabs, Detect Indentation from Content, Convert Indentation to Spaces/Tabs. Checked: a
+  2-space file showed "Spaces: 2"; Convert to tabs gave "Tab Size: 2".
 * (2) Edit commands, in the palette with VS Code's ids: Join Lines, Transpose Characters, Sort
   Lines Ascending/Descending (the selected lines, or the file), Delete Duplicate Lines, Trim
   Trailing Whitespace (Ctrl+K Ctrl+X), Transform to Uppercase/Lowercase/Title/Snake/Kebab Case (the
   selection or the word at the cursor), Expand/Shrink Selection (Shift+Alt+→/←: the server's
-  `selectionRange` when it has one, with words, strings, brackets, lines and indented blocks), and
-  Format Selection (Ctrl+K Ctrl+F, the selected lines through range formatting). Each is one
-  edit (one Undo). Built, unit-tested; tablet check pending.
-* (11) Undo after deleting from Explorer: the daemon already kept trashed entries 10 s
-  (`RestoreReq`); the app now reads the trash id from the delete's Ack and shows a snackbar "Deleted
-  x · Undo" for 9.5 s, which restores the entries and reopens their tabs. "Confirm before
-  deleting" (`explorer.confirmDelete`, on as in VS Code) turns the question off. Built; tablet
-  check pending.
+  `selectionRange`, ty has it, together with words, strings, brackets, lines and indented blocks),
+  Format Selection (Ctrl+K Ctrl+F, range formatting of the selected lines). One edit each (one
+  Undo). Checked: Transform to Uppercase on `zeta`; Expand twice (statement, then the file) and
+  Shrink back. The rest by unit tests only.
+* (3) Language-server extras. Reference counts (code lens, setting "Reference counts",
+  `editor.codeLens`): the server's own lenses when it has them (vtsls, asked for with
+  `typescript.referencesCodeLens.enabled`), else `textDocument/references` for each class,
+  function and method in the outline, 16 at a time, shown at the end of the line ("1 reference"),
+  a tap lists them in References. Found on the tablet: ty sends flat symbols whose range starts at
+  `def`, and references asked there are empty; the name's column is now looked up. Linked editing
+  (setting "Linked editing", on): typing or deleting in an HTML/XML/JSX tag's name changes its
+  partner (nesting counted, self-closing and half-typed tags left alone, an emptied name stays
+  linked); done in the editor, no server needed. `$/progress` from servers shows in the status bar
+  with a spinner ("ty: Indexing 40%"); not seen on the tablet (ty finished too fast). Checked: lens
+  counts in batch28.py and b30/indent.py, a tap opened References; `<div>` → `<divxy>` renamed the
+  outer `</div>` and not the inner one, and back.
+* (11) Undo after a delete: the daemon already kept trashed entries 10 s; the app reads the trash
+  id from the delete's Ack and shows "Deleted x · Undo" for 9.5 s, restoring the entries and
+  reopening their tabs. "Confirm before deleting" (`explorer.confirmDelete`, on as in VS Code).
+  Checked: delete one.txt, Undo, "Restored one.txt". (A first try ran past the window while I took
+  screenshots; two test files stayed deleted.)
 * (12) Explorer: multi-select (Ctrl+tap, Shift+tap a range, or Select in a row's menu, then taps
-  toggle; a bar with Move to…, Delete and Clear), drag to move (long-press and drag onto a folder,
-  ".." for the parent; the list scrolls near its edges; a long press without moving opens the
-  menu; setting "Drag to move in Explorer"), Move to… (a folder in the workspace, created if new),
-  Undo for moves, Open Editors above the files (setting), compact folders (`explorer.compactFolders`:
-  a folder holding one folder opens through and shows as `a/b/c`), and `files.exclude` (VS Code's
-  defaults; globs with `**`, `*`, `?`, `{a,b}`, `[…]`; Explorer and Quick Open). Built; tablet
-  check pending.
-* (21, part) Haptic feedback (`avf.haptics`, setting): breakpoints, latched Ctrl/Alt/Shift in the
-  key bar, Explorer selection and drag, Undo offered.
+  toggle; a bar with Move to…, Delete and Clear), drag to move (long-press and drag onto a folder
+  or ".."; the list scrolls near its edges; a long press that doesn't move opens the menu; setting
+  "Drag to move in Explorer"), Move to… (a folder in the workspace, created if new), Undo for
+  moves, Open Editors above the files (setting "Open editors in Explorer"), compact folders
+  (`explorer.compactFolders`: a folder holding one folder opens through and shows as `a/b/c`),
+  `files.exclude` (VS Code's defaults; `**`, `*`, `?`, `{a,b}`, `[…]`; Explorer and Quick Open;
+  Settings → Hidden files opens settings.json). Checked: deep/nested/inner as one row, drag of
+  one.txt onto target and Undo, menu on a still long press, Select + tap, Delete 2 items with the
+  dialog. Found on the tablet: Open Editors inside the file list was pushed above the rows the
+  list keeps in view; it is now its own section. Not checked: Ctrl/Shift+tap (no keyboard),
+  files.exclude edits.
+* (16) Notebook find and outline. Ctrl+F (and Ctrl+H, F3, Alt+L…) in a notebook open the same
+  find widget over every cell's source: matches highlighted in the cells, "3 of 8", Enter moves
+  through cells (a Markdown cell opens its source to show it) while the keys stay in the find box;
+  Find in Selection means the selected cell; Replace and Replace All work cell by cell; closing
+  leaves the match selected in its cell. Outline for notebooks: Markdown headings by level, and
+  code cells under them with the "Code cells" chip; a tap selects the cell. Checked: "price"
+  8 matches, Enter 8 → 1 → 2, outline taps. Not checked: Replace in notebooks.
+* (17) Data viewer: a filter (text in any column, or a pandas query such as `price > 1150 and
+  city == "Oslo"`; a query that fails is matched as text, with the error shown), 500 rows a page
+  with first/previous/next/last, and sorting by a column over all rows (the kernel sorts). The
+  bridge's `_avf_table` takes offset, query, sort and order; an older bridge still shows the
+  first rows, with a note. Checked on a 1,200-row DataFrame: rows 1,001–1,200 on the last page,
+  the query gave 16 rows "filtered from 1.200", price descending. Typing with adb garbled the
+  first word (it types faster than a person; one letter at a time was fine); a fixed dialog size
+  came out of chasing it.
+* (21) Share target, tile, haptics. MaterialCode is in the share sheet: text opens as a new
+  untitled file; files are saved into a workspace folder you choose (a taken name gets " (2)"),
+  or one file opens without saving. Quick Settings tile "MaterialCode": a tap opens the app; lit
+  while connected. Haptics (`avf.haptics`, setting "Haptic feedback"): breakpoints, latched key-bar
+  modifiers, Explorer selection and drag, Undo offered. Checked: shared text → Untitled-1; a plot
+  shared from the plot viewer → MaterialCode → saved in b30 and opened; the tile (added with
+  `cmd statusbar add-tile`, removed afterwards) lit, and a tap from the home screen brought the
+  app back. Haptics not felt (adb). An adb share of a MediaStore file fails with a clear message
+  (the shell can't grant the read).
+* Found on the way (batch 29): a shared or copied SVG plot drew at its own size in a bitmap twice
+  as large (a quarter filled); AndroidSVG now scales it to the bitmap. The Undo snackbar's button
+  uses the inverse primary colour (it was hard to read).
+* Test files in the guest: ~/Projects/b30 (indent.py, page.html, notebook.ipynb, one.txt,
+  deep/nested/inner/leaf.txt, target/, batch29-plot-20261101-201541.png). Untitled-1 holds the
+  shared text, unsaved.
 
 ## Backlog
 To investigate (user, 10-28):
@@ -1606,11 +1653,11 @@ day, L several days.
      in selection, preserve case, previous match, match count and all matches highlighted. M.
   3. Go to Type Definition, Implementation and Declaration; a real Peek (today it jumps); call
      hierarchy. M.
-  4. More edit commands: join lines, transpose, sort lines, upper/lower case, expand/shrink
+  4. (Done in batch 30.) More edit commands: join lines, transpose, sort lines, upper/lower case, expand/shrink
      selection (LSP `selectionRange`), format selection. S-M.
-  5. LSP extras: code lens (reference counts), linked editing (HTML tags), `$/progress` in the
+  5. (Done in batch 30.) LSP extras: code lens (reference counts), linked editing (HTML tags), `$/progress` in the
      status bar (indexing). M.
-  6. Indentation detection from the file's content (`editor.detectIndentation`). S.
+  6. (Done in batch 30.) Indentation detection from the file's content (`editor.detectIndentation`). S.
   7. Hex view for binary files. M.
 * Languages:
   8. Language servers beyond Python and TypeScript/JavaScript, offered on demand like syntax
@@ -1621,9 +1668,9 @@ day, L several days.
      over the concatenated cells, as the Copilot mirror already does. M-L.
   10. File icon themes from imported VSIX packs (kept but not used today). S-M.
 * Workbench:
-  11. Undo after deleting a file (the daemon's trash can restore it; the spec asks for a 10 s
+  11. (Done in batch 30.) Undo after deleting a file (the daemon's trash can restore it; the spec asks for a 10 s
       Undo). S.
-  12. Explorer: multi-select, drag to move, Open Editors section, `files.exclude`, compact
+  12. (Done in batch 30.) Explorer: multi-select, drag to move, Open Editors section, `files.exclude`, compact
       folders. M.
   13. Source Control: stage and discard per hunk from the diff, stash, history (log) view,
       blame toggle, file timeline. M-L.
@@ -1634,14 +1681,14 @@ day, L several days.
       LaTeX math (`$…$`, KaTeX as in outputs). Today headings, bullets and inline styles only;
       commonmark is already in the app. M.
   16. Raw cells: the model reads them, but the cell toolbar switches only Code and Markdown. S.
-  17. Find and replace across a notebook's cells, and a notebook outline (headings). M.
+  17. (Done in batch 30.) Find and replace across a notebook's cells, and a notebook outline (headings). M.
   18. (Done in batch 29.) Plot viewer: an image output full screen with pinch zoom, save and share. S-M.
-  19. Data viewer: filter rows and page past the first rows. M.
+  19. (Done in batch 30.) Data viewer: filter rows and page past the first rows. M.
 * Debugging:
   20. Set a variable's value, inline values in the editor, attach to a process, more adapters
       (codelldb, js-debug). M-L.
 * Device and quality:
-  21. Share-sheet target (text or files into the workspace), a Quick Settings tile, haptics for
+  21. (Done in batch 30.) Share-sheet target (text or files into the workspace), a Quick Settings tile, haptics for
       latched modifiers and breakpoints. S-M.
   22. Accessibility pass (TalkBack labels for the editor, tree and outputs). M.
   23. Instrumented tests and golden screenshots (spec 12; the app has unit tests only). L.
