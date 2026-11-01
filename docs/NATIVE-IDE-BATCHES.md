@@ -1267,6 +1267,17 @@ To investigate (user, 10-28):
   copilot-language-server offers it over LSP (open-source editor plugins use a
   `textDocument/copilotInlineEdit` request) and what the account allows. It needs a diff
   decoration in sora, and a setting (on by default when Copilot is signed in). Likely M-L.
+* Syntax colours on demand for more languages (user, 10-31): opening a SQL file (or Rust, Go,
+  TOML, …) should colour it. Today only Python's grammar ships with the app; other files are
+  coloured only if a .vsix with their grammar was imported by hand (Settings → Import VS Code
+  theme takes .vsix files and loads the TextMate grammars in them). First look: Open VSX
+  publishes VS Code's built-in language extensions under the `vscode` namespace (e.g.
+  `vscode/sql` 1.95.3, MIT grammars, ~50 KB each), and the app already installs a .vsix into
+  asset-packs and registers its grammars by file extension. So: a map from file extension to
+  extension id (built-ins first; an Open VSX search for the rest), an offer in the editor when a
+  file has no grammar ("Colour SQL files? Downloads vscode.sql from Open VSX"), download with
+  checksum, install, and re-colour open tabs. A setting to ask, always fetch, or never; an
+  "Installed languages" list in Settings to remove them. Not the Microsoft Marketplace. Likely M.
 * Refactor: replace sora-editor with Aardink (user, 10-28). **Decided (user, 10-28): it will be
   done, for the licence (Apache-2.0 instead of sora's LGPL-2.1); held for later.** Evaluated the
   same day (`docs/native-editor-evaluation.md`, "Re-evaluation 2026-10-28"); not ready yet,
