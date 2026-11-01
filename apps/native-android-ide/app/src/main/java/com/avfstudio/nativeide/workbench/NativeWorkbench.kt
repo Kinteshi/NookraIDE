@@ -72,6 +72,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Snackbar
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.runtime.Composable
@@ -486,6 +487,13 @@ private fun StatusBar(controller: WorkbenchController) {
                     style = MaterialTheme.typography.labelMedium,
                     color = if (pressure) colors.error else colors.onSurfaceVariant,
                 )
+            }
+        }
+        // Language servers' work in progress (indexing, loading the project), the newest first.
+        controller.serverProgress.values.lastOrNull()?.let { progress ->
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 1.5.dp, color = colors.onSurfaceVariant)
+                Text(progress, style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 260.dp))
             }
         }
         StatusItem(

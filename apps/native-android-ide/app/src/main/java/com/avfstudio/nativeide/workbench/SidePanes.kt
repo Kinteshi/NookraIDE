@@ -39,6 +39,7 @@ import androidx.compose.material.icons.automirrored.outlined.InsertDriveFile
 import androidx.compose.material.icons.automirrored.outlined.NoteAdd
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Code
+import androidx.compose.material.icons.outlined.TextFields
 import androidx.compose.material.icons.outlined.CreateNewFolder
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DriveFileRenameOutline
@@ -141,6 +142,7 @@ internal fun OfflineFilesList(controller: WorkbenchController) {
 
 @Composable
 private fun OutlineList(controller: WorkbenchController) {
+    controller.activeNotebook?.let { return NotebookOutlineList(controller, it) }
     val document = controller.activeDocument
     val rows = remember(controller.outlineSymbols) { flattenOutline(controller.outlineSymbols) }
     val showProblems = controller.settings.outlineProblems
@@ -179,6 +181,39 @@ private fun OutlineList(controller: WorkbenchController) {
                         val uri = controller.diagnosticUri(document.path)
                         controller.navigateToLocation(LanguageLocation(uri, symbol.range))
                     }
+                }
+            }
+        }
+    }
+}
+
+/** A notebook's outline, as VS Code's: the Markdown cells' headings, and its code cells if asked for. */
+@Composable
+private fun NotebookOutlineList(controller: WorkbenchController, session: NotebookSession) {
+    controller.documentRevision
+    var codeCells by remember { mutableStateOf(false) }
+    val entries = notebookOutline(session.notebook.cells, codeCells)
+    Column {
+        Row(Modifier.padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            FilterChip(
+                selected = codeCells,
+                onClick = { codeCells = !codeCells },
+                label = { Text("Code cells") },
+                leadingIcon = { Icon(Icons.Outlined.Code, contentDescription = null, modifier = Modifier.size(16.dp)) },
+            )
+        }
+        if (entries.isEmpty()) {
+            EmptyMessage(if (codeCells) "No cells yet." else "No headings: Markdown cells with # titles show here.")
+        } else {
+            LazyColumn {
+                items(entries) { entry ->
+                    PaneRow(
+                        if (entry.code) Icons.Outlined.Code else Icons.Outlined.TextFields,
+                        entry.title,
+                        muted = entry.code,
+                        selected = entry.cellId == session.selectedCell,
+                        indent = entry.depth,
+                    ) { controller.revealCell(session, entry.cellId) }
                 }
             }
         }

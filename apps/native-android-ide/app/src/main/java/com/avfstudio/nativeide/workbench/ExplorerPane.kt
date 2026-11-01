@@ -11,6 +11,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.runtime.key
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -145,14 +150,19 @@ private fun ExplorerTree(controller: WorkbenchController, directory: String) {
         ?: controller.roots.any { it.trimEnd('/') == directory.trimEnd('/') }
     Column(Modifier.fillMaxSize()) {
         if (selecting) SelectionBar(controller, selection.toList())
+        // Its own section above the files, as in VS Code (inside the list, tabs opened later went
+        // above the rows it keeps in view).
+        if (settings.openEditors && controller.documents.isNotEmpty()) {
+            OpenEditorsHeader(controller)
+            if (controller.openEditorsExpanded) {
+                Column(Modifier.heightIn(max = 180.dp).verticalScroll(rememberScrollState())) {
+                    controller.documents.toList().forEach { document -> key(document.path) { OpenEditorRow(controller, document) } }
+                }
+            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), modifier = Modifier.padding(top = 4.dp))
+        }
         Box(Modifier.weight(1f).onGloballyPositioned { listBounds = it.boundsInRoot() }) {
             LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
-                if (settings.openEditors && controller.documents.isNotEmpty()) {
-                    item(key = "open-editors") { OpenEditorsHeader(controller) }
-                    if (controller.openEditorsExpanded) {
-                        items(controller.documents.toList(), key = { "open:" + it.path }) { document -> OpenEditorRow(controller, document) }
-                    }
-                }
                 item(key = "up") {
                     Box(Modifier.dropTarget(drag, "up", parent.takeIf { !atRoot && it.isNotEmpty() })) {
                         PaneRow(

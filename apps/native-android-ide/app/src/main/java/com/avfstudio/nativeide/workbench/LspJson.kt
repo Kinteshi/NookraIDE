@@ -37,6 +37,8 @@ data class OutlineSymbol(
     val kind: Int,
     val range: JsonObject,
     val children: List<OutlineSymbol>,
+    /** The name itself (DocumentSymbol's `selectionRange`); null for SymbolInformation. */
+    val selectionRange: JsonObject? = null,
 )
 
 internal fun JsonObject.toLspRange(): LspRange? {
@@ -81,6 +83,7 @@ internal fun JsonElement.toOutlineSymbols(): List<OutlineSymbol> =
             kind = symbol.get("kind")?.takeUnless { it.isJsonNull }?.asInt ?: 0,
             range = range,
             children = symbol.getAsJsonArray("children")?.toOutlineSymbols().orEmpty(),
+            selectionRange = symbol.getAsJsonObject("selectionRange"),
         )
     }
 

@@ -189,6 +189,7 @@ fun NotebookEditor(controller: WorkbenchController, session: NotebookSession) {
             }
         }
         if (controller.settings.stickyCellHeader) StickyCellHeader(controller, session, listState)
+        if (controller.findVisible) FindWidget(controller, Modifier.align(Alignment.TopEnd).padding(top = 4.dp, end = 8.dp))
         UndoDeleteBar(controller, session, Modifier.align(Alignment.BottomCenter))
         }
     }
@@ -423,6 +424,30 @@ private fun StickyCellHeader(controller: WorkbenchController, session: NotebookS
 }
 
 /** A cell's first non-blank line, without Markdown's heading marks. */
+/** A notebook outline row: a Markdown heading ([depth] from its level) or a code cell under the heading before it. */
+internal data class NotebookOutlineEntry(val cellId: String, val title: String, val depth: Int, val code: Boolean)
+
+internal fun notebookOutline(cells: List<NotebookCell>, codeCells: Boolean): List<NotebookOutlineEntry> {
+    val entries = mutableListOf<NotebookOutlineEntry>()
+    var level = 0
+    cells.forEach { cell ->
+        if (cell.type == CellType.Markdown) {
+            var fenced = false
+            cell.source.lineSequence().forEach { line ->
+                if (line.trimStart().startsWith("```") || line.trimStart().startsWith("~~~")) fenced = !fenced
+                val heading = if (fenced) null else Regex("^ {0,3}(#{1,6})\\s+(.+?)\\s*#*\\s*$").find(line)
+                if (heading != null) {
+                    level = heading.groupValues[1].length
+                    entries += NotebookOutlineEntry(cell.id, heading.groupValues[2], level - 1, code = false)
+                }
+            }
+        } else if (codeCells && cell.type == CellType.Code) {
+            entries += NotebookOutlineEntry(cell.id, cellHeadline(cell).ifBlank { "Empty code cell" }, level, code = true)
+        }
+    }
+    return entries
+}
+
 internal fun cellHeadline(cell: NotebookCell): String {
     val line = cell.source.lineSequence().firstOrNull { it.isNotBlank() }?.trim() ?: return "Empty cell"
     return if (cell.type == CellType.Markdown) line.trimStart('#', ' ') else line
@@ -439,7 +464,7 @@ private fun CellSourceEditor(
     val colors = MaterialTheme.colorScheme
     val focus = remember { FocusRequester() }
     val palette = syntaxPalette(controller.settings.syntaxColors, colors, dark)
-    val highlighter = remember(palette, cell.type) {
+    val baseHighlighter = remember(palette, cell.type) {
         if (cell.type == CellType.Code) PythonHighlighter(palette) else VisualTransformation.None
     }
     var field by remember(cell.id) { mutableStateOf(TextFieldValue(cell.source)) }
@@ -448,6 +473,11 @@ private fun CellSourceEditor(
     // Selecting a cell (Shift+Enter, + Code, a tap) puts the keyboard in it, as in Jupyter's edit mode.
     LaunchedEffect(selected, session.focusRequest) {
         if (!selected) return@LaunchedEffect
+        // Find selected this cell: the keys stay in the find box.
+        if (session.keepFocusOnSelect) {
+            session.keepFocusOnSelect = false
+            return@LaunchedEffect
+        }
         session.caretAtEnd?.let { atEnd ->
             // Land on the first row (coming from above) or the last one (from below), at the
             // horizontal position the cursor had, so Up/Down feel like one continuous editor.
@@ -492,6 +522,16 @@ private fun CellSourceEditor(
             controller.onCellEdited(session)
         }
         controller.onCellInput(session, cell, value, textChanged)
+    }
+    // Find's current match in this cell becomes its selection, so closing find leaves it selected.
+    LaunchedEffect(session.findReveal) {
+        val (cellId, range) = session.findCurrentMatch ?: return@LaunchedEffect
+        if (cellId == cell.id && range.last < field.text.length) field = field.copy(selection = TextRange(range.first, range.last + 1))
+    }
+    val findMatches = session.findMatches[cell.id].orEmpty()
+    val findCurrent = session.findCurrentMatch?.takeIf { it.first == cell.id }?.second
+    val highlighter = if (findMatches.isEmpty()) baseHighlighter else {
+        FindHighlights(baseHighlighter, findMatches, findCurrent, colors.tertiary.copy(alpha = 0.28f), colors.tertiary.copy(alpha = 0.6f))
     }
     val ghost = session.cellSuggestion?.takeIf { it.cellId == cell.id && field.selection.collapsed }
         ?.let { cellGhostText(field.text, field.selection.start, it) }
@@ -682,6 +722,34 @@ private val ansiPattern = Regex("\u001B\\[[0-9;?]*[ -/]*[@-~]")
 internal fun String.stripAnsi(): String = replace(ansiPattern, "")
 
 /** Lightweight Python colouring for notebook cells, in the code editor's [SyntaxPalette]. */
+/** Find's matches in a cell drawn behind its text, the current one stronger, over [base]'s colours. */
+private class FindHighlights(
+    private val base: VisualTransformation,
+    private val matches: List<IntRange>,
+    private val current: IntRange?,
+    private val matchColor: Color,
+    private val currentColor: Color,
+) : VisualTransformation {
+    override fun filter(text: AnnotatedString): TransformedText {
+        val transformed = base.filter(text)
+        val styled = buildAnnotatedString {
+            append(transformed.text)
+            val length = transformed.text.length
+            matches.forEach { range ->
+                val start = transformed.offsetMapping.originalToTransformed(range.first.coerceIn(0, text.length))
+                val end = transformed.offsetMapping.originalToTransformed((range.last + 1).coerceIn(0, text.length))
+                if (start < end && end <= length) addStyle(SpanStyle(background = if (range == current) currentColor else matchColor), start, end)
+            }
+        }
+        return TransformedText(styled, transformed.offsetMapping)
+    }
+
+    override fun equals(other: Any?): Boolean =
+        other is FindHighlights && other.base == base && other.matches == matches && other.current == current
+
+    override fun hashCode(): Int = matches.hashCode() * 31 + (current?.hashCode() ?: 0)
+}
+
 internal class PythonHighlighter(palette: SyntaxPalette) : VisualTransformation {
     private val keyword = palette.keyword
     private val string = palette.string

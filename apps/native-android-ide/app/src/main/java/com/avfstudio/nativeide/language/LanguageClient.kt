@@ -100,6 +100,18 @@ class LanguageClient(
     @Volatile var supportsRangeFormatting = false
         private set
     @Volatile var supportsInlayHints = false
+    /** `textDocument/codeLens` (TypeScript's reference counts); others get counts from references. */
+    @Volatile var supportsCodeLens = false
+        private set
+    @Volatile var supportsCodeLensResolve = false
+        private set
+    @Volatile var supportsReferences = false
+        private set
+    /** `textDocument/linkedEditingRange` (JSX/HTML tag pairs). */
+    @Volatile var supportsLinkedEditing = false
+        private set
+    /** `$/progress` reports (begin, report, end) by token: indexing and loading the project. */
+    @Volatile var progressListener: ((String, JsonObject) -> Unit)? = null
     /** `textDocument/selectionRange`, for Expand Selection. */
     @Volatile var supportsSelectionRange = false
         private set
@@ -158,6 +170,11 @@ class LanguageClient(
                 supportsInlayHints = capabilities?.provides("inlayHintProvider") == true
                 supportsWorkspaceSymbols = capabilities?.provides("workspaceSymbolProvider") == true
                 supportsSelectionRange = capabilities?.provides("selectionRangeProvider") == true
+                supportsCodeLens = capabilities?.provides("codeLensProvider") == true
+                supportsCodeLensResolve = capabilities?.get("codeLensProvider")?.takeIf { it.isJsonObject }?.asJsonObject
+                    ?.get("resolveProvider")?.takeIf { it.isJsonPrimitive }?.asBoolean == true
+                supportsReferences = capabilities?.provides("referencesProvider") == true
+                supportsLinkedEditing = capabilities?.provides("linkedEditingRangeProvider") == true
                 notify("initialized", JsonObject())
                 notify("workspace/didChangeConfiguration", JsonObject().apply {
                     add("settings", gson.toJsonTree(configuredSettings))
@@ -295,10 +312,20 @@ class LanguageClient(
     fun definition(path: String, position: LspPosition): CompletableFuture<JsonElement> =
         request("textDocument/definition", positionParams(path, position))
 
-    fun references(path: String, position: LspPosition): CompletableFuture<JsonElement> =
+    fun references(path: String, position: LspPosition, includeDeclaration: Boolean = true): CompletableFuture<JsonElement> =
         request("textDocument/references", positionParams(path, position).apply {
-            add("context", JsonObject().apply { addProperty("includeDeclaration", true) })
+            add("context", JsonObject().apply { addProperty("includeDeclaration", includeDeclaration) })
         })
+
+    fun codeLens(path: String): CompletableFuture<JsonElement> =
+        request("textDocument/codeLens", JsonObject().apply {
+            add("textDocument", JsonObject().apply { addProperty("uri", fileUri(path)) })
+        })
+
+    fun resolveCodeLens(lens: JsonObject): CompletableFuture<JsonElement> = request("codeLens/resolve", lens)
+
+    fun linkedEditingRanges(path: String, position: LspPosition): CompletableFuture<JsonElement> =
+        request("textDocument/linkedEditingRange", positionParams(path, position))
 
     fun codeActions(path: String, range: LspRange, diagnostics: JsonArray): CompletableFuture<JsonElement> =
         request("textDocument/codeAction", JsonObject().apply {
@@ -364,7 +391,12 @@ class LanguageClient(
             "textDocument/publishDiagnostics" -> publishDiagnostics(params)
             "window/showMessage" ->
                 messageListener?.invoke(params.get("message")?.asString ?: "Language server message")
-            "window/logMessage", "\$/progress", "\$/logTrace" -> Unit
+            "\$/progress" -> {
+                val token = params.get("token")?.takeIf { it.isJsonPrimitive }?.asString
+                val value = params.get("value")?.takeIf { it.isJsonObject }?.asJsonObject
+                if (token != null && value != null) progressListener?.invoke(token, value)
+            }
+            "window/logMessage", "\$/logTrace" -> Unit
             else -> notificationListener?.invoke(method, params)
         }
     }
@@ -494,6 +526,8 @@ class LanguageClient(
                 })
                 add("documentHighlight", JsonObject().apply { addProperty("dynamicRegistration", false) })
                 add("selectionRange", JsonObject().apply { addProperty("dynamicRegistration", false) })
+                add("codeLens", JsonObject().apply { addProperty("dynamicRegistration", false) })
+                add("linkedEditingRange", JsonObject().apply { addProperty("dynamicRegistration", false) })
                 add("rangeFormatting", JsonObject().apply { addProperty("dynamicRegistration", false) })
                 add("inlayHint", JsonObject().apply { addProperty("dynamicRegistration", false) })
                 add("definition", JsonObject().apply { addProperty("dynamicRegistration", false) })

@@ -473,12 +473,23 @@ internal fun DataViewerTable(table: OutputTable) {
     OutputTableView(table, presentation, Modifier, maxBodyHeight = 560.dp) { presentation = it }
 }
 
+/** The data viewer's table when the kernel sorts (all rows, not just the page): [onSort] asks for a column, or null for none. */
+@Composable
+internal fun DataViewerTable(table: OutputTable, sortColumn: Int?, ascending: Boolean, maxBodyHeight: Dp, onSort: (Int?, Boolean) -> Unit) {
+    val presentation = OutputPresentation(sortColumn = sortColumn, sortDirection = if (ascending) SortDirection.Ascending else SortDirection.Descending)
+    OutputTableView(table, presentation, Modifier, maxBodyHeight = maxBodyHeight, sortLocally = false) { next ->
+        onSort(next.sortColumn, next.sortDirection == SortDirection.Ascending)
+    }
+}
+
 @Composable
 private fun OutputTableView(
     table: OutputTable,
     presentation: OutputPresentation,
     modifier: Modifier,
     maxBodyHeight: Dp = 420.dp,
+    /** False when the rows come sorted (the data viewer's kernel sorts them all). */
+    sortLocally: Boolean = true,
     onPresentation: (OutputPresentation) -> Unit,
 ) {
     val colors = MaterialTheme.colorScheme
@@ -486,7 +497,7 @@ private fun OutputTableView(
     val headerStyle = style.copy(fontWeight = FontWeight.SemiBold)
     val sortColumn = presentation.sortColumn?.takeIf { it < table.columnCount }
     val rows = remember(table, sortColumn, presentation.sortDirection) {
-        if (sortColumn != null) table.sortedBody(sortColumn, presentation.sortDirection) else table.body
+        if (sortColumn != null && sortLocally) table.sortedBody(sortColumn, presentation.sortDirection) else table.body
     }
     val widths = columnWidths(table, style, headerStyle)
     val numeric = remember(table) {
@@ -551,7 +562,7 @@ private fun OutputTableView(
         val notes = listOfNotNull(
             table.caption.takeIf { it.isNotEmpty() },
             "first $TABLE_ROW_LIMIT rows shown".takeIf { rows.size > TABLE_ROW_LIMIT },
-            sortColumn?.let { "sorted by ${table.head.lastOrNull()?.getOrNull(it)?.text?.ifBlank { null } ?: "column ${it + 1}"} (the rows shown)" },
+            sortColumn?.takeIf { sortLocally }?.let { "sorted by ${table.head.lastOrNull()?.getOrNull(it)?.text?.ifBlank { null } ?: "column ${it + 1}"} (the rows shown)" },
         )
         if (notes.isNotEmpty()) {
             Text(

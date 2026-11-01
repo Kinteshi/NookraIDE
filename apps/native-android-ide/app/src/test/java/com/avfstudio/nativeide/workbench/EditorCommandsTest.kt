@@ -36,7 +36,8 @@ class EditorCommandsTest {
 
     @Test
     fun everyCoreBindingResolvesToItsCommand() {
-        EditorCommands.core.forEach { command ->
+        // Palette-only commands (Join Lines, Sort Lines…) have no keys.
+        EditorCommands.core.filter { it.keybinding.isNotEmpty() }.forEach { command ->
             val dispatcher = EditorKeybindingDispatcher()
             val result = command.keybinding.split(' ')
                 .map(KeyStroke::parse)
@@ -87,7 +88,7 @@ class EditorCommandsTest {
             "F12" to KeyEvent.KEYCODE_F12,
         )
 
-        EditorCommands.core.forEach { command ->
+        EditorCommands.core.filter { it.keybinding.isNotEmpty() }.forEach { command ->
             command.keybinding.split(' ').forEachIndexed { index, binding ->
                 val expected = KeyStroke.parse(binding)
                 val keyCode = requireNotNull(keyCodes[expected.key]) { "No Android key code for ${expected.key}" }

@@ -11,7 +11,7 @@ import com.avfstudio.nativeide.R
 
 /**
  * Hands the activity's intents to the workbench: "Open with" from a file manager (a content URI
- * to view or edit) and the launcher's recent-folder shortcuts. An intent that arrives before the
+ * to view or edit), the share sheet, and the launcher's recent-folder shortcuts. An intent that arrives before the
  * workbench is composed waits for [handler].
  */
 object IntentRouter {
@@ -30,7 +30,7 @@ object IntentRouter {
         }
 
     fun deliver(intent: Intent?) {
-        if (intent == null || (intent.action != Intent.ACTION_VIEW && intent.action != Intent.ACTION_EDIT && intent.action != ACTION_OPEN_FOLDER)) return
+        if (intent == null || intent.action !in setOf(Intent.ACTION_VIEW, Intent.ACTION_EDIT, Intent.ACTION_SEND, Intent.ACTION_SEND_MULTIPLE, ACTION_OPEN_FOLDER)) return
         handler?.invoke(intent) ?: run { pending = intent }
     }
 }

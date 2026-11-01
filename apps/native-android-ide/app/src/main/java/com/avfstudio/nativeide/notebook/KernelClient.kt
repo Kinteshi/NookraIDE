@@ -124,11 +124,19 @@ class KernelClient(transport: GuestVfsClient) {
     fun variables(): CompletableFuture<KernelVariables> =
         connection.request("variables", JsonObject(), timeoutSeconds = null).thenApply(::parseKernelVariables)
 
-    /** Up to [limit] rows of the DataFrame, Series or array called [name], for the data viewer. */
-    fun table(name: String, limit: Int): CompletableFuture<VariableTable?> =
+    /**
+     * [limit] rows from [offset] of the DataFrame, Series or array called [name], for the data
+     * viewer: those matching [query] (a pandas query or text), sorted by the shown [sort] column
+     * (0 is the index). Older bridges ignore all but [limit].
+     */
+    fun table(name: String, limit: Int, offset: Int = 0, query: String = "", sort: Int? = null, ascending: Boolean = true): CompletableFuture<VariableTable?> =
         connection.request("table", JsonObject().apply {
             addProperty("name", name)
             addProperty("limit", limit)
+            addProperty("offset", offset)
+            addProperty("query", query)
+            sort?.let { addProperty("sort", it) }
+            addProperty("ascending", ascending)
         }, timeoutSeconds = null).thenApply(::parseVariableTable)
 
     fun interrupt(): CompletableFuture<Unit> = connection.request("interrupt", JsonNull.INSTANCE).thenApply { }

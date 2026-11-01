@@ -35,8 +35,20 @@ fun parseKernelVariables(result: JsonElement?): KernelVariables {
     return KernelVariables(variables, body.get("truncated")?.asBoolean ?: false)
 }
 
-/** A DataFrame or array the bridge sent for the data viewer, as the notebook's native table, and how many rows it has in all. */
-data class VariableTable(val table: OutputTable, val total: Int)
+/**
+ * A page of a DataFrame or array the bridge sent for the data viewer, as the notebook's native
+ * table: [total] rows in all, [matched] after the filter, the page starting at [offset].
+ * [pages] is false from a bridge that only sends the first rows (guest tools before batch 30).
+ */
+data class VariableTable(
+    val table: OutputTable,
+    val total: Int,
+    val matched: Int = total,
+    val offset: Int = 0,
+    /** Why the filter wasn't read as a pandas query (it was matched as text instead). */
+    val filterError: String? = null,
+    val pages: Boolean = false,
+)
 
 fun parseVariableTable(result: JsonElement?): VariableTable? {
     val body = result?.takeIf { it.isJsonObject }?.asJsonObject ?: return null
@@ -51,7 +63,15 @@ fun parseVariableTable(result: JsonElement?): VariableTable? {
                 TableCell(if (value.isJsonNull) "None" else value.asJsonPrimitive.let { if (it.isNumber) formatNumber(it.asString) else it.asString }, header = false)
             }
     }.orEmpty()
-    return VariableTable(OutputTable(head, rows, caption = ""), body.get("total")?.asInt ?: rows.size)
+    val total = body.get("total")?.asInt ?: rows.size
+    return VariableTable(
+        OutputTable(head, rows, caption = ""),
+        total = total,
+        matched = body.get("matched")?.takeIf { it.isJsonPrimitive }?.asInt ?: total,
+        offset = body.get("offset")?.takeIf { it.isJsonPrimitive }?.asInt ?: 0,
+        filterError = body.text("error").ifEmpty { null },
+        pages = body.has("matched"),
+    )
 }
 
 private fun JsonObject.text(name: String) = get(name)?.takeIf { it.isJsonPrimitive }?.asString.orEmpty()

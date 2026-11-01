@@ -563,6 +563,14 @@ private fun NativeEditorView(controller: WorkbenchController, document: Document
                 var previousText = document.text
                 subscribeAlways(ContentChangeEvent::class.java) { event ->
                     if (event.action == ContentChangeEvent.ACTION_SET_NEW_TEXT) return@subscribeAlways
+                    // Linked editing: a tag's name typed or deleted changes its partner's too.
+                    if (!isApplyingAutoPair && controller.settings.linkedEditing && document.languageId in LINKED_EDITING_LANGUAGES &&
+                        (event.action == ContentChangeEvent.ACTION_INSERT || event.action == ContentChangeEvent.ACTION_DELETE)
+                    ) {
+                        val inserted = if (event.action == ContentChangeEvent.ACTION_INSERT) event.changedText.toString() else ""
+                        val removed = if (event.action == ContentChangeEvent.ACTION_DELETE) event.changedText.length else 0
+                        linkedTagEdit(previousText, event.changeStart.index, removed, inserted)?.let(::applyLinkedEdit)
+                    }
                     if (!isApplyingAutoPair && event.action == ContentChangeEvent.ACTION_INSERT) {
                         val currentText = text.toString()
                         val insertedText = event.changedText.toString()
@@ -681,7 +689,8 @@ private fun InlayHintsOverlay(controller: WorkbenchController) {
     controller.editorViewportTick
     controller.documentRevision
     val lines = controller.inlayHintLines
-    if (lines.isEmpty()) return
+    val lenses = controller.codeLenses
+    if (lines.isEmpty() && lenses.isEmpty()) return
     val view = controller.soraEditor() ?: return
     val density = LocalDensity.current
     val colors = MaterialTheme.colorScheme
@@ -692,7 +701,9 @@ private fun InlayHintsOverlay(controller: WorkbenchController) {
     val content = view.text
     Box(Modifier.fillMaxSize().clipToBounds()) {
         for (line in view.firstVisibleLine..view.lastVisibleLine) {
-            val hints = lines[line] ?: continue
+            val hints = lines[line].orEmpty()
+            val lineLenses = lenses[line].orEmpty()
+            if (hints.isEmpty() && lineLenses.isEmpty()) continue
             if (line == ghostLine || line >= content.lineCount) continue
             val column = content.getColumnCount(line)
             val x = view.getCharOffsetX(line, column) + gap
@@ -714,6 +725,20 @@ private fun InlayHintsOverlay(controller: WorkbenchController) {
                         softWrap = false,
                         modifier = Modifier
                             .background(colors.surfaceContainerHighest.copy(alpha = 0.7f), RoundedCornerShape(4.dp))
+                            .padding(horizontal = 4.dp),
+                    )
+                }
+                // Code lenses (reference counts): VS Code puts them on a line above, which sora can't add.
+                lineLenses.forEach { lens ->
+                    Text(
+                        lens.title,
+                        fontSize = fontSize,
+                        color = colors.primary.copy(alpha = 0.85f),
+                        maxLines = 1,
+                        softWrap = false,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .clickable { controller.openCodeLens(lens) }
                             .padding(horizontal = 4.dp),
                     )
                 }
@@ -1081,6 +1106,18 @@ internal class NativeCodeEditor(
         }
         captureSelection()
         subscribeAlways(SelectionChangeEvent::class.java) { captureSelection() }
+    }
+
+    /** Rewrites the partner tag's name; the cursor stays where typing is. */
+    fun applyLinkedEdit(edit: LinkedTagEdit) {
+        val start = text.indexer.getCharPosition(edit.start)
+        val end = text.indexer.getCharPosition(edit.end)
+        isApplyingAutoPair = true
+        try {
+            text.replace(start.line, start.column, end.line, end.column, edit.name)
+        } finally {
+            isApplyingAutoPair = false
+        }
     }
 
     fun deletePairedCloser(offset: Int) {

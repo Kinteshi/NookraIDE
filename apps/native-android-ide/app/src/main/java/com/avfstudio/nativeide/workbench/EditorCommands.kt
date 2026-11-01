@@ -204,7 +204,12 @@ object EditorCommands {
         command("notebook.cell.moveDown", "Notebook: Move Cell Down", "Alt+Down"),
         command("notebook.cell.delete", "Notebook: Delete Cell", ""),
         command("notebook.undoDeleteCell", "Notebook: Undo Delete Cell", ""),
+        command("notebook.outline", "Notebook: Show Outline", ""),
     )
+
+    /** The editor's find keys, which a notebook takes too (its widget searches every cell). */
+    val notebookFind: List<EditorCommand>
+        get() = core.filter { it.id in setOf("actions.find", "editor.action.startFindReplaceAction", "editor.action.nextMatchFindAction", "editor.action.previousMatchFindAction", "toggleFindInSelection", "editor.action.replaceAll", "editor.action.replaceOne") }
 
     val all: List<EditorCommand> get() = core + language + copilot + workbench + notebook + terminal + interactive
 

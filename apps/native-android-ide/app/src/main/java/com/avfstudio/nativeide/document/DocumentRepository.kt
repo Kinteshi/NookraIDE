@@ -456,7 +456,8 @@ class DocumentRepository(
         }
     }
 
-    private fun writeAll(path: String, bytes: ByteArray, expectedModifiedTs: Long?): CompletableFuture<Long> {
+    /** Writes [bytes] as [path]'s whole content, in chunks the daemon takes, then flushes it. */
+    fun writeAll(path: String, bytes: ByteArray, expectedModifiedTs: Long?): CompletableFuture<Long> {
         if (bytes.isEmpty()) {
             return vfs.write(path, 0L, byteArrayOf(), truncate = true, expectedModifiedTs)
                 .thenCompose { vfs.flush(path) }

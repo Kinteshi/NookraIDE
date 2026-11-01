@@ -229,7 +229,22 @@ def _avf_variables(limit=500):
     return _AvfJson(json.dumps({"variables": rows, "truncated": False}))
 
 
-def _avf_table(name, limit=1000):
+def _avf_filter(frame, query):
+    # Rows matching [query]: a pandas query (`price > 10 and city == "Rome"`) when it reads as
+    # one, else rows where any cell (or the index) contains the text, ignoring case.
+    error = ""
+    if any(op in query for op in ("==", "!=", ">", "<", " and ", " or ", "not ", " in ", "`", "&", "|", "~")):
+        try:
+            return frame.query(query, engine="python"), ""
+        except Exception as failure:
+            error = "%s: %s" % (type(failure).__name__, failure)
+    needle = query.lower()
+    mask = frame.astype(str).apply(lambda column: column.str.lower().str.contains(needle, regex=False)).any(axis=1)
+    mask = mask | frame.index.astype(str).str.lower().str.contains(needle, regex=False)
+    return frame[mask], error
+
+
+def _avf_table(name, limit=1000, offset=0, query="", sort=None, ascending=True):
     import json, math
     value = get_ipython().user_ns[name]
     kind = type(value).__name__
@@ -240,14 +255,33 @@ def _avf_table(name, limit=1000):
     if kind == "Series":
         value = value.to_frame()
         kind = "DataFrame"
+    if kind != "DataFrame" and getattr(value, "ndim", 0) in (1, 2):
+        try:
+            import pandas
+            value = pandas.DataFrame(value)
+            kind = "DataFrame"
+        except ImportError:
+            pass
     if kind == "DataFrame":
-        head = value.head(limit)
+        frame, error = (value, "")
+        if query:
+            frame, error = _avf_filter(frame, query)
+        # Column 0 is the index, as the viewer shows it.
+        if sort is not None and 0 <= sort <= len(frame.columns):
+            if sort == 0:
+                frame = frame.sort_index(ascending=ascending, kind="stable")
+            else:
+                frame = frame.sort_values(by=frame.columns[sort - 1], ascending=ascending, kind="stable", na_position="last")
+        head = frame.iloc[offset:offset + limit]
         return _AvfJson(json.dumps({
             "columns": [str(c) for c in head.columns],
             "index_name": str(head.index.name) if head.index.name is not None else "",
             "index": [str(i) for i in head.index],
             "rows": [[cell(x) for x in row] for row in head.itertuples(index=False, name=None)],
             "total": int(len(value)),
+            "matched": int(len(frame)),
+            "offset": int(offset),
+            "error": error,
         }, default=str))
     rows = value[:limit].tolist()
     if value.ndim == 1:
@@ -410,7 +444,15 @@ class Bridge:
         return self.inspect("_avf_variables()")
 
     def table(self, params):
-        return self.inspect("_avf_table(%r, %d)" % (str(params["name"]), int(params.get("limit", 1000))))
+        sort = params.get("sort")
+        return self.inspect("_avf_table(%r, %d, %d, %r, %r, %r)" % (
+            str(params["name"]),
+            int(params.get("limit", 1000)),
+            max(0, int(params.get("offset", 0))),
+            str(params.get("query") or ""),
+            int(sort) if sort is not None else None,
+            bool(params.get("ascending", True)),
+        ))
 
     def complete(self, params):
         if self.client is None:

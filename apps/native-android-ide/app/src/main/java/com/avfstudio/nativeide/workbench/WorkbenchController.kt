@@ -165,13 +165,19 @@ private const val LANGUAGES_DECLINED_KEY = "languages-declined"
 private const val MAX_LANGUAGE_PACK_BYTES = 4 * 1024 * 1024
 private val languagePackHttp by lazy { okhttp3.OkHttpClient() }
 /** Rows the data viewer asks the kernel for. */
-private const val DATA_VIEWER_ROWS = 1000
+private const val DATA_VIEWER_ROWS = DATA_VIEWER_PAGE
 /** The native daemon's default port; hidden in Ports with the connection's own. */
 private const val DAEMON_PORT = 19870
 /** Commands whose ports are the app's own plumbing (kernels, the Jupyter bridge, the daemon). */
 private val INTERNAL_COMMANDS = listOf("ipykernel", "avf-native-daemon", "avf-jupyter-bridge", "jupyter-bridge")
 /** Two taps on the same file this close together keep its preview tab. */
 private const val DOUBLE_TAP_MS = 500L
+/** Files shared into the workspace are read into memory first; larger ones are refused. */
+private const val MAX_SHARED_FILE_BYTES = 256L * 1024 * 1024
+/** Reference counts asked for per file at most (one request each when the server has no code lens). */
+private const val MAX_CODE_LENSES = 200
+/** Symbol kinds that get a reference count: class, method, constructor, enum, interface, function, struct. */
+private val CODE_LENS_KINDS = setOf(5, 6, 9, 10, 11, 12, 23)
 /** How long Undo stays offered after an Explorer delete or move; the daemon keeps a deleted entry 10 s. */
 private const val UNDO_WINDOW_MS = 9_500L
 /** A finished action's buzz (CONFIRM since Android 11). */
@@ -267,7 +273,7 @@ class WorkbenchController(private val context: Context) {
     private var cellEditorDispatcher = EditorKeybindingDispatcher(applyKeybindings(EditorCommands.interactive + EditorCommands.editor, keybindingRules))
     private var globalDispatcher = EditorKeybindingDispatcher(applyKeybindings(EditorCommands.global, keybindingRules))
     private var notebookDispatcher =
-        EditorKeybindingDispatcher(applyKeybindings(EditorCommands.global + EditorCommands.notebook, keybindingRules))
+        EditorKeybindingDispatcher(applyKeybindings(EditorCommands.global + EditorCommands.notebook + EditorCommands.notebookFind, keybindingRules))
     private var terminalDispatcher =
         EditorKeybindingDispatcher(applyKeybindings(EditorCommands.terminal + EditorCommands.global, keybindingRules))
     private val consumedKeyDowns = mutableSetOf<Int>()
@@ -302,8 +308,13 @@ class WorkbenchController(private val context: Context) {
     val outputLog = mutableStateListOf<String>()
 
     // Connection --------------------------------------------------------------------------------
-    var connected by mutableStateOf(false)
-        private set
+    private var connectedState by mutableStateOf(false)
+    var connected: Boolean
+        get() = connectedState
+        private set(value) {
+            connectedState = value
+            com.avfstudio.nativeide.IdeTileService.update(context, value)
+        }
     var busy by mutableStateOf(false)
         private set
     private var keepAliveError: String? = null
@@ -575,6 +586,7 @@ class WorkbenchController(private val context: Context) {
                 }
             }
             client.messageListener = { message -> post { status = message } }
+            client.progressListener = { token, value -> post { onServerProgress(client, token, value) } }
             client.inlayHintRefreshListener = {
                 post { activePath?.takeIf { languageClientFor(it) === client }?.let { scheduleInlayHints(it, delayMs = 100) } }
             }
@@ -683,6 +695,7 @@ class WorkbenchController(private val context: Context) {
         val previousTypeChecking = settings.pythonTypeChecking
         val previousLintRules = settings.pythonLintRules
         val previousInlayHints = settings.inlayHints
+        val previousCodeLens = settings.codeLens
         userSettings = next
         updateLanguageSettings()
         editorSurface?.applyConfig(editorConfig())
@@ -696,6 +709,7 @@ class WorkbenchController(private val context: Context) {
         if (settings.typescriptLanguageServer != previousTypescriptServer) restartLanguageServer("typescript")
         if (settings.chatAgent != chatAgentKind) switchChatAgent(settings.chatAgent)
         if (settings.inlayHints != previousInlayHints) activePath?.let { scheduleInlayHints(it, delayMs = 0) }
+        if (settings.codeLens != previousCodeLens) activePath?.let { scheduleCodeLens(it, delayMs = 0) }
         refreshLauncherShortcuts()
     }
 
@@ -770,6 +784,11 @@ class WorkbenchController(private val context: Context) {
             fill("basedpyright.analysis.typeCheckingMode", settings.pythonTypeChecking.basedpyrightMode)
             // ty's inline configuration wins over ty.toml; `all` sets every rule's level.
             fill("ty.configuration.rules.all", settings.pythonTypeChecking.tyRulesLevel)
+        }
+        if (language == "typescript" && settings.codeLens) {
+            // vtsls draws reference counts only when asked (VS Code's settings).
+            fill("typescript.referencesCodeLens.enabled", true)
+            fill("javascript.referencesCodeLens.enabled", true)
         }
         if (language == "python-format" && settings.pythonLintRules.extendSelect.isNotEmpty()) {
             fill("ruff.lint.extendSelect", com.google.gson.JsonArray().apply { settings.pythonLintRules.extendSelect.forEach(::add) })
@@ -2265,7 +2284,102 @@ class WorkbenchController(private val context: Context) {
                 openDeviceFile(uri)
                 compactDestination = CompactDestination.Editor
             }
+            android.content.Intent.ACTION_SEND, android.content.Intent.ACTION_SEND_MULTIPLE -> receiveShare(intent)
         }
+    }
+
+    /**
+     * The share sheet: text alone opens as a new untitled file; files are offered for saving
+     * into a workspace folder (or, one of them, to open from the device).
+     */
+    private fun receiveShare(intent: android.content.Intent) {
+        @Suppress("DEPRECATION")
+        val streams = when (intent.action) {
+            android.content.Intent.ACTION_SEND_MULTIPLE -> intent.getParcelableArrayListExtra<android.net.Uri>(android.content.Intent.EXTRA_STREAM).orEmpty()
+            else -> listOfNotNull(intent.getParcelableExtra<android.net.Uri>(android.content.Intent.EXTRA_STREAM))
+        }.filter { it.scheme == "content" || it.scheme == "file" }
+        val text = intent.getCharSequenceExtra(android.content.Intent.EXTRA_TEXT)?.toString()
+        compactDestination = CompactDestination.Editor
+        if (streams.isEmpty()) {
+            if (text.isNullOrEmpty()) return
+            val name = nextUntitledName(documents.map { it.path })
+            val document = DocumentSession("scratch:/$name", text, baseModifiedTs = null, dirty = true)
+            documents.add(document)
+            selectDocument(document.path)
+            status = "Shared text opened as $name; save it to keep it"
+            return
+        }
+        val resolver = context.contentResolver
+        val names = streams.map { uri ->
+            runCatching {
+                resolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                    if (cursor.moveToFirst()) cursor.getString(0) else null
+                }
+            }.getOrNull() ?: uri.lastPathSegment?.substringAfterLast('/') ?: "shared"
+        }
+        val folder = currentDirectory.ifEmpty { workspaceRoot.orEmpty() }
+        dialog = WorkbenchDialog.SharedFiles(streams, names, folder)
+    }
+
+    /** Saves the shared files into [folder] (a name taken gets " (2)"), then opens the first. */
+    fun saveSharedFiles(shared: WorkbenchDialog.SharedFiles, folder: String) {
+        if (!connected) {
+            dialog = shared.copy(error = "Connect to the guest to save into the workspace")
+            return
+        }
+        dialog = shared.copy(saving = true, error = null)
+        val target = folder.trim().trimEnd('/').ifEmpty { workspaceRoot ?: return }
+        val saved = mutableListOf<String>()
+        fun freeName(name: String, attempt: Int = 1): CompletableFuture<String> {
+            val candidate = if (attempt == 1) name else name.substringBeforeLast('.', name) + " ($attempt)" + name.substringAfterLast('.', "").let { if (it.isEmpty() || !name.contains('.')) "" else ".$it" }
+            val path = "$target/$candidate"
+            return vfs.stat(path).handle { _, error -> error != null }.thenCompose { free -> if (free) CompletableFuture.completedFuture(path) else freeName(name, attempt + 1) }
+        }
+        fun next(index: Int) {
+            if (index == shared.uris.size) {
+                post {
+                    dialog = null
+                    afterFileSystemChange()
+                    saved.firstOrNull()?.let { first -> if (!isImagePath(first) || saved.size == 1) openPath(first) }
+                    status = "Saved ${if (saved.size == 1) saved.single().substringAfterLast('/') else "${saved.size} files"} to ${target.substringAfterLast('/')}"
+                }
+                return
+            }
+            io.execute {
+                val bytes = runCatching {
+                    context.contentResolver.openInputStream(shared.uris[index])?.use { input ->
+                        val out = java.io.ByteArrayOutputStream()
+                        val buffer = ByteArray(64 * 1024)
+                        var total = 0L
+                        while (true) {
+                            val count = input.read(buffer)
+                            if (count < 0) break
+                            total += count
+                            if (total > MAX_SHARED_FILE_BYTES) throw java.io.IOException("${shared.names[index]} is over ${MAX_SHARED_FILE_BYTES / (1024 * 1024)} MB")
+                            out.write(buffer, 0, count)
+                        }
+                        out.toByteArray()
+                    } ?: throw java.io.IOException("Couldn't read ${shared.names[index]}")
+                }
+                bytes.fold(
+                    onSuccess = { content ->
+                        vfs.create(target, directory = true).handle { _, _ -> }
+                            .thenCompose { freeName(shared.names[index].replace('/', '_')) }
+                            .thenCompose { path -> vfs.create(path, directory = false).thenCompose { repository.writeAll(path, content, null) }.thenApply { path } }
+                            .whenComplete { path, error ->
+                                if (error != null) {
+                                    post { dialog = shared.copy(error = "${shared.names[index]}: ${failureMessage(error)}") }
+                                } else {
+                                    saved += path
+                                    next(index + 1)
+                                }
+                            }
+                    },
+                    onFailure = { error -> post { dialog = shared.copy(error = error.message ?: "Couldn't read ${shared.names[index]}") } },
+                )
+            }
+        }
+        next(0)
     }
 
     /** A launcher shortcut's folder: opened now, or first once the guest connects. */
@@ -3458,6 +3572,8 @@ class WorkbenchController(private val context: Context) {
                         // Hints are kept by line; once lines come or go they'd sit on the wrong ones.
                         if (editorSurface?.lineCount != inlayHintLineCount) inlayHintLines = emptyMap()
                         scheduleInlayHints(event.uri)
+                        if (editorSurface?.lineCount != codeLensLineCount) codeLenses = emptyMap()
+                        scheduleCodeLens(event.uri)
                     }
                 }
             }
@@ -3617,6 +3733,7 @@ class WorkbenchController(private val context: Context) {
                             refreshOutline(document)
                             refreshSemanticTokens(document)
                             scheduleInlayHints(document.path, delayMs = 0)
+                            scheduleCodeLens(document.path, delayMs = 300)
                         }
                     }
                 }
@@ -3662,11 +3779,13 @@ class WorkbenchController(private val context: Context) {
         closeParameterHints()
         clearSymbolHighlights()
         clearInlayHints()
+        clearCodeLens()
         refreshEditorProblems()
         activeDocument?.let { document ->
             refreshOutline(document)
             refreshSemanticTokens(document)
             scheduleInlayHints(document.path, delayMs = 0)
+            scheduleCodeLens(document.path, delayMs = 300)
         }
         if (copilot.language.isReady) copilot.didFocus(activePath)
     }
@@ -4359,6 +4478,143 @@ class WorkbenchController(private val context: Context) {
         }
     }
 
+    // Code lens and server progress ---------------------------------------------------------------
+
+    /** A line's lens: "3 references" above a function in VS Code, here after its line. */
+    data class CodeLensItem(val title: String, val position: LspPosition)
+
+    /** The active file's code lenses, by line. */
+    var codeLenses by mutableStateOf<Map<Int, List<CodeLensItem>>>(emptyMap())
+        private set
+    private var scheduledCodeLens: ScheduledFuture<*>? = null
+    private var codeLensRequest = 0L
+    private var codeLensLineCount = 0
+
+    private fun scheduleCodeLens(path: String, delayMs: Long = 1500) {
+        scheduledCodeLens?.cancel(false)
+        if (!settings.codeLens) {
+            clearCodeLens()
+            return
+        }
+        scheduledCodeLens = timer.schedule({ post { requestCodeLens(path) } }, delayMs, TimeUnit.MILLISECONDS)
+    }
+
+    private fun clearCodeLens() {
+        scheduledCodeLens?.cancel(false)
+        codeLensRequest++
+        codeLenses = emptyMap()
+    }
+
+    /**
+     * The server's own lenses (TypeScript's reference counts) when it has them; otherwise the
+     * references of each class, function and method in the outline (ty and basedpyright have
+     * no code lens), asked 16 at a time.
+     */
+    private fun requestCodeLens(path: String) {
+        val document = activeDocument?.takeIf { it.path == path && activeNotebook == null } ?: return
+        val client = languageClientFor(path)?.takeIf { it.isReady } ?: return
+        val version = document.version
+        val id = ++codeLensRequest
+        fun publish(items: List<Pair<Int, CodeLensItem>>) = post {
+            if (id != codeLensRequest || activePath != path || document.version != version) return@post
+            val current = editorSurface ?: return@post
+            codeLensLineCount = current.lineCount
+            codeLenses = items.filter { it.first < current.lineCount }.groupBy({ it.first }, { it.second })
+        }
+        if (client.supportsCodeLens) {
+            client.codeLens(path).thenCompose { result ->
+                val lenses = result.takeIf { it.isJsonArray }?.asJsonArray?.mapNotNull { it.takeIf { l -> l.isJsonObject }?.asJsonObject }.orEmpty().take(MAX_CODE_LENSES)
+                val resolved = lenses.map { lens ->
+                    if (lens.has("command") || !client.supportsCodeLensResolve) {
+                        CompletableFuture.completedFuture(lens)
+                    } else {
+                        client.resolveCodeLens(lens).handle { value, _ -> value?.takeIf { it.isJsonObject }?.asJsonObject ?: lens }
+                    }
+                }
+                CompletableFuture.allOf(*resolved.toTypedArray()).thenApply { resolved.map { it.join() } }
+            }.whenComplete { lenses, error ->
+                if (error != null) return@whenComplete
+                publish(
+                    lenses.mapNotNull { lens ->
+                        val range = lens.getAsJsonObject("range")?.toLspRange() ?: return@mapNotNull null
+                        val title = lens.getAsJsonObject("command")?.get("title")?.takeIf { it.isJsonPrimitive }?.asString?.takeIf(String::isNotBlank)
+                            ?: return@mapNotNull null
+                        range.start.line to CodeLensItem(title, range.start)
+                    },
+                )
+            }
+            return
+        }
+        if (!client.supportsReferences) return
+        client.documentSymbols(path).whenComplete { response, error ->
+            if (error != null || response == null) return@whenComplete
+            val symbols = flattenOutline(response.toOutlineSymbols()).map { it.first }
+                .filter { it.kind in CODE_LENS_KINDS }
+                .mapNotNull { symbol ->
+                    val start = (symbol.selectionRange ?: symbol.range).toLspRange()?.start ?: return@mapNotNull null
+                    // Flat symbols (SymbolInformation, ty's) start at `def`/`class`: references want the name.
+                    val line = document.text.lineSequence().elementAtOrNull(start.line) ?: return@mapNotNull start
+                    val column = Regex("\\b" + Regex.escape(symbol.name) + "\\b").find(line, start.character.coerceAtMost(line.length))?.range?.first
+                    if (symbol.selectionRange == null && column != null) start.copy(character = column) else start
+                }
+                .take(MAX_CODE_LENSES)
+            val counted = mutableListOf<Pair<Int, CodeLensItem>>()
+            fun chunk(from: Int) {
+                if (from >= symbols.size || id != codeLensRequest) return publish(counted.toList())
+                val batch = symbols.subList(from, minOf(from + 16, symbols.size)).map { position ->
+                    client.references(path, position, includeDeclaration = false).handle { value, _ -> position to value }
+                }
+                CompletableFuture.allOf(*batch.toTypedArray()).whenComplete { _, _ ->
+                    batch.forEach { future ->
+                        val (position, value) = future.join()
+                        val count = value?.takeIf { it.isJsonArray }?.asJsonArray?.size() ?: return@forEach
+                        counted += position.line to CodeLensItem(if (count == 1) "1 reference" else "$count references", position)
+                    }
+                    // Show what is counted so far, then go on.
+                    publish(counted.toList())
+                    chunk(from + 16)
+                }
+            }
+            chunk(0)
+        }
+    }
+
+    /** A tap on a lens: its references in the References view, as VS Code's peek lists them. */
+    fun openCodeLens(item: CodeLensItem) {
+        val surface = editorSurface ?: return
+        surface.moveCursor(item.position, reveal = false)
+        findReferences()
+    }
+
+    /** Language servers' running work (`$/progress`): token → "ty: Indexing 40%". */
+    val serverProgress = mutableStateMapOf<String, String>()
+    private val progressTitles = mutableMapOf<String, String>()
+
+    private fun onServerProgress(client: LanguageClient, token: String, value: JsonObject) {
+        val name = languageClients.entries.firstOrNull { it.value === client }?.key?.let(::serverName) ?: "Language server"
+        val key = "$name:$token"
+        when (value.get("kind")?.takeIf { it.isJsonPrimitive }?.asString) {
+            "begin" -> progressTitles[key] = value.get("title")?.takeIf { it.isJsonPrimitive }?.asString.orEmpty()
+            "end" -> {
+                progressTitles.remove(key)
+                serverProgress.remove(key)
+                return
+            }
+        }
+        val title = progressTitles[key].orEmpty()
+        val message = value.get("message")?.takeIf { it.isJsonPrimitive }?.asString.orEmpty()
+        val percentage = value.get("percentage")?.takeIf { it.isJsonPrimitive }?.asInt
+        val text = listOf(title, message).filter(String::isNotBlank).joinToString(" · ").ifBlank { "Working" }
+        serverProgress[key] = "$name: $text" + (percentage?.let { " $it%" } ?: "")
+    }
+
+    private fun serverName(language: String): String = when (language) {
+        "python" -> settings.pythonLanguageServer
+        "python-format" -> "Ruff"
+        "typescript" -> if (settings.typescriptLanguageServer == "vtsls") "vtsls" else "TypeScript"
+        else -> language
+    }
+
     // Inlay hints ---------------------------------------------------------------------------------
 
     /** The active file's inlay hints as their line-end text, by line. */
@@ -4451,6 +4707,7 @@ class WorkbenchController(private val context: Context) {
         get() = SearchPattern(findQuery, findRegex, findCaseSensitive, findWholeWord)
 
     fun showFind(replace: Boolean) {
+        activeNotebook?.let { return showNotebookFind(it, replace) }
         val surface = editorSurface ?: return
         if (activeDocument == null) return
         val selection = surface.selectionOffsets
@@ -4480,6 +4737,13 @@ class WorkbenchController(private val context: Context) {
         findResult = FindResult(emptyList())
         findCurrent = -1
         scheduledFindRefresh?.cancel(false)
+        activeNotebook?.let { session ->
+            session.findMatches = emptyMap()
+            session.findCurrentMatch = null
+            // Back to the cell with the match selected, as the editor keeps it.
+            session.focusRequest++
+            return
+        }
         editorSurface?.setFindHighlights(emptyList(), -1)
         editorSurface?.focus()
     }
@@ -4491,6 +4755,14 @@ class WorkbenchController(private val context: Context) {
     }
 
     fun toggleFindInSelection() {
+        activeNotebook?.let { session ->
+            // In a notebook, the selection is the selected cell.
+            findScope = if (findScope != null) null else notebookFindText(session).let { (_, cells) ->
+                cells.firstOrNull { it.first.id == session.selectedCell }?.let { (cell, start) -> start until start + cell.source.length }
+            }
+            refreshFind(reveal = true)
+            return
+        }
         val surface = editorSurface ?: return
         findScope = if (findScope != null) null else {
             val selection = surface.selectionOffsets
@@ -4507,6 +4779,7 @@ class WorkbenchController(private val context: Context) {
     }
 
     private fun refreshFind(reveal: Boolean) {
+        activeNotebook?.let { return refreshNotebookFind(it, reveal) }
         val surface = editorSurface ?: return
         val text = surface.text
         // Edits inside the scope move its end (the edit is almost always a replace in it).
@@ -4534,6 +4807,7 @@ class WorkbenchController(private val context: Context) {
     }
 
     private fun drawFindHighlights() {
+        activeNotebook?.let { return drawNotebookFindHighlights(it) }
         val surface = editorSurface ?: return
         val matches = findResult.matches
         surface.setFindHighlights(matches.map { LspRange(surface.positionAt(it.start), surface.positionAt(it.end)) }, findCurrent)
@@ -4553,6 +4827,7 @@ class WorkbenchController(private val context: Context) {
 
     /** Enter / F3 (next) and Shift+Enter / Shift+F3 (previous); opens the widget when it is closed. */
     fun findNext(forward: Boolean) {
+        activeNotebook?.let { return notebookFindNext(it, forward) }
         val surface = editorSurface ?: return
         if (!findVisible || findQuery.isEmpty()) {
             showFind(replace = false)
@@ -4575,6 +4850,7 @@ class WorkbenchController(private val context: Context) {
 
     /** Replaces the current match and goes to the next (VS Code's Replace, Ctrl+Shift+1). */
     fun replaceOne() {
+        activeNotebook?.let { return notebookReplace(it, all = false) }
         val document = activeDocument ?: return
         val surface = editorSurface ?: return
         val match = findResult.matches.getOrNull(findCurrent)
@@ -4594,6 +4870,7 @@ class WorkbenchController(private val context: Context) {
 
     /** Replaces every match (in the scope) in one edit, so one Undo brings them back (Ctrl+Alt+Enter). */
     fun replaceAll() {
+        activeNotebook?.let { return notebookReplace(it, all = true) }
         val document = activeDocument ?: return
         val surface = editorSurface ?: return
         val text = surface.text
@@ -4609,6 +4886,144 @@ class WorkbenchController(private val context: Context) {
         onDocumentEdited(document)
         refreshFind(reveal = false)
         status = "Replaced ${matches.size} occurrence${if (matches.size == 1) "" else "s"}"
+    }
+
+    /** The notebook outline's tap: scroll to the cell and select it, leaving the keys where they are. */
+    fun revealCell(session: NotebookSession, cellId: String) {
+        if (session.selectedCell == cellId) return
+        session.keepFocusOnSelect = true
+        session.selectedCell = cellId
+    }
+
+    // Find in a notebook: the same widget over all cells' sources ---------------------------------
+
+    /** The cells' sources joined by line breaks (where each starts), so the editor's search runs over them. */
+    private fun notebookFindText(session: NotebookSession): Pair<String, List<Pair<NotebookCell, Int>>> {
+        val text = StringBuilder()
+        val starts = session.notebook.cells.map { cell ->
+            val start = text.length
+            text.append(cell.source).append('\n')
+            cell to start
+        }
+        return text.toString() to starts
+    }
+
+    private fun showNotebookFind(session: NotebookSession, replace: Boolean) {
+        findVisible = true
+        if (replace) findReplaceVisible = true
+        findFocusReplace = false
+        findFocus++
+        val (_, cells) = notebookFindText(session)
+        findOrigin = cells.firstOrNull { it.first.id == session.selectedCell }?.second ?: 0
+        findScope = null
+        refreshFind(reveal = false)
+    }
+
+    private fun refreshNotebookFind(session: NotebookSession, reveal: Boolean) {
+        val (text, cells) = notebookFindText(session)
+        findScope = findScope?.let { scope -> scope.first until minOf(scope.last + 1, text.length) }
+        val found = findMatches(text, findPattern, findScope)
+        // A match across two cells (a regex with \n) is no match.
+        val starts = cells.map { it.second }
+        fun cellAt(offset: Int) = (starts.binarySearch(offset).let { if (it >= 0) it else -it - 2 }).coerceAtLeast(0)
+        findResult = found.copy(matches = found.matches.filter { match ->
+            val index = cellAt(match.start)
+            match.end <= starts[index] + cells[index].first.source.length
+        })
+        val current = session.findCurrentMatch
+        findCurrent = findResult.matches.indexOfFirst { match ->
+            val index = cellAt(match.start)
+            current != null && cells[index].first.id == current.first && match.start - starts[index] == current.second.first
+        }
+        if (reveal && findResult.matches.isNotEmpty()) {
+            selectNotebookMatch(session, matchAtOrAfter(findResult.matches, maxOf(findOrigin, findScope?.first ?: 0)))
+        } else {
+            drawNotebookFindHighlights(session)
+        }
+    }
+
+    /** Each cell's matches (offsets in its source) and the current one, for the cells to draw. */
+    private fun drawNotebookFindHighlights(session: NotebookSession) {
+        val (_, cells) = notebookFindText(session)
+        val starts = cells.map { it.second }
+        val byCell = mutableMapOf<String, MutableList<IntRange>>()
+        findResult.matches.forEach { match ->
+            val index = (starts.binarySearch(match.start).let { if (it >= 0) it else -it - 2 }).coerceAtLeast(0)
+            byCell.getOrPut(cells[index].first.id) { mutableListOf() } += (match.start - starts[index]) until (match.end - starts[index])
+        }
+        session.findMatches = byCell
+        if (findCurrent < 0) session.findCurrentMatch = null
+    }
+
+    /** Shows the match: its cell selected (a Markdown cell opens its source) without taking the keys from the find box. */
+    private fun selectNotebookMatch(session: NotebookSession, index: Int) {
+        val match = findResult.matches.getOrNull(index) ?: return
+        val (_, cells) = notebookFindText(session)
+        val starts = cells.map { it.second }
+        val cellIndex = (starts.binarySearch(match.start).let { if (it >= 0) it else -it - 2 }).coerceAtLeast(0)
+        val (cell, start) = cells[cellIndex]
+        findCurrent = index
+        val range = (match.start - start) until (match.end - start)
+        session.findCurrentMatch = cell.id to range
+        if (session.selectedCell != cell.id) {
+            session.keepFocusOnSelect = true
+            session.selectedCell = cell.id
+        }
+        session.findReveal++
+        drawNotebookFindHighlights(session)
+    }
+
+    private fun notebookFindNext(session: NotebookSession, forward: Boolean) {
+        if (!findVisible || findQuery.isEmpty()) {
+            showFind(replace = false)
+            if (findQuery.isEmpty()) return
+        }
+        val matches = findResult.matches
+        if (matches.isEmpty()) {
+            status = findResult.error ?: "No results for \"$findQuery\""
+            return
+        }
+        val index = when {
+            findCurrent >= 0 -> (findCurrent + if (forward) 1 else -1).mod(matches.size)
+            forward -> matchAtOrAfter(matches, findOrigin)
+            else -> matchBefore(matches, findOrigin)
+        }
+        findOrigin = matches[index].start
+        selectNotebookMatch(session, index)
+    }
+
+    /** Replace (the current match, then the next) and Replace All, cell by cell. */
+    private fun notebookReplace(session: NotebookSession, all: Boolean) {
+        val (text, cells) = notebookFindText(session)
+        val starts = cells.map { it.second }
+        val targets = if (all) findMatches(text, findPattern, findScope, limit = Int.MAX_VALUE).matches else listOfNotNull(findResult.matches.getOrNull(findCurrent))
+        if (targets.isEmpty()) {
+            if (!all) notebookFindNext(session, forward = true)
+            return
+        }
+        var replaced = 0
+        targets.groupBy { match -> (starts.binarySearch(match.start).let { if (it >= 0) it else -it - 2 }).coerceAtLeast(0) }
+            .forEach { (cellIndex, matches) ->
+                val (cell, start) = cells[cellIndex]
+                val source = StringBuilder(cell.source)
+                matches.filter { it.end <= start + cell.source.length }.sortedByDescending { it.start }.forEach { match ->
+                    source.replace(match.start - start, match.end - start, findReplacement(text, match, findPattern, replaceQuery, findPreserveCase))
+                    replaced++
+                }
+                cell.source = source.toString()
+            }
+        if (replaced == 0) return
+        onCellEdited(session)
+        if (all) {
+            session.findCurrentMatch = null
+            refreshFind(reveal = false)
+            status = "Replaced $replaced occurrence${if (replaced == 1) "" else "s"}"
+        } else {
+            val match = targets.single()
+            findOrigin = match.start + findReplacement(text, match, findPattern, replaceQuery, findPreserveCase).length
+            session.findCurrentMatch = null
+            refreshFind(reveal = true)
+        }
     }
 
     /** The status bar's line number: a small dialog with a number pad, kinder to touch than Quick Open. */
@@ -6478,16 +6893,28 @@ class WorkbenchController(private val context: Context) {
         refreshVariables()
     }
 
-    /** A DataFrame, Series or array in the data viewer: its first [DATA_VIEWER_ROWS] rows as a sortable table. */
+    /** A DataFrame, Series or array in the data viewer, [DATA_VIEWER_ROWS] rows a page. */
     fun openDataViewer(session: NotebookSession, variable: com.avfstudio.nativeide.notebook.KernelVariable) {
-        dialog = WorkbenchDialog.DataViewer(variable.name)
-        session.kernel.table(variable.name, DATA_VIEWER_ROWS).whenComplete { table, error ->
+        dataViewerSession = session
+        loadDataViewer(WorkbenchDialog.DataViewer(variable.name))
+    }
+
+    private var dataViewerSession: NotebookSession? = null
+    private var dataViewerRequest = 0L
+
+    /** Asks the kernel for [request]'s page (filter, sort, offset); the table shown stays until it comes. */
+    fun loadDataViewer(request: WorkbenchDialog.DataViewer) {
+        val session = dataViewerSession ?: activeNotebook ?: return
+        val id = ++dataViewerRequest
+        dialog = request.copy(loading = true, error = null)
+        session.kernel.table(request.name, DATA_VIEWER_ROWS, request.offset, request.query.trim(), request.sort, request.ascending).whenComplete { table, error ->
             post {
-                if ((dialog as? WorkbenchDialog.DataViewer)?.name != variable.name) return@post
+                val shown = dialog as? WorkbenchDialog.DataViewer
+                if (id != dataViewerRequest || shown?.name != request.name) return@post
                 dialog = when {
-                    error != null -> WorkbenchDialog.DataViewer(variable.name, error = error.cause?.message ?: error.message ?: "The kernel didn't answer")
-                    table == null -> WorkbenchDialog.DataViewer(variable.name, error = "${variable.name} can't be shown as a table")
-                    else -> WorkbenchDialog.DataViewer(variable.name, table)
+                    error != null -> shown.copy(loading = false, error = error.cause?.message ?: error.message ?: "The kernel didn't answer")
+                    table == null -> shown.copy(loading = false, error = "${request.name} can't be shown as a table")
+                    else -> shown.copy(loading = false, table = table)
                 }
             }
         }
@@ -6642,6 +7069,7 @@ class WorkbenchController(private val context: Context) {
     fun onCellEdited(session: NotebookSession) {
         session.notebook.dirty = true
         documentRevision++
+        scheduleFindRefresh()
         // Keep a draft like text files do, so a restart (the tablet has rebooted mid-session)
         // doesn't lose unsaved cells.
         val path = session.document.path
@@ -7000,7 +7428,7 @@ class WorkbenchController(private val context: Context) {
         editorDispatcher = EditorKeybindingDispatcher(applyKeybindings(EditorCommands.editor, rules))
         cellEditorDispatcher = EditorKeybindingDispatcher(applyKeybindings(EditorCommands.interactive + EditorCommands.editor, rules))
         globalDispatcher = EditorKeybindingDispatcher(applyKeybindings(EditorCommands.global, rules))
-        notebookDispatcher = EditorKeybindingDispatcher(applyKeybindings(EditorCommands.global + EditorCommands.notebook, rules))
+        notebookDispatcher = EditorKeybindingDispatcher(applyKeybindings(EditorCommands.global + EditorCommands.notebook + EditorCommands.notebookFind, rules))
         terminalDispatcher = EditorKeybindingDispatcher(applyKeybindings(EditorCommands.terminal + EditorCommands.global, rules))
         return true
     }
@@ -7257,7 +7685,7 @@ class WorkbenchController(private val context: Context) {
         val identity = event.downTime to event.keyCode
         if (identity == lastHandledKey) return true
         // Escape in the editor closes the find widget first, as in VS Code.
-        if (findVisible && focusArea == FocusArea.Editor && event.keyCode == AndroidKeyEvent.KEYCODE_ESCAPE && event.hasNoModifiers()) {
+        if (findVisible && focusArea in setOf(FocusArea.Editor, FocusArea.Notebook) && event.keyCode == AndroidKeyEvent.KEYCODE_ESCAPE && event.hasNoModifiers()) {
             lastHandledKey = identity
             closeFind()
             return true
@@ -7492,6 +7920,7 @@ class WorkbenchController(private val context: Context) {
                 }
             }
             "notebook.undoDeleteCell" -> activeNotebook?.let(::undoDeleteCell)
+            "notebook.outline" -> sidebar = SidebarView.Outline
             "notebook.focusPreviousEditor", "notebook.focusNextEditor" -> activeNotebook?.let { session ->
                 val cell = session.notebook.cells.firstOrNull { it.id == session.selectedCell } ?: return@let
                 selectAdjacentCell(session, cell, if (commandId == "notebook.focusNextEditor") 1 else -1)

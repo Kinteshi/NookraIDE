@@ -22,6 +22,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.FirstPage
+import androidx.compose.material.icons.outlined.LastPage
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.BasicAlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -345,29 +349,8 @@ fun WorkbenchDialogHost(controller: WorkbenchController) {
                 )
             }
         }
-        is WorkbenchDialog.DataViewer -> AlertDialog(
-            onDismissRequest = { controller.dialog = null },
-            properties = DialogProperties(usePlatformDefaultWidth = false),
-            modifier = Modifier.padding(24.dp),
-            title = { Text(dialog.name, fontFamily = FontFamily.Monospace) },
-            text = {
-                when {
-                    dialog.error != null -> Text(dialog.error, color = MaterialTheme.colorScheme.error)
-                    dialog.table == null -> Text("Asking the kernel…", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    else -> Column {
-                        DataViewerTable(dialog.table.table)
-                        val shown = dialog.table.table.body.size
-                        Text(
-                            if (dialog.table.total > shown) "First $shown of ${dialog.table.total} rows · tap a column to sort them" else "${dialog.table.total} rows · tap a column to sort",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 6.dp),
-                        )
-                    }
-                }
-            },
-            confirmButton = { TextButton(onClick = { controller.dialog = null }) { Text("Close") } },
-        )
+        is WorkbenchDialog.DataViewer -> DataViewerDialog(controller, dialog)
+        is WorkbenchDialog.SharedFiles -> SharedFilesDialog(controller, dialog)
         is WorkbenchDialog.RecordKeybinding -> RecordKeybindingDialog(controller, dialog.commandId)
         WorkbenchDialog.KeybindingsJson -> AlertDialog(
             onDismissRequest = { controller.dialog = null },
@@ -626,6 +609,153 @@ private fun ChoiceDialog(title: String, selected: String, options: List<String>,
         confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
     )
 }
+
+/**
+ * The Variables view's data viewer: a filter (text, or a pandas query), the kernel's rows a page
+ * at a time, sorted by the column tapped (all rows, by the kernel).
+ */
+@Composable
+private fun DataViewerDialog(controller: WorkbenchController, dialog: WorkbenchDialog.DataViewer) {
+    val colors = MaterialTheme.colorScheme
+    var query by remember(dialog.name) { mutableStateOf(dialog.query) }
+    // Typing filters once it pauses.
+    LaunchedEffect(query) {
+        if (query == dialog.query) return@LaunchedEffect
+        kotlinx.coroutines.delay(500)
+        controller.loadDataViewer(dialog.copy(query = query, offset = 0))
+    }
+    val table = dialog.table
+    AlertDialog(
+        onDismissRequest = { controller.dialog = null },
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+        modifier = Modifier.padding(24.dp),
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(dialog.name, fontFamily = FontFamily.Monospace)
+                if (dialog.loading) androidx.compose.material3.CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (table == null || table.pages) {
+                    OutlinedTextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        singleLine = true,
+                        leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
+                        placeholder = { Text("Filter: text in any column, or a pandas query like price > 10") },
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search, autoCorrectEnabled = false),
+                        keyboardActions = KeyboardActions(onSearch = { controller.loadDataViewer(dialog.copy(query = query, offset = 0)) }),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                table?.filterError?.let {
+                    Text("Not a pandas query ($it); matched as text", style = MaterialTheme.typography.labelSmall, color = colors.error)
+                }
+                when {
+                    dialog.error != null -> Text(dialog.error, color = colors.error)
+                    table == null -> Text("Asking the kernel…", color = colors.onSurfaceVariant)
+                    !table.pages -> {
+                        DataViewerTable(table.table)
+                        val shown = table.table.body.size
+                        Text(
+                            (if (table.total > shown) "First $shown of ${table.total} rows · tap a column to sort them" else "${table.total} rows · tap a column to sort") +
+                                " · update the guest tools to filter and page",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colors.onSurfaceVariant,
+                        )
+                    }
+                    else -> {
+                        DataViewerTable(table.table, dialog.sort, dialog.ascending, maxBodyHeight = 480.dp) { column, ascending ->
+                            controller.loadDataViewer(dialog.copy(sort = column, ascending = ascending, offset = 0))
+                        }
+                        val pageSize = table.table.body.size
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            val first = table.offset + 1
+                            val last = table.offset + pageSize
+                            Text(
+                                when {
+                                    table.matched == 0 -> if (dialog.query.isBlank()) "No rows" else "No rows match"
+                                    else -> "Rows ${"%,d".format(first)}–${"%,d".format(last)} of ${"%,d".format(table.matched)}"
+                                } + if (table.matched != table.total) " (filtered from ${"%,d".format(table.total)})" else "",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = colors.onSurfaceVariant,
+                                modifier = Modifier.weight(1f),
+                            )
+                            val step = maxOf(pageSize, 1)
+                            val lastPage = ((table.matched - 1).coerceAtLeast(0) / DATA_VIEWER_PAGE) * DATA_VIEWER_PAGE
+                            IconButton(enabled = table.offset > 0, onClick = { controller.loadDataViewer(dialog.copy(offset = 0)) }) {
+                                Icon(Icons.Outlined.FirstPage, contentDescription = "First page")
+                            }
+                            IconButton(enabled = table.offset > 0, onClick = { controller.loadDataViewer(dialog.copy(offset = (table.offset - DATA_VIEWER_PAGE).coerceAtLeast(0))) }) {
+                                Icon(Icons.AutoMirrored.Outlined.KeyboardArrowLeft, contentDescription = "Previous page")
+                            }
+                            IconButton(enabled = table.offset + step < table.matched, onClick = { controller.loadDataViewer(dialog.copy(offset = table.offset + step)) }) {
+                                Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = "Next page")
+                            }
+                            IconButton(enabled = table.offset < lastPage, onClick = { controller.loadDataViewer(dialog.copy(offset = lastPage)) }) {
+                                Icon(Icons.Outlined.LastPage, contentDescription = "Last page")
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { controller.dialog = null }) { Text("Close") } },
+    )
+}
+
+/** Files from the share sheet: the folder to save them in, or (one file) open it from the device. */
+@Composable
+private fun SharedFilesDialog(controller: WorkbenchController, shared: WorkbenchDialog.SharedFiles) {
+    val root = controller.workspaceRoot?.trimEnd('/')
+    var folder by remember(shared.uris) {
+        mutableStateOf(if (root != null && shared.folder.startsWith(root)) shared.folder.removePrefix(root).trimStart('/') else shared.folder)
+    }
+    fun target() = if (root != null && !folder.startsWith("/")) (root + "/" + folder.trim().trim('/')).trimEnd('/') else folder.trim()
+    AlertDialog(
+        onDismissRequest = { if (!shared.saving) controller.dialog = null },
+        title = { Text(if (shared.names.size == 1) "Save ${shared.names.single()}" else "Save ${shared.names.size} shared files") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (shared.names.size > 1) {
+                    Text(
+                        shared.names.take(6).joinToString(", ") + if (shared.names.size > 6) " and ${shared.names.size - 6} more" else "",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                OutlinedTextField(
+                    value = folder,
+                    onValueChange = { folder = it },
+                    singleLine = true,
+                    enabled = !shared.saving,
+                    label = { Text("Folder in the workspace (created if new; empty is the top)") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                shared.error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+                if (shared.saving) Text("Saving…", style = MaterialTheme.typography.bodySmall)
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = !shared.saving && controller.connected, onClick = { controller.saveSharedFiles(shared, target()) }) { Text("Save") }
+        },
+        dismissButton = {
+            Row {
+                if (shared.uris.size == 1) {
+                    TextButton(enabled = !shared.saving, onClick = {
+                        controller.dialog = null
+                        controller.openDeviceFile(shared.uris.single())
+                    }) { Text("Open without saving") }
+                }
+                TextButton(enabled = !shared.saving, onClick = { controller.dialog = null }) { Text("Cancel") }
+            }
+        },
+    )
+}
+
+/** The data viewer's page size; the controller asks for as many rows. */
+internal const val DATA_VIEWER_PAGE = 500
 
 /** VS Code's indentation quick pick, in one dialog: spaces or tabs, the size, detect again, convert. */
 @OptIn(ExperimentalMaterial3Api::class)

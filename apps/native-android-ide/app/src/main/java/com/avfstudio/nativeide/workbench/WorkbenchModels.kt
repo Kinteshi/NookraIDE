@@ -58,6 +58,14 @@ sealed interface WorkbenchDialog {
     data object GotoLine : WorkbenchDialog
     data object Encoding : WorkbenchDialog
     data object LineEnding : WorkbenchDialog
+    /** Files from the share sheet, to save into [folder] of the workspace. */
+    data class SharedFiles(
+        val uris: List<android.net.Uri>,
+        val names: List<String>,
+        val folder: String,
+        val saving: Boolean = false,
+        val error: String? = null,
+    ) : WorkbenchDialog
     /** The active file's indentation: spaces or tabs, the size, detect, convert. */
     data object IndentationPicker : WorkbenchDialog
     /** The language of an untitled file. */
@@ -70,6 +78,12 @@ sealed interface WorkbenchDialog {
         val name: String,
         val table: com.avfstudio.nativeide.notebook.VariableTable? = null,
         val error: String? = null,
+        /** What is asked for: the filter, the shown column sorted by (0 is the index), the page's first row. */
+        val query: String = "",
+        val sort: Int? = null,
+        val ascending: Boolean = true,
+        val offset: Int = 0,
+        val loading: Boolean = true,
     ) : WorkbenchDialog
     /** Keyboard Shortcuts waits for the keys to give [commandId]. */
     data class RecordKeybinding(val commandId: String) : WorkbenchDialog
@@ -188,6 +202,12 @@ class NotebookSession(
     var kernelState by mutableStateOf("No kernel")
     var busy by mutableStateOf(false)
     var selectedCell by mutableStateOf(notebook.cells.firstOrNull()?.id)
+    /** Set when find selects a cell: the keys stay in the find box instead of moving into the cell. */
+    var keepFocusOnSelect = false
+    /** Find's matches by cell (offsets in its source) and the current one; [findReveal] asks the cell to show it. */
+    var findMatches by mutableStateOf<Map<String, List<IntRange>>>(emptyMap())
+    var findCurrentMatch by mutableStateOf<Pair<String, IntRange>?>(null)
+    var findReveal by mutableStateOf(0)
     /** Bumped to put the keyboard back into the selected cell (e.g. after a kernel starts). */
     var focusRequest by mutableStateOf(0)
     /** Where the cursor lands in the next focused cell: true = end (arrived from below), false = start. */

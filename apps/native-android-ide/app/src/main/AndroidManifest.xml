@@ -45,7 +45,27 @@
                 <data android:mimeType="application/x-ipynb+json" />
                 <data android:mimeType="application/sql" />
             </intent-filter>
+            <!-- The share sheet: text opens as a new file, files are saved into the workspace. -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
         </activity>
+        <service
+            android:name=".IdeTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_tile_code"
+            android:label="MaterialCode"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.quicksettings.TOGGLEABLE_TILE"
+                android:value="false" />
+        </service>
         <service
             android:name=".GuestConnectionService"
             android:exported="false"
