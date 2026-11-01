@@ -1,6 +1,7 @@
 package com.avfstudio.nativeide.workbench
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -80,47 +81,7 @@ fun WorkbenchDialogHost(controller: WorkbenchController) {
     when (val dialog = controller.dialog) {
         null -> Unit
         WorkbenchDialog.Connect -> ConnectDialog(controller)
-        WorkbenchDialog.Commands -> PaletteDialog(
-            placeholder = "Type a command",
-            query = controller.commandFilter,
-            onQuery = { controller.commandFilter = it },
-            items = EditorCommands.all.distinctBy { it.id }.filter { fuzzyMatch(controller.commandFilter, it.title) || it.id.contains(controller.commandFilter, true) },
-            onDismiss = { controller.dialog = null },
-            onPick = { command ->
-                controller.dialog = null
-                controller.runCommand(command.id)
-            },
-        ) { command ->
-            PaletteRow(command.title, command.keybinding.takeIf(String::isNotEmpty))
-        }
-        WorkbenchDialog.QuickOpen -> {
-            LaunchedEffect(Unit) { controller.refreshQuickOpenIndex() }
-            val root = controller.workspaceRoot.orEmpty().trimEnd('/')
-            PaletteDialog(
-                placeholder = when {
-                    controller.quickOpenIndexing -> "Indexing workspace…"
-                    controller.quickOpenAttachesToChat -> "Add a file to Copilot chat"
-                    else -> "Search files by name"
-                },
-                query = controller.quickOpenFilter,
-                onQuery = { controller.quickOpenFilter = it },
-                items = controller.quickOpenIndex
-                    .filter { fuzzyMatch(controller.quickOpenFilter, it.path.removePrefix(root)) }
-                    .sortedBy { if (it.name.startsWith(controller.quickOpenFilter, true)) 0 else 1 }
-                    .take(200),
-                onDismiss = {
-                    controller.dialog = null
-                    controller.quickOpenAttachesToChat = false
-                },
-                onPick = { entry ->
-                    controller.dialog = null
-                    if (controller.quickOpenAttachesToChat) controller.attachFileToChat(entry.path) else controller.openPath(entry.path)
-                    controller.quickOpenAttachesToChat = false
-                },
-            ) { entry ->
-                PaletteRow(entry.name, entry.path.removePrefix(root).removePrefix("/").substringBeforeLast('/', ""))
-            }
-        }
+        WorkbenchDialog.QuickOpen -> QuickOpenDialog(controller)
         WorkbenchDialog.Find -> AlertDialog(
             onDismissRequest = { controller.dialog = null },
             title = { Text("Find and replace") },
@@ -355,18 +316,32 @@ fun WorkbenchDialogHost(controller: WorkbenchController) {
             confirmButton = { TextButton(onClick = controller::saveSettingsJson) { Text("Save") } },
             dismissButton = { TextButton(onClick = { controller.dialog = null }) { Text("Cancel") } },
         )
-        WorkbenchDialog.Keybindings -> PaletteDialog(
-            placeholder = "Search keyboard shortcuts",
-            query = controller.commandFilter,
-            onQuery = { controller.commandFilter = it },
-            items = EditorCommands.all.distinctBy { it.id }.filter { it.keybinding.isNotEmpty() }
-                .filter { fuzzyMatch(controller.commandFilter, it.title) || it.keybinding.contains(controller.commandFilter, true) },
-            onDismiss = { controller.dialog = null },
-            onPick = { command ->
-                controller.dialog = null
-                controller.runCommand(command.id)
+        WorkbenchDialog.Keybindings -> KeybindingsDialog(controller)
+        is WorkbenchDialog.RecordKeybinding -> RecordKeybindingDialog(controller, dialog.commandId)
+        WorkbenchDialog.KeybindingsJson -> AlertDialog(
+            onDismissRequest = { controller.dialog = null },
+            properties = DialogProperties(usePlatformDefaultWidth = false),
+            modifier = Modifier.padding(32.dp),
+            title = { Text("keybindings.json") },
+            text = {
+                Column {
+                    Text(
+                        "VS Code's format: [{\"key\": \"ctrl+k ctrl+r\", \"command\": \"…\"}]. A command starting with \"-\" removes " +
+                            "that default shortcut. \"when\" clauses are kept but not used: a shortcut works wherever its command does.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    OutlinedTextField(
+                        value = controller.settingsDraft,
+                        onValueChange = { controller.settingsDraft = it },
+                        modifier = Modifier.fillMaxWidth().height(420.dp).padding(top = 8.dp),
+                        textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                    )
+                }
             },
-        ) { command -> PaletteRow(command.title, command.keybinding) }
+            confirmButton = { TextButton(onClick = controller::saveKeybindingsJson) { Text("Save") } },
+            dismissButton = { TextButton(onClick = { controller.dialog = null }) { Text("Cancel") } },
+        )
         is WorkbenchDialog.Completion -> PaletteDialog(
             placeholder = "Filter completions",
             query = controller.commandFilter,
@@ -508,9 +483,15 @@ private fun <T> PaletteDialog(
     items: List<T>,
     onDismiss: () -> Unit,
     onPick: (T) -> Unit,
+    /** Start from [query] as it is (Quick Open's prefixes) rather than empty. */
+    keepQuery: Boolean = false,
+    header: @Composable () -> Unit = {},
     row: @Composable (T) -> Unit,
 ) {
-    LaunchedEffect(Unit) { onQuery("") }
+    LaunchedEffect(Unit) { if (!keepQuery) onQuery("") }
+    // The cursor goes after a prefix the caller set, and follows when the caller changes the text.
+    var field by remember { mutableStateOf(TextFieldValue(query, TextRange(query.length))) }
+    LaunchedEffect(query) { if (field.text != query) field = TextFieldValue(query, TextRange(query.length)) }
     BasicAlertDialog(onDismissRequest = onDismiss, modifier = Modifier.padding(horizontal = 24.dp)) {
         Surface(
             shape = RoundedCornerShape(28.dp),
@@ -521,8 +502,11 @@ private fun <T> PaletteDialog(
                 val focus = remember { FocusRequester() }
                 LaunchedEffect(Unit) { focus.requestFocus() }
                 OutlinedTextField(
-                    value = query,
-                    onValueChange = onQuery,
+                    value = field,
+                    onValueChange = {
+                        field = it
+                        if (it.text != query) onQuery(it.text)
+                    },
                     placeholder = { Text(placeholder) },
                     leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
                     singleLine = true,
@@ -547,6 +531,7 @@ private fun <T> PaletteDialog(
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
                     keyboardActions = KeyboardActions(onGo = { items.firstOrNull()?.let(onPick) }),
                 )
+                header()
                 LazyColumn(Modifier.heightIn(max = 440.dp).padding(top = 8.dp)) {
                     items(items) { item ->
                         Row(Modifier.fillMaxWidth().clickable { onPick(item) }) { row(item) }
@@ -1031,4 +1016,167 @@ private fun FootprintGraph(history: List<Long>, totalMb: Long, color: androidx.c
         }
         drawPath(path, color, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx()))
     }
+}
+
+@Composable
+private fun QuickOpenDialog(controller: WorkbenchController) {
+    LaunchedEffect(Unit) { controller.refreshQuickOpenIndex() }
+    val query = controller.quickOpenFilter
+    val mode = quickOpenMode(query)
+    LaunchedEffect(query) { if (mode == QuickOpenMode.WorkspaceSymbols) controller.searchWorkspaceSymbols(query.removePrefix(mode.prefix)) }
+    val root = controller.workspaceRoot.orEmpty().trimEnd('/')
+    PaletteDialog(
+        placeholder = when {
+            controller.quickOpenAttachesToChat -> "Add a file to chat"
+            controller.quickOpenIndexing -> "Indexing workspace… (type ? for help)"
+            else -> "Search files by name (type ? for help)"
+        },
+        query = query,
+        onQuery = { controller.quickOpenFilter = it },
+        items = controller.quickOpenItems(query),
+        onDismiss = {
+            controller.dialog = null
+            controller.quickOpenAttachesToChat = false
+        },
+        onPick = controller::pickQuickOpen,
+        keepQuery = true,
+        header = {
+            if (mode != QuickOpenMode.Files) {
+                Text(
+                    mode.title,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(start = 16.dp, top = 8.dp),
+                )
+            }
+        },
+    ) { item ->
+        when (item) {
+            is QuickOpenItem.File -> PaletteRow(item.entry.name, item.entry.path.removePrefix(root).removePrefix("/").substringBeforeLast('/', ""))
+            is QuickOpenItem.Command -> PaletteRow(item.command.title, item.keybinding.takeIf(String::isNotEmpty))
+            is QuickOpenItem.Symbol -> PaletteRow(item.name, item.detail)
+            is QuickOpenItem.Line -> PaletteRow(item.title, null)
+            is QuickOpenItem.Prefix -> PaletteRow(item.mode.prefix.ifEmpty { "…" } + "  " + item.mode.title, null)
+            is QuickOpenItem.Message -> Text(
+                item.text,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(16.dp),
+            )
+        }
+    }
+}
+
+/** Keyboard Shortcuts: every command with its keys; a tap records new ones. */
+@Composable
+private fun KeybindingsDialog(controller: WorkbenchController) {
+    val filter = controller.commandFilter
+    val commands = controller.effectiveCommands
+    val keys = commands.filter { it.keybinding.isNotEmpty() }.groupBy({ it.id }, { it.keybinding })
+    PaletteDialog(
+        placeholder = "Search commands or keys",
+        query = filter,
+        onQuery = { controller.commandFilter = it },
+        items = EditorCommands.all.distinctBy { it.id }.filter { command ->
+            fuzzyMatch(filter, command.title) || keys[command.id].orEmpty().any { it.contains(filter, true) }
+        }.sortedBy { if (keys[it.id] == null) 1 else 0 },
+        onDismiss = { controller.dialog = null },
+        onPick = { controller.beginRecordingKeybinding(it.id) },
+        keepQuery = true,
+        header = {
+            Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "Tap a command to change its keys.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f).padding(start = 16.dp),
+                )
+                TextButton(onClick = controller::openKeybindingsJson) { Text("Edit as JSON") }
+            }
+        },
+    ) { command ->
+        val changed = controller.keybindingChanged(command.id)
+        ListItem(
+            headlineContent = { Text(command.title, maxLines = 1) },
+            supportingContent = if (changed) {
+                { Text("Changed by you", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary) }
+            } else {
+                null
+            },
+            trailingContent = {
+                Text(
+                    keys[command.id]?.joinToString("  ·  ") ?: "—",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
+            },
+            colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+        )
+    }
+}
+
+/**
+ * Waits for a key press for [commandId] on a focused box (no text field, so the on-screen
+ * keyboard and Gboard stay out of it): one stroke or a two-stroke chord, Enter to save.
+ */
+@Composable
+private fun RecordKeybindingDialog(controller: WorkbenchController, commandId: String) {
+    val title = EditorCommands.all.firstOrNull { it.id == commandId }?.title ?: commandId
+    val current = controller.effectiveCommands.filter { it.id == commandId && it.keybinding.isNotEmpty() }.map { it.keybinding }
+    val recorded = controller.recordedKeys.joinToString(" ") { it.label() }
+    val conflicts = controller.recordedKeyConflicts(commandId)
+    val focus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { focus.requestFocus() }
+    AlertDialog(
+        onDismissRequest = { controller.dialog = WorkbenchDialog.Keybindings },
+        title = { Text(title) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "Press the keys on your keyboard (up to two in a row, like Ctrl+K Ctrl+S), then Enter. Escape cancels.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(56.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                        .focusRequester(focus)
+                        .onPreviewKeyEvent { controller.recordKey(it.nativeKeyEvent) }
+                        .focusable(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        recorded.ifEmpty { "Waiting for keys…" },
+                        fontFamily = FontFamily.Monospace,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = if (recorded.isEmpty()) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+                if (conflicts.isNotEmpty()) {
+                    Text(
+                        "Also runs: ${conflicts.joinToString(", ")}. Your shortcut wins.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+                Text(
+                    "Now: ${current.joinToString("  ·  ").ifEmpty { "no shortcut" }}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (current.isNotEmpty()) OutlinedButton(onClick = { controller.removeKeybinding(commandId) }) { Text("Remove shortcut") }
+                    if (controller.keybindingChanged(commandId)) OutlinedButton(onClick = { controller.resetKeybinding(commandId) }) { Text("Reset to default") }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { controller.saveRecordedKeybinding(commandId) }, enabled = recorded.isNotEmpty()) { Text("Save") }
+        },
+        dismissButton = { TextButton(onClick = { controller.dialog = WorkbenchDialog.Keybindings }) { Text("Cancel") } },
+    )
 }

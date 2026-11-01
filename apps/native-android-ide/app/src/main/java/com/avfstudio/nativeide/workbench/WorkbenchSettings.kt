@@ -105,6 +105,12 @@ data class WorkbenchSettings(
     val pythonTypeChecking: PythonTypeChecking = PythonTypeChecking.Default,
     /** Explorer folders open in place as a tree; off goes into a folder one level at a time. */
     val explorerTree: Boolean = true,
+    /** A single tap opens a file in a preview tab that the next one replaces (`workbench.editor.enablePreview`). */
+    val enablePreview: Boolean = true,
+    /** SVG files open drawn, with their source a tap away; off opens them as text. */
+    val svgAsImage: Boolean = true,
+    /** A server starting in the guest is announced in the status bar (`remote.autoForwardPortsNotify`). */
+    val portNotifications: Boolean = true,
 ) {
     companion object {
         const val THEME_MODE = "avf.theme.mode"
@@ -170,6 +176,9 @@ data class WorkbenchSettings(
         const val PYTHON_LINT_RULES = "avf.python.lintRules"
         const val PYTHON_TYPE_CHECKING = "avf.python.typeChecking"
         const val EXPLORER_TREE = "avf.explorer.tree"
+        const val ENABLE_PREVIEW = "workbench.editor.enablePreview"
+        const val SVG_AS_IMAGE = "avf.svg.openAsImage"
+        const val PORT_NOTIFICATIONS = "remote.autoForwardPortsNotify"
 
         fun from(settings: JsonObject): WorkbenchSettings {
             val defaults = WorkbenchSettings()
@@ -243,6 +252,9 @@ data class WorkbenchSettings(
                 pythonTypeChecking = PythonTypeChecking.entries.firstOrNull { it.key == string(PYTHON_TYPE_CHECKING) }
                     ?: defaults.pythonTypeChecking,
                 explorerTree = bool(EXPLORER_TREE, defaults.explorerTree),
+                enablePreview = bool(ENABLE_PREVIEW, defaults.enablePreview),
+                svgAsImage = bool(SVG_AS_IMAGE, defaults.svgAsImage),
+                portNotifications = bool(PORT_NOTIFICATIONS, defaults.portNotifications),
             )
         }
     }

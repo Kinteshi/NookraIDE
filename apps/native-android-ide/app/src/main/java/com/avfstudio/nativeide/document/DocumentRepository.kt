@@ -46,6 +46,8 @@ data class DocumentSession(
     var conflict: RemoteConflict? = null,
     var encoding: String = "UTF-8",
     var eol: String = if (text.contains("\r\n")) "\r\n" else "\n",
+    /** Shown but not held as text (an image in the viewer): never cached, saved or sent to servers. */
+    val binary: Boolean = false,
 ) {
     val languageId: String = path.substringAfterLast('.', "").lowercase()
     val expectedModifiedTs: Long? get() = baseModifiedTs
@@ -259,8 +261,9 @@ class DocumentRepository(
     fun hasCopy(path: String): Boolean = cache.contains(path)
 
     /** A whole file's bytes, for files the editor doesn't open (preview images); fails past [limit]. */
-    fun readBytes(path: String, limit: Int): CompletableFuture<ByteArray> =
-        vfs.stat(path).thenCompose { entry ->
+    fun readBytes(path: String, limit: Int): CompletableFuture<ByteArray> {
+        if (isDevicePath(path)) return readDeviceBytes(path, limit)
+        return vfs.stat(path).thenCompose { entry ->
             if (entry.isDirectory || entry.size > limit) {
                 return@thenCompose CompletableFuture.failedFuture<ByteArray>(IOException("$path is not a file under ${limit / (1024 * 1024)} MiB"))
             }
@@ -277,6 +280,15 @@ class DocumentRepository(
                 }
             readNext(0)
         }
+    }
+
+    private fun readDeviceBytes(path: String, limit: Int): CompletableFuture<ByteArray> {
+        val store = deviceFiles ?: return CompletableFuture.failedFuture(IOException("Device files can't be read here"))
+        val uri = deviceUri(path) ?: return CompletableFuture.failedFuture(IllegalArgumentException("Not a device file: $path"))
+        return CompletableFuture.supplyAsync {
+            store.read(uri).also { if (it.size > limit) throw IOException("$path is over ${limit / (1024 * 1024)} MiB") }
+        }
+    }
 
     /**
      * A device file, read through its content URI. An unsaved draft wins, as for guest files;
@@ -327,6 +339,7 @@ class DocumentRepository(
     }
 
     fun persistDraft(document: DocumentSession) {
+        if (document.binary) return
         cache.save(
             DocumentSnapshot(
                 document.path,

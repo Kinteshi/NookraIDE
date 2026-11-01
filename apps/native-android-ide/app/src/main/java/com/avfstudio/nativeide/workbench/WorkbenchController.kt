@@ -103,6 +103,7 @@ import com.avfstudio.nativeide.notebook.NotebookCell
 import com.avfstudio.nativeide.notebook.NotebookDocument
 import com.avfstudio.nativeide.transport.ConnectionProfileStore
 import com.avfstudio.nativeide.transport.FileEntry
+import com.avfstudio.nativeide.transport.GuestPort
 import com.avfstudio.nativeide.transport.GuestVfsClient
 import com.avfstudio.nativeide.transport.GuestVfsException
 import com.avfstudio.nativeide.transport.GuestRejectedException
@@ -141,6 +142,19 @@ private const val RECENT_WORKSPACES_LIMIT = 10
 private const val SESSION_UNTITLED_KEY = "session-untitled"
 /** Device files open at the last stop, read again through their content URI. */
 private const val SESSION_DEVICE_KEY = "session-device"
+private const val KEYBINDINGS_KEY = "user-keybindings"
+/** The native daemon's default port; hidden in Ports with the connection's own. */
+private const val DAEMON_PORT = 19870
+/** Commands whose ports are the app's own plumbing (kernels, the Jupyter bridge, the daemon). */
+private val INTERNAL_COMMANDS = listOf("ipykernel", "avf-native-daemon", "avf-jupyter-bridge", "jupyter-bridge")
+/** Two taps on the same file this close together keep its preview tab. */
+private const val DOUBLE_TAP_MS = 500L
+private val KEYBINDINGS_TEMPLATE = """
+    // Keyboard shortcuts, in VS Code's keybindings.json format. A command starting with "-"
+    // removes that default shortcut. "when" clauses are kept but not evaluated here.
+    [
+    ]
+""".trimIndent()
 /** Per folder, the guest files this device has a copy of (the document cache), for Explorer offline. */
 private const val OFFLINE_FILES_PREFIX = "offline-files:"
 private const val OFFLINE_FILES_LIMIT = 200
@@ -208,9 +222,15 @@ class WorkbenchController(private val context: Context) {
     private val timer = Executors.newSingleThreadScheduledExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
     private val profileStore = ConnectionProfileStore(SharedPreferencesKeyValueStore(context), KeystoreSecretCipher())
-    private val editorDispatcher = EditorKeybindingDispatcher(EditorCommands.all)
-    private val globalDispatcher = EditorKeybindingDispatcher(EditorCommands.global)
-    private val notebookDispatcher = EditorKeybindingDispatcher(EditorCommands.global + EditorCommands.notebook)
+    /** The user's `keybindings.json` (kept on this device, like user settings), as parsed. */
+    var keybindingRules by mutableStateOf(
+        runCatching { parseKeybindings(preferences.getString(KEYBINDINGS_KEY, "").orEmpty()).rules }.getOrDefault(emptyList()),
+    )
+        private set
+    private var editorDispatcher = EditorKeybindingDispatcher(applyKeybindings(EditorCommands.all, keybindingRules))
+    private var globalDispatcher = EditorKeybindingDispatcher(applyKeybindings(EditorCommands.global, keybindingRules))
+    private var notebookDispatcher =
+        EditorKeybindingDispatcher(applyKeybindings(EditorCommands.global + EditorCommands.notebook, keybindingRules))
     private val consumedKeyDowns = mutableSetOf<Int>()
     private var lastHandledKey: Pair<Long, Int>? = null
     private val scheduledDraftWrites = mutableMapOf<String, ScheduledFuture<*>>()
@@ -471,9 +491,13 @@ class WorkbenchController(private val context: Context) {
     }
 
     private fun bindListeners() {
+        vfs.portListener = { port, open -> post { onGuestPort(port, open) } }
         vfs.connectionStateListener = { isConnected, failure ->
             post {
                 connected = isConnected
+                // The daemon lists its open ports again after each handshake.
+                guestPorts.clear()
+                portsConnectedAt = android.os.SystemClock.uptimeMillis()
                 if (!isConnected) {
                     languageClients.values.forEach(LanguageClient::onDisconnected)
                     copilot.language.onDisconnected()
@@ -554,6 +578,7 @@ class WorkbenchController(private val context: Context) {
         terminals.forEach { it.emulator.close() }
         documents.forEach { document -> io.execute { repository.persistDraft(document) } }
         vfs.connectionStateListener = null
+        vfs.portListener = null
         vfs.close()
         GuestConnectionService.stop(context)
         io.shutdown()
@@ -936,7 +961,7 @@ class WorkbenchController(private val context: Context) {
             add("start", position)
             add("end", end)
         }
-        navigateToLocation(LanguageLocation(java.net.URI("file", "", match.path, null).toASCIIString(), range))
+        navigateToLocation(LanguageLocation(java.net.URI("file", "", match.path, null).toASCIIString(), range), preview = true)
     }
 
     // Guest resources -----------------------------------------------------------------------------
@@ -1816,6 +1841,8 @@ class WorkbenchController(private val context: Context) {
             active = activePath?.takeIf(::isGuestPath),
             directory = currentDirectory.ifEmpty { null },
             expanded = expandedFolders.toList(),
+            pinned = pinnedTabs.filter(::isGuestPath),
+            preview = previewTab?.takeIf(::isGuestPath),
         )
         preferences.edit().putString(workspaceSessionKey(workspace), gson.toJson(session)).apply()
     }
@@ -1829,7 +1856,8 @@ class WorkbenchController(private val context: Context) {
             ?.let { runCatching { gson.fromJson(it, WorkspaceSession::class.java) }.getOrNull() }
             ?: legacySession(workspace)
         val open = saved.open.orEmpty().filter { isPathWithinRoot(it, workspace) }
-        open.sortedBy { it == saved.active }.forEach(::openPath)
+        pinnedTabs.addAll(saved.pinned.orEmpty().filter { it in open && it !in pinnedTabs })
+        open.sortedBy { it == saved.active }.forEach { openPath(it, preview = it == saved.preview) }
         // Offline there is no folder to list; Explorer shows the files this device has instead.
         if (!vfs.isConnected()) return
         saved.directory?.takeIf { isPathWithinRoot(it, workspace) && it != workspace }?.let(::loadDirectory)
@@ -2217,13 +2245,34 @@ class WorkbenchController(private val context: Context) {
         loadDirectory(path)
     }
 
-    fun openPath(path: String) {
+    /**
+     * Opens [path] in a tab, or selects its tab. With [preview] (a single tap in Explorer or on a
+     * search match) it is a preview tab that the next such open replaces; a second tap within
+     * [DOUBLE_TAP_MS] keeps it, like a double click in VS Code.
+     */
+    fun openPath(path: String, preview: Boolean = false) {
         // Offline, a guest file opens from this device's copy if there is one.
         if (!vfs.isConnected() && isGuestPath(path) && !repository.hasCopy(path)) {
             status = "Connect to a guest before opening files"
             return
         }
+        val now = android.os.SystemClock.uptimeMillis()
+        val doubleTap = preview && lastPreviewOpen?.let { (last, time) -> last == path && now - time < DOUBLE_TAP_MS } == true
+        lastPreviewOpen = if (preview && !doubleTap) path to now else null
         documents.firstOrNull { it.path == path }?.let {
+            if (doubleTap || !preview) keepTab(path)
+            selectDocument(path)
+            return
+        }
+        if (preview && !doubleTap && settings.enablePreview && !path.endsWith(".ipynb", ignoreCase = true)) {
+            previewRequests += path
+        } else {
+            previewRequests -= path
+        }
+        // Images open in the viewer, which reads the file itself; there is no text to load.
+        if (isImagePath(path)) {
+            if (isGuestPath(path) && vfs.isConnected()) rememberOfflineFile(path)
+            addTab(DocumentSession(path, "", null, dirty = false, binary = true), asPreview = previewRequests.remove(path))
             selectDocument(path)
             return
         }
@@ -2242,11 +2291,13 @@ class WorkbenchController(private val context: Context) {
             is OpenDocument.Editable -> {
                 if (isGuestPath(result.document.path) && vfs.isConnected()) rememberOfflineFile(result.document.path)
                 val existing = documents.firstOrNull { it.path == result.document.path }
-                val session = existing ?: result.document.also(documents::add)
+                val session = existing ?: result.document.also { addTab(it, asPreview = previewRequests.remove(it.path)) }
                 if (session.path.endsWith(".ipynb", ignoreCase = true) && !openNotebook(session)) {
                     documents.remove(session)
                     return
                 }
+                // An SVG opens drawn (avf.svg.openAsImage); the breadcrumb's buttons show its source.
+                if (existing == null && isSvgPath(session.path) && settings.svgAsImage) markdownPreviews[session.path] = MarkdownPreviewMode.Only
                 selectDocument(session.path)
                 status = if (session.conflict != null) "Remote changes detected; choose how to resolve" else "Opened ${session.path.substringAfterLast('/')}"
                 notifyDocumentOpened(session)
@@ -2338,6 +2389,8 @@ class WorkbenchController(private val context: Context) {
     }
 
     fun closeDocument(path: String) {
+        if (previewTab == path) previewTab = null
+        pinnedTabs.remove(path)
         documents.firstOrNull { it.path == path }?.let(closedDocuments::add)
         notifyDocumentClosed(path)
         notebooks.remove(path)?.kernel?.stop()
@@ -2349,6 +2402,117 @@ class WorkbenchController(private val context: Context) {
         scheduleIdleServerStop()
     }
 
+    // Ports -------------------------------------------------------------------------------------
+
+    /** TCP ports listening in the guest, from the daemon's scan (IPv4 and IPv6 apart). */
+    val guestPorts = mutableStateListOf<GuestPort>()
+    private var portsConnectedAt = 0L
+    /**
+     * Ports the view hides unless asked: the daemon's own, Jupyter kernels', the app's bridges,
+     * and other users' (the guest's services: ssh, DNS, Linux Terminal's ttyd), whose command
+     * the daemon can't read.
+     */
+    var showInternalPorts by mutableStateOf(false)
+
+    /** One row per port number; the command comes from whichever socket had one. */
+    val listedPorts: List<GuestPort>
+        get() = guestPorts.groupBy { it.port }.map { (port, sockets) ->
+            GuestPort(port, sockets.all { it.ipv6 }, sockets.firstNotNullOfOrNull { it.command })
+        }.sortedBy { it.port }
+
+    val visiblePorts: List<GuestPort> get() = listedPorts.filterNot(::isInternalPort)
+
+    fun isInternalPort(port: GuestPort): Boolean {
+        val daemonPort = runCatching { Uri.parse(endpoint.replaceFirst("ws", "http")).port }.getOrDefault(-1)
+        val command = port.command.orEmpty()
+        return port.command == null || port.port == daemonPort || port.port == DAEMON_PORT ||
+            INTERNAL_COMMANDS.any { it in command }
+    }
+
+    private fun onGuestPort(port: GuestPort, open: Boolean) {
+        guestPorts.removeAll { it.port == port.port && it.ipv6 == port.ipv6 }
+        if (!open) return
+        val known = guestPorts.any { it.port == port.port }
+        guestPorts.add(port)
+        // The list sent on connecting is not news; a server started since is.
+        val settled = android.os.SystemClock.uptimeMillis() - portsConnectedAt > 3_000
+        if (settled && !known && settings.portNotifications && !isInternalPort(port)) {
+            status = "A server is listening on port ${port.port}${port.command?.let { " (${it.take(40)})" }.orEmpty()}; open it from Ports"
+        }
+    }
+
+    /** Opens a guest port in the browser; Linux Terminal forwards it to this tablet once allowed. */
+    fun openPort(port: GuestPort) = openLink("http://localhost:${port.port}")
+
+    fun copyPortAddress(port: GuestPort) {
+        val clipboard = context.getSystemService(android.content.ClipboardManager::class.java) ?: return
+        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Address", "http://localhost:${port.port}"))
+        status = "Copied http://localhost:${port.port}"
+    }
+
+    // Tabs --------------------------------------------------------------------------------------
+
+    /** The preview tab (italic): the next file opened with a single tap replaces it (`workbench.editor.enablePreview`). */
+    var previewTab by mutableStateOf<String?>(null)
+        private set
+    /** Pinned tabs: first in the strip, left open by Close Other Editors, and saved with the folder. */
+    val pinnedTabs = mutableStateListOf<String>()
+    /** Files being opened as the preview tab. */
+    private val previewRequests = mutableSetOf<String>()
+    private var lastPreviewOpen: Pair<String, Long>? = null
+
+    /** Puts a newly opened tab in the strip: pinned ones after the other pinned, a preview in place of the old preview. */
+    private fun addTab(document: DocumentSession, asPreview: Boolean) {
+        val oldPreview = previewTab?.takeIf { asPreview }?.let { path -> documents.firstOrNull { it.path == path } }
+        when {
+            document.path in pinnedTabs -> documents.add(documents.count { it.path in pinnedTabs }, document)
+            oldPreview != null && !oldPreview.dirty -> {
+                val index = documents.indexOf(oldPreview)
+                closeDocument(oldPreview.path)
+                documents.add(index.coerceIn(0, documents.size), document)
+            }
+            else -> documents.add(document)
+        }
+        if (asPreview) previewTab = document.path
+    }
+
+    /** The preview tab stays open: edited, double-tapped, pinned, or Keep Editor Open. */
+    fun keepTab(path: String) {
+        if (previewTab == path) {
+            previewTab = null
+            persistSession()
+        }
+    }
+
+    fun pinTab(path: String) {
+        if (path in pinnedTabs) return
+        keepTab(path)
+        val document = documents.firstOrNull { it.path == path } ?: return
+        documents.remove(document)
+        documents.add(documents.count { it.path in pinnedTabs }, document)
+        pinnedTabs.add(path)
+        persistSession()
+    }
+
+    fun unpinTab(path: String) {
+        if (!pinnedTabs.remove(path)) return
+        val document = documents.firstOrNull { it.path == path } ?: return
+        documents.remove(document)
+        documents.add(documents.count { it.path in pinnedTabs }, document)
+        persistSession()
+    }
+
+    /** Close Other Editors leaves [path] and the pinned tabs. */
+    fun closeOtherTabs(path: String) {
+        requestCloseDocuments(documents.map { it.path }.filter { it != path && it !in pinnedTabs })
+    }
+
+    fun copyPath(path: String) {
+        val clipboard = context.getSystemService(android.content.ClipboardManager::class.java) ?: return
+        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Path", path))
+        status = "Copied $path"
+    }
+
     // Markdown preview ----------------------------------------------------------------------------
 
     /** Markdown files shown with their preview, beside the editor or instead of it. */
@@ -2356,8 +2520,8 @@ class WorkbenchController(private val context: Context) {
 
     /** Ctrl+Shift+V and Ctrl+K V; the same again goes back to the editor alone. */
     fun toggleMarkdownPreview(mode: MarkdownPreviewMode, path: String? = activePath) {
-        if (path == null || !isMarkdownPath(path)) {
-            status = "The preview is for Markdown files"
+        if (path == null || !hasPreview(path)) {
+            status = "The preview is for Markdown and SVG files"
             return
         }
         if (markdownPreviews[path] == mode) markdownPreviews.remove(path) else markdownPreviews[path] = mode
@@ -2390,6 +2554,28 @@ class WorkbenchController(private val context: Context) {
         }
     }
 
+    /** Markdown and SVG files have a preview beside or instead of their text. */
+    fun hasPreview(path: String): Boolean = isMarkdownPath(path) || isSvgPath(path)
+
+    /** The image viewer's file, read on its loader thread (guest or device; up to [MAX_PREVIEW_IMAGE_BYTES]). */
+    fun readImageBytes(path: String): ByteArray {
+        if (isGuestPath(path) && !vfs.isConnected()) throw java.io.IOException("Connect to the guest to show this image")
+        return repository.readBytes(path, MAX_PREVIEW_IMAGE_BYTES).get(30, TimeUnit.SECONDS)
+    }
+
+    /** Ctrl+= and Ctrl+- on an image tab: the viewer zooms by [ImageZoomRequest.step]. */
+    var imageZoomRequest by mutableStateOf<ImageZoomRequest?>(null)
+        private set
+
+    private fun zoomEditorOrImage(step: Int) {
+        val path = activePath
+        if (path != null && (isImagePath(path) || (isSvgPath(path) && markdownPreviews[path] == MarkdownPreviewMode.Only))) {
+            imageZoomRequest = ImageZoomRequest(path, step, (imageZoomRequest?.id ?: 0) + 1)
+        } else {
+            zoomEditor(step.toFloat())
+        }
+    }
+
     /** An image the preview shows, read from the guest (on the WebView's loader thread). */
     fun readPreviewImage(path: String): ByteArray? {
         if (!vfs.isConnected() || roots.none { isPathWithinRoot(path, it) }) return null
@@ -2398,6 +2584,7 @@ class WorkbenchController(private val context: Context) {
 
     fun onDocumentEdited(document: DocumentSession) {
         documentRevision++
+        if (previewTab == document.path) keepTab(document.path)
         synchronized(scheduledDraftWrites) {
             scheduledDraftWrites.remove(document.path)?.cancel(false)
             scheduledDraftWrites[document.path] = timer.schedule(
@@ -2437,7 +2624,7 @@ class WorkbenchController(private val context: Context) {
             saveNotebook(it)
             return
         }
-        val document = activeDocument ?: return
+        val document = activeDocument?.takeUnless { it.binary } ?: return
         if (document.path.startsWith("scratch:")) {
             if (vfs.isConnected()) {
                 beginSaveAs(document)
@@ -2888,7 +3075,7 @@ class WorkbenchController(private val context: Context) {
 
     private fun notifyDocumentOpened(document: DocumentSession) {
         // Device files have no guest path for the servers (or Copilot) to know them by.
-        if (document.path in notebooks || isDevicePath(document.path)) return
+        if (document.path in notebooks || isDevicePath(document.path) || document.binary) return
         lspLanguageId(document.path)?.let { languageId ->
             languageClientsFor(document.path).filter { it.isReady }.forEach { client ->
                 lspLog { "didOpen ${document.path} v${document.version} (${document.text.length} chars) in ${languageClients.entries.firstOrNull { it.value === client }?.key}" }
@@ -2907,7 +3094,7 @@ class WorkbenchController(private val context: Context) {
     }
 
     private fun notifyDocumentClosed(path: String) {
-        if (isDevicePath(path)) return
+        if (isDevicePath(path) || isImagePath(path)) return
         languageClientsFor(path).forEach { it.didClose(path) }
         copilot.language.didClose(path)
     }
@@ -3050,7 +3237,7 @@ class WorkbenchController(private val context: Context) {
         return document to start
     }
 
-    fun navigateToLocation(location: LanguageLocation) {
+    fun navigateToLocation(location: LanguageLocation, preview: Boolean = false) {
         val path = java.net.URI(location.uri).path?.let(::documentPathFor) ?: return
         val start = location.range.getAsJsonObject("start") ?: return
         val target = EditorNavigationTarget(path, start.get("line").asInt, start.get("character").asInt)
@@ -3060,7 +3247,7 @@ class WorkbenchController(private val context: Context) {
             pendingNavigation = null
         } else {
             pendingNavigation = target
-            openPath(path)
+            openPath(path, preview)
         }
     }
 
@@ -3673,6 +3860,12 @@ class WorkbenchController(private val context: Context) {
         editorSurface?.setText(document.text)
         onDocumentEdited(document)
         status = "Replaced $count occurrence(s)"
+    }
+
+    /** The status bar's line number: a small dialog with a number pad, kinder to touch than Quick Open. */
+    fun showGoToLine() {
+        gotoLine = ""
+        dialog = WorkbenchDialog.GotoLine
     }
 
     fun goToLine() {
@@ -5264,6 +5457,236 @@ class WorkbenchController(private val context: Context) {
     var editorThemeRevision by mutableIntStateOf(0)
         private set
 
+    // Keyboard shortcuts --------------------------------------------------------------------------
+
+    /** Every command's bindings now: the user's rules over the defaults (several when a command has more than one). */
+    val effectiveCommands: List<EditorCommand> get() = applyKeybindings(EditorCommands.all, keybindingRules)
+
+    /** The first key [commandId] answers to, for menus and the palette; empty when it has none. */
+    fun keybindingFor(commandId: String): String =
+        effectiveCommands.firstOrNull { it.id == commandId && it.keybinding.isNotEmpty() }?.keybinding.orEmpty()
+
+    /** Whether the user changed [commandId]'s binding (Keyboard Shortcuts marks it and offers Reset). */
+    fun keybindingChanged(commandId: String): Boolean = keybindingRules.any { it.commandId == commandId }
+
+    private fun applyKeybindingRules(rules: List<KeybindingRule>, text: String = formatKeybindings(rules)): Boolean {
+        if (!preferences.edit().putString(KEYBINDINGS_KEY, text).commit()) {
+            status = "Keyboard shortcuts could not be saved"
+            return false
+        }
+        keybindingRules = rules
+        editorDispatcher = EditorKeybindingDispatcher(applyKeybindings(EditorCommands.all, rules))
+        globalDispatcher = EditorKeybindingDispatcher(applyKeybindings(EditorCommands.global, rules))
+        notebookDispatcher = EditorKeybindingDispatcher(applyKeybindings(EditorCommands.global + EditorCommands.notebook, rules))
+        return true
+    }
+
+    /** Keys recorded for [WorkbenchDialog.RecordKeybinding]: one stroke, or two for a chord. */
+    var recordedKeys by mutableStateOf(emptyList<KeyStroke>())
+        private set
+
+    fun beginRecordingKeybinding(commandId: String) {
+        recordedKeys = emptyList()
+        dialog = WorkbenchDialog.RecordKeybinding(commandId)
+    }
+
+    /**
+     * A key pressed while Keyboard Shortcuts records (the dialog's own window gets it, so the
+     * IME never does): modifiers alone wait, Enter saves, Escape cancels, a third stroke starts over.
+     */
+    fun recordKey(event: AndroidKeyEvent): Boolean {
+        val recording = dialog as? WorkbenchDialog.RecordKeybinding ?: return false
+        if (event.action != AndroidKeyEvent.ACTION_DOWN) return true
+        if (AndroidKeyEvent.isModifierKey(event.keyCode)) return true
+        val plain = !event.isCtrlPressed && !event.isAltPressed && !event.isShiftPressed
+        if (plain && event.keyCode == AndroidKeyEvent.KEYCODE_ESCAPE) {
+            dialog = WorkbenchDialog.Keybindings
+            return true
+        }
+        if (plain && event.keyCode == AndroidKeyEvent.KEYCODE_ENTER) {
+            if (recordedKeys.isNotEmpty()) saveRecordedKeybinding(recording.commandId)
+            return true
+        }
+        val stroke = editorKeyStroke(event.keyCode, event.isCtrlPressed, event.isShiftPressed, event.isAltPressed, allowUnmodified = true)
+            ?: return true
+        recordedKeys = if (recordedKeys.size >= 2) listOf(stroke) else recordedKeys + stroke
+        return true
+    }
+
+    /** Other commands the recorded keys already run, shown under them in the recorder. */
+    fun recordedKeyConflicts(commandId: String): List<String> {
+        val keys = recordedKeys.joinToString(" ") { it.label() }
+        if (keys.isEmpty()) return emptyList()
+        val strokes = keys.split(' ').map(KeyStroke::parse)
+        return effectiveCommands.filter { it.id != commandId && it.keybinding.isNotEmpty() && it.keybinding.split(' ').map(KeyStroke::parse) == strokes }
+            .map { it.title }.distinct()
+    }
+
+    fun saveRecordedKeybinding(commandId: String) {
+        val keys = recordedKeys.joinToString(" ") { it.label() }.ifEmpty { return }
+        if (applyKeybindingRules(rebind(keybindingRules, commandId, keys))) {
+            status = "${commandTitle(commandId)}: $keys"
+            dialog = WorkbenchDialog.Keybindings
+        }
+    }
+
+    fun removeKeybinding(commandId: String) {
+        if (applyKeybindingRules(rebind(keybindingRules, commandId, null))) {
+            status = "${commandTitle(commandId)} has no shortcut now"
+            dialog = WorkbenchDialog.Keybindings
+        }
+    }
+
+    fun resetKeybinding(commandId: String) {
+        if (applyKeybindingRules(resetKeybinding(keybindingRules, commandId))) {
+            status = "${commandTitle(commandId)} uses its default shortcut again"
+            dialog = WorkbenchDialog.Keybindings
+        }
+    }
+
+    private fun commandTitle(commandId: String) = EditorCommands.all.firstOrNull { it.id == commandId }?.title ?: commandId
+
+    /** Preferences: Open Keyboard Shortcuts (JSON): the rules as VS Code writes them. */
+    fun openKeybindingsJson() {
+        settingsDraft = preferences.getString(KEYBINDINGS_KEY, null)?.takeIf(String::isNotBlank) ?: KEYBINDINGS_TEMPLATE
+        dialog = WorkbenchDialog.KeybindingsJson
+    }
+
+    fun saveKeybindingsJson() {
+        val parsed = try {
+            parseKeybindings(settingsDraft)
+        } catch (error: RuntimeException) {
+            status = "keybindings.json: ${error.message}"
+            return
+        }
+        // The text is kept as typed (comments too); rules that can't apply are only reported.
+        if (!applyKeybindingRules(parsed.rules, settingsDraft)) return
+        dialog = null
+        status = if (parsed.problems.isEmpty()) "Keyboard shortcuts saved" else {
+            "Keyboard shortcuts saved; skipped ${parsed.problems.size}: ${parsed.problems.joinToString("; ")}"
+        }
+    }
+
+    // Quick Open --------------------------------------------------------------------------------
+
+    /** Opens Quick Open in the mode [prefix] picks (`>` commands, `@` symbols, `#` workspace symbols, `:` line). */
+    fun openQuickOpen(prefix: String = "") {
+        quickOpenFilter = prefix
+        workspaceSymbols = emptyList()
+        dialog = WorkbenchDialog.QuickOpen
+    }
+
+    /** `workspace/symbol` matches for Quick Open's `#`, from every running server that offers them. */
+    var workspaceSymbols by mutableStateOf(emptyList<QuickOpenItem.Symbol>())
+        private set
+    var workspaceSymbolsSearching by mutableStateOf(false)
+        private set
+    private var scheduledSymbolSearch: java.util.concurrent.ScheduledFuture<*>? = null
+    private var symbolSearchGeneration = 0
+
+    private fun workspaceSymbolClients(): List<LanguageClient> =
+        listOfNotNull(languageClients["python"], languageClients["typescript"]).filter { it.isReady && it.supportsWorkspaceSymbols }
+
+    fun searchWorkspaceSymbols(query: String) {
+        scheduledSymbolSearch?.cancel(false)
+        val generation = ++symbolSearchGeneration
+        val clients = workspaceSymbolClients()
+        if (query.isBlank() || clients.isEmpty()) {
+            workspaceSymbols = emptyList()
+            workspaceSymbolsSearching = false
+            return
+        }
+        workspaceSymbolsSearching = true
+        scheduledSymbolSearch = timer.schedule(
+            {
+                val requests = clients.map { client -> client.workspaceSymbols(query.trim()).exceptionally { null } }
+                CompletableFuture.allOf(*requests.toTypedArray()).whenComplete { _, _ ->
+                    val root = workspaceRoot.orEmpty().trimEnd('/')
+                    val items = requests.flatMap { request ->
+                        workspaceSymbolItems(request.getNow(null)) { path -> path.removePrefix("$root/") }
+                    }.distinctBy { Triple(it.name, it.location.uri, it.detail) }
+                    post {
+                        if (generation != symbolSearchGeneration) return@post
+                        workspaceSymbols = rankSymbols(items, query).take(200)
+                        workspaceSymbolsSearching = false
+                    }
+                }
+            },
+            200,
+            TimeUnit.MILLISECONDS,
+        )
+    }
+
+    /** What Quick Open lists for [query] in its current mode. */
+    fun quickOpenItems(query: String): List<QuickOpenItem> {
+        val mode = quickOpenMode(query)
+        val text = query.removePrefix(mode.prefix)
+        return when (mode) {
+            QuickOpenMode.Files -> {
+                val root = workspaceRoot.orEmpty().trimEnd('/')
+                quickOpenIndex
+                    .filter { fuzzyMatch(text, it.path.removePrefix(root)) }
+                    .sortedBy { if (it.name.startsWith(text, true)) 0 else 1 }
+                    .take(200)
+                    .map(QuickOpenItem::File)
+            }
+            QuickOpenMode.Commands -> EditorCommands.all.distinctBy { it.id }
+                .filter { fuzzyMatch(text.trim(), it.title) || it.id.contains(text.trim(), true) }
+                .map { QuickOpenItem.Command(it, keybindingFor(it.id)) }
+            QuickOpenMode.EditorSymbols -> {
+                val document = activeDocument
+                when {
+                    document == null || activeNotebook != null -> listOf(QuickOpenItem.Message("Open a text file to go to its symbols"))
+                    languageClientFor(document.path)?.isReady != true ->
+                        listOf(QuickOpenItem.Message("No language server for ${document.path.substringAfterLast('/')}; symbols come from Python and TypeScript servers"))
+                    else -> editorSymbolItems(outlineSymbols, diagnosticUri(document.path), text)
+                        .ifEmpty { listOf(QuickOpenItem.Message("No matching symbols")) }
+                }
+            }
+            QuickOpenMode.WorkspaceSymbols -> when {
+                workspaceSymbolClients().isEmpty() ->
+                    listOf(QuickOpenItem.Message("Open a Python or TypeScript file first: its language server finds the workspace's symbols"))
+                text.isBlank() -> listOf(QuickOpenItem.Message("Type the name of a class, function or variable"))
+                workspaceSymbols.isEmpty() -> listOf(QuickOpenItem.Message(if (workspaceSymbolsSearching) "Searching…" else "No matching symbols"))
+                else -> workspaceSymbols
+            }
+            QuickOpenMode.Line -> {
+                val surface = editorSurface
+                if (surface == null || activeDocument == null || activeNotebook != null) {
+                    listOf(QuickOpenItem.Message("Open a text file to go to a line"))
+                } else {
+                    listOf(lineItem(text, surface.lineCount, (cursorPosition?.line ?: 0) + 1))
+                }
+            }
+            QuickOpenMode.Help -> QuickOpenMode.entries.filter { it != QuickOpenMode.Help }.map(QuickOpenItem::Prefix)
+        }
+    }
+
+    fun pickQuickOpen(item: QuickOpenItem) {
+        when (item) {
+            is QuickOpenItem.Message -> return
+            is QuickOpenItem.Prefix -> {
+                quickOpenFilter = item.mode.prefix
+                return
+            }
+            else -> Unit
+        }
+        dialog = null
+        when (item) {
+            is QuickOpenItem.File -> if (quickOpenAttachesToChat) attachFileToChat(item.entry.path) else openPath(item.entry.path)
+            is QuickOpenItem.Command -> runCommand(item.command.id)
+            is QuickOpenItem.Symbol -> navigateToLocation(item.location)
+            is QuickOpenItem.Line -> editorSurface?.let { surface ->
+                val line = (item.line - 1).coerceIn(0, surface.lineCount - 1)
+                // Past the line's end the cursor goes to its end, as in VS Code.
+                val length = activeDocument?.text?.lineSequence()?.elementAtOrNull(line)?.length ?: 0
+                surface.moveCursor(LspPosition(line, ((item.column ?: 1) - 1).coerceIn(0, length)))
+            }
+            else -> Unit
+        }
+        quickOpenAttachesToChat = false
+    }
+
     // Commands and keys -------------------------------------------------------------------------
 
     /**
@@ -5366,18 +5789,16 @@ class WorkbenchController(private val context: Context) {
             "explorer.newFolder" -> beginNewEntry(folder = true)
             "renameFile" -> beginRenameEntry()
             "deleteFile" -> beginDeleteEntry()
-            "workbench.action.files.openFile", "workbench.action.quickOpen" -> {
-                quickOpenFilter = ""
-                dialog = WorkbenchDialog.QuickOpen
-            }
-            "workbench.action.showCommands" -> {
-                commandFilter = ""
-                dialog = WorkbenchDialog.Commands
-            }
+            "workbench.action.files.openFile", "workbench.action.quickOpen" -> openQuickOpen()
+            "workbench.action.showCommands" -> openQuickOpen(">")
+            "workbench.action.gotoSymbol" -> openQuickOpen("@")
+            "workbench.action.showAllSymbols" -> openQuickOpen("#")
+            "outline.focus" -> toggleSidebar(SidebarView.Outline)
             "workbench.action.closeActiveEditor" -> activePath?.let(::requestCloseDocument)
-            "workbench.action.closeOtherEditors" -> activePath?.let { path ->
-                requestCloseDocuments(documents.filter { it.path != path }.map { it.path })
-            }
+            "workbench.action.closeOtherEditors" -> activePath?.let(::closeOtherTabs)
+            "workbench.action.keepEditor" -> activePath?.let(::keepTab)
+            "workbench.action.pinEditor" -> activePath?.let { if (it in pinnedTabs) unpinTab(it) else pinTab(it) }
+            "workbench.action.unpinEditor" -> activePath?.let(::unpinTab)
             "workbench.action.reopenClosedEditor" -> closedDocuments.removeLastOrNull()?.let { document ->
                 if (document.path.endsWith(".ipynb")) openPath(document.path) else {
                     documents.add(document)
@@ -5394,7 +5815,6 @@ class WorkbenchController(private val context: Context) {
                 panelVisible = true
                 panelTab = PanelTab.Problems
             }
-            "workbench.action.gotoSymbol" -> toggleSidebar(SidebarView.Outline)
             "workbench.action.output.toggleOutput" -> {
                 panelVisible = !(panelVisible && panelTab == PanelTab.Output)
                 panelTab = PanelTab.Output
@@ -5408,10 +5828,19 @@ class WorkbenchController(private val context: Context) {
             }
             "workbench.action.openSettings" -> settingsVisible = true
             "workbench.action.openSettingsJson" -> openSettingsJson()
-            "workbench.action.openGlobalKeybindings" -> dialog = WorkbenchDialog.Keybindings
+            "workbench.action.openGlobalKeybindings" -> {
+                commandFilter = ""
+                dialog = WorkbenchDialog.Keybindings
+            }
+            "workbench.action.openGlobalKeybindingsFile" -> openKeybindingsJson()
+            "ports.focus" -> {
+                panelVisible = true
+                panelTab = PanelTab.Ports
+                compactDestination = CompactDestination.Terminal
+            }
             "workbench.action.debug.run" -> runActiveFile()
-            "editor.action.fontZoomIn" -> zoomEditor(1f)
-            "editor.action.fontZoomOut" -> zoomEditor(-1f)
+            "editor.action.fontZoomIn" -> zoomEditorOrImage(1)
+            "editor.action.fontZoomOut" -> zoomEditorOrImage(-1)
             "workbench.action.connect" -> dialog = WorkbenchDialog.Connect
             "undo" -> surface?.undo()
             "redo" -> surface?.redo()
@@ -5442,10 +5871,7 @@ class WorkbenchController(private val context: Context) {
             }
             "editor.action.nextMatchFindAction" -> findInEditor(true)
             "editor.action.previousMatchFindAction" -> findInEditor(false)
-            "workbench.action.gotoLine" -> {
-                gotoLine = ""
-                dialog = WorkbenchDialog.GotoLine
-            }
+            "workbench.action.gotoLine" -> openQuickOpen(":")
             "editor.action.formatDocument" -> formatActiveDocument()
             "editor.action.goToDefinition", "editor.action.peekDefinition" -> goToDefinition()
             "editor.action.goToReferences" -> findReferences()

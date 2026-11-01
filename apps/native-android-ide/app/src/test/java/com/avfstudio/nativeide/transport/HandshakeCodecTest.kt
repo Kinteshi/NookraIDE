@@ -38,6 +38,38 @@ class HandshakeCodecTest {
     }
 
     @Test
+    fun decodesGuestPortsOpeningAndClosing() {
+        val opened = system("PortOpened") {
+            packMapHeader(3)
+            packString("port")
+            packInt(8000)
+            packString("protocol")
+            packString("Tcp6")
+            packString("process_name")
+            packString("python3 -m http.server")
+        }
+        assertEquals(IncomingPacket.Port(GuestPort(8000, ipv6 = true, command = "python3 -m http.server"), open = true), MessagePackVfsCodec.decode(opened))
+        val closed = system("PortClosed") {
+            packMapHeader(2)
+            packString("port")
+            packInt(8000)
+            packString("protocol")
+            packString("Tcp")
+        }
+        assertEquals(IncomingPacket.Port(GuestPort(8000, ipv6 = false, command = null), open = false), MessagePackVfsCodec.decode(closed))
+        val unknownOwner = system("PortOpened") {
+            packMapHeader(3)
+            packString("port")
+            packInt(22)
+            packString("protocol")
+            packString("Tcp")
+            packString("process_name")
+            packNil()
+        }
+        assertEquals(IncomingPacket.Port(GuestPort(22, ipv6 = false, command = null), open = true), MessagePackVfsCodec.decode(unknownOwner))
+    }
+
+    @Test
     fun decodesThePairedToken() {
         val paired = system("Paired") {
             packMapHeader(1)

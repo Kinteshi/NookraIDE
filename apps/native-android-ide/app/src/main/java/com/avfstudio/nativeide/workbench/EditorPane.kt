@@ -1,6 +1,15 @@
 package com.avfstudio.nativeide.workbench
 
 import androidx.compose.runtime.remember
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.outlined.PushPin
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -90,7 +99,7 @@ fun EditorArea(controller: WorkbenchController, modifier: Modifier = Modifier) {
                 if (device) "/This device/${document.path.substringAfterLast('/')}" else document.path,
                 if (device) { _ -> } else controller::navigateToDirectory,
             ) {
-                if (isMarkdownPath(document.path)) MarkdownPreviewButtons(controller, preview)
+                if (controller.hasPreview(document.path)) MarkdownPreviewButtons(controller, preview)
             }
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -98,8 +107,15 @@ fun EditorArea(controller: WorkbenchController, modifier: Modifier = Modifier) {
             when {
                 paged != null -> LargeFileView(controller)
                 notebook != null -> NotebookEditor(controller, notebook)
+                activeDocument != null && activeDocument.binary -> key(activeDocument.path) {
+                    ImageViewer(controller, activeDocument.path)
+                }
                 activeDocument != null && preview == MarkdownPreviewMode.Only -> key(activeDocument.path) {
-                    MarkdownPreview(controller, activeDocument, followEditor = false, Modifier.fillMaxSize())
+                    if (isSvgPath(activeDocument.path)) {
+                        SvgPreview(controller, activeDocument.path, { activeDocument.text })
+                    } else {
+                        MarkdownPreview(controller, activeDocument, followEditor = false, Modifier.fillMaxSize())
+                    }
                 }
                 activeDocument != null && preview == MarkdownPreviewMode.Side -> key(activeDocument.path) {
                     Row(Modifier.fillMaxSize()) {
@@ -108,19 +124,24 @@ fun EditorArea(controller: WorkbenchController, modifier: Modifier = Modifier) {
                             EditorOverlays(controller)
                         }
                         androidx.compose.material3.VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                        MarkdownPreview(
-                            controller,
-                            activeDocument,
-                            followEditor = controller.settings.markdownScrollSync,
-                            Modifier.weight(1f).fillMaxHeight(),
-                        )
+                        if (isSvgPath(activeDocument.path)) {
+                            SvgPreview(controller, activeDocument.path, { activeDocument.text }, Modifier.weight(1f).fillMaxHeight())
+                        } else {
+                            MarkdownPreview(
+                                controller,
+                                activeDocument,
+                                followEditor = controller.settings.markdownScrollSync,
+                                Modifier.weight(1f).fillMaxHeight(),
+                            )
+                        }
                     }
                 }
                 activeDocument != null -> key(activeDocument.path) { NativeEditorView(controller, activeDocument) }
                 else -> EmptyEditor(controller)
             }
-            if (notebook == null && paged == null && preview == null) EditorOverlays(controller)
-            if (notebook == null && paged == null && activeDocument != null && preview == null) {
+            val image = activeDocument?.binary == true
+            if (notebook == null && paged == null && preview == null && !image) EditorOverlays(controller)
+            if (notebook == null && paged == null && activeDocument != null && preview == null && !image) {
                 ProblemScrollMarks(controller, Modifier.align(Alignment.TopEnd))
             }
         }
@@ -199,42 +220,7 @@ private fun EditorTabs(controller: WorkbenchController) {
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         controller.documents.forEach { document ->
-            val selected = document.path == controller.activePath
-            val dirty = document.dirty || controller.notebooks[document.path]?.notebook?.dirty == true
-            Surface(
-                color = if (selected) colors.surface else colors.surfaceContainer,
-                contentColor = if (selected) colors.onSurface else colors.onSurfaceVariant,
-                shape = RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp),
-                modifier = Modifier.height(34.dp).align(Alignment.Bottom),
-            ) {
-                Row(
-                    Modifier.clickable { controller.selectDocument(document.path) }.padding(start = 12.dp, end = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    Icon(
-                        if (document.path.endsWith(".ipynb")) Icons.Outlined.Code else Icons.AutoMirrored.Outlined.InsertDriveFile,
-                        contentDescription = null,
-                        modifier = Modifier.size(15.dp),
-                        tint = if (selected) colors.primary else colors.onSurfaceVariant,
-                    )
-                    Text(
-                        document.path.substringAfterLast('/'),
-                        style = MaterialTheme.typography.labelLarge,
-                        maxLines = 1,
-                    )
-                    Box(
-                        Modifier.size(26.dp).clip(RoundedCornerShape(13.dp)).clickable { controller.requestCloseDocument(document.path) },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        if (dirty) {
-                            Box(Modifier.size(8.dp).clip(RoundedCornerShape(4.dp)).background(colors.primary))
-                        } else {
-                            Icon(Icons.Outlined.Close, contentDescription = "Close", modifier = Modifier.size(15.dp))
-                        }
-                    }
-                }
-            }
+            key(document.path) { EditorTab(controller, document, Modifier.align(Alignment.Bottom)) }
         }
         controller.pagedDocument?.let {
             Text(
@@ -243,6 +229,91 @@ private fun EditorTabs(controller: WorkbenchController) {
                 color = colors.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 12.dp),
             )
+        }
+    }
+}
+
+/**
+ * One tab: the preview tab's name is italic (a double tap keeps it), a pinned tab shows a pin
+ * instead of the close button (tap it to unpin), and a long press opens the tab's menu.
+ */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+private fun EditorTab(controller: WorkbenchController, document: DocumentSession, modifier: Modifier) {
+    val colors = MaterialTheme.colorScheme
+    val path = document.path
+    val selected = path == controller.activePath
+    val dirty = document.dirty || controller.notebooks[path]?.notebook?.dirty == true
+    val preview = controller.previewTab == path
+    val pinned = path in controller.pinnedTabs
+    var menu by remember { mutableStateOf(false) }
+    Surface(
+        color = if (selected) colors.surface else colors.surfaceContainer,
+        contentColor = if (selected) colors.onSurface else colors.onSurfaceVariant,
+        shape = RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp),
+        modifier = modifier.height(34.dp),
+    ) {
+        Box {
+            Row(
+                Modifier
+                    .combinedClickable(
+                        onClick = { controller.selectDocument(path) },
+                        // Only the preview tab waits for a second tap, so other tabs switch at once.
+                        onDoubleClick = if (preview) {
+                            { controller.keepTab(path) }
+                        } else {
+                            null
+                        },
+                        onLongClick = { menu = true },
+                    )
+                    .padding(start = 12.dp, end = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Icon(
+                    when {
+                        path.endsWith(".ipynb") -> Icons.Outlined.Code
+                        isImagePath(path) -> Icons.Outlined.Image
+                        else -> Icons.AutoMirrored.Outlined.InsertDriveFile
+                    },
+                    contentDescription = null,
+                    modifier = Modifier.size(15.dp),
+                    tint = if (selected) colors.primary else colors.onSurfaceVariant,
+                )
+                Text(
+                    path.substringAfterLast('/'),
+                    style = MaterialTheme.typography.labelLarge,
+                    fontStyle = if (preview) FontStyle.Italic else FontStyle.Normal,
+                    maxLines = 1,
+                )
+                Box(
+                    Modifier.size(26.dp).clip(RoundedCornerShape(13.dp)).clickable {
+                        if (pinned) controller.unpinTab(path) else controller.requestCloseDocument(path)
+                    },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    when {
+                        dirty -> Box(Modifier.size(8.dp).clip(RoundedCornerShape(4.dp)).background(colors.primary))
+                        pinned -> Icon(Icons.Outlined.PushPin, contentDescription = "Unpin", modifier = Modifier.size(14.dp))
+                        else -> Icon(Icons.Outlined.Close, contentDescription = "Close", modifier = Modifier.size(15.dp))
+                    }
+                }
+            }
+            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                @Composable
+                fun item(label: String, action: () -> Unit) = DropdownMenuItem(
+                    text = { Text(label) },
+                    onClick = {
+                        menu = false
+                        action()
+                    },
+                )
+                if (pinned) item("Unpin") { controller.unpinTab(path) } else item("Pin") { controller.pinTab(path) }
+                if (preview) item("Keep open") { controller.keepTab(path) }
+                item("Close") { controller.requestCloseDocument(path) }
+                item("Close others") { controller.closeOtherTabs(path) }
+                if (!path.startsWith("scratch:")) item("Copy path") { controller.copyPath(if (isDevicePath(path)) path.substringAfterLast('/') else path) }
+            }
         }
     }
 }

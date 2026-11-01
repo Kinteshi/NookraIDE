@@ -79,6 +79,8 @@ dependencies {
     implementation("org.commonmark:commonmark-ext-gfm-strikethrough:0.30.1")
     implementation("org.commonmark:commonmark-ext-task-list-items:0.30.1")
     implementation("org.commonmark:commonmark-ext-autolink:0.30.1")
+    // SVG files drawn in the image viewer (Apache-2.0; no scripts, nothing fetched).
+    implementation("com.caverock:androidsvg-aar:1.4")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     testImplementation("junit:junit:4.13.2")

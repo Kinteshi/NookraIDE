@@ -192,7 +192,7 @@ fun ExplorerList(controller: WorkbenchController) {
                         onLongClick = { menu = true },
                     ) {
                         when {
-                            !entry.isDirectory -> controller.openPath(entry.path)
+                            !entry.isDirectory -> controller.openPath(entry.path, preview = true)
                             tree -> controller.toggleFolder(entry.path)
                             else -> controller.loadDirectory(entry.path)
                         }

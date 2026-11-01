@@ -95,6 +95,8 @@ class LanguageClient(
     @Volatile var supportsRangeFormatting = false
         private set
     @Volatile var supportsInlayHints = false
+    /** `workspace/symbol`, for Quick Open's `#`. */
+    @Volatile var supportsWorkspaceSymbols = false
         private set
     /** Called when the server asks for fresh inlay hints (`workspace/inlayHint/refresh`). */
     @Volatile var inlayHintRefreshListener: (() -> Unit)? = null
@@ -142,6 +144,7 @@ class LanguageClient(
                 supportsDocumentHighlight = capabilities?.provides("documentHighlightProvider") == true
                 supportsRangeFormatting = capabilities?.provides("documentRangeFormattingProvider") == true
                 supportsInlayHints = capabilities?.provides("inlayHintProvider") == true
+                supportsWorkspaceSymbols = capabilities?.provides("workspaceSymbolProvider") == true
                 notify("initialized", JsonObject())
                 notify("workspace/didChangeConfiguration", JsonObject().apply {
                     add("settings", gson.toJsonTree(configuredSettings))
@@ -271,6 +274,9 @@ class LanguageClient(
         request("textDocument/documentSymbol", JsonObject().apply {
             add("textDocument", JsonObject().apply { addProperty("uri", fileUri(path)) })
         })
+
+    fun workspaceSymbols(query: String): CompletableFuture<JsonElement> =
+        request("workspace/symbol", JsonObject().apply { addProperty("query", query) })
 
     fun semanticTokens(path: String): CompletableFuture<List<EditorDecoration>> {
         val tokenTypes = semanticTokenTypes
@@ -409,6 +415,7 @@ class LanguageClient(
                 addProperty("workspaceFolders", true)
                 add("workspaceEdit", JsonObject().apply { addProperty("documentChanges", true) })
                 add("inlayHint", JsonObject().apply { addProperty("refreshSupport", true) })
+                add("symbol", JsonObject().apply { addProperty("dynamicRegistration", false) })
             })
             add("textDocument", JsonObject().apply {
                 add("publishDiagnostics", JsonObject().apply {

@@ -27,6 +27,7 @@ enum class PanelTab(val title: String) {
     Debug("Debug"),
     Problems("Problems"),
     Output("Output"),
+    Ports("Ports"),
 }
 
 enum class CompactDestination(val title: String) {
@@ -49,7 +50,6 @@ sealed interface PathAction {
 
 sealed interface WorkbenchDialog {
     data object Connect : WorkbenchDialog
-    data object Commands : WorkbenchDialog
     data object QuickOpen : WorkbenchDialog
     data object Find : WorkbenchDialog
     data object GotoLine : WorkbenchDialog
@@ -60,6 +60,9 @@ sealed interface WorkbenchDialog {
     data object Rename : WorkbenchDialog
     data object SettingsJson : WorkbenchDialog
     data object Keybindings : WorkbenchDialog
+    /** Keyboard Shortcuts waits for the keys to give [commandId]. */
+    data class RecordKeybinding(val commandId: String) : WorkbenchDialog
+    data object KeybindingsJson : WorkbenchDialog
     data class Completion(val choices: List<CompletionChoice>) : WorkbenchDialog
     data class CodeActions(val choices: List<CodeActionChoice>) : WorkbenchDialog
     data class Hover(val text: String) : WorkbenchDialog
@@ -99,6 +102,9 @@ sealed interface WorkbenchDialog {
         val setup: List<GuestDependency> = emptyList(),
     ) : WorkbenchDialog
 }
+
+/** A zoom step for the image viewer showing [path]; [id] makes each press a new request. */
+data class ImageZoomRequest(val path: String, val step: Int, val id: Int)
 
 /** How a Markdown file shows its preview (VS Code's Ctrl+K V and Ctrl+Shift+V). */
 enum class MarkdownPreviewMode { Side, Only }
@@ -190,6 +196,8 @@ data class WorkspaceSession(
     val active: String? = null,
     val directory: String? = null,
     val expanded: List<String>? = null,
+    val pinned: List<String>? = null,
+    val preview: String? = null,
 )
 
 internal fun workspaceSessionKey(workspace: String) = "session:$workspace"

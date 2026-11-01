@@ -68,6 +68,8 @@ class GuestVfsClient(
     @Volatile private var connected = CompletableFuture<Unit>()
     @Volatile var connectionStateListener: ((Boolean, String?) -> Unit)? = null
     @Volatile var rpcEventListener: ((RpcEvent) -> Unit)? = null
+    /** Guest ports opening and closing; the daemon sends the open ones again after each handshake. */
+    @Volatile var portListener: ((GuestPort, Boolean) -> Unit)? = null
 
     fun addRpcEventListener(bridgeId: UUID, listener: (RpcEvent) -> Unit) {
         rpcEventListeners[bridgeId] = listener
@@ -191,6 +193,7 @@ class GuestVfsClient(
                         is IncomingPacket.CommandsProbed -> pendingProbes.remove(packet.requestId)?.complete(packet.paths)
                         is IncomingPacket.Stats -> pendingPings.remove(packet.stats.timestamp)?.complete(packet.stats)
                         is IncomingPacket.Pty -> ptyListeners[packet.event.sessionId]?.invoke(packet.event)
+                        is IncomingPacket.Port -> portListener?.invoke(packet.port, packet.open)
                         is IncomingPacket.Unexpected ->
                             handshake.completeExceptionally(IOException(packet.message))
                         IncomingPacket.Ignored -> Unit

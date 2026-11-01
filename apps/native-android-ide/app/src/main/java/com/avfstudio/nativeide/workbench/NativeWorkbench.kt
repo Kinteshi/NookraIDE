@@ -307,7 +307,7 @@ private fun WorkbenchRail(controller: WorkbenchController) {
             label = { Text("Git") },
         )
         RailItem(Icons.Outlined.AccountTree, "Outline", controller.sidebar == SidebarView.Outline) {
-            controller.runCommand("workbench.action.gotoSymbol")
+            controller.runCommand("outline.focus")
         }
         NavigationRailItem(
             selected = controller.sidebar == SidebarView.Problems,
@@ -350,7 +350,7 @@ private fun CompactContent(controller: WorkbenchController) {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                listOf(PanelTab.Terminal, PanelTab.Debug, PanelTab.Output).forEach { tab ->
+                listOf(PanelTab.Terminal, PanelTab.Debug, PanelTab.Output, PanelTab.Ports).forEach { tab ->
                     FilterChip(selected = controller.panelTab == tab, onClick = { controller.panelTab = tab }, label = { Text(tab.title) })
                 }
                 if (controller.panelTab == PanelTab.Terminal) {
@@ -361,6 +361,7 @@ private fun CompactContent(controller: WorkbenchController) {
                 when (controller.panelTab) {
                     PanelTab.Debug -> DebugPanel(controller)
                     PanelTab.Output -> OutputLog(controller)
+                    PanelTab.Ports -> PortsView(controller)
                     else -> TerminalView(controller)
                 }
             }
@@ -462,8 +463,9 @@ private fun StatusBar(controller: WorkbenchController) {
             Icons.Outlined.AutoAwesome,
             onClick = controller::onCopilotStatusClick,
         )
-        if (document != null && controller.activeNotebook == null) {
-            controller.cursorPosition?.let { StatusItem("Ln ${it.line + 1}, Col ${it.character + 1}") { controller.runCommand("workbench.action.gotoLine") } }
+        // An image has no lines, encoding or language to show.
+        if (document != null && controller.activeNotebook == null && !document.binary) {
+            controller.cursorPosition?.let { StatusItem("Ln ${it.line + 1}, Col ${it.character + 1}") { controller.showGoToLine() } }
             StatusItem(document.encoding) { controller.dialog = WorkbenchDialog.Encoding }
             StatusItem(if (document.eol == "\r\n") "CRLF" else "LF") { controller.dialog = WorkbenchDialog.LineEnding }
             if (controller.lspLanguageId(document.path) == "python") {

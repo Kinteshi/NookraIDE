@@ -1140,6 +1140,65 @@ User's pick: 3, 5, 7, 13 and 11 of the list after batch 23 (port 36601).
   is back on Copilot. 198 tests pass (new: InlayHintsTest, ChatAgentsTest, MarkdownRendererTest,
   device and offline repository tests), plus 2 daemon tests.
 
+## 25. Keyboard shortcuts, Quick Open modes, image viewer, Ports, preview and pinned tabs (10-31 20:40–21:25; done, checked except pinch)
+User's pick: 1, 5, 7, 8, 13 and 11 of the list after batch 24 (port 39891).
+* Custom keyboard shortcuts (`keybindings.json`, VS Code's format, kept on the device like user
+  settings): Keyboard Shortcuts (Ctrl+K Ctrl+S) lists every command with its keys; a tap opens a
+  recorder that takes one stroke or a two-stroke chord from the keyboard (Enter saves, Escape
+  cancels), warns about keys another command has, and offers Remove and Reset. It writes rules
+  as VS Code does: the new key, plus `-command` rules that drop the defaults. "Edit as JSON"
+  ("Open Keyboard Shortcuts (JSON)") takes comments and trailing commas; rules for unknown
+  commands or keys no keyboard here sends (cmd/meta) are skipped and named. `when` clauses are
+  kept but not evaluated: a rule works where its command works (editor-only commands in the
+  editor). No setting: the file is the setting. Checked: recorded Ctrl+Alt+K for Toggle Word
+  Wrap, which then wrapped the editor while Alt+Z did nothing; the JSON matched; Reset brought
+  Alt+Z back.
+* Quick Open modes by prefix, as in VS Code: `>` commands (Ctrl+Shift+P is now Quick Open with
+  `>`), `@` symbols in the file (Ctrl+Shift+O; the Outline view moved to "Show Outline" and the
+  rail), `#` workspace symbols (Ctrl+T; `workspace/symbol` from the Python and TypeScript
+  servers, 200 ms after typing), `:` line and column (Ctrl+G; the status bar's Ln/Col still opens
+  the number-pad dialog), `?` the list of modes. Checked with ty: `@` listed batch23.py's
+  symbols with kind and line, `#sca` found `scale` in batch23.py and batch24.py and opened it,
+  `:3:12` went to line 3 (an empty line, so column 1).
+* Code folding: not possible with sora 0.23.6. It has a `FoldingRegion` class that nothing uses,
+  and no way to hide lines. Folding comes with the Aardink switch (it has folding built in).
+* Image viewer: PNG, JPEG, GIF (first frame), WebP, BMP, ICO, HEIC and AVIF open in a viewer
+  tab instead of failing as binary, from the guest or the device (up to 16 MB; sides over 4096 px
+  are subsampled). Pinch and Ctrl+wheel zoom around the fingers, drag or wheel pans, a double tap
+  switches fit/actual size, and a toolbar has zoom out/in, the percentage (tap for 100%) and fit;
+  Ctrl+= and Ctrl+- zoom the image. Actual size is one image pixel per dp; zoomed in past 2×,
+  pixels stay square. Transparent parts show a checkerboard. SVG files open drawn by AndroidSVG
+  1.4 (Apache-2.0; no scripts, nothing fetched), vector-sharp at any zoom, with the Markdown
+  preview's two buttons to show the source beside it or alone; edits redraw it
+  (`avf.svg.openAsImage`, on; off opens SVG as text). Checked: batch24.png (120×60) at 100%,
+  fitted (696%) and back; batch25.svg drawn, sharp when fitted, and side by side with its
+  source. Not checked: pinch (adb can't inject two fingers) and a double tap (two adb taps are
+  too far apart).
+* Ports (a panel tab, and "Show Ports"): the daemon's port scan (it already sent ports opening
+  and closing) now carries the command line of the process holding each port, found through
+  `/proc/<pid>/fd` socket links for new ports only. The view lists port, command and
+  `localhost:<port>`, with Open in browser and Copy address. Hidden unless asked: the daemon's
+  port, Jupyter kernels', the app's bridges and other users' services (ssh 22, DNS 53, Linux
+  Terminal's ttyd 7681). A server starting in the guest is announced in the status bar
+  (`remote.autoForwardPortsNotify`, on). Checked: `python3 -m http.server 8765` showed up with
+  its command and the status message; Open in browser opened Firefox at localhost:8765, which
+  loaded once Linux Terminal's "open a new port" notification was accepted; stopping the
+  server removed the row. The guest daemon was updated (sha256 1c783243…ce0f, copied with
+  `cat`).
+* Preview and pinned tabs (`workbench.editor.enablePreview`, on): a single tap in Explorer or on
+  a search match opens an italic preview tab that the next one replaces; editing it, a second
+  tap within 500 ms, a double tap on the tab, Pin, or Keep Editor Open (Ctrl+K Enter) keeps it.
+  Notebooks never open as preview (closing one would stop its kernel). A long press on a tab
+  opens Pin/Unpin, Keep open, Close, Close others and Copy path. Pinned tabs (Ctrl+K
+  Shift+Enter toggles) go first, show a pin instead of the close button (tap it to unpin), and
+  stay on Close Other Editors. Both are saved with the folder's session. Checked: previews
+  replaced each other, two quick taps kept batch23.py, Pin moved it first, and after a restart
+  it was still pinned and the SVG still a preview.
+* Also: the status bar hides line, encoding and language for an image.
+* Test file `~/Projects/batch25.svg` stays (with batch24's). 209 tests pass (new:
+  KeybindingsTest, QuickOpenTest, the port packet test), plus the daemon's port tests (one new:
+  finding a socket's process).
+
 ## Next pass (registered 10-27 23:35, updated 10-28 13:06)
 * Batch 15 did the carried-over tests (Copilot signed out, the setup paths, reconnect cap,
   Copilot model list, prompt prefix). Left over:
@@ -1240,22 +1299,23 @@ Not picked yet. Effort: S about half a day, M about a day, L several days.
   1. (Done in batch 23.) Signature help: parameter hints while typing a call (`textDocument/signatureHelp`). S-M.
   2. (Done in batch 23.) Document highlights: other uses of the symbol under the cursor. S.
   3. (Done in batch 24, at the line end.) Inlay hints: inferred types and parameter names, with a setting. M.
-  4. Quick Open prefixes as in VS Code (`@` symbols in the file, `#` workspace symbols, `:`
+  4. (Done in batch 25.) Quick Open prefixes as in VS Code (`@` symbols in the file, `#` workspace symbols, `:`
      line, `>` commands). M.
   5. Snippets: VS Code snippet files from asset packs, and LSP snippet completions with tab
      stops. M-L.
   6. (Done in batch 23.) `files.trimTrailingWhitespace`, `files.insertFinalNewline`, `editor.formatOnPaste`. S.
-  7. Code folding (LSP folding ranges or indentation). M; sora's support needs checking first.
+  7. Code folding (LSP folding ranges or indentation). M. Checked in batch 25: sora 0.23.6
+     can't hide lines, so this waits for the Aardink switch.
   8. (Done in batch 24.) Markdown preview for `.md` files (toggle or side by side). M.
-  9. Image viewer for image files (zoom, pan; SVG too). S-M.
+  9. (Done in batch 25.) Image viewer for image files (zoom, pan; SVG too). S-M.
   10. (Done in batch 24; not checked by touch.) Pinch to zoom the editor font, persisted. S.
 * Workbench:
   11. Replace across files in Search, with a preview and per-match accept. M.
   12. Explorer decorations: Git status colours and problem badges on files and folders. S-M.
-  13. Tabs: preview tabs (a single tap opens a replaceable tab) and pinning. S-M.
+  13. (Done in batch 25.) Tabs: preview tabs (a single tap opens a replaceable tab) and pinning. S-M.
   14. Git: a merge-conflict helper (accept current/incoming/both on conflict markers) and a
       side-by-side diff. M-L.
-  15. Ports view: the daemon's detected listening ports, opened in the browser. M.
+  15. (Done in batch 25.) Ports view: the daemon's detected listening ports, opened in the browser. M.
   16. Terminal: links (file:line opens in the editor, URLs in the browser) and find in
       scrollback. M.
 * Notebooks (spec 5.9):
@@ -1306,7 +1366,7 @@ Bugs (user, 10-28): both fixed and checked in batch 15.
   messages (comm_open/comm_msg/comm_close) both ways. Work: the bridge forwards them, and one
   widget manager per notebook (@jupyter-widgets/html-manager in a WebView) is shared by its
   widget outputs. Saved widget state (`metadata.widgets`) could draw static widgets first. L.
-* Customisable keybindings (`keybindings.json`).
+* (Done in batch 25.) Customisable keybindings (`keybindings.json`).
 * (Done in batch 17: TypeScript 7 as the default TypeScript server; compact layout reaches
   Source Control, Search, Debug, Output and extra terminals.)
 * (Done in batch 18: the pickers drop environments that no longer exist.)

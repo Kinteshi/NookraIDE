@@ -200,6 +200,25 @@ fun SettingsScreen(controller: WorkbenchController) {
                     }
                 }
                 item {
+                    SwitchRow(
+                        "Preview tabs",
+                        "A tap in Explorer or Search opens the file in an italic tab that the next one replaces; edit it or tap twice to keep it",
+                        settings.enablePreview,
+                    ) {
+                        set(WorkbenchSettings.ENABLE_PREVIEW, it)
+                    }
+                }
+                item {
+                    SwitchRow("Open SVG files as images", "Drawn in the image viewer; the buttons by the file path show the source", settings.svgAsImage) {
+                        set(WorkbenchSettings.SVG_AS_IMAGE, it)
+                    }
+                }
+                item {
+                    SwitchRow("Announce new servers", "When a program in the guest starts listening on a port, the status bar says so (Ports lists them all)", settings.portNotifications) {
+                        set(WorkbenchSettings.PORT_NOTIFICATIONS, it)
+                    }
+                }
+                item {
                     SwitchRow("Guest resources in the status bar", "Memory the Linux guest costs the tablet, its CPU and its storage", settings.statusBarGuestResources) {
                         set(WorkbenchSettings.STATUS_BAR_GUEST, it)
                     }

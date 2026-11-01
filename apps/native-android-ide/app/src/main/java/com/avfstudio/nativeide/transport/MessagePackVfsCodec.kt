@@ -409,6 +409,17 @@ internal object MessagePackVfsCodec {
             "Paired" -> IncomingPacket.Paired(
                 variant.value.asMapValue().map().entries.first { it.key.asString() == "token" }.value.asString(),
             )
+            "PortOpened", "PortClosed" -> {
+                val fields = variant.value.asMapValue().map().mapKeys { it.key.asString() }
+                IncomingPacket.Port(
+                    GuestPort(
+                        port = fields.getValue("port").asLong().toInt(),
+                        ipv6 = fields["protocol"]?.takeIf { it.isStringValue }?.asStringValue()?.asString() == "Tcp6",
+                        command = fields["process_name"]?.takeIf { it.isStringValue }?.asStringValue()?.asString(),
+                    ),
+                    open = variant.key.asString() == "PortOpened",
+                )
+            }
             "ProtocolError" -> IncomingPacket.Unexpected(variant.value.toString())
             else -> IncomingPacket.Ignored
         }
@@ -525,6 +536,8 @@ sealed interface IncomingPacket {
     data class Error(val requestId: Long, val code: String, val message: String) : IncomingPacket
     data class Rpc(val event: RpcEvent) : IncomingPacket
     data class Pty(val event: PtyEvent) : IncomingPacket
+    /** A port in the guest started ([open]) or stopped listening. */
+    data class Port(val port: GuestPort, val open: Boolean) : IncomingPacket
     data class Unexpected(val message: String) : IncomingPacket
     data object Ignored : IncomingPacket
 }
@@ -537,6 +550,9 @@ sealed interface RpcEvent {
     data class Exited(override val bridgeId: UUID, val code: Int?) : RpcEvent
     data class Error(override val bridgeId: UUID, val message: String) : RpcEvent
 }
+
+/** A listening TCP port in the guest and, when the daemon could see it, the command holding it. */
+data class GuestPort(val port: Int, val ipv6: Boolean, val command: String?)
 
 data class PtySessionInfo(val sessionId: UUID, val cwd: String, val cols: Int, val rows: Int)
 

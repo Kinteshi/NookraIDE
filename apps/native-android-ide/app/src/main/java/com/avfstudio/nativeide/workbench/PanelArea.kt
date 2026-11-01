@@ -22,6 +22,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.outlined.OpenInBrowser
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.FilterChip
@@ -87,7 +89,11 @@ fun PanelArea(controller: WorkbenchController, modifier: Modifier = Modifier) {
                     selected = controller.panelTab == tab,
                     onClick = { controller.panelTab = tab },
                     label = {
-                        val count = if (tab == PanelTab.Problems) controller.diagnostics.size else 0
+                        val count = when (tab) {
+                            PanelTab.Problems -> controller.diagnostics.size
+                            PanelTab.Ports -> controller.visiblePorts.size
+                            else -> 0
+                        }
                         Text(if (count > 0) "${tab.title} $count" else tab.title)
                     },
                 )
@@ -106,6 +112,7 @@ fun PanelArea(controller: WorkbenchController, modifier: Modifier = Modifier) {
                 PanelTab.Problems -> ProblemsList(controller)
                 PanelTab.Output -> OutputLog(controller)
                 PanelTab.Debug -> DebugPanel(controller)
+                PanelTab.Ports -> PortsView(controller)
             }
         }
     }
@@ -207,6 +214,81 @@ fun TerminalView(controller: WorkbenchController, modifier: Modifier = Modifier)
                         modifier = Modifier.weight(1f).padding(vertical = 8.dp),
                     )
                     FilledTonalButton(onClick = { controller.newTerminal() }) { Text("New terminal") }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Ports (VS Code's Ports view): what listens in the guest, the program holding it, and buttons
+ * to open it in the browser or copy its address. Linux Terminal forwards a guest port to this
+ * tablet's localhost once you allow it in its notification.
+ */
+@Composable
+fun PortsView(controller: WorkbenchController) {
+    val colors = MaterialTheme.colorScheme
+    val ports = controller.listedPorts
+    val shown = if (controller.showInternalPorts) ports else ports.filterNot(controller::isInternalPort)
+    val hidden = ports.size - ports.count { !controller.isInternalPort(it) }
+    Column(Modifier.fillMaxSize()) {
+        if (!controller.connected) {
+            EmptyMessage("Connect to the guest to see its ports.")
+            return@Column
+        }
+        if (shown.isEmpty()) {
+            EmptyMessage("Nothing listens in the guest yet. Start a server (python3 -m http.server, npm run dev) and it shows up here.")
+        }
+        androidx.compose.foundation.lazy.LazyColumn(Modifier.weight(1f, fill = shown.isNotEmpty())) {
+            items(shown.size) { index ->
+                val port = shown[index]
+                val internal = controller.isInternalPort(port)
+                Row(
+                    Modifier.fillMaxWidth().clickable { controller.openPort(port) }.padding(start = 16.dp, end = 4.dp, top = 2.dp, bottom = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text(
+                        port.port.toString(),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                        color = if (internal) colors.onSurfaceVariant else colors.primary,
+                        modifier = Modifier.width(64.dp),
+                    )
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            port.command ?: "A system service (another user's process)",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = if (port.command != null) androidx.compose.ui.text.font.FontFamily.Monospace else null,
+                            color = if (port.command != null) colors.onSurface else colors.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            "localhost:${port.port}${if (port.ipv6) " · IPv6" else ""}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colors.onSurfaceVariant,
+                        )
+                    }
+                    IconButton(onClick = { controller.copyPortAddress(port) }) {
+                        Icon(Icons.Outlined.ContentCopy, contentDescription = "Copy address", modifier = Modifier.size(18.dp))
+                    }
+                    IconButton(onClick = { controller.openPort(port) }) {
+                        Icon(Icons.Outlined.OpenInBrowser, contentDescription = "Open in browser", modifier = Modifier.size(18.dp))
+                    }
+                }
+            }
+        }
+        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "The first time, Linux Terminal asks in a notification to open the port.",
+                style = MaterialTheme.typography.labelSmall,
+                color = colors.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
+            if (hidden > 0) {
+                TextButton(onClick = { controller.showInternalPorts = !controller.showInternalPorts }) {
+                    Text(if (controller.showInternalPorts) "Hide system and app ports" else "Show system and app ports ($hidden)")
                 }
             }
         }
