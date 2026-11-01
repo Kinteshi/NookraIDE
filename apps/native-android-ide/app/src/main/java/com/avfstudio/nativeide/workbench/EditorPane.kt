@@ -177,6 +177,7 @@ private fun LanguagePackBanner(controller: WorkbenchController, pack: com.avfstu
 @Composable
 private fun EditorOverlays(controller: WorkbenchController) {
     MergeConflictOverlay(controller)
+    PythonCellOverlay(controller)
     InlayHintsOverlay(controller)
     InlineGhostText(controller)
     ParameterHints(controller)
@@ -767,6 +768,65 @@ private fun MergeConflictOverlay(controller: WorkbenchController) {
     }
 }
 
+/**
+ * A Python file's `# %%` cells: a rule above each marker and, with the setting on, Run Cell, Run
+ * Above and Run Below after it (the Jupyter extension's code lenses, which sora can't draw).
+ */
+@Composable
+private fun PythonCellOverlay(controller: WorkbenchController) {
+    controller.editorViewportTick
+    val cells = controller.activePythonCells()
+    if (cells.isEmpty()) return
+    val view = controller.soraEditor() ?: return
+    val density = LocalDensity.current
+    val colors = MaterialTheme.colorScheme
+    val rowHeight = view.rowHeight.toFloat()
+    val content = view.text
+    fun top(line: Int): Float = view.getCharOffsetY(line.coerceIn(0, content.lineCount - 1), 0) - rowHeight
+    Box(Modifier.fillMaxSize().clipToBounds()) {
+        cells.forEach { cell ->
+            if (cell.marker < view.firstVisibleLine - 1 || cell.marker > view.lastVisibleLine || cell.marker >= content.lineCount) return@forEach
+            val y = top(cell.marker)
+            if (cell.marker > 0) {
+                Box(
+                    Modifier
+                        .offset { IntOffset(0, y.roundToInt()) }
+                        .fillMaxWidth()
+                        .height(1.dp)
+                        .background(colors.outlineVariant),
+                )
+            }
+            if (!controller.settings.interactiveCodeLens || cell.markdown) return@forEach
+            val x = view.getCharOffsetX(cell.marker, content.getColumnCount(cell.marker)) + with(density) { 16.dp.toPx() }
+            Row(
+                Modifier
+                    .offset { IntOffset(x.roundToInt(), y.roundToInt()) }
+                    .height(with(density) { rowHeight.toDp() }),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                listOf(
+                    "Run Cell" to CellRange.Current,
+                    "Run Above" to CellRange.Above,
+                    "Run Below" to CellRange.CurrentAndBelow,
+                ).forEach { (label, range) ->
+                    Text(
+                        label,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = colors.primary,
+                        maxLines = 1,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(colors.surfaceContainerHighest.copy(alpha = 0.9f))
+                            .clickable { controller.runPythonCell(cell, range) }
+                            .padding(horizontal = 6.dp, vertical = 1.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
 /** Copilot's suggestion drawn after the cursor in the editor's font, dimmed, like VS Code ghost text. */
 @Composable
 private fun InlineGhostText(controller: WorkbenchController) {
@@ -861,6 +921,12 @@ internal class NativeCodeEditor(
     var hasInlineSuggestion: Boolean = false
     /** While parameter hints are shown, Escape closes them. */
     var hasParameterHints: Boolean = false
+
+    /** Ctrl or Alt latched on the key bar turns the next typed character into that shortcut. */
+    override fun onCreateInputConnection(outAttrs: android.view.inputmethod.EditorInfo): android.view.inputmethod.InputConnection? =
+        super.onCreateInputConnection(outAttrs)?.let { connection ->
+            KeyBarInputConnection(connection) { start, end -> runCatching { text.subSequence(start, end) }.getOrNull() }
+        }
 
     /** Paste goes through the workbench (shortcut, menu, selection handles) so format on paste applies. */
     override fun pasteText() {

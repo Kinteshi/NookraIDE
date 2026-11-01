@@ -1299,6 +1299,53 @@ User's pick: 1, 6, 7, 8, 9, 10 and 14 of the list after batch 26 (port 39891).
 * (Done in batch 24.) Offline experience: the editor alone when no guest is reachable (open/edit local and cached
   files, no tools).
 
+## 28. Output types, cell drag and undo, Interactive window, key bar; next edit suggestions (11-01; in progress)
+User's pick: 2, 5, 6, 7 and 8 of the backlog list after batch 27 (port 39891), then a backlog
+review against the spec.
+* (5) More output types. `image/svg+xml` is drawn natively (AndroidSVG) at its own size, up to the
+  output's width. `text/latex` (SymPy, IPython's `Math()`/`Latex()`) is drawn with KaTeX 0.16.11
+  from jsDelivr in the isolated script WebView; offline it shows the source. `application/json`
+  (IPython's `JSON()`) is a tree: tap an object or array to open it, 200 children at most per
+  node, then "… N more". Each is in the output menu's "Show as", and Copy gives the SVG, the
+  LaTeX or indented JSON. Setting: "Draw LaTeX" (`avf.notebook.latex`); SVG and JSON need none
+  (plain text stays one tap away in the menu). Checked with batch28.ipynb: the SVG at 240×90,
+  ∫x²dx = 1/3, the tree opened at `items`. Found on the tablet: the SVG first filled the width.
+* (6) Cells move by a drag handle in the selected cell's gutter (the list scrolls at its edges;
+  a cell swaps once it passes its neighbour's middle, so tall and short cells don't flicker).
+  Delete leaves "Cell deleted · Undo" for 10 seconds; "Notebook: Undo Delete Cell" brings back
+  the last 20, with their outputs, where they were. New commands: Move Cell Up/Down (Alt+Up,
+  Alt+Down, as VS Code), Delete Cell, Undo Delete Cell. No setting: the handle shows only on the
+  selected cell. Checked: third dragged above first, deleted, Undo put it back with its run
+  mark, Alt+Up moved it above the JSON cell.
+* (7) Interactive window for `# %%` cells of .py files (also `# In[ ]`, `# <codecell>`;
+  `# %% [markdown]` cells never run). The editor draws a rule above each marker and Run Cell,
+  Run Above, Run Below after it (setting `jupyter.interactiveWindow.codeLens.enable`).
+  Ctrl+Enter runs the cell at the cursor and Shift+Enter runs it and moves to the next, only in
+  a file with cells. Palette: Run All Cells, Run Cells Above, Run Current Cell and Below, Run
+  Selection/Line in Interactive Window, Create Interactive Window. The panel's new Interactive
+  tab shows each run's code (file and line above it) and outputs, with its own kernel (picker,
+  interrupt, restart, clear, Variables, export as a notebook next to the file, close), and a box
+  to type more code (Shift+Enter). It's a hidden notebook session per file, so outputs,
+  Variables and the data viewer work as in notebooks. `Cell In[3], line 2` in a traceback opens
+  the .py file at that line. Code above the first marker is in no cell, as in VS Code. Checked
+  with batch28.py: Run Cell, Run Below (three runs), the NameError's link opened line 16, the
+  input box ran `import math`, Ctrl+Enter drew √42 ≈ 6.481, Shift+Enter moved to line 19,
+  Variables listed x and y. Not checked: export (it now picks `name-2.ipynb` when `name.ipynb`
+  exists, as here).
+* (8) Key bar above the on-screen keyboard (setting "Key bar", `avf.keyBar.enabled`): Esc, Tab,
+  Ctrl, Alt, Shift, arrows (repeat while held), Home, End, PgUp, PgDn, sent as a keyboard's keys.
+  Ctrl, Alt and Shift latch for the next key (tap twice to lock); with Ctrl or Alt latched, the
+  next letter typed on the on-screen keyboard becomes the shortcut: in the terminal a control
+  character (Ctrl then C is ^C) or Escape first for Alt, in the code editor and notebook cells
+  the key combination (Ctrl then S saves). It shows only while the on-screen keyboard does.
+  Checked with `show_ime_with_hard_keyboard` on for the test (restored to 0): Ctrl+L cleared
+  the terminal, ↑ recalled the last command, Ctrl+U cleared the line, Ctrl+A selected all in
+  the editor and in a cell. Found on the tablet: Samsung's keyboard resends the word being
+  typed ("matha" after "math", from `setComposingRegion`), so the editor's connection now
+  tracks that word and takes the new letter; ← drew lower than the other arrows (icons now).
+* Next edit suggestions (2): started after the checks above.
+* Test files `~/Projects/batch28.{py,ipynb}`.
+
 ## Backlog
 To investigate (user, 10-28):
 * (Done in batch 16, with a notebook-side finding.) Plotly figures updating in place (the user's private-notebook-1.ipynb: `plot_handle =
@@ -1413,13 +1460,13 @@ Not picked yet. Effort: S about half a day, M about a day, L several days.
       scrollback. M.
 * Notebooks (spec 5.9):
   17. (Done in batch 27.) ANSI colours in outputs (they are stripped today) and clickable traceback lines. S-M.
-  18. More output types: `image/svg+xml`, `application/json` as a tree, `text/latex` (KaTeX). M.
-  19. Cell reordering by drag, and undo for a deleted cell. M.
+  18. (Done in batch 28.) More output types: `image/svg+xml`, `application/json` as a tree, `text/latex` (KaTeX). M.
+  19. (Done in batch 28.) Cell reordering by drag, and undo for a deleted cell. M.
   20. (Done in batch 26.) Variable explorer (`%whos`-style, opening DataFrames in the native table). L.
-  21. Interactive window: run `# %%` cells of a `.py` file in a kernel. L.
+  21. (Done in batch 28.) Interactive window: run `# %%` cells of a `.py` file in a kernel. L.
 * Device and quality (spec 10, 11):
   22. (Done in batch 27.) Launcher shortcuts for recent folders, and "Open with" for code files from other apps. S-M.
-  23. Touch modifier bar (Ctrl, Alt, Tab, Esc, arrows) above the soft keyboard. M.
+  23. (Done in batch 28.) Touch modifier bar (Ctrl, Alt, Tab, Esc, arrows) above the soft keyboard. M.
   24. Measure the spec's budgets on the tablet (cold start, RSS, keystroke latency, a
       200-cell notebook). S-M.
   25. Debugging extras: conditional and log breakpoints, watch expressions, `launch.json`. M.

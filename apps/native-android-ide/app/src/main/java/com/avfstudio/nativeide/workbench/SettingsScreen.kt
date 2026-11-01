@@ -415,6 +415,18 @@ fun SettingsScreen(controller: WorkbenchController) {
                 }
                 item {
                     SwitchRow(
+                        "Run buttons on # %% lines",
+                        "Python files with # %% cells: Run Cell, Run Above and Run Below; Ctrl+Enter and Shift+Enter run cells in the Interactive window either way",
+                        settings.interactiveCodeLens,
+                    ) { set(WorkbenchSettings.INTERACTIVE_CODE_LENS, it) }
+                }
+                item {
+                    SwitchRow("Draw LaTeX", "Formulas from SymPy and IPython's Math() in cell outputs; loads KaTeX from jsDelivr the first time", settings.renderLatex) {
+                        set(WorkbenchSettings.RENDER_LATEX, it)
+                    }
+                }
+                item {
+                    SwitchRow(
                         "Plotly figures update in place",
                         "display(fig, display_id=True) and its update() redraw one figure; applies to kernels started from now on",
                         settings.plotlyDisplayIds,
@@ -526,6 +538,11 @@ fun SettingsScreen(controller: WorkbenchController) {
                 }
                 item { Section("Keyboard and advanced") }
                 item { ActionRow("Keyboard shortcuts", "VS Code defaults · Ctrl+K Ctrl+S") { controller.dialog = WorkbenchDialog.Keybindings } }
+                item {
+                    SwitchRow("Key bar", "Esc, Tab, Ctrl, Alt, Shift and arrows above the on-screen keyboard; tap Ctrl twice to keep it on", settings.keyBar) {
+                        set(WorkbenchSettings.KEY_BAR, it)
+                    }
+                }
                 item { ActionRow("Edit settings.json", "Every setting, in VS Code's format") { controller.openSettingsJson() } }
                 item {
                     SwitchRow("Open the last folder offline", "Without a guest, its tabs come back from this device's copies; saves wait for the guest", settings.offlineWorkspace) {

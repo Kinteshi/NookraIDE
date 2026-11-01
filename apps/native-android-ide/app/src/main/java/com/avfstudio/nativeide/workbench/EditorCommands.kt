@@ -148,6 +148,17 @@ object EditorCommands {
         command("avf.chat.selectGemini", "Chat: Use Gemini", ""),
         command("avf.chat.signIn", "Chat: Sign In to the Chat Agent", ""),
         command("workbench.action.files.openLocalFile", "File: Open File from Device...", ""),
+        command("jupyter.runallcells", "Jupyter: Run All Cells", ""),
+        command("jupyter.runallcellsabove", "Jupyter: Run Cells Above Current Cell", ""),
+        command("jupyter.runcurrentcellandallbelow", "Jupyter: Run Current Cell and Below", ""),
+        command("jupyter.execSelectionInteractive", "Jupyter: Run Selection/Line in Interactive Window", ""),
+        command("jupyter.createnewinteractive", "Jupyter: Create Interactive Window", ""),
+    )
+
+    /** Keys a Python file with `# %%` cells takes before the editor (the Jupyter extension's). */
+    val interactive: List<EditorCommand> = listOf(
+        command("jupyter.runcurrentcell", "Jupyter: Run Current Cell", "Ctrl+Enter"),
+        command("jupyter.runcurrentcelladvance", "Jupyter: Run Current Cell and Advance", "Shift+Enter"),
     )
 
     /** Keys a terminal takes before the workbench (VS Code's terminal find); Ctrl+F reaches the shell elsewhere. */
@@ -163,9 +174,16 @@ object EditorCommands {
         command("notebook.cell.insertCodeCellBelow", "Notebook: Insert Code Cell Below", "Ctrl+Shift+Enter"),
         command("notebook.focusPreviousEditor", "Notebook: Focus Previous Cell", "Ctrl+Up"),
         command("notebook.focusNextEditor", "Notebook: Focus Next Cell", "Ctrl+Down"),
+        command("notebook.cell.moveUp", "Notebook: Move Cell Up", "Alt+Up"),
+        command("notebook.cell.moveDown", "Notebook: Move Cell Down", "Alt+Down"),
+        command("notebook.cell.delete", "Notebook: Delete Cell", ""),
+        command("notebook.undoDeleteCell", "Notebook: Undo Delete Cell", ""),
     )
 
-    val all: List<EditorCommand> get() = core + language + copilot + workbench + notebook + terminal
+    val all: List<EditorCommand> get() = core + language + copilot + workbench + notebook + terminal + interactive
+
+    /** What the code editor's keys reach: not the notebook's cell keys, and the cell keys only in a file with cells. */
+    val editor: List<EditorCommand> get() = core + language + copilot + workbench
 
     private val globalIds = setOf(
         "workbench.action.files.save",

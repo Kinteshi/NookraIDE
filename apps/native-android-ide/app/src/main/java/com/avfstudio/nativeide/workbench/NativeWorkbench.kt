@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.WindowInsetsSides
@@ -94,6 +95,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material3.FilledTonalButton
 
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun NativeWorkbench() {
     val context = LocalContext.current.applicationContext
@@ -142,13 +144,21 @@ fun NativeWorkbench() {
             if (controller.dialog != null) controller.dialog = null else controller.settingsVisible = false
         }
         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surfaceContainer) {
-            Box(
+            val activity = LocalContext.current as? android.app.Activity
+            DisposableEffect(activity) {
+                KeyBar.inject = { event -> activity?.dispatchKeyEvent(event) ?: false }
+                onDispose { KeyBar.inject = null }
+            }
+            Column(
                 Modifier
                     .fillMaxSize()
                     .windowInsetsPadding(WindowInsets.safeDrawing)
                     .imePadding(),
             ) {
-                if (controller.settingsVisible) SettingsScreen(controller) else WorkbenchLayout(controller)
+                Box(Modifier.weight(1f)) {
+                    if (controller.settingsVisible) SettingsScreen(controller) else WorkbenchLayout(controller)
+                }
+                if (controller.settings.keyBar && WindowInsets.isImeVisible) KeyBarRow()
             }
         }
         WorkbenchDialogHost(controller)
@@ -352,7 +362,7 @@ private fun CompactContent(controller: WorkbenchController) {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                listOf(PanelTab.Terminal, PanelTab.Debug, PanelTab.Output, PanelTab.Ports, PanelTab.Variables).forEach { tab ->
+                listOf(PanelTab.Terminal, PanelTab.Debug, PanelTab.Output, PanelTab.Ports, PanelTab.Variables, PanelTab.Interactive).forEach { tab ->
                     FilterChip(selected = controller.panelTab == tab, onClick = { controller.panelTab = tab }, label = { Text(tab.title) })
                 }
                 if (controller.panelTab == PanelTab.Terminal) TerminalActions(controller)
@@ -363,6 +373,7 @@ private fun CompactContent(controller: WorkbenchController) {
                     PanelTab.Output -> OutputLog(controller)
                     PanelTab.Ports -> PortsView(controller)
                     PanelTab.Variables -> VariablesView(controller)
+                    PanelTab.Interactive -> InteractiveView(controller)
                     else -> TerminalView(controller)
                 }
             }

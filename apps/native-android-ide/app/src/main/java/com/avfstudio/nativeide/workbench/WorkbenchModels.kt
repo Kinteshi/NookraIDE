@@ -29,6 +29,7 @@ enum class PanelTab(val title: String) {
     Output("Output"),
     Ports("Ports"),
     Variables("Variables"),
+    Interactive("Interactive"),
 }
 
 enum class CompactDestination(val title: String) {
@@ -201,7 +202,16 @@ class NotebookSession(
     var variables by mutableStateOf<com.avfstudio.nativeide.notebook.KernelVariables?>(null)
     var variablesLoading by mutableStateOf(false)
     var variablesError by mutableStateOf<String?>(null)
+    /** Deleted cells, newest last, for Undo; [lastDeleted] shows the Undo bar until it times out. */
+    val deletedCells = ArrayDeque<DeletedCell>()
+    var lastDeleted by mutableStateOf<DeletedCell?>(null)
+    /** The cell being dragged by its handle, and how far it is from where it lies now (px). */
+    var draggedCell by mutableStateOf<String?>(null)
+    var dragOffset by mutableStateOf(0f)
 }
+
+/** A deleted cell and where it was; [placeholder] is the empty cell added when it was the last one. */
+class DeletedCell(val cell: com.avfstudio.nativeide.notebook.NotebookCell, val index: Int, val placeholder: String? = null)
 
 /** One file's matches in the Search view. */
 class SearchFileResult(val path: String) {

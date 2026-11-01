@@ -72,6 +72,8 @@ data class WorkbenchSettings(
     val notebookCopilot: Boolean = true,
     /** Draw Plotly figures; needs plotly.js from cdn.plot.ly the first time. */
     val renderPlotly: Boolean = true,
+    /** `text/latex` outputs (SymPy, IPython's Math) drawn with KaTeX; needs it from jsDelivr the first time. */
+    val renderLatex: Boolean = true,
     /** Python kernels let `display(fig, display_id=True)` update Plotly figures in place. */
     val plotlyDisplayIds: Boolean = true,
     val statusBarGuestResources: Boolean = true,
@@ -91,6 +93,10 @@ data class WorkbenchSettings(
     val nativeTables: Boolean = true,
     /** Text outputs longer than this scroll in a box until expanded (VS Code's default is 30). */
     val outputLineLimit: Int = 30,
+    /** Run Cell, Run Above and Run Below on the `# %%` lines of Python files. */
+    val interactiveCodeLens: Boolean = true,
+    /** Esc, Tab, Ctrl, Alt, Shift and arrow keys in a bar above the on-screen keyboard. */
+    val keyBar: Boolean = true,
     /** Problem counts beside Outline entries and its "Problems only" filter. */
     val outlineProblems: Boolean = true,
     /** Squiggles under problems in the editor and their marks beside the scrollbar. */
@@ -166,6 +172,9 @@ data class WorkbenchSettings(
         const val USE_TAB_STOPS = "editor.useTabStops"
         const val NOTEBOOK_COPILOT = "avf.copilot.notebooks"
         const val RENDER_PLOTLY = "avf.notebook.plotly"
+        const val RENDER_LATEX = "avf.notebook.latex"
+        const val KEY_BAR = "avf.keyBar.enabled"
+        const val INTERACTIVE_CODE_LENS = "jupyter.interactiveWindow.codeLens.enable"
         const val PLOTLY_DISPLAY_IDS = "avf.notebook.plotlyDisplayIds"
         const val STATUS_BAR_GUEST = "avf.statusBar.guestResources"
         const val RENDER_HTML = "avf.notebook.htmlOutputs"
@@ -245,6 +254,9 @@ data class WorkbenchSettings(
                 useTabStops = bool(USE_TAB_STOPS, defaults.useTabStops),
                 notebookCopilot = bool(NOTEBOOK_COPILOT, defaults.notebookCopilot),
                 renderPlotly = bool(RENDER_PLOTLY, defaults.renderPlotly),
+                renderLatex = bool(RENDER_LATEX, defaults.renderLatex),
+                keyBar = bool(KEY_BAR, defaults.keyBar),
+                interactiveCodeLens = bool(INTERACTIVE_CODE_LENS, defaults.interactiveCodeLens),
                 plotlyDisplayIds = bool(PLOTLY_DISPLAY_IDS, defaults.plotlyDisplayIds),
                 statusBarGuestResources = bool(STATUS_BAR_GUEST, defaults.statusBarGuestResources),
                 renderHtmlOutputs = bool(RENDER_HTML, defaults.renderHtmlOutputs),

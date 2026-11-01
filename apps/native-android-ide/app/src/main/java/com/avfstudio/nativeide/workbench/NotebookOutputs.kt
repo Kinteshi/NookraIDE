@@ -194,8 +194,11 @@ internal fun outputViews(output: JsonObject): List<OutputView> {
         if (data.get(PLOTLY_MIME)?.isJsonObject == true) add(OutputView.Plotly)
         if (vegaSpec(data) != null) add(OutputView.Vega)
         if (data.has("image/png") || data.has("image/jpeg")) add(OutputView.Image)
+        if (data.has(SVG_MIME)) add(OutputView.Svg)
         if (html != null && parseDataFrameHtml(html) != null) add(OutputView.Table)
         if (html != null) add(OutputView.Html)
+        if (data.has(LATEX_MIME)) add(OutputView.Latex)
+        if (data.has(JSON_MIME)) add(OutputView.Json)
         if (data.has("text/markdown")) add(OutputView.Markdown)
         if (data.has("text/plain")) add(OutputView.Text)
     }
@@ -210,6 +213,7 @@ internal fun shownView(views: List<OutputView>, presentation: OutputPresentation
         when (view) {
             OutputView.Plotly -> settings.renderPlotly
             OutputView.Vega -> settings.scriptOutputs
+            OutputView.Latex -> settings.renderLatex
             OutputView.Table -> settings.nativeTables
             OutputView.Html -> settings.renderHtmlOutputs && (!scripted || settings.scriptOutputs)
             else -> true
@@ -234,6 +238,9 @@ internal fun outputCopyText(output: JsonObject, view: OutputView?, presentation:
             table.toTsv(if (column != null) table.sortedBody(column, presentation.sortDirection) else table.body)
         }
         OutputView.Markdown -> mime("text/markdown")
+        OutputView.Svg -> mime(SVG_MIME)
+        OutputView.Latex -> mime(LATEX_MIME)
+        OutputView.Json -> data.get(JSON_MIME)?.let(::prettyJson)
         OutputView.Html -> mime("text/plain") ?: mime("text/html")?.replace(Regex("<[^>]*>"), " ")?.let(::decodeHtmlText)
         else -> mime("text/plain")?.stripAnsi()
     }
@@ -354,6 +361,12 @@ private fun CellOutput(
                 } else {
                     HtmlOutput(mime("text/html"), dark, modifier)
                 }
+                OutputView.Svg -> SvgOutput(mime(SVG_MIME), modifier) { OutputText(mime("text/plain"), colors.onSurface, modifier) }
+                OutputView.Latex -> {
+                    val page = remember(output, dark) { latexPage(mime(LATEX_MIME), dark) }
+                    ScriptOutput(page, modifier, minHeightDp = 24)
+                }
+                OutputView.Json -> JsonTree(data.get(JSON_MIME), presentation, modifier) { cell.outputPresentation[index] = it }
                 OutputView.Markdown -> MarkdownText(mime("text/markdown"), modifier)
                 OutputView.Text -> OutputText(mime("text/plain"), colors.onSurface, modifier, lineLimit, presentation.expanded, follow = false, onExpand = ::expand)
                 null -> OutputText("[${data.keySet().joinToString()} output]", colors.onSurfaceVariant, modifier)

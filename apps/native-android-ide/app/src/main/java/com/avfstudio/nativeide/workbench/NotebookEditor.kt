@@ -22,6 +22,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.zIndex
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
@@ -163,7 +165,15 @@ fun NotebookEditor(controller: WorkbenchController, session: NotebookSession) {
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             items(session.notebook.cells, key = { it.id }) { cell ->
-                NotebookCellView(controller, session, cell)
+                val dragged = session.draggedCell == cell.id
+                NotebookCellView(
+                    controller, session, cell, listState,
+                    if (dragged) {
+                        Modifier.zIndex(1f).graphicsLayer { translationY = session.dragOffset; shadowElevation = 12f }
+                    } else {
+                        Modifier.animateItem(fadeInSpec = null, fadeOutSpec = null)
+                    },
+                )
             }
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(16.dp)) {
@@ -179,6 +189,7 @@ fun NotebookEditor(controller: WorkbenchController, session: NotebookSession) {
             }
         }
         if (controller.settings.stickyCellHeader) StickyCellHeader(controller, session, listState)
+        UndoDeleteBar(controller, session, Modifier.align(Alignment.BottomCenter))
         }
     }
 }
@@ -206,12 +217,19 @@ private const val NOTEBOOK_LOG_TAG = "AVFNB"
 internal fun Modifier.noKeyFocus(): Modifier = focusProperties { canFocus = false }
 
 @Composable
-private fun NotebookCellView(controller: WorkbenchController, session: NotebookSession, cell: NotebookCell) {
+private fun NotebookCellView(
+    controller: WorkbenchController,
+    session: NotebookSession,
+    cell: NotebookCell,
+    listState: LazyListState,
+    modifier: Modifier = Modifier,
+) {
     val colors = MaterialTheme.colorScheme
     val selected = session.selectedCell == cell.id
     val dark = LocalDarkTheme.current
     Column(
-        Modifier
+        modifier
+            .background(if (session.draggedCell == cell.id) colors.surface else Color.Transparent)
             .widthIn(max = 1100.dp)
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 4.dp),
@@ -222,6 +240,7 @@ private fun NotebookCellView(controller: WorkbenchController, session: NotebookS
                 if (cell.type == CellType.Code && controller.settings.cellStatistics) {
                     CellRunStatus(controller, session, cell, Modifier.padding(top = 2.dp))
                 }
+                if (selected || session.draggedCell == cell.id) CellDragHandle(controller, session, cell, listState)
             }
             Column(Modifier.weight(1f)) {
                 Surface(
@@ -462,6 +481,8 @@ private fun CellSourceEditor(
         }
     }
     fun apply(value: TextFieldValue) {
+        // Ctrl or Alt latched on the key bar: the typed character is a shortcut, not text.
+        if (KeyBar.holdsTyping) typedCharacter(field, value)?.let { if (KeyBar.typed(it.toString())) return }
         session.stickyGoalX = null
         val textChanged = value.text != cell.source
         field = value
@@ -697,7 +718,7 @@ private val ansiPattern = Regex("\u001B\\[[0-9;?]*[ -/]*[@-~]")
 internal fun String.stripAnsi(): String = replace(ansiPattern, "")
 
 /** Lightweight Python colouring for notebook cells, in the code editor's [SyntaxPalette]. */
-private class PythonHighlighter(palette: SyntaxPalette) : VisualTransformation {
+internal class PythonHighlighter(palette: SyntaxPalette) : VisualTransformation {
     private val keyword = palette.keyword
     private val string = palette.string
     private val comment = palette.comment

@@ -138,6 +138,12 @@ import java.util.concurrent.TimeUnit
 
 /** How long a status bar message stays. */
 private const val STATUS_SECONDS = 10L
+/** The key of a .py file's Interactive window in the notebooks map (also its title). */
+private const val INTERACTIVE_SUFFIX = " · Interactive"
+/** A run's source in the Interactive window: the .py file and its first line, in the cell's metadata. */
+private const val INTERACTIVE_ORIGIN = "avf_interactive"
+/** Deleted notebook cells kept for Undo, per notebook. */
+private const val DELETED_CELLS_KEPT = 20
 /** Recently opened workspace folders, newest first. */
 private const val RECENT_WORKSPACES_KEY = "recent-workspaces"
 private const val RECENT_WORKSPACES_LIMIT = 10
@@ -236,7 +242,9 @@ class WorkbenchController(private val context: Context) {
         runCatching { parseKeybindings(preferences.getString(KEYBINDINGS_KEY, "").orEmpty()).rules }.getOrDefault(emptyList()),
     )
         private set
-    private var editorDispatcher = EditorKeybindingDispatcher(applyKeybindings(EditorCommands.all, keybindingRules))
+    private var editorDispatcher = EditorKeybindingDispatcher(applyKeybindings(EditorCommands.editor, keybindingRules))
+    /** The editor's keys in a Python file with `# %%` cells: Ctrl+Enter and Shift+Enter run them. */
+    private var cellEditorDispatcher = EditorKeybindingDispatcher(applyKeybindings(EditorCommands.interactive + EditorCommands.editor, keybindingRules))
     private var globalDispatcher = EditorKeybindingDispatcher(applyKeybindings(EditorCommands.global, keybindingRules))
     private var notebookDispatcher =
         EditorKeybindingDispatcher(applyKeybindings(EditorCommands.global + EditorCommands.notebook, keybindingRules))
@@ -4979,7 +4987,7 @@ class WorkbenchController(private val context: Context) {
             defaultBackground = Color.Black,
             onKeyboardInput = { bytes ->
                 val replaying = SystemClock.uptimeMillis() < session.replayUntil
-                if (!(replaying && isTerminalReply(bytes))) vfs.ptyInput(id, bytes)
+                if (!(replaying && isTerminalReply(bytes))) vfs.ptyInput(id, KeyBar.terminalBytes(bytes))
             },
             onResize = { dimensions ->
                 if (dimensions.columns > 0 && dimensions.rows > 0) vfs.ptyResize(id, dimensions.columns, dimensions.rows)
@@ -5060,6 +5068,11 @@ class WorkbenchController(private val context: Context) {
                 val cell = session.notebook.cells.firstOrNull { it.executionCount == target.executionCount }
                 if (cell == null) {
                     status = "No cell ran as [${target.executionCount}] since the kernel started; it may have run again"
+                    return
+                }
+                // The Interactive window's runs came from a .py file: go to the line there.
+                interactiveOrigin(cell)?.let { (path, firstLine) ->
+                    openGuestFileAt(path, firstLine + target.line, null)
                     return
                 }
                 session.selectedCell = cell.id
@@ -5224,6 +5237,12 @@ class WorkbenchController(private val context: Context) {
         }
         // A restored draft has unsaved cells.
         notebook.dirty = document.dirty
+        notebooks[document.path] = notebookSession(document, notebook)
+        return true
+    }
+
+    /** A notebook and its kernel client, with the kernel's messages wired to its cells. */
+    private fun notebookSession(document: DocumentSession, notebook: NotebookDocument): NotebookSession {
         val kernel = KernelClient(vfs)
         val session = NotebookSession(document, notebook, kernel)
         kernel.outputListener = { cellId, output, displayId -> post { appendCellOutput(session, cellId, output, displayId) } }
@@ -5261,8 +5280,7 @@ class WorkbenchController(private val context: Context) {
                 session.executing.clear()
             }
         }
-        notebooks[document.path] = session
-        return true
+        return session
     }
 
     private fun appendCellOutput(session: NotebookSession, cellId: String, output: JsonObject, displayId: String? = null) {
@@ -5462,13 +5480,173 @@ class WorkbenchController(private val context: Context) {
         session.kernelState = "Busy"
     }
 
+    // Interactive window ------------------------------------------------------------------------
+
+    /** The .py file whose Interactive window the panel shows. */
+    var interactivePath by mutableStateOf<String?>(null)
+
+    private fun interactiveKey(path: String) = "$path$INTERACTIVE_SUFFIX"
+
+    /** A .py file's Interactive window: a notebook of its runs that is never saved, kept in [notebooks] under its own key. */
+    fun interactiveSession(path: String): NotebookSession? = notebooks[interactiveKey(path)]
+
+    /** The active .py file's Interactive window, once it has one. */
+    val activeInteractive: NotebookSession?
+        get() = activeDocument?.takeIf { activeNotebook == null && it.languageId == "py" }?.path?.let(::interactiveSession)
+
+    val shownInteractive: NotebookSession? get() = interactivePath?.let(::interactiveSession)
+
+    private fun interactiveFor(path: String): NotebookSession =
+        interactiveSession(path) ?: run {
+            val key = interactiveKey(path)
+            val document = DocumentSession(key, "", null, dirty = false)
+            notebookSession(document, NotebookDocument(key, emptyList(), JsonObject(), 5)).also { notebooks[key] = it }
+        }
+
+    /** The `# %%` cells of the active Python file (none for other files). */
+    fun activePythonCells(): List<PythonCell> {
+        documentRevision
+        val document = activeDocument?.takeIf { !it.binary && activeNotebook == null && it.languageId == "py" } ?: return emptyList()
+        return pythonCells(document.text)
+    }
+
+    /** The .py file and the 0-based line of the first code line a run of the Interactive window came from. */
+    fun interactiveOrigin(cell: NotebookCell): Pair<String, Int>? {
+        val origin = cell.metadata.getAsJsonObject(INTERACTIVE_ORIGIN) ?: return null
+        val path = origin.get("path")?.asString ?: return null
+        return path to (origin.get("line")?.asInt ?: return null)
+    }
+
+    /** Goes to the line of the .py file a run came from. */
+    fun openInteractiveOrigin(cell: NotebookCell) {
+        val (path, line) = interactiveOrigin(cell) ?: return
+        openGuestFileAt(path, line + 1, null)
+    }
+
+    /** Runs the cells at the cursor ([range]) of the active .py file in its Interactive window. */
+    fun runPythonCells(range: CellRange, advance: Boolean = false) {
+        val document = activeDocument?.takeIf { it.languageId == "py" && activeNotebook == null } ?: return
+        val cells = pythonCells(document.text)
+        val line = editorSurface?.selection?.active?.line ?: 0
+        val chosen = cellsToRun(cells, line, range)
+        if (chosen.isEmpty()) {
+            status = if (cells.isEmpty()) "No # %% cells in this file" else "No cell to run here"
+            return
+        }
+        chosen.forEach { cell -> runInteractive(document.path, pythonCellCode(document.text, cell), cell.firstCodeLine) }
+        if (advance) {
+            val next = cells.firstOrNull { it.marker > (cells.cellAt(line)?.marker ?: line) }
+            val target = next?.firstCodeLine ?: cells.cellAt(line)?.end ?: line
+            editorSurface?.moveCursor(LspPosition(target.coerceAtMost((editorSurface?.lineCount ?: 1) - 1), 0))
+        }
+    }
+
+    /** Runs the lenses' cell (Run Cell above a `# %%` line). */
+    fun runPythonCell(cell: PythonCell, range: CellRange = CellRange.Current) {
+        val document = activeDocument?.takeIf { it.languageId == "py" } ?: return
+        val cells = cellsToRun(pythonCells(document.text), cell.marker, range)
+        cells.forEach { runInteractive(document.path, pythonCellCode(document.text, it), it.firstCodeLine) }
+    }
+
+    /** The selection, or the cursor's line, in the Interactive window. */
+    fun runSelectionInteractive() {
+        val document = activeDocument?.takeIf { it.languageId == "py" && activeNotebook == null } ?: run {
+            status = "Open a Python file to run its code in the Interactive window"
+            return
+        }
+        val surface = editorSurface ?: return
+        val range = surface.selectionOffsets
+        val (code, line) = if (range.first != range.last) {
+            surface.text.substring(range.first, range.last) to surface.positionAt(range.first).line
+        } else {
+            val line = surface.selection.active.line
+            surface.lineText(line) to line
+        }
+        if (code.isBlank()) return
+        runInteractive(document.path, code.trimEnd(), line)
+    }
+
+    /** Adds a run to [path]'s Interactive window and sends it to its kernel (asking for one first). */
+    fun runInteractive(path: String, code: String, firstLine: Int?) {
+        if (code.isBlank()) return
+        val session = interactiveFor(path)
+        val cell = NotebookCell.empty().also { it.source = code }
+        if (firstLine != null) {
+            cell.metadata.add(INTERACTIVE_ORIGIN, JsonObject().apply {
+                addProperty("path", path)
+                addProperty("line", firstLine)
+            })
+        }
+        session.notebook.cells.add(cell)
+        session.selectedCell = cell.id
+        showInteractive(path)
+        runCell(session, cell)
+    }
+
+    /** Opens the panel on [path]'s Interactive window ("Jupyter: Create Interactive Window"). */
+    fun showInteractive(path: String? = activeDocument?.path?.takeIf { it.endsWith(".py") } ?: interactivePath) {
+        if (path != null) {
+            interactivePath = path
+            interactiveFor(path)
+        }
+        panelVisible = true
+        panelTab = PanelTab.Interactive
+        compactDestination = CompactDestination.Terminal
+    }
+
+    fun clearInteractive(session: NotebookSession) {
+        session.notebook.cells.removeAll { !it.running && !it.queued }
+        documentRevision++
+    }
+
+    /** Ends the window's kernel and forgets its runs. */
+    fun closeInteractive(path: String) {
+        notebooks.remove(interactiveKey(path))?.kernel?.stop()
+        if (interactivePath == path) interactivePath = null
+        documentRevision++
+    }
+
+    /** The Interactive window's runs as a notebook next to the file ("Export as Jupyter Notebook"). */
+    fun exportInteractive(session: NotebookSession) {
+        val path = interactivePath ?: return
+        exportInteractive(session, path, 1)
+    }
+
+    /** Writes to `name.ipynb`, or `name-2.ipynb` and on when that exists (never over a file). */
+    private fun exportInteractive(session: NotebookSession, path: String, attempt: Int) {
+        val target = path.removeSuffix(".py") + (if (attempt == 1) "" else "-$attempt") + ".ipynb"
+        val cells = session.notebook.cells.map { cell ->
+            val metadata = cell.metadata.deepCopy().apply { remove(INTERACTIVE_ORIGIN) }
+            NotebookCell(cell.id, cell.type, cell.source, cell.outputs.toList(), cell.executionCount, metadata)
+        }
+        val text = NotebookDocument(target, cells, session.notebook.metadata.deepCopy(), 5).toJson()
+        vfs.stat(target).whenComplete { _, missing ->
+            if (missing == null) {
+                if (attempt < 20) exportInteractive(session, path, attempt + 1) else post { status = "Export failed: too many notebooks named like ${target.substringAfterLast('/')}" }
+                return@whenComplete
+            }
+            vfs.create(target, false)
+                .thenCompose { vfs.write(target, 0, text.toByteArray(), truncate = true, expectedModifiedTs = null) }
+                .whenComplete { _, error ->
+                    post {
+                        if (error != null) {
+                            status = "Export failed: ${error.cause?.message ?: error.message}"
+                        } else {
+                            afterFileSystemChange()
+                            openPath(target)
+                        }
+                    }
+                }
+        }
+    }
+
     // Variables ---------------------------------------------------------------------------------
 
     /** The notebook the Variables view shows: the active one, else the last one looked at. */
     private var variablesNotebook: String? = null
 
     val variablesSession: NotebookSession?
-        get() = activeNotebook?.also { variablesNotebook = it.document.path } ?: variablesNotebook?.let(notebooks::get)
+        get() = (activeNotebook ?: activeInteractive)?.also { variablesNotebook = it.document.path } ?: variablesNotebook?.let(notebooks::get)
 
     private val variablesShown: Boolean
         get() = panelTab == PanelTab.Variables && (panelVisible || compactDestination == CompactDestination.Terminal)
@@ -5607,9 +5785,32 @@ class WorkbenchController(private val context: Context) {
 
     fun deleteCell(session: NotebookSession, cell: NotebookCell) {
         val index = session.notebook.cells.indexOf(cell)
+        if (index < 0) return
         session.notebook.cells.remove(cell)
-        if (session.notebook.cells.isEmpty()) session.notebook.cells.add(NotebookCell.empty())
+        val placeholder = if (session.notebook.cells.isEmpty()) NotebookCell.empty().also { session.notebook.cells.add(it) } else null
         session.selectedCell = session.notebook.cells.getOrNull(index.coerceAtMost(session.notebook.cells.lastIndex))?.id
+        val deleted = DeletedCell(cell, index, placeholder?.id)
+        session.deletedCells.addLast(deleted)
+        while (session.deletedCells.size > DELETED_CELLS_KEPT) session.deletedCells.removeFirst()
+        session.lastDeleted = deleted
+        timer.schedule({ post { if (session.lastDeleted === deleted) session.lastDeleted = null } }, 10, TimeUnit.SECONDS)
+        session.notebook.dirty = true
+        documentRevision++
+    }
+
+    /** Puts the last deleted cell back where it was, with its source and outputs (VS Code's notebook undo). */
+    fun undoDeleteCell(session: NotebookSession) {
+        val deleted = session.deletedCells.removeLastOrNull()
+        if (deleted == null) {
+            status = "No deleted cell to restore"
+            return
+        }
+        val cells = session.notebook.cells
+        // The empty cell that stood in for the last one goes again if nothing was typed into it.
+        cells.firstOrNull { it.id == deleted.placeholder }?.takeIf { it.source.isEmpty() && cells.size == 1 }?.let(cells::remove)
+        cells.add(deleted.index.coerceIn(0, cells.size), deleted.cell)
+        session.selectedCell = deleted.cell.id
+        session.lastDeleted = null
         session.notebook.dirty = true
         documentRevision++
     }
@@ -5634,6 +5835,12 @@ class WorkbenchController(private val context: Context) {
         cells.add(target, cell)
         session.notebook.dirty = true
         documentRevision++
+    }
+
+    /** Drag and drop: [cell] to position [target]. */
+    fun moveCellTo(session: NotebookSession, cell: NotebookCell, target: Int) {
+        val index = session.notebook.cells.indexOf(cell)
+        if (index >= 0) moveCell(session, cell, target.coerceIn(session.notebook.cells.indices) - index)
     }
 
     fun onCellEdited(session: NotebookSession) {
@@ -5994,7 +6201,8 @@ class WorkbenchController(private val context: Context) {
             return false
         }
         keybindingRules = rules
-        editorDispatcher = EditorKeybindingDispatcher(applyKeybindings(EditorCommands.all, rules))
+        editorDispatcher = EditorKeybindingDispatcher(applyKeybindings(EditorCommands.editor, rules))
+        cellEditorDispatcher = EditorKeybindingDispatcher(applyKeybindings(EditorCommands.interactive + EditorCommands.editor, rules))
         globalDispatcher = EditorKeybindingDispatcher(applyKeybindings(EditorCommands.global, rules))
         notebookDispatcher = EditorKeybindingDispatcher(applyKeybindings(EditorCommands.global + EditorCommands.notebook, rules))
         terminalDispatcher = EditorKeybindingDispatcher(applyKeybindings(EditorCommands.terminal + EditorCommands.global, rules))
@@ -6253,7 +6461,7 @@ class WorkbenchController(private val context: Context) {
         val identity = event.downTime to event.keyCode
         if (identity == lastHandledKey) return true
         val dispatcher = when {
-            focusArea == FocusArea.Editor -> editorDispatcher
+            focusArea == FocusArea.Editor -> if (activePythonCells().isNotEmpty()) cellEditorDispatcher else editorDispatcher
             activeNotebook != null && focusArea in setOf(FocusArea.Notebook, FocusArea.Other) -> notebookDispatcher
             focusArea == FocusArea.Terminal -> terminalDispatcher
             else -> globalDispatcher
@@ -6455,10 +6663,28 @@ class WorkbenchController(private val context: Context) {
             "notebook.cell.insertCodeCellBelow" -> activeNotebook?.let { session ->
                 addCell(session, session.notebook.cells.firstOrNull { it.id == session.selectedCell })
             }
+            "notebook.cell.moveUp", "notebook.cell.moveDown", "notebook.cell.delete" -> activeNotebook?.let { session ->
+                val cell = session.notebook.cells.firstOrNull { it.id == session.selectedCell } ?: return@let
+                when (commandId) {
+                    "notebook.cell.delete" -> deleteCell(session, cell)
+                    else -> {
+                        moveCell(session, cell, if (commandId == "notebook.cell.moveDown") 1 else -1)
+                        session.focusRequest++
+                    }
+                }
+            }
+            "notebook.undoDeleteCell" -> activeNotebook?.let(::undoDeleteCell)
             "notebook.focusPreviousEditor", "notebook.focusNextEditor" -> activeNotebook?.let { session ->
                 val cell = session.notebook.cells.firstOrNull { it.id == session.selectedCell } ?: return@let
                 selectAdjacentCell(session, cell, if (commandId == "notebook.focusNextEditor") 1 else -1)
             }
+            "jupyter.runcurrentcell" -> runPythonCells(CellRange.Current)
+            "jupyter.runcurrentcelladvance" -> runPythonCells(CellRange.Current, advance = true)
+            "jupyter.runallcells" -> runPythonCells(CellRange.All)
+            "jupyter.runallcellsabove" -> runPythonCells(CellRange.Above)
+            "jupyter.runcurrentcellandallbelow" -> runPythonCells(CellRange.CurrentAndBelow)
+            "jupyter.execSelectionInteractive" -> runSelectionInteractive()
+            "jupyter.createnewinteractive" -> showInteractive()
             "jupyter.selectKernel" -> activeNotebook?.let(::chooseKernel)
             "jupyter.runAll" -> activeNotebook?.let(::runAllCells)
             "jupyter.restartKernel" -> activeNotebook?.let(::restartKernel)

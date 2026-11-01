@@ -12,6 +12,8 @@ data class OutputPresentation(
     val expanded: Boolean = false,
     val sortColumn: Int? = null,
     val sortDirection: SortDirection = SortDirection.Ascending,
+    /** A JSON tree's open nodes, by path (`$`, `$.a`, `$.a[0]`); the top level starts open. */
+    val jsonExpanded: Set<String> = setOf("$"),
 )
 
 /** The views an output can be drawn with; [label] reads after "Show as". */
@@ -19,8 +21,11 @@ enum class OutputView(val label: String) {
     Plotly("Plotly chart"),
     Vega("Vega chart"),
     Image("image"),
+    Svg("SVG image"),
     Table("table"),
     Html("HTML"),
+    Latex("formula"),
+    Json("JSON tree"),
     Markdown("Markdown"),
     Text("plain text"),
 }

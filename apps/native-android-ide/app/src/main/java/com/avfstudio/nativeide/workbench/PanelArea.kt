@@ -119,6 +119,7 @@ fun PanelArea(controller: WorkbenchController, modifier: Modifier = Modifier) {
                 PanelTab.Debug -> DebugPanel(controller)
                 PanelTab.Ports -> PortsView(controller)
                 PanelTab.Variables -> VariablesView(controller)
+                PanelTab.Interactive -> InteractiveView(controller)
             }
         }
     }
