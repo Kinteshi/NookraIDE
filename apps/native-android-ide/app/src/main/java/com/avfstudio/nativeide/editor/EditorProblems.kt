@@ -121,4 +121,6 @@ data class EditorConfig(
     val showDeprecated: Boolean = true,
     /** Pinching changes the font size; the editor reports it as [EditorEvent.Zoomed]. */
     val pinchToZoom: Boolean = true,
+    /** `editor.folding`: fold controls beside the line numbers. */
+    val folding: Boolean = true,
 )

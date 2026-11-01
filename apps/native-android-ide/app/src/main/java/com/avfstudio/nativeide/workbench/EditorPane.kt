@@ -41,6 +41,8 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
+import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.automirrored.outlined.InsertDriveFile
 import androidx.compose.material.icons.outlined.ChevronLeft
 import androidx.compose.material.icons.outlined.ChevronRight
@@ -80,6 +82,8 @@ import com.avfstudio.nativeide.editor.pairedCloserOffsetAfterDeletion
 import com.avfstudio.nativeide.editor.skipExistingCloserAfterInsertion
 import io.github.rosemoe.sora.event.ContentChangeEvent
 import io.github.rosemoe.sora.event.SelectionChangeEvent
+import com.avfstudio.nativeide.editor.FoldState
+import com.avfstudio.nativeide.editor.FoldRange
 import io.github.rosemoe.sora.lang.analysis.StyleUpdateRange
 import io.github.rosemoe.sora.lang.styling.Styles
 import io.github.rosemoe.sora.langs.textmate.TextMateLanguage
@@ -179,6 +183,7 @@ private fun LanguagePackBanner(controller: WorkbenchController, pack: com.avfstu
 /** What the pane draws over the code: inlay hints, Copilot's ghost text and parameter hints. */
 @Composable
 private fun EditorOverlays(controller: WorkbenchController) {
+    FoldingOverlay(controller)
     MergeConflictOverlay(controller)
     PythonCellOverlay(controller)
     InlayHintsOverlay(controller)
@@ -544,6 +549,7 @@ private fun NativeEditorView(controller: WorkbenchController, document: Document
                 val editorSurface = SoraEditorSurface(this, bracketColorizer)
                 surface = editorSurface
                 shown[0] = editorSurface
+                onFoldsChanged = { controller.foldRevision++ }
                 editorSurface.applyConfig(controller.editorConfig(document))
                 onStylesPublished = {
                     bracketColorizer.update()
@@ -688,10 +694,12 @@ private fun ParameterHints(controller: WorkbenchController) {
 private fun InlayHintsOverlay(controller: WorkbenchController) {
     controller.editorViewportTick
     controller.documentRevision
+    controller.foldRevision
     val lines = controller.inlayHintLines
     val lenses = controller.codeLenses
-    if (lines.isEmpty() && lenses.isEmpty()) return
     val view = controller.soraEditor() ?: return
+    val folds = (view as? NativeCodeEditor)?.takeIf { it.foldingEnabled }?.foldState
+    if (lines.isEmpty() && lenses.isEmpty() && folds?.isEmpty != false) return
     val density = LocalDensity.current
     val colors = MaterialTheme.colorScheme
     val fontSize = with(density) { (view.textSizePx * 0.86f).toSp() }
@@ -701,9 +709,11 @@ private fun InlayHintsOverlay(controller: WorkbenchController) {
     val content = view.text
     Box(Modifier.fillMaxSize().clipToBounds()) {
         for (line in view.firstVisibleLine..view.lastVisibleLine) {
+            if (folds?.isHidden(line) == true) continue
             val hints = lines[line].orEmpty()
             val lineLenses = lenses[line].orEmpty()
-            if (hints.isEmpty() && lineLenses.isEmpty()) continue
+            val folded = folds?.isFolded(line) == true
+            if (hints.isEmpty() && lineLenses.isEmpty() && !folded) continue
             if (line == ghostLine || line >= content.lineCount) continue
             val column = content.getColumnCount(line)
             val x = view.getCharOffsetX(line, column) + gap
@@ -715,6 +725,20 @@ private fun InlayHintsOverlay(controller: WorkbenchController) {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
+                // A folded region's first line: VS Code's "⋯", a tap opens it.
+                if (folded) {
+                    Text(
+                        "⋯",
+                        fontSize = fontSize,
+                        color = colors.onSecondaryContainer,
+                        maxLines = 1,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(colors.secondaryContainer)
+                            .clickable { (view as? NativeCodeEditor)?.unfold(line) }
+                            .padding(horizontal = 6.dp),
+                    )
+                }
                 hints.forEach { hint ->
                     Text(
                         hint,
@@ -742,6 +766,49 @@ private fun InlayHintsOverlay(controller: WorkbenchController) {
                             .padding(horizontal = 4.dp),
                     )
                 }
+            }
+        }
+    }
+}
+
+/**
+ * Fold arrows between the line numbers and the text, on each line a region starts at (VS Code's
+ * `editor.showFoldingControls: always`, as there is no hover): down when open, right when folded.
+ * Taps here reach the arrow, not sora's breakpoint toggle on the line numbers.
+ */
+@Composable
+private fun FoldingOverlay(controller: WorkbenchController) {
+    controller.editorViewportTick
+    controller.foldRevision
+    controller.documentRevision
+    val view = controller.soraEditor() as? NativeCodeEditor ?: return
+    if (!view.foldingEnabled || view.isWordwrap || !view.isLineNumberEnabled) return
+    val starts = view.foldRanges.map { it.startLine }.toHashSet()
+    if (starts.isEmpty()) return
+    val density = LocalDensity.current
+    val colors = MaterialTheme.colorScheme
+    val rowHeight = view.rowHeight.toFloat()
+    val strip = view.dividerMarginRight
+    val x = view.measureTextRegionOffset() - strip
+    val content = view.text
+    Box(Modifier.fillMaxSize().clipToBounds()) {
+        for (line in view.firstVisibleLine..view.lastVisibleLine) {
+            if (line !in starts || line >= content.lineCount || view.isLineHidden(line)) continue
+            val folded = view.foldState.isFolded(line)
+            val top = view.getCharOffsetY(line, 0) - rowHeight
+            Box(
+                Modifier
+                    .offset { IntOffset(x.roundToInt(), top.roundToInt()) }
+                    .size(with(density) { strip.toDp() }, with(density) { rowHeight.toDp() })
+                    .clickable { view.toggleFold(line) },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    if (folded) Icons.AutoMirrored.Outlined.KeyboardArrowRight else Icons.Outlined.KeyboardArrowDown,
+                    contentDescription = if (folded) "Unfold line ${line + 1}" else "Fold line ${line + 1}",
+                    modifier = Modifier.size(with(density) { (strip * 0.9f).toDp() }),
+                    tint = if (folded) colors.primary else colors.onSurfaceVariant.copy(alpha = 0.55f),
+                )
             }
         }
     }
@@ -833,6 +900,7 @@ private fun PythonCellOverlay(controller: WorkbenchController) {
     Box(Modifier.fillMaxSize().clipToBounds()) {
         cells.forEach { cell ->
             if (cell.marker < view.firstVisibleLine - 1 || cell.marker > view.lastVisibleLine || cell.marker >= content.lineCount) return@forEach
+            if ((view as? NativeCodeEditor)?.isLineHidden(cell.marker) == true) return@forEach
             val y = top(cell.marker)
             if (cell.marker > 0) {
                 Box(
@@ -1069,6 +1137,123 @@ internal class NativeCodeEditor(
     var autoIndent = true
     /** `editor.useTabStops`: Backspace in leading spaces removes one indentation level. */
     var useTabStops = true
+
+    // Code folding ------------------------------------------------------------------------------
+    // sora 0.23.6 has none: [FoldingLayout] leaves the folded lines out of the rows. The state is
+    // made in [createLayout], which sora's constructor calls before this class's fields exist.
+
+    lateinit var foldState: FoldState
+        private set
+    /** Where regions start and end (the language server's, or indentation's). */
+    var foldRanges: List<FoldRange> = emptyList()
+        set(value) {
+            field = value
+            onFoldsChanged?.invoke()
+        }
+    /** Folds were made, opened or moved: the overlays redraw. */
+    var onFoldsChanged: (() -> Unit)? = null
+    /** Off until the settings are applied, which then makes room for the fold arrows. */
+    var foldingEnabled = false
+        private set
+
+    override fun createLayout(clearWordwrapCache: Boolean) {
+        if (!::foldState.isInitialized) foldState = FoldState()
+        val current = io.github.rosemoe.sora.widget.EditorLayoutAccess.get(this)
+        if (isWordwrap) {
+            // Folding needs a row per line; word wrap opens every fold.
+            if (foldState.clear()) post { foldsChanged() }
+            super.createLayout(clearWordwrapCache)
+            return
+        }
+        if (current is io.github.rosemoe.sora.widget.layout.FoldingLayout) {
+            // New text (setText): its folds go.
+            if (foldState.clear()) post { foldsChanged() }
+            current.reuse(text)
+            return
+        }
+        current?.destroyLayout()
+        io.github.rosemoe.sora.widget.EditorLayoutAccess.set(
+            this,
+            io.github.rosemoe.sora.widget.layout.FoldingLayout(this, text, foldState) { post { foldsChanged() } },
+        )
+        runCatching { eventHandler.scrollBy(0f, 0f) }
+    }
+
+    fun setFoldingEnabled(enabled: Boolean) {
+        if (foldingEnabled == enabled) return
+        foldingEnabled = enabled
+        if (!enabled && foldState.clear()) foldsChanged()
+        // Room for the fold arrows between the line numbers and the text.
+        setDividerMargin(dividerMarginLeft, if (enabled) dpUnit * 16 else dpUnit * 2)
+        onFoldsChanged?.invoke()
+    }
+
+    /** After folds change: sora's line caches and indent guides assume a row per line, so they rest while anything is folded. */
+    fun foldsChanged() {
+        val folded = !foldState.isEmpty
+        if (isHardwareAcceleratedDrawAllowed == folded) setHardwareAcceleratedDrawAllowed(!folded)
+        if (isBlockLineEnabled == folded) isBlockLineEnabled = !folded
+        runCatching { eventHandler.scrollBy(0f, 0f) }
+        invalidate()
+        onFoldsChanged?.invoke()
+    }
+
+    /** The region a fold command at [line] acts on: one starting there, else the innermost around it. */
+    fun foldRangeAt(line: Int): FoldRange? = foldRanges.firstOrNull { it.startLine == line }
+        ?: foldRanges.filter { line in it.startLine..it.endLine }.minByOrNull { it.endLine - it.startLine }
+
+    fun fold(line: Int): Boolean {
+        if (!foldingEnabled || isWordwrap) return false
+        val range = foldRangeAt(line) ?: return false
+        // The cursor goes to the fold's first line rather than into the hidden lines (which unfolds).
+        if (cursor.leftLine in range.startLine + 1..range.endLine || cursor.rightLine in range.startLine + 1..range.endLine) {
+            setSelection(range.startLine, text.getColumnCount(range.startLine))
+        }
+        if (!foldState.fold(range)) return false
+        foldsChanged()
+        return true
+    }
+
+    fun unfold(line: Int): Boolean {
+        val changed = foldState.unfold(line) || foldState.folded.filter { line in it.startLine..it.endLine }
+            .maxByOrNull { it.startLine }?.let { foldState.unfold(it.startLine) } == true
+        if (changed) foldsChanged()
+        return changed
+    }
+
+    fun toggleFold(line: Int): Boolean = if (foldState.isFolded(line)) unfold(line) else fold(line)
+
+    /** VS Code's fold commands at the cursor. */
+    fun runFoldCommand(commandId: String): Boolean {
+        if (!foldingEnabled || isWordwrap) return false
+        val line = cursor.leftLine
+        return when (commandId) {
+            "editor.fold" -> fold(line)
+            "editor.unfold" -> unfold(line)
+            "editor.toggleFold" -> toggleFold(line)
+            "editor.foldAll" -> {
+                val cursorRanges = foldRanges.filter { line in it.startLine + 1..it.endLine }
+                cursorRanges.minByOrNull { it.startLine }?.let { setSelection(it.startLine, text.getColumnCount(it.startLine)) }
+                foldRanges.forEach(foldState::fold)
+                foldsChanged()
+                true
+            }
+            "editor.unfoldAll" -> foldState.clear().also { foldsChanged() }
+            "editor.foldAllExcept" -> false
+            else -> false
+        }
+    }
+
+    fun isLineHidden(line: Int): Boolean = ::foldState.isInitialized && foldState.isHidden(line)
+
+    init {
+        // The cursor reaching a folded line (arrows, find, go to definition) opens its fold, as in VS Code.
+        subscribeAlways(SelectionChangeEvent::class.java) {
+            if (foldState.isEmpty) return@subscribeAlways
+            val opened = foldState.unfoldAround(cursor.leftLine) or foldState.unfoldAround(cursor.rightLine)
+            if (opened) post { foldsChanged() }
+        }
+    }
 
     override fun setStyles(styles: Styles?) {
         super.setStyles(styles)

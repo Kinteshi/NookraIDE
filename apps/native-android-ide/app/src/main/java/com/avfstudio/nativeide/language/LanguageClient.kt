@@ -107,6 +107,9 @@ class LanguageClient(
         private set
     @Volatile var supportsReferences = false
         private set
+    /** `textDocument/foldingRange`; without it, folding follows indentation. */
+    @Volatile var supportsFoldingRange = false
+        private set
     /** `textDocument/linkedEditingRange` (JSX/HTML tag pairs). */
     @Volatile var supportsLinkedEditing = false
         private set
@@ -175,6 +178,7 @@ class LanguageClient(
                     ?.get("resolveProvider")?.takeIf { it.isJsonPrimitive }?.asBoolean == true
                 supportsReferences = capabilities?.provides("referencesProvider") == true
                 supportsLinkedEditing = capabilities?.provides("linkedEditingRangeProvider") == true
+                supportsFoldingRange = capabilities?.provides("foldingRangeProvider") == true
                 notify("initialized", JsonObject())
                 notify("workspace/didChangeConfiguration", JsonObject().apply {
                     add("settings", gson.toJsonTree(configuredSettings))
@@ -323,6 +327,11 @@ class LanguageClient(
         })
 
     fun resolveCodeLens(lens: JsonObject): CompletableFuture<JsonElement> = request("codeLens/resolve", lens)
+
+    fun foldingRanges(path: String): CompletableFuture<JsonElement> =
+        request("textDocument/foldingRange", JsonObject().apply {
+            add("textDocument", JsonObject().apply { addProperty("uri", fileUri(path)) })
+        })
 
     fun linkedEditingRanges(path: String, position: LspPosition): CompletableFuture<JsonElement> =
         request("textDocument/linkedEditingRange", positionParams(path, position))
@@ -528,6 +537,10 @@ class LanguageClient(
                 add("selectionRange", JsonObject().apply { addProperty("dynamicRegistration", false) })
                 add("codeLens", JsonObject().apply { addProperty("dynamicRegistration", false) })
                 add("linkedEditingRange", JsonObject().apply { addProperty("dynamicRegistration", false) })
+                add("foldingRange", JsonObject().apply {
+                    addProperty("dynamicRegistration", false)
+                    addProperty("lineFoldingOnly", true)
+                })
                 add("rangeFormatting", JsonObject().apply { addProperty("dynamicRegistration", false) })
                 add("inlayHint", JsonObject().apply { addProperty("dynamicRegistration", false) })
                 add("definition", JsonObject().apply { addProperty("dynamicRegistration", false) })

@@ -207,7 +207,14 @@ internal class SoraEditorSurface(
         view.useTabStops = config.useTabStops
         if (view.isWordwrap != config.wordWrap) view.setWordwrap(config.wordWrap)
         if (view.isLineNumberEnabled != config.lineNumbers) view.setLineNumberEnabled(config.lineNumbers)
+        view.setFoldingEnabled(config.folding)
     }
+
+    override fun setFoldingRanges(ranges: List<com.avfstudio.nativeide.editor.FoldRange>) {
+        editor.foldRanges = ranges
+    }
+
+    override fun runFoldCommand(commandId: String): Boolean = editor.runFoldCommand(commandId)
 
     private var appliedFontSizeSp = Float.NaN
     private var scaleBoundsSet = false

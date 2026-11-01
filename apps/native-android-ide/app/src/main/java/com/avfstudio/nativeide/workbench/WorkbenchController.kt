@@ -94,6 +94,8 @@ import com.avfstudio.nativeide.language.untitledPathFor
 import com.avfstudio.nativeide.editor.saveCleanupEdits
 import com.avfstudio.nativeide.editor.SaveCleanups
 import com.avfstudio.nativeide.editor.Indentation
+import com.avfstudio.nativeide.editor.FoldRange
+import com.avfstudio.nativeide.editor.indentationFoldingRanges
 import com.avfstudio.nativeide.editor.convertIndentation
 import com.avfstudio.nativeide.editor.detectIndentation
 import com.avfstudio.nativeide.language.signatureContext
@@ -710,6 +712,7 @@ class WorkbenchController(private val context: Context) {
         if (settings.chatAgent != chatAgentKind) switchChatAgent(settings.chatAgent)
         if (settings.inlayHints != previousInlayHints) activePath?.let { scheduleInlayHints(it, delayMs = 0) }
         if (settings.codeLens != previousCodeLens) activePath?.let { scheduleCodeLens(it, delayMs = 0) }
+        activePath?.let { scheduleFoldingRanges(it, delayMs = 0) }
         refreshLauncherShortcuts()
     }
 
@@ -763,6 +766,7 @@ class WorkbenchController(private val context: Context) {
             showUnused = it.showUnused,
             showDeprecated = it.showDeprecated,
             pinchToZoom = it.pinchToZoom,
+            folding = it.folding,
         )
     }
 
@@ -3576,6 +3580,7 @@ class WorkbenchController(private val context: Context) {
                         scheduleInlayHints(event.uri)
                         if (editorSurface?.lineCount != codeLensLineCount) codeLenses = emptyMap()
                         scheduleCodeLens(event.uri)
+                        scheduleFoldingRanges(event.uri)
                     }
                 }
             }
@@ -3736,6 +3741,7 @@ class WorkbenchController(private val context: Context) {
                             refreshSemanticTokens(document)
                             scheduleInlayHints(document.path, delayMs = 0)
                             scheduleCodeLens(document.path, delayMs = 300)
+                            scheduleFoldingRanges(document.path, delayMs = 0)
                         }
                     }
                 }
@@ -3788,6 +3794,7 @@ class WorkbenchController(private val context: Context) {
             refreshSemanticTokens(document)
             scheduleInlayHints(document.path, delayMs = 0)
             scheduleCodeLens(document.path, delayMs = 300)
+            scheduleFoldingRanges(document.path, delayMs = 0)
         }
         if (copilot.language.isReady) copilot.didFocus(activePath)
     }
@@ -4477,6 +4484,47 @@ class WorkbenchController(private val context: Context) {
                 val highlights = if (error == null) parseDocumentHighlights(result) else emptyList()
                 editorSurface?.setSymbolHighlights(highlights.map { it.range to it.write })
             }
+        }
+    }
+
+    // Folding ranges --------------------------------------------------------------------------------
+
+    /** Bumped when folds open or close, so the fold arrows and the overlays redraw. */
+    var foldRevision by mutableIntStateOf(0)
+    private var scheduledFoldingRanges: ScheduledFuture<*>? = null
+    private var foldingRequest = 0L
+
+    private fun scheduleFoldingRanges(path: String, delayMs: Long = 600) {
+        scheduledFoldingRanges?.cancel(false)
+        scheduledFoldingRanges = timer.schedule({ post { requestFoldingRanges(path) } }, delayMs, TimeUnit.MILLISECONDS)
+    }
+
+    /** The language server's folding ranges when it has them, else indentation's (VS Code's fallback). */
+    private fun requestFoldingRanges(path: String) {
+        val document = activeDocument?.takeIf { it.path == path && activeNotebook == null && !it.binary } ?: return
+        val surface = editorSurface ?: return
+        if (!settings.folding) {
+            surface.setFoldingRanges(emptyList())
+            return
+        }
+        val version = document.version
+        val id = ++foldingRequest
+        val tabSize = indentation(document).tabSize
+        fun publish(ranges: List<FoldRange>) = post {
+            if (id != foldingRequest || activePath != path || document.version != version) return@post
+            editorSurface?.setFoldingRanges(ranges)
+        }
+        fun byIndentation() = io.execute { publish(indentationFoldingRanges(document.text.split('\n'), tabSize)) }
+        val client = languageClientFor(path)?.takeIf { it.isReady && it.supportsFoldingRange } ?: return byIndentation()
+        client.foldingRanges(path).whenComplete { result, error ->
+            val ranges = result?.takeIf { error == null && it.isJsonArray }?.asJsonArray?.mapNotNull { element ->
+                val range = element.takeIf { it.isJsonObject }?.asJsonObject ?: return@mapNotNull null
+                val start = range.get("startLine")?.takeIf { it.isJsonPrimitive }?.asInt ?: return@mapNotNull null
+                val end = range.get("endLine")?.takeIf { it.isJsonPrimitive }?.asInt ?: return@mapNotNull null
+                FoldRange(start, end).takeIf { end > start }
+            }
+            // One region per first line, the outermost, as VS Code keeps them.
+            if (ranges.isNullOrEmpty()) byIndentation() else publish(ranges.groupBy { it.startLine }.map { (_, same) -> same.maxBy { it.endLine } }.sortedBy { it.startLine })
         }
     }
 
@@ -7862,6 +7910,10 @@ class WorkbenchController(private val context: Context) {
             "workbench.action.gotoLine" -> openQuickOpen(":")
             "editor.action.formatDocument" -> formatActiveDocument()
             "editor.action.formatSelection" -> formatSelection()
+            "editor.fold", "editor.unfold", "editor.toggleFold", "editor.foldAll", "editor.unfoldAll" ->
+                if (surface?.runFoldCommand(commandId) != true) {
+                    status = if (!settings.folding) "Folding is off in Settings" else if (settings.wordWrap) "Folding needs word wrap off" else "Nothing to fold here"
+                }
             "editor.action.smartSelect.expand" -> expandSelection()
             "editor.action.smartSelect.shrink" -> shrinkSelection()
             "editor.action.joinLines", "editor.action.transposeLetters", "editor.action.sortLinesAscending",

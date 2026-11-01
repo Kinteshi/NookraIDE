@@ -149,6 +149,8 @@ data class WorkbenchSettings(
     val explorerDragAndDrop: Boolean = true,
     /** Names Explorer and Quick Open hide (`files.exclude`, glob → true). */
     val filesExclude: List<String> = DEFAULT_FILES_EXCLUDE,
+    /** Fold arrows beside the line numbers and the fold commands (`editor.folding`). */
+    val folding: Boolean = true,
     /** A short buzz for a breakpoint, a latched modifier, a long-press drag (`avf.haptics`). */
     val haptics: Boolean = true,
 ) {
@@ -240,6 +242,7 @@ data class WorkbenchSettings(
         const val EXPLORER_DRAG_AND_DROP = "explorer.enableDragAndDrop"
         const val FILES_EXCLUDE = "files.exclude"
         const val HAPTICS = "avf.haptics"
+        const val FOLDING = "editor.folding"
         /** VS Code's defaults for `files.exclude`. */
         val DEFAULT_FILES_EXCLUDE = listOf("**/.git", "**/.svn", "**/.hg", "**/CVS", "**/.DS_Store", "**/Thumbs.db")
 
@@ -342,6 +345,7 @@ data class WorkbenchSettings(
                     ?.filter { (_, value) -> value.isJsonPrimitive && runCatching { value.asBoolean }.getOrDefault(false) }
                     ?.map { it.key } ?: defaults.filesExclude,
                 haptics = bool(HAPTICS, defaults.haptics),
+                folding = bool(FOLDING, defaults.folding),
             )
         }
     }

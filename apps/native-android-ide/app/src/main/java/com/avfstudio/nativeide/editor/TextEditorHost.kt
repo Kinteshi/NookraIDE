@@ -94,6 +94,10 @@ interface EditorSurface {
     fun selectFound(selection: EditorSelection) = setSelection(selection)
     /** Shows the suggest popup now (Ctrl+Space), whatever was typed. */
     fun triggerSuggest() {}
+    /** Where code can fold (from the language server or indentation). */
+    fun setFoldingRanges(ranges: List<FoldRange>) {}
+    /** Fold, Unfold, Toggle Fold, Fold All, Unfold All at the cursor; false when the editor can't fold. */
+    fun runFoldCommand(commandId: String): Boolean = false
     /** The find widget's matches, [current] (an index in [matches], or -1) stronger. */
     fun setFindHighlights(matches: List<LspRange>, current: Int) {}
     fun observe(listener: (EditorEvent) -> Unit): Closeable
