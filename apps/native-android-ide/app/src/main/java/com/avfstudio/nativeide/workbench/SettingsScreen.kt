@@ -115,6 +115,34 @@ fun SettingsScreen(controller: WorkbenchController) {
                     ActionRow("Use app syntax colours", "Drop an imported theme and follow light and dark mode") { controller.clearImportedTheme() }
                 }
 
+                item { Section("Languages") }
+                item {
+                    SettingRow("Colours for other languages", "Files Python's built-in grammar doesn't cover can get VS Code's own grammar from Open VSX (10–60 KB each)") {
+                        SingleChoiceSegmentedButtonRow {
+                            LanguageDownloads.entries.forEachIndexed { index, mode ->
+                                SegmentedButton(
+                                    selected = settings.languageDownloads == mode,
+                                    onClick = { set(WorkbenchSettings.LANGUAGE_DOWNLOADS, mode.key) },
+                                    shape = SegmentedButtonDefaults.itemShape(index, LanguageDownloads.entries.size),
+                                ) { Text(mode.label) }
+                            }
+                        }
+                    }
+                }
+                item {
+                    ActionRow("Get colours for a language…", "SQL, Rust, Go, YAML, shell, C/C++ and 40 more") {
+                        controller.commandFilter = ""
+                        controller.dialog = WorkbenchDialog.LanguagePacks
+                    }
+                }
+                controller.installedLanguagePacks().forEach { (id, name) ->
+                    item(key = "language-pack-$id") {
+                        SettingRow(name, id) {
+                            TextButton(onClick = { controller.removeLanguagePack(id) }) { Text("Remove") }
+                        }
+                    }
+                }
+
                 item { Section("Editor") }
                 item {
                     SliderRow("Font size", settings.editorFontSize, 8f..32f, "%.0f sp") { set(WorkbenchSettings.EDITOR_FONT_SIZE, it.roundToInt()) }
@@ -197,6 +225,21 @@ fun SettingsScreen(controller: WorkbenchController) {
                 item {
                     SwitchRow("Explorer tree", "Folders open in place below themselves; off opens one folder at a time", settings.explorerTree) {
                         set(WorkbenchSettings.EXPLORER_TREE, it)
+                    }
+                }
+                item {
+                    SwitchRow("Git marks in Explorer", "Changed files in colour with their letter (M, U, A, D, ! for a conflict); their folders in colour", settings.gitDecorations) {
+                        set(WorkbenchSettings.GIT_DECORATIONS, it)
+                    }
+                }
+                item {
+                    SwitchRow("Problem marks in Explorer", "Files with errors or warnings in red or yellow with their count", settings.problemDecorations) {
+                        set(WorkbenchSettings.PROBLEM_DECORATIONS, it)
+                    }
+                }
+                item {
+                    SwitchRow("Recent folders in the launcher", "Long-press MaterialCode's icon to open one of the last four folders", settings.launcherShortcuts) {
+                        set(WorkbenchSettings.LAUNCHER_SHORTCUTS, it)
                     }
                 }
                 item {

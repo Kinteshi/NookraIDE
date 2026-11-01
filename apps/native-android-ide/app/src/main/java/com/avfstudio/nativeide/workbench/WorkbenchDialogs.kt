@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -155,9 +156,9 @@ fun WorkbenchDialogHost(controller: WorkbenchController) {
         is WorkbenchDialog.GitDiff -> AlertDialog(
             onDismissRequest = { controller.dialog = null },
             properties = DialogProperties(usePlatformDefaultWidth = false),
-            modifier = Modifier.padding(24.dp),
+            modifier = Modifier.padding(24.dp).fillMaxWidth(),
             title = { Text(dialog.title) },
-            text = { DiffText(dialog.patch) },
+            text = { DiffView(dialog.patch) },
             confirmButton = { TextButton(onClick = { controller.dialog = null }) { Text("Close") } },
         )
         is WorkbenchDialog.GitBranches -> GitBranchesDialog(controller, dialog)
@@ -317,6 +318,49 @@ fun WorkbenchDialogHost(controller: WorkbenchController) {
             dismissButton = { TextButton(onClick = { controller.dialog = null }) { Text("Cancel") } },
         )
         WorkbenchDialog.Keybindings -> KeybindingsDialog(controller)
+        is WorkbenchDialog.TerminalLinks -> PaletteDialog(
+            placeholder = "Open a link from the terminal",
+            query = controller.commandFilter,
+            onQuery = { controller.commandFilter = it },
+            items = dialog.links.filter { fuzzyMatch(controller.commandFilter, it.label) },
+            onDismiss = { controller.dialog = null },
+            onPick = controller::openTerminalLink,
+        ) { link -> PaletteRow(link.label, if (link is TerminalLink.Web) "web" else "file") }
+        is WorkbenchDialog.ConfirmReplaceAll -> AlertDialog(
+            onDismissRequest = { controller.dialog = null },
+            title = { Text("Replace all") },
+            text = {
+                Text(
+                    "Replace ${dialog.matches} occurrence${if (dialog.matches == 1) "" else "s"} across ${dialog.files} file${if (dialog.files == 1) "" else "s"} " +
+                        "with \"${controller.searchReplace}\"? Closed files are saved; open ones stay unsaved so you can check them.",
+                )
+            },
+            confirmButton = { TextButton(onClick = controller::replaceAllSearchResults) { Text("Replace") } },
+            dismissButton = { TextButton(onClick = { controller.dialog = null }) { Text("Cancel") } },
+        )
+        WorkbenchDialog.LanguagePacks -> {
+            val installed = controller.installedLanguagePacks().map { it.first }.toSet()
+            PaletteDialog(
+                placeholder = "Language or file extension",
+                query = controller.commandFilter,
+                onQuery = { controller.commandFilter = it },
+                items = com.avfstudio.nativeide.assets.LANGUAGE_PACKS.filter { pack ->
+                    val query = controller.commandFilter.trim().removePrefix(".")
+                    query.isEmpty() || pack.languageName.contains(query, true) || pack.extensions.any { it.equals(query, true) } ||
+                        pack.filenames.any { it.contains(query, true) }
+                },
+                onDismiss = { controller.dialog = null },
+                onPick = { pack ->
+                    controller.dialog = null
+                    if (pack.id !in installed) controller.installLanguagePack(pack)
+                },
+            ) { pack ->
+                PaletteRow(
+                    pack.languageName + if (pack.id in installed) "  ✓" else "",
+                    (pack.extensions.take(4).map { ".$it" } + pack.filenames.take(2)).joinToString(" "),
+                )
+            }
+        }
         is WorkbenchDialog.DataViewer -> AlertDialog(
             onDismissRequest = { controller.dialog = null },
             properties = DialogProperties(usePlatformDefaultWidth = false),
@@ -925,6 +969,100 @@ private fun GitCloneDialog(controller: WorkbenchController) {
 }
 
 /** A unified diff with added, removed and hunk lines coloured. */
+/**
+ * A file's diff side by side (old left, new right, line numbers, the changed part of a changed
+ * line marked), as VS Code's diff editor; "Inline" shows the unified patch. Side by side is the
+ * default where the dialog is wide enough.
+ */
+@Composable
+private fun DiffView(patch: String) {
+    val wide = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp >= 700
+    run {
+        var sideBySide by remember { mutableStateOf(wide) }
+        Column {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(bottom = 6.dp)) {
+                androidx.compose.material3.FilterChip(selected = sideBySide, onClick = { sideBySide = true }, label = { Text("Side by side") })
+                androidx.compose.material3.FilterChip(selected = !sideBySide, onClick = { sideBySide = false }, label = { Text("Inline") })
+            }
+            if (sideBySide) SideBySideDiff(patch) else DiffText(patch)
+        }
+    }
+}
+
+@Composable
+private fun SideBySideDiff(patch: String) {
+    val colors = MaterialTheme.colorScheme
+    val rows = remember(patch) { sideBySideRows(patch) }
+    val removedTint = colors.errorContainer.copy(alpha = 0.45f)
+    val addedTint = androidx.compose.ui.graphics.Color(0x3348B04F)
+    val removedStrong = colors.error.copy(alpha = 0.35f)
+    val addedStrong = androidx.compose.ui.graphics.Color(0x6648B04F)
+    val style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace)
+    if (rows.isEmpty()) {
+        Text("No changes to show.", color = colors.onSurfaceVariant)
+        return
+    }
+    @Composable
+    fun Side(number: Int?, text: String?, tint: androidx.compose.ui.graphics.Color, strong: androidx.compose.ui.graphics.Color, span: IntRange?, modifier: Modifier) {
+        Row(modifier.background(if (text == null) colors.surfaceContainerHighest.copy(alpha = 0.4f) else tint)) {
+            Text(
+                number?.toString().orEmpty(),
+                style = style,
+                color = colors.onSurfaceVariant,
+                textAlign = androidx.compose.ui.text.style.TextAlign.End,
+                modifier = Modifier.width(40.dp).padding(end = 6.dp),
+            )
+            val line = text.orEmpty()
+            Text(
+                androidx.compose.ui.text.buildAnnotatedString {
+                    if (span != null && !span.isEmpty() && span.last < line.length) {
+                        append(line.substring(0, span.first))
+                        pushStyle(androidx.compose.ui.text.SpanStyle(background = strong))
+                        append(line.substring(span.first, span.last + 1))
+                        pop()
+                        append(line.substring(span.last + 1))
+                    } else {
+                        append(line.ifEmpty { " " })
+                    }
+                },
+                style = style,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Clip,
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+    LazyColumn(Modifier.heightIn(max = 560.dp)) {
+        items(rows) { row ->
+            if (row.kind == DiffKind.Hunk) {
+                Text(
+                    row.left.orEmpty(),
+                    style = style,
+                    color = colors.onSecondaryContainer,
+                    maxLines = 1,
+                    modifier = Modifier.fillMaxWidth().background(colors.secondaryContainer).padding(horizontal = 6.dp),
+                )
+                return@items
+            }
+            val spans = if (row.kind == DiffKind.Changed) changedSpans(row.left.orEmpty(), row.right.orEmpty()) else null
+            Row(Modifier.fillMaxWidth().height(androidx.compose.foundation.layout.IntrinsicSize.Min)) {
+                Side(
+                    row.leftNumber, row.left,
+                    if (row.kind == DiffKind.Removed || row.kind == DiffKind.Changed) removedTint else androidx.compose.ui.graphics.Color.Transparent,
+                    removedStrong, spans?.first, Modifier.weight(1f).fillMaxHeight(),
+                )
+                Box(Modifier.width(1.dp).fillMaxHeight().background(colors.outlineVariant))
+                Side(
+                    row.rightNumber, row.right,
+                    if (row.kind == DiffKind.Added || row.kind == DiffKind.Changed) addedTint else androidx.compose.ui.graphics.Color.Transparent,
+                    addedStrong, spans?.second, Modifier.weight(1f).fillMaxHeight(),
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun DiffText(patch: String) {
     val colors = MaterialTheme.colorScheme

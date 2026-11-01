@@ -428,6 +428,7 @@ pub enum SearchMessage {
         req_id: u64,
         path: String,
         line: u32,
+        /// 1-based byte column of the match in [preview], as ripgrep reports it.
         col: u32,
         len: u32,
         preview: String,

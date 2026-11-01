@@ -102,6 +102,7 @@ fun EditorArea(controller: WorkbenchController, modifier: Modifier = Modifier) {
                 if (controller.hasPreview(document.path)) MarkdownPreviewButtons(controller, preview)
             }
         }
+        controller.languagePackOffer?.let { pack -> LanguagePackBanner(controller, pack) }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             val notebook = controller.activeNotebook
             when {
@@ -120,7 +121,7 @@ fun EditorArea(controller: WorkbenchController, modifier: Modifier = Modifier) {
                 activeDocument != null && preview == MarkdownPreviewMode.Side -> key(activeDocument.path) {
                     Row(Modifier.fillMaxSize()) {
                         Box(Modifier.weight(1f).fillMaxHeight()) {
-                            NativeEditorView(controller, activeDocument)
+                            key(controller.grammarRevision) { NativeEditorView(controller, activeDocument) }
                             EditorOverlays(controller)
                         }
                         androidx.compose.material3.VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -136,7 +137,8 @@ fun EditorArea(controller: WorkbenchController, modifier: Modifier = Modifier) {
                         }
                     }
                 }
-                activeDocument != null -> key(activeDocument.path) { NativeEditorView(controller, activeDocument) }
+                // A grammar that arrives (or goes) makes the editor again with its colours.
+                activeDocument != null -> key(activeDocument.path, controller.grammarRevision) { NativeEditorView(controller, activeDocument) }
                 else -> EmptyEditor(controller)
             }
             val image = activeDocument?.binary == true
@@ -148,9 +150,33 @@ fun EditorArea(controller: WorkbenchController, modifier: Modifier = Modifier) {
     }
 }
 
+/** A file without colours whose language VS Code's built-in extensions cover: fetch them, later, or never. */
+@Composable
+private fun LanguagePackBanner(controller: WorkbenchController, pack: com.avfstudio.nativeide.assets.LanguagePack) {
+    val colors = MaterialTheme.colorScheme
+    val downloading = pack.id in controller.languagePackDownloads
+    Row(
+        Modifier.fillMaxWidth().background(colors.secondaryContainer).padding(start = 14.dp, end = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            if (downloading) "Downloading ${pack.languageName} colours…" else "Colour ${pack.languageName} files? Downloads VS Code's ${pack.languageName} grammar (${pack.id} ${pack.version}) from Open VSX.",
+            style = MaterialTheme.typography.bodySmall,
+            color = colors.onSecondaryContainer,
+            modifier = Modifier.weight(1f).padding(vertical = 6.dp),
+        )
+        if (!downloading) {
+            androidx.compose.material3.TextButton(onClick = { controller.installLanguagePack(pack) }) { Text("Download") }
+            androidx.compose.material3.TextButton(onClick = { controller.postponeLanguagePack(pack) }) { Text("Not now") }
+            androidx.compose.material3.TextButton(onClick = { controller.declineLanguagePack(pack) }) { Text("Never") }
+        }
+    }
+}
+
 /** What the pane draws over the code: inlay hints, Copilot's ghost text and parameter hints. */
 @Composable
 private fun EditorOverlays(controller: WorkbenchController) {
+    MergeConflictOverlay(controller)
     InlayHintsOverlay(controller)
     InlineGhostText(controller)
     ParameterHints(controller)
@@ -484,7 +510,7 @@ private fun NativeEditorView(controller: WorkbenchController, document: Document
                 val language = if (document.languageId in setOf("py", "pyi")) {
                     TextMateLanguage.create("source.python", true)
                 } else {
-                    AssetPackGrammarLoader.scopeNameForExtension(document.languageId)
+                    AssetPackGrammarLoader.scopeNameFor(document.path.substringAfterLast('/'))
                         ?.let { TextMateLanguage.create(it, true) }
                         ?: editorLanguage
                 }
@@ -666,6 +692,74 @@ private fun InlayHintsOverlay(controller: WorkbenchController) {
                         modifier = Modifier
                             .background(colors.surfaceContainerHighest.copy(alpha = 0.7f), RoundedCornerShape(4.dp))
                             .padding(horizontal = 4.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Git conflict blocks tinted as VS Code does (current changes green, incoming blue, the marker
+ * lines stronger), with Accept Current / Incoming / Both at the end of each `<<<<<<<` line.
+ */
+@Composable
+private fun MergeConflictOverlay(controller: WorkbenchController) {
+    controller.editorViewportTick
+    val conflicts = controller.activeConflicts()
+    if (conflicts.isEmpty()) return
+    val view = controller.soraEditor() ?: return
+    val density = LocalDensity.current
+    val colors = MaterialTheme.colorScheme
+    val rowHeight = view.rowHeight.toFloat()
+    val content = view.text
+    val current = androidx.compose.ui.graphics.Color(0xFF40C8AE)
+    val incoming = androidx.compose.ui.graphics.Color(0xFF40A6FF)
+    fun top(line: Int): Float = view.getCharOffsetY(line.coerceIn(0, content.lineCount - 1), 0) - rowHeight
+    Box(Modifier.fillMaxSize().clipToBounds()) {
+        conflicts.forEach { conflict ->
+            if (conflict.end < view.firstVisibleLine || conflict.start > view.lastVisibleLine || conflict.end >= content.lineCount) return@forEach
+            val currentEnd = (conflict.base ?: conflict.separator) - 1
+            listOf(
+                Triple(conflict.start, conflict.start, current.copy(alpha = 0.35f)),
+                Triple(conflict.start + 1, currentEnd, current.copy(alpha = 0.14f)),
+                Triple(conflict.separator + 1, conflict.end - 1, incoming.copy(alpha = 0.14f)),
+                Triple(conflict.end, conflict.end, incoming.copy(alpha = 0.35f)),
+            ).forEach { (first, last, tint) ->
+                if (last < first) return@forEach
+                val y = top(first)
+                val height = top(last) + rowHeight - y
+                Box(
+                    Modifier
+                        .offset { IntOffset(0, y.roundToInt()) }
+                        .fillMaxWidth()
+                        .height(with(density) { height.toDp() })
+                        .background(tint),
+                )
+            }
+            val x = view.getCharOffsetX(conflict.start, content.getColumnCount(conflict.start)) + with(density) { 16.dp.toPx() }
+            Row(
+                Modifier
+                    .offset { IntOffset(x.roundToInt(), top(conflict.start).roundToInt()) }
+                    .height(with(density) { rowHeight.toDp() }),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                listOf(
+                    "Accept Current" to ConflictChoice.Current,
+                    "Accept Incoming" to ConflictChoice.Incoming,
+                    "Accept Both" to ConflictChoice.Both,
+                ).forEach { (label, choice) ->
+                    Text(
+                        label,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = colors.onSurface,
+                        maxLines = 1,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(colors.surfaceContainerHighest.copy(alpha = 0.9f))
+                            .clickable { controller.resolveConflict(conflict, choice) }
+                            .padding(horizontal = 6.dp, vertical = 1.dp),
                     )
                 }
             }

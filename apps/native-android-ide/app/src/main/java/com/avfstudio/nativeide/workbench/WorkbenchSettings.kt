@@ -111,6 +111,14 @@ data class WorkbenchSettings(
     val svgAsImage: Boolean = true,
     /** A server starting in the guest is announced in the status bar (`remote.autoForwardPortsNotify`). */
     val portNotifications: Boolean = true,
+    /** Files without colours: offer their VS Code grammar from Open VSX, fetch it at once, or leave them plain. */
+    val languageDownloads: LanguageDownloads = LanguageDownloads.Ask,
+    /** Explorer colours and letters for changed files (`git.decorations.enabled`). */
+    val gitDecorations: Boolean = true,
+    /** Explorer colours and counts for files with problems (`problems.decorations.enabled`). */
+    val problemDecorations: Boolean = true,
+    /** The launcher's long-press menu lists the recent folders. */
+    val launcherShortcuts: Boolean = true,
 ) {
     companion object {
         const val THEME_MODE = "avf.theme.mode"
@@ -179,6 +187,10 @@ data class WorkbenchSettings(
         const val ENABLE_PREVIEW = "workbench.editor.enablePreview"
         const val SVG_AS_IMAGE = "avf.svg.openAsImage"
         const val PORT_NOTIFICATIONS = "remote.autoForwardPortsNotify"
+        const val LANGUAGE_DOWNLOADS = "avf.languages.download"
+        const val GIT_DECORATIONS = "git.decorations.enabled"
+        const val PROBLEM_DECORATIONS = "problems.decorations.enabled"
+        const val LAUNCHER_SHORTCUTS = "avf.launcher.recentFolders"
 
         fun from(settings: JsonObject): WorkbenchSettings {
             val defaults = WorkbenchSettings()
@@ -255,6 +267,10 @@ data class WorkbenchSettings(
                 enablePreview = bool(ENABLE_PREVIEW, defaults.enablePreview),
                 svgAsImage = bool(SVG_AS_IMAGE, defaults.svgAsImage),
                 portNotifications = bool(PORT_NOTIFICATIONS, defaults.portNotifications),
+                languageDownloads = LanguageDownloads.entries.firstOrNull { it.key == string(LANGUAGE_DOWNLOADS) } ?: defaults.languageDownloads,
+                gitDecorations = bool(GIT_DECORATIONS, defaults.gitDecorations),
+                problemDecorations = bool(PROBLEM_DECORATIONS, defaults.problemDecorations),
+                launcherShortcuts = bool(LAUNCHER_SHORTCUTS, defaults.launcherShortcuts),
             )
         }
     }
@@ -284,6 +300,13 @@ enum class PythonTypeChecking(val key: String, val label: String, val basedpyrig
     Default("default", "Default", null, null),
     Off("off", "Off", "off", "ignore"),
     Strict("strict", "Strict", "strict", "error"),
+}
+
+/** `avf.languages.download`: what happens when a file's language has no colours yet. */
+enum class LanguageDownloads(val key: String, val label: String) {
+    Ask("ask", "Ask"),
+    Always("always", "Always"),
+    Never("never", "Never"),
 }
 
 /** VS Code's `files.autoSave` values. */

@@ -66,6 +66,13 @@ object EditorCommands {
         command("markdown.showPreview", "Markdown: Open Preview", "Ctrl+Shift+V"),
         command("markdown.showPreviewToSide", "Markdown: Open Preview to the Side", "Ctrl+K V"),
         command("workbench.action.openSettings", "Open Settings", "Ctrl+,"),
+        command("merge-conflict.accept.current", "Merge Conflict: Accept Current", ""),
+        command("merge-conflict.accept.incoming", "Merge Conflict: Accept Incoming", ""),
+        command("merge-conflict.accept.both", "Merge Conflict: Accept Both", ""),
+        command("merge-conflict.accept.all-current", "Merge Conflict: Accept All Current", ""),
+        command("merge-conflict.accept.all-incoming", "Merge Conflict: Accept All Incoming", ""),
+        command("merge-conflict.next", "Merge Conflict: Next Conflict", ""),
+        command("merge-conflict.previous", "Merge Conflict: Previous Conflict", ""),
     )
 
     val copilot: List<EditorCommand> = listOf(
@@ -82,6 +89,7 @@ object EditorCommands {
     val workbench: List<EditorCommand> = listOf(
         command("workbench.action.terminal.toggleTerminal", "Toggle Terminal", "Ctrl+`"),
         command("workbench.action.terminal.new", "New Terminal", "Ctrl+Shift+`"),
+        command("workbench.action.terminal.openDetectedLink", "Terminal: Open Detected Link...", ""),
         command("workbench.action.toggleSidebarVisibility", "Toggle Primary Side Bar", "Ctrl+B"),
         command("workbench.action.togglePanel", "Toggle Panel", "Ctrl+J"),
         command("workbench.view.explorer", "Show Explorer", "Ctrl+Shift+E"),
@@ -142,6 +150,11 @@ object EditorCommands {
         command("workbench.action.files.openLocalFile", "File: Open File from Device...", ""),
     )
 
+    /** Keys a terminal takes before the workbench (VS Code's terminal find); Ctrl+F reaches the shell elsewhere. */
+    val terminal: List<EditorCommand> = listOf(
+        command("workbench.action.terminal.focusFind", "Terminal: Find", "Ctrl+F"),
+    )
+
     /** Jupyter-style cell keys; honoured while a notebook is the active editor. */
     val notebook: List<EditorCommand> = listOf(
         command("notebook.cell.executeAndSelectBelow", "Notebook: Run Cell and Select Below", "Shift+Enter"),
@@ -152,7 +165,7 @@ object EditorCommands {
         command("notebook.focusNextEditor", "Notebook: Focus Next Cell", "Ctrl+Down"),
     )
 
-    val all: List<EditorCommand> get() = core + language + copilot + workbench + notebook
+    val all: List<EditorCommand> get() = core + language + copilot + workbench + notebook + terminal
 
     private val globalIds = setOf(
         "workbench.action.files.save",

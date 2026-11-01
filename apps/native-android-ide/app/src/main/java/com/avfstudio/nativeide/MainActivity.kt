@@ -61,6 +61,13 @@ class MainActivity : ComponentActivity() {
         }
         root.addView(ComposeView(this).apply { setContent { NativeWorkbench() } })
         setContentView(root)
+        // A restored activity already handled the intent it started with.
+        if (savedInstanceState == null) com.avfstudio.nativeide.workbench.IntentRouter.deliver(intent)
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        com.avfstudio.nativeide.workbench.IntentRouter.deliver(intent)
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean =

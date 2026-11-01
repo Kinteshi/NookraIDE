@@ -1220,6 +1220,67 @@ User's pick: 12 of the list after batch 25.
   `extra = 7` ran as [3] (the silent looks took no counts) and `extra` appeared.
 * Test file `~/Projects/batch25.ipynb` stays. 211 tests pass (new: KernelVariablesTest).
 
+## 27. Syntax colours on demand, replace in files, Explorer marks, conflicts and side-by-side diff, terminal find and links, coloured outputs, launcher shortcuts and Open with (10-31 21:40–22:20; done, checked)
+User's pick: 1, 6, 7, 8, 9, 10 and 14 of the list after batch 26 (port 39891).
+* Syntax colours on demand (`avf.languages.download`: ask, always, never; Settings → Languages):
+  a file with no grammar whose type one of VS Code's 46 built-in language extensions covers
+  (SQL, Rust, Go, YAML, shell, C/C++, Dockerfile, Makefile…) gets a bar above the editor:
+  Download, Not now, Never. The pack comes from Open VSX (`vscode` namespace, 1.95.3, 10–60
+  KB), pinned by version and SHA-256 in the app (`assets/LanguagePacks.kt`, generated from
+  open-vsx.org on 10-31), installed with the existing .vsix installer, and the open editors are
+  made again with the colours. Exact names (Dockerfile, Makefile) now count as well as
+  extensions. Settings lists the installed ones (Remove) and "Get colours for a language…" picks
+  any pack. Checked: batch27.sql offered "vscode.sql 1.95.3", downloaded and was coloured.
+* Replace across files (Search's chevron opens a replace field): each match previews the old
+  text struck through and the new beside it; a button per match, per file, and Replace All
+  (asks first with the count). Regex replacements take `$1`, `${name}`, `$0`/`$&`. Matching is
+  per line, like ripgrep. Open files change in their editor and stay unsaved; closed files are
+  read, changed and saved (a conflict leaves them alone and says so). Checked: one match, then
+  Replace All (case-insensitive) in a closed file, confirmed with `cat`.
+  * Found while checking (from batch 9): search columns were one to the right. The daemon sends
+    ripgrep's 1-based column and the app took it as 0-based, so highlights were shifted and a
+    tapped result landed one column late. Fixed in the codec; the protocol field is documented.
+* Explorer marks (`git.decorations.enabled`, `problems.decorations.enabled`, both on): changed
+  files in VS Code's Git colours with their letter (M, U, A, D, R, ! for a conflict), files with
+  problems in red/yellow with their count, and folders take the most important colour below
+  them with a dot. Git status refreshes when Explorer opens and with its refresh button.
+  Checked: untracked files green with U, data/ and django_example/ with a dot, batch27_err.py
+  yellow with 1.
+* Merge conflicts: each conflict is tinted as in VS Code (current green, incoming blue, markers
+  stronger) with Accept Current / Incoming / Both on the `<<<<<<<` line; commands for the one at
+  the cursor, all current/incoming, next/previous. A conflicted file in Source Control opens in
+  the editor. Checked: Accept Incoming then Accept Both on batch27_conflict.py ("No conflicts
+  left …; save it and stage it").
+* Side-by-side diff in Source Control's diff dialog (default where the screen is ≥ 700 dp wide;
+  Inline beside it): old left, new right, line numbers, a changed line's changed part marked.
+  Checked on a throwaway repository (created in ~/Projects/b27repo and removed afterwards).
+* Terminal: Ctrl+F in a terminal (and a search button) opens a find bar that lists the matching
+  lines of its output, matches marked, following new output; a tap opens a link in the line
+  (else copies it). "Terminal: Open Detected Link…" (link button) lists web addresses and
+  file:line references (Python frames, `path:12:5`) newest first; files open at their line
+  (relative ones from the workspace). Web addresses in the terminal were already tappable
+  (the library's own detection). The library can't scroll its view to a line, so find lists
+  the lines instead of jumping. Each terminal keeps a plain-text copy of its output for this
+  (up to 10,000 lines). Checked with batch27_err.py's output: 4 links, frame :10 opened at line
+  10, `batch27_words.txt:2:5` at Ln 2, Col 5.
+  * Found while checking (from batch 12): jumping into a file that wasn't open yet ran before
+    its text was in the editor; a column then crashed the app (sora throws past a line's end).
+    The jump now waits for the text, and the editor clamps positions it is given.
+* Notebook outputs keep their ANSI colours (16, 256 and RGB, bold, italic, underline, inverse;
+  the terminal's palette) instead of stripping them, so IPython tracebacks look as in VS Code.
+  Traceback references are links: `Cell In[2], line 4` selects that cell, `File ~/x.py:12` and
+  `File "x.py", line 12` open the file at the line. Checked with batch27.ipynb.
+* Launcher shortcuts (`avf.launcher.recentFolders`, on): long-pressing the app icon lists the
+  last four folders; one opens that folder (now, or once the guest connects). "Open with": text
+  and code files (text/*, JSON, JS/TS, XML, YAML, TOML, shell, Python, SQL, ipynb) from other
+  apps open as device files (saved back when the app granted write). The activity is
+  singleTask now, so these reuse the open window. Checked: the shortcuts registered, the
+  OPEN_FOLDER intent switched the workspace, and a VIEW intent for Downloads/device24.txt
+  opened it.
+* Test files `~/Projects/batch27.{sql,ipynb}`, `batch27_conflict.py` (resolved),
+  `batch27_err.py`, `batch27_words.txt` stay. 227 tests pass (new: LanguagePacksTest,
+  SearchReplaceTest, DiffModelsTest, ExplorerDecorationsTest, TerminalTextTest, AnsiTextTest).
+
 ## Next pass (registered 10-27 23:35, updated 10-28 13:06)
 * Batch 15 did the carried-over tests (Copilot signed out, the setup paths, reconnect cap,
   Copilot model list, prompt prefix). Left over:
@@ -1288,7 +1349,7 @@ To investigate (user, 10-28):
   copilot-language-server offers it over LSP (open-source editor plugins use a
   `textDocument/copilotInlineEdit` request) and what the account allows. It needs a diff
   decoration in sora, and a setting (on by default when Copilot is signed in). Likely M-L.
-* Syntax colours on demand for more languages (user, 10-31): opening a SQL file (or Rust, Go,
+* (Done in batch 27.) Syntax colours on demand for more languages (user, 10-31): opening a SQL file (or Rust, Go,
   TOML, …) should colour it. Today only Python's grammar ships with the app; other files are
   coloured only if a .vsix with their grammar was imported by hand (Settings → Import VS Code
   theme takes .vsix files and loads the TextMate grammars in them). First look: Open VSX
@@ -1342,22 +1403,22 @@ Not picked yet. Effort: S about half a day, M about a day, L several days.
   9. (Done in batch 25.) Image viewer for image files (zoom, pan; SVG too). S-M.
   10. (Done in batch 24; not checked by touch.) Pinch to zoom the editor font, persisted. S.
 * Workbench:
-  11. Replace across files in Search, with a preview and per-match accept. M.
-  12. Explorer decorations: Git status colours and problem badges on files and folders. S-M.
+  11. (Done in batch 27.) Replace across files in Search, with a preview and per-match accept. M.
+  12. (Done in batch 27.) Explorer decorations: Git status colours and problem badges on files and folders. S-M.
   13. (Done in batch 25.) Tabs: preview tabs (a single tap opens a replaceable tab) and pinning. S-M.
-  14. Git: a merge-conflict helper (accept current/incoming/both on conflict markers) and a
+  14. (Done in batch 27.) Git: a merge-conflict helper (accept current/incoming/both on conflict markers) and a
       side-by-side diff. M-L.
   15. (Done in batch 25.) Ports view: the daemon's detected listening ports, opened in the browser. M.
-  16. Terminal: links (file:line opens in the editor, URLs in the browser) and find in
+  16. (Done in batch 27; find lists lines, the library can't scroll to them.) Terminal: links (file:line opens in the editor, URLs in the browser) and find in
       scrollback. M.
 * Notebooks (spec 5.9):
-  17. ANSI colours in outputs (they are stripped today) and clickable traceback lines. S-M.
+  17. (Done in batch 27.) ANSI colours in outputs (they are stripped today) and clickable traceback lines. S-M.
   18. More output types: `image/svg+xml`, `application/json` as a tree, `text/latex` (KaTeX). M.
   19. Cell reordering by drag, and undo for a deleted cell. M.
   20. (Done in batch 26.) Variable explorer (`%whos`-style, opening DataFrames in the native table). L.
   21. Interactive window: run `# %%` cells of a `.py` file in a kernel. L.
 * Device and quality (spec 10, 11):
-  22. Launcher shortcuts for recent folders, and "Open with" for code files from other apps. S-M.
+  22. (Done in batch 27.) Launcher shortcuts for recent folders, and "Open with" for code files from other apps. S-M.
   23. Touch modifier bar (Ctrl, Alt, Tab, Esc, arrows) above the soft keyboard. M.
   24. Measure the spec's budgets on the tablet (cold start, RSS, keystroke latency, a
       200-cell notebook). S-M.

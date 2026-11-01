@@ -38,6 +38,9 @@ import com.avfstudio.nativeide.language.parseInlayHints
 import com.avfstudio.nativeide.ai.parseDeviceCodePrompt
 import com.avfstudio.nativeide.assets.AssetPackGrammarLoader
 import com.avfstudio.nativeide.assets.AssetPackInstaller
+import com.avfstudio.nativeide.assets.LANGUAGE_PACKS
+import com.avfstudio.nativeide.assets.LanguagePack
+import com.avfstudio.nativeide.assets.languagePackFor
 import com.avfstudio.nativeide.assets.ImportedTheme
 import com.avfstudio.nativeide.assets.InstalledAssetPack
 import com.avfstudio.nativeide.assets.VsCodeThemeImporter
@@ -143,6 +146,10 @@ private const val SESSION_UNTITLED_KEY = "session-untitled"
 /** Device files open at the last stop, read again through their content URI. */
 private const val SESSION_DEVICE_KEY = "session-device"
 private const val KEYBINDINGS_KEY = "user-keybindings"
+private const val LANGUAGES_DECLINED_KEY = "languages-declined"
+/** Built-in language packs are 10-60 KB; anything far bigger isn't one. */
+private const val MAX_LANGUAGE_PACK_BYTES = 4 * 1024 * 1024
+private val languagePackHttp by lazy { okhttp3.OkHttpClient() }
 /** Rows the data viewer asks the kernel for. */
 private const val DATA_VIEWER_ROWS = 1000
 /** The native daemon's default port; hidden in Ports with the connection's own. */
@@ -233,6 +240,8 @@ class WorkbenchController(private val context: Context) {
     private var globalDispatcher = EditorKeybindingDispatcher(applyKeybindings(EditorCommands.global, keybindingRules))
     private var notebookDispatcher =
         EditorKeybindingDispatcher(applyKeybindings(EditorCommands.global + EditorCommands.notebook, keybindingRules))
+    private var terminalDispatcher =
+        EditorKeybindingDispatcher(applyKeybindings(EditorCommands.terminal + EditorCommands.global, keybindingRules))
     private val consumedKeyDowns = mutableSetOf<Int>()
     private var lastHandledKey: Pair<Long, Int>? = null
     private val scheduledDraftWrites = mutableMapOf<String, ScheduledFuture<*>>()
@@ -470,6 +479,7 @@ class WorkbenchController(private val context: Context) {
         // workspace connects (restoreSession). Nothing opens by default: the empty editor offers
         // folders and files.
         recentWorkspaces = loadRecentWorkspaces()
+        refreshLauncherShortcuts()
         restoreUntitledFiles()
         if (settings.chatAgent != ChatAgentKind.Copilot) {
             chatAgent = AcpClient(vfs, settings.chatAgent.tool)
@@ -652,6 +662,7 @@ class WorkbenchController(private val context: Context) {
         if (settings.typescriptLanguageServer != previousTypescriptServer) restartLanguageServer("typescript")
         if (settings.chatAgent != chatAgentKind) switchChatAgent(settings.chatAgent)
         if (settings.inlayHints != previousInlayHints) activePath?.let { scheduleInlayHints(it, delayMs = 0) }
+        refreshLauncherShortcuts()
     }
 
     /**
@@ -947,6 +958,100 @@ class WorkbenchController(private val context: Context) {
         if (requestId == null) {
             searchRunning = false
             searchSummary = "Connect to a guest to search"
+        }
+    }
+
+    /** Search's replace field (VS Code's toggle beside the search box) and its text. */
+    var searchReplaceVisible by mutableStateOf(false)
+    var searchReplace by mutableStateOf("")
+    var replacing by mutableStateOf(false)
+        private set
+
+    private val searchPattern: SearchPattern
+        get() = SearchPattern(searchText, searchRegex, searchCaseSensitive, searchWholeWord)
+
+    /** What a match would become with the current replace text, for its preview; null without one. */
+    fun replacementPreviewFor(match: SearchEvent.Match): String? =
+        if (!searchReplaceVisible) null else replacementPreview(match.preview.trimEnd('\n', '\r'), match.column, searchPattern, searchReplace)
+
+    fun replaceSearchMatch(file: SearchFileResult, match: SearchEvent.Match) =
+        replaceInFiles(mapOf(file.path to setOf(MatchPosition(match.line, match.column))))
+
+    fun replaceInSearchFile(file: SearchFileResult) = replaceInFiles(mapOf(file.path to null))
+
+    /** Replace All asks first, with the count, as VS Code does. */
+    fun confirmReplaceAll() {
+        val total = searchResults.sumOf { it.matches.size }
+        if (total == 0) return
+        dialog = WorkbenchDialog.ConfirmReplaceAll(total, searchResults.size)
+    }
+
+    fun replaceAllSearchResults() {
+        dialog = null
+        replaceInFiles(searchResults.associate { it.path to null })
+    }
+
+    /**
+     * Replaces in each file: all matches (null) or only those positions. Open files change in
+     * their editor and stay unsaved, as in VS Code; closed ones are read, changed and saved (a
+     * file changed in the guest since is left alone and named). Search runs again afterwards.
+     */
+    private fun replaceInFiles(targets: Map<String, Set<MatchPosition>?>) {
+        if (replacing || targets.isEmpty()) return
+        val pattern = searchPattern
+        val replacement = searchReplace
+        if (runCatching { pattern.toRegex() }.isFailure) {
+            status = "The search pattern isn't a valid regular expression here"
+            return
+        }
+        var replaced = 0
+        val closed = mutableListOf<Pair<String, Set<MatchPosition>?>>()
+        targets.forEach { (path, only) ->
+            val document = documents.firstOrNull { it.path == path }
+            if (document == null || document.binary) {
+                closed += path to only
+                return@forEach
+            }
+            val (text, count) = replaceMatches(document.text, pattern, replacement, only)
+            if (count == 0) return@forEach
+            replaced += count
+            document.updateText(text)
+            if (path == activePath) editorSurface?.setText(text) else notifyDocumentChanged(path, document.version, text)
+            onDocumentEdited(document)
+        }
+        if (closed.isEmpty()) {
+            status = "Replaced $replaced occurrence${if (replaced == 1) "" else "s"}; open files are unsaved"
+            runSearch()
+            return
+        }
+        replacing = true
+        status = "Replacing…"
+        val failures = java.util.concurrent.ConcurrentLinkedQueue<String>()
+        val counts = java.util.concurrent.atomic.AtomicInteger(replaced)
+        val work = closed.map { (path, only) ->
+            repository.open(path).thenCompose { opened ->
+                val document = (opened as? OpenDocument.Editable)?.document
+                    ?: return@thenCompose CompletableFuture.completedFuture<Unit>(Unit).also { failures += "${path.substringAfterLast('/')} (too large)" }
+                val (text, count) = replaceMatches(document.text, pattern, replacement, only)
+                if (count == 0) return@thenCompose CompletableFuture.completedFuture(Unit)
+                document.updateText(text)
+                repository.save(document).thenApply { result ->
+                    if (result is SaveResult.Saved) counts.addAndGet(count) else failures += path.substringAfterLast('/')
+                    Unit
+                }
+            }.exceptionally { error ->
+                failures += "${path.substringAfterLast('/')} (${error.cause?.message ?: error.message})"
+                Unit
+            }
+        }
+        CompletableFuture.allOf(*work.toTypedArray()).whenComplete { _, _ ->
+            post {
+                replacing = false
+                val total = counts.get()
+                status = "Replaced $total occurrence${if (total == 1) "" else "s"}" +
+                    if (failures.isEmpty()) "" else "; not changed: ${failures.joinToString(", ")}"
+                runSearch()
+            }
         }
     }
 
@@ -1511,6 +1616,86 @@ class WorkbenchController(private val context: Context) {
         }
     }
 
+    // Merge conflicts ---------------------------------------------------------------------------
+
+    /** The conflicts Git left in the active file, for the editor's actions over them. */
+    fun activeConflicts(): List<MergeConflict> {
+        documentRevision
+        val document = activeDocument?.takeUnless { it.binary } ?: return emptyList()
+        if ("<<<<<<<" !in document.text) return emptyList()
+        return findConflicts(document.text)
+    }
+
+    /** Accept Current, Incoming or Both for one conflict (VS Code's actions above it). */
+    fun resolveConflict(conflict: MergeConflict, choice: ConflictChoice) = resolveConflicts(listOf(conflict), choice)
+
+    /** For all conflicts in the file ("Accept All Current/Incoming/Both"). */
+    fun resolveAllConflicts(choice: ConflictChoice) = resolveConflicts(activeConflicts(), choice)
+
+    private fun resolveConflicts(conflicts: List<MergeConflict>, choice: ConflictChoice) {
+        val document = activeDocument ?: return
+        if (conflicts.isEmpty()) {
+            status = "No merge conflicts in ${document.path.substringAfterLast('/')}"
+            return
+        }
+        val lines = document.text.split('\n')
+        val edits = conflicts.map { conflict ->
+            val replacement = conflictResolution(document.text, conflict, choice)
+            if (conflict.end + 1 < lines.size) {
+                LspTextEdit(LspRange(LspPosition(conflict.start, 0), LspPosition(conflict.end + 1, 0)), replacement.joinToString("") { "$it\n" })
+            } else {
+                LspTextEdit(LspRange(LspPosition(conflict.start, 0), LspPosition(conflict.end, lines[conflict.end].length)), replacement.joinToString("\n"))
+            }
+        }
+        if (editorHost.isOpen(document.path)) {
+            editorHost.applyEdits(document.path, edits)
+        } else {
+            document.updateText(applyLspTextEdits(document.text, edits))
+            onDocumentEdited(document)
+        }
+        documentRevision++
+        val left = findConflicts(document.text).size
+        status = if (left == 0) {
+            "No conflicts left in ${document.path.substringAfterLast('/')}; save it and stage it in Source Control to mark it resolved"
+        } else {
+            "$left conflict${if (left == 1) "" else "s"} left"
+        }
+    }
+
+    /** Moves the cursor to the next (or previous) conflict, wrapping around. */
+    fun goToConflict(forward: Boolean) {
+        val conflicts = activeConflicts()
+        val surface = editorSurface
+        if (conflicts.isEmpty() || surface == null) {
+            status = "No merge conflicts in this file"
+            return
+        }
+        val line = cursorPosition?.line ?: 0
+        val target = if (forward) conflicts.firstOrNull { it.start > line } ?: conflicts.first()
+        else conflicts.lastOrNull { it.start < line } ?: conflicts.last()
+        surface.moveCursor(LspPosition(target.start, 0))
+    }
+
+    /**
+     * Explorer's marks by absolute path: Git state (`git.decorations.enabled`) and problems
+     * (`problems.decorations.enabled`) on files, and the most important of them on folders.
+     */
+    val explorerMarks: Map<String, FileDecoration> by derivedStateOf {
+        val root = workspaceRoot ?: return@derivedStateOf emptyMap()
+        val problems = HashMap<String, Pair<Int, Int>>()
+        if (settings.problemDecorations) {
+            diagnostics.forEach { diagnostic ->
+                val path = runCatching { java.net.URI(diagnostic.uri).path }.getOrNull() ?: return@forEach
+                val (errors, warnings) = problems[path] ?: (0 to 0)
+                when (diagnostic.severity ?: 1) {
+                    1 -> problems[path] = errors + 1 to warnings
+                    2 -> problems[path] = errors to warnings + 1
+                }
+            }
+        }
+        explorerDecorations(root, gitStatus?.entries.orEmpty(), problems, settings.gitDecorations, settings.problemDecorations)
+    }
+
     fun refreshGitStatus() = runGit(null, GitOperation.Status) { result ->
         gitStatus = result as? GitResult.Status
         gitNotARepository = false
@@ -1563,7 +1748,8 @@ class WorkbenchController(private val context: Context) {
     }
 
     fun showGitDiff(entry: GitStatusEntry, staged: Boolean) {
-        if (entry.status == GitFileStatus.Untracked) {
+        // A conflicted file opens in the editor, where each conflict has its Accept actions.
+        if (entry.status == GitFileStatus.Untracked || entry.status == GitFileStatus.Conflicted) {
             workspaceRoot?.let { openPath("${it.trimEnd('/')}/${entry.path}") }
             return
         }
@@ -2003,11 +2189,41 @@ class WorkbenchController(private val context: Context) {
     private fun rememberWorkspace(path: String) {
         recentWorkspaces = (listOf(path) + recentWorkspaces.filterNot { it == path }).take(RECENT_WORKSPACES_LIMIT)
         preferences.edit().putString(RECENT_WORKSPACES_KEY, com.google.gson.Gson().toJson(recentWorkspaces)).apply()
+        refreshLauncherShortcuts()
     }
 
     fun forgetRecentWorkspace(path: String) {
         recentWorkspaces = recentWorkspaces.filterNot { it == path }
         preferences.edit().putString(RECENT_WORKSPACES_KEY, com.google.gson.Gson().toJson(recentWorkspaces)).apply()
+        refreshLauncherShortcuts()
+    }
+
+    /** The launcher's shortcuts follow the recent folders (`avf.launcher.recentFolders`). */
+    private fun refreshLauncherShortcuts() {
+        val folders = if (settings.launcherShortcuts) recentWorkspaces else emptyList()
+        io.execute { updateLauncherShortcuts(context, folders) }
+    }
+
+    /** An intent from [IntentRouter]: "Open with" from another app, or a recent-folder shortcut. */
+    fun handleIntent(intent: android.content.Intent) {
+        when (intent.action) {
+            IntentRouter.ACTION_OPEN_FOLDER -> intent.getStringExtra(IntentRouter.EXTRA_FOLDER)?.let(::openFolderFromLauncher)
+            android.content.Intent.ACTION_VIEW, android.content.Intent.ACTION_EDIT -> {
+                val uri = intent.data?.takeIf { it.scheme == "content" } ?: return
+                openDeviceFile(uri)
+                compactDestination = CompactDestination.Editor
+            }
+        }
+    }
+
+    /** A launcher shortcut's folder: opened now, or first once the guest connects. */
+    private fun openFolderFromLauncher(path: String) {
+        if (connected) {
+            openWorkspace(path)
+        } else {
+            rememberWorkspace(path)
+            status = "Opening ${path.substringAfterLast('/')} when the guest connects"
+        }
     }
 
     /** The folder to open on connecting: the last one, if this guest still has it, else its first root. */
@@ -2302,6 +2518,7 @@ class WorkbenchController(private val context: Context) {
                 if (existing == null && isSvgPath(session.path) && settings.svgAsImage) markdownPreviews[session.path] = MarkdownPreviewMode.Only
                 selectDocument(session.path)
                 status = if (session.conflict != null) "Remote changes detected; choose how to resolve" else "Opened ${session.path.substringAfterLast('/')}"
+                fetchLanguagePackIfWanted(session.path)
                 notifyDocumentOpened(session)
                 ensureLanguageServers(session.path)
                 if (lspLanguageId(session.path) != null) refreshOutline(session)
@@ -2900,7 +3117,8 @@ class WorkbenchController(private val context: Context) {
         val newlyBound = editorSurface !== surface
         editorSurface = surface
         val target = pendingNavigation
-        if (target != null && target.path == activePath) {
+        // The view is made empty and gets its text right after; a jump waits for the text.
+        if (target != null && target.path == activePath && surface.text == activeDocument?.text) {
             surface.moveCursor(LspPosition(target.line, target.character))
             pendingNavigation = null
         }
@@ -4780,7 +4998,10 @@ class WorkbenchController(private val context: Context) {
 
     private fun onPtyEvent(session: TerminalSession, event: PtyEvent, initialCommand: String?) {
         when (event) {
-            is PtyEvent.Output -> session.emulator.writeInput(event.data, 0, event.data.size)
+            is PtyEvent.Output -> {
+                session.emulator.writeInput(event.data, 0, event.data.size)
+                session.textLog.append(event.data)
+            }
             is PtyEvent.Spawned -> if (initialCommand != null) {
                 timer.schedule({ vfs.ptyInput(session.id, "$initialCommand\r".toByteArray()) }, 400, TimeUnit.MILLISECONDS)
             }
@@ -4805,6 +5026,127 @@ class WorkbenchController(private val context: Context) {
         session.emulator.writeInput("\r\n[this terminal ended when the guest daemon restarted; open a new one with +]\r\n".toByteArray())
     }
 
+    // Terminal find and links ---------------------------------------------------------------------
+
+    /** The terminal panel's find bar (Ctrl+F in a terminal, as in VS Code). */
+    var terminalFindVisible by mutableStateOf(false)
+    var terminalFindQuery by mutableStateOf("")
+    var terminalFindCaseSensitive by mutableStateOf(false)
+    /** Bumped to put the keyboard in the find field. */
+    var terminalFindFocus by mutableIntStateOf(0)
+        private set
+
+    fun showTerminalFind() {
+        panelVisible = true
+        panelTab = PanelTab.Terminal
+        compactDestination = CompactDestination.Terminal
+        terminalFindVisible = true
+        terminalFindFocus++
+    }
+
+    /** The active terminal's lines that have the find text (the view re-reads as output arrives). */
+    fun terminalMatches(): List<TerminalMatch> {
+        val session = activeTerminal ?: return emptyList()
+        return findInTerminal(session.textLog.snapshot(), terminalFindQuery, terminalFindCaseSensitive)
+    }
+
+    /**
+     * A traceback reference in a notebook output: `Cell In[3], line 5` selects the cell that ran
+     * as [3] (its line is named in the status bar); a file opens at its line.
+     */
+    fun openTracebackTarget(session: NotebookSession, target: TracebackTarget) {
+        when (target) {
+            is TracebackTarget.Cell -> {
+                val cell = session.notebook.cells.firstOrNull { it.executionCount == target.executionCount }
+                if (cell == null) {
+                    status = "No cell ran as [${target.executionCount}] since the kernel started; it may have run again"
+                    return
+                }
+                session.selectedCell = cell.id
+                session.caretAtEnd = false
+                session.focusRequest++
+                status = "Cell [${target.executionCount}], line ${target.line}"
+            }
+            is TracebackTarget.File -> {
+                val root = workspaceRoot?.trimEnd('/') ?: return
+                openGuestFileAt(guestPath(target.path, root), target.line, null)
+            }
+        }
+    }
+
+    /** A tapped find result: its first link opens; a line without one is copied. */
+    fun openTerminalLine(text: String) {
+        val link = detectTerminalLinks(listOf(text)).firstOrNull()
+        if (link != null) {
+            openTerminalLink(link)
+        } else {
+            context.getSystemService(ClipboardManager::class.java)?.setPrimaryClip(ClipData.newPlainText("Terminal line", text))
+            status = "Copied the line"
+        }
+    }
+
+    /** Terminal: Open Detected Link…: the web addresses and file:line references in the terminal's output. */
+    fun showTerminalLinks() {
+        val session = activeTerminal
+        if (session == null) {
+            status = "Open a terminal first"
+            return
+        }
+        val links = detectTerminalLinks(session.textLog.snapshot())
+        if (links.isEmpty()) {
+            status = "No links or file:line references in this terminal's output"
+            return
+        }
+        commandFilter = ""
+        dialog = WorkbenchDialog.TerminalLinks(links)
+    }
+
+    /**
+     * Opens a link from the terminal: a web address in the browser; a file (relative ones from
+     * the workspace folder, where terminals start) at its line, once the guest confirms it exists.
+     */
+    fun openTerminalLink(link: TerminalLink) {
+        dialog = null
+        when (link) {
+            is TerminalLink.Web -> openLink(link.url)
+            is TerminalLink.File -> {
+                val root = workspaceRoot?.trimEnd('/') ?: return
+                openGuestFileAt(guestPath(link.path, root), link.line, link.column)
+            }
+        }
+    }
+
+    /** The guest user's home, from the workspace path (/home/<user>/…). */
+    private fun guestHome(root: String): String =
+        Regex("^/home/[^/]+").find(root)?.value ?: root
+
+    /** An absolute guest path for [path]: as is, `~/` from the home, else from [base]. */
+    private fun guestPath(path: String, base: String): String = when {
+        path.startsWith("/") -> path
+        path == "~" || path.startsWith("~/") -> guestHome(base) + path.removePrefix("~")
+        else -> java.io.File(base, path).normalize().path
+    }
+
+    /** Opens [path] at [line] and [column] (1-based) once the guest says it is a file. */
+    private fun openGuestFileAt(path: String, line: Int?, column: Int?) {
+        vfs.stat(path).whenComplete { entry, error ->
+            post {
+                if (error != null || entry.isDirectory) {
+                    status = "No file at $path"
+                    return@post
+                }
+                val position = JsonObject().apply {
+                    addProperty("line", ((line ?: 1) - 1).coerceAtLeast(0))
+                    addProperty("character", ((column ?: 1) - 1).coerceAtLeast(0))
+                }
+                navigateToLocation(LanguageLocation(java.net.URI("file", "", path, null).toASCIIString(), JsonObject().apply {
+                    add("start", position)
+                    add("end", position)
+                }))
+            }
+        }
+    }
+
     /** Reconnects the panel to shells the guest kept running, including ones from an earlier app session. */
     private fun reattachTerminals() {
         vfs.guestPtySessions.forEach { info ->
@@ -4812,6 +5154,8 @@ class WorkbenchController(private val context: Context) {
                 ?: createTerminalSession(info.sessionId, info.cwd.substringAfterLast('/').ifEmpty { "bash" })
                     .also(terminals::add)
             session.emulator.clearScreen()
+            // The replay sends the scrollback again; the text copy starts over with it.
+            session.textLog.clear()
             session.replayUntil = SystemClock.uptimeMillis() + TERMINAL_REPLAY_WINDOW_MS
             vfs.addPtyListener(session.id) { event -> onPtyEvent(session, event, null) }
             vfs.ptyReattach(session.id)
@@ -5468,6 +5812,117 @@ class WorkbenchController(private val context: Context) {
 
     // Asset packs and themes ------------------------------------------------------------------
 
+    // Language packs (syntax colours on demand) -------------------------------------------------
+
+    /** Bumped when a grammar arrives or goes, so open editors are made again with it. */
+    var grammarRevision by mutableIntStateOf(0)
+        private set
+    /** Packs being downloaded, by id. */
+    val languagePackDownloads = mutableStateListOf<String>()
+    /** File types the user said "Not now" to in this session. */
+    private val languagePacksPostponed = mutableStateListOf<String>()
+    private var languagePacksDeclined by mutableStateOf(preferences.getStringSet(LANGUAGES_DECLINED_KEY, emptySet()).orEmpty())
+
+    private val packsDirectory: File get() = File(context.filesDir, "asset-packs")
+
+    /** Whether some grammar colours [path] (Python's built in, or an installed pack's). */
+    fun hasGrammar(path: String): Boolean {
+        val name = path.substringAfterLast('/')
+        return name.substringAfterLast('.', "").lowercase() in setOf("py", "pyi") || AssetPackGrammarLoader.scopeNameFor(name) != null
+    }
+
+    /**
+     * The pack the editor offers for the active file: a text file with no grammar whose type a
+     * VS Code built-in extension colours, unless the user turned the offer down
+     * (`avf.languages.download`: ask, always, never).
+     */
+    val languagePackOffer: LanguagePack?
+        get() {
+            grammarRevision
+            val document = activeDocument?.takeUnless { it.binary || activeNotebook != null } ?: return null
+            if (settings.languageDownloads != LanguageDownloads.Ask || hasGrammar(document.path)) return null
+            val pack = languagePackFor(document.path.substringAfterLast('/')) ?: return null
+            return pack.takeUnless { it.id in languagePacksPostponed || it.id in languagePacksDeclined }
+        }
+
+    /** With `always`, a file without colours fetches its pack as soon as it opens. */
+    private fun fetchLanguagePackIfWanted(path: String) {
+        if (settings.languageDownloads != LanguageDownloads.Always || hasGrammar(path)) return
+        languagePackFor(path.substringAfterLast('/'))?.let(::installLanguagePack)
+    }
+
+    fun postponeLanguagePack(pack: LanguagePack) {
+        languagePacksPostponed += pack.id
+    }
+
+    fun declineLanguagePack(pack: LanguagePack) {
+        languagePacksDeclined = languagePacksDeclined + pack.id
+        preferences.edit().putStringSet(LANGUAGES_DECLINED_KEY, languagePacksDeclined).apply()
+        status = "${pack.languageName} files stay without colours; Settings → Languages can fetch them later"
+    }
+
+    /** Downloads [pack] from Open VSX, checks its pinned SHA-256, installs it, and colours open tabs. */
+    fun installLanguagePack(pack: LanguagePack) {
+        if (pack.id in languagePackDownloads) return
+        languagePackDownloads += pack.id
+        status = "Downloading ${pack.languageName} colours from Open VSX…"
+        io.execute {
+            val result = runCatching {
+                val directory = File(packsDirectory, pack.id)
+                if (!directory.isDirectory) {
+                    val request = okhttp3.Request.Builder().url(pack.downloadUrl).build()
+                    val bytes = languagePackHttp.newCall(request).execute().use { response ->
+                        if (!response.isSuccessful) throw IOException("Open VSX answered ${response.code}")
+                        val body = response.body ?: throw IOException("Open VSX sent nothing")
+                        if (body.contentLength() > MAX_LANGUAGE_PACK_BYTES) throw IOException("The pack is larger than expected")
+                        body.byteStream().use { input ->
+                            val output = java.io.ByteArrayOutputStream()
+                            val buffer = ByteArray(16 * 1024)
+                            while (output.size() <= MAX_LANGUAGE_PACK_BYTES) {
+                                val count = input.read(buffer)
+                                if (count < 0) break
+                                output.write(buffer, 0, count)
+                            }
+                            output.toByteArray()
+                        }
+                    }
+                    if (bytes.size > MAX_LANGUAGE_PACK_BYTES) throw IOException("The pack is larger than expected")
+                    val digest = java.security.MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+                    if (digest != pack.sha256) throw IOException("The download doesn't match the checksum MaterialCode expects")
+                    AssetPackInstaller(packsDirectory).install(bytes.inputStream())
+                }
+                AssetPackGrammarLoader.loadPack(directory)
+            }
+            post {
+                languagePackDownloads -= pack.id
+                result.onSuccess {
+                    grammarRevision++
+                    status = "${pack.languageName} files are coloured now"
+                }.onFailure { error ->
+                    status = "Couldn't get ${pack.languageName} colours: ${error.message ?: error.javaClass.simpleName}"
+                }
+            }
+        }
+    }
+
+    /** The language packs on this device (downloaded or imported .vsix files with grammars), for Settings. */
+    fun installedLanguagePacks(): List<Pair<String, String>> {
+        grammarRevision
+        return packsDirectory.listFiles()?.filter { File(it, "extension/package.json").isFile }?.mapNotNull { directory ->
+            val known = LANGUAGE_PACKS.firstOrNull { it.id == directory.name }
+            val manifest = runCatching { JsonParser.parseString(File(directory, "extension/package.json").readText()).asJsonObject }.getOrNull()
+            if (manifest?.getAsJsonObject("contributes")?.has("grammars") != true) return@mapNotNull null
+            directory.name to (known?.languageName ?: manifest.get("displayName")?.asString?.takeUnless { it.startsWith("%") } ?: directory.name)
+        }.orEmpty().sortedBy { it.second.lowercase() }
+    }
+
+    fun removeLanguagePack(id: String) {
+        AssetPackGrammarLoader.forgetPack(id)
+        File(packsDirectory, id).deleteRecursively()
+        grammarRevision++
+        status = "Removed $id; its files open without colours"
+    }
+
     fun installAssetPack(uri: Uri, mode: String) {
         status = "Installing asset pack…"
         io.execute {
@@ -5542,6 +5997,7 @@ class WorkbenchController(private val context: Context) {
         editorDispatcher = EditorKeybindingDispatcher(applyKeybindings(EditorCommands.all, rules))
         globalDispatcher = EditorKeybindingDispatcher(applyKeybindings(EditorCommands.global, rules))
         notebookDispatcher = EditorKeybindingDispatcher(applyKeybindings(EditorCommands.global + EditorCommands.notebook, rules))
+        terminalDispatcher = EditorKeybindingDispatcher(applyKeybindings(EditorCommands.terminal + EditorCommands.global, rules))
         return true
     }
 
@@ -5799,6 +6255,7 @@ class WorkbenchController(private val context: Context) {
         val dispatcher = when {
             focusArea == FocusArea.Editor -> editorDispatcher
             activeNotebook != null && focusArea in setOf(FocusArea.Notebook, FocusArea.Other) -> notebookDispatcher
+            focusArea == FocusArea.Terminal -> terminalDispatcher
             else -> globalDispatcher
         }
         val stroke = editorKeyStroke(
@@ -5898,6 +6355,22 @@ class WorkbenchController(private val context: Context) {
             }
             "workbench.action.openGlobalKeybindingsFile" -> openKeybindingsJson()
             "jupyter.showVariables" -> showVariables()
+            "workbench.action.terminal.focusFind" -> showTerminalFind()
+            "workbench.action.terminal.openDetectedLink" -> showTerminalLinks()
+            "merge-conflict.accept.current", "merge-conflict.accept.incoming", "merge-conflict.accept.both" -> {
+                val line = cursorPosition?.line ?: 0
+                val conflict = activeConflicts().firstOrNull { line in it.start..it.end }
+                val choice = when (commandId) {
+                    "merge-conflict.accept.current" -> ConflictChoice.Current
+                    "merge-conflict.accept.incoming" -> ConflictChoice.Incoming
+                    else -> ConflictChoice.Both
+                }
+                if (conflict == null) status = "Put the cursor in a conflict first" else resolveConflict(conflict, choice)
+            }
+            "merge-conflict.accept.all-current" -> resolveAllConflicts(ConflictChoice.Current)
+            "merge-conflict.accept.all-incoming" -> resolveAllConflicts(ConflictChoice.Incoming)
+            "merge-conflict.next" -> goToConflict(forward = true)
+            "merge-conflict.previous" -> goToConflict(forward = false)
             "ports.focus" -> {
                 panelVisible = true
                 panelTab = PanelTab.Ports

@@ -25,10 +25,11 @@ class SearchCodecTest {
 
     @Test
     fun convertsUtf8ByteColumnsToCharacters() {
-        // "ação = 1": "ação" is 6 UTF-8 bytes but 4 chars; the match "= 1" starts at byte 7.
-        val event = (MessagePackVfsCodec.decode(match("ação = 1", 7, 3)) as IncomingPacket.Search).event
+        // "ação = 1": "ação" is 6 UTF-8 bytes but 4 chars; the match "= 1" starts at byte 7
+        // (column 8: the daemon passes on ripgrep's 1-based column).
+        val event = (MessagePackVfsCodec.decode(match("ação = 1", 8, 3)) as IncomingPacket.Search).event
         assertEquals(SearchEvent.Match(7, "/w/a.py", 3, 5, 3, "ação = 1"), event)
-        val accented = (MessagePackVfsCodec.decode(match("x = ação", 4, 6)) as IncomingPacket.Search).event as SearchEvent.Match
+        val accented = (MessagePackVfsCodec.decode(match("x = ação", 5, 6)) as IncomingPacket.Search).event as SearchEvent.Match
         assertEquals(4, accented.column)
         assertEquals(4, accented.length)
     }

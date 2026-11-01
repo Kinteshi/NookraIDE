@@ -211,10 +211,11 @@ internal object MessagePackVfsCodec {
             val requestId = fields["req_id"]?.asLong() ?: -1L
             return when (variant.key.asString()) {
                 "Match" -> {
-                    // The daemon reports byte offsets into the UTF-8 line; convert them to chars.
+                    // The daemon reports ripgrep's 1-based byte column into the UTF-8 line; convert
+                    // it to a 0-based char offset.
                     val preview = fields.getValue("preview").asString()
                     val bytes = preview.toByteArray(Charsets.UTF_8)
-                    val startByte = fields.getValue("col").asLong().toInt().coerceIn(0, bytes.size)
+                    val startByte = (fields.getValue("col").asLong().toInt() - 1).coerceIn(0, bytes.size)
                     val endByte = (startByte + fields.getValue("len").asLong().toInt()).coerceIn(startByte, bytes.size)
                     val column = String(bytes, 0, startByte, Charsets.UTF_8).length
                     IncomingPacket.Search(

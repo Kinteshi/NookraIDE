@@ -70,6 +70,12 @@ sealed interface WorkbenchDialog {
     /** Keyboard Shortcuts waits for the keys to give [commandId]. */
     data class RecordKeybinding(val commandId: String) : WorkbenchDialog
     data object KeybindingsJson : WorkbenchDialog
+    /** The language packs MaterialCode knows, to fetch one by hand. */
+    data object LanguagePacks : WorkbenchDialog
+    /** Terminal: Open Detected Link…, newest first. */
+    data class TerminalLinks(val links: List<TerminalLink>) : WorkbenchDialog
+    /** Replace All in Search: [matches] occurrences in [files] files. */
+    data class ConfirmReplaceAll(val matches: Int, val files: Int) : WorkbenchDialog
     data class Completion(val choices: List<CompletionChoice>) : WorkbenchDialog
     data class CodeActions(val choices: List<CodeActionChoice>) : WorkbenchDialog
     data class Hover(val text: String) : WorkbenchDialog
@@ -152,6 +158,8 @@ sealed interface ChatEntry {
 
 /** One guest PTY shown in the Terminal panel; the emulator outlives the composable. */
 class TerminalSession(val id: UUID, val emulator: TerminalEmulator, title: String) {
+    /** The output as plain text, for find and detected links. */
+    val textLog = TerminalTextLog()
     /**
      * Until this time (uptime ms) the emulator's automatic replies are dropped: a reattach replays
      * old output, and queries in it (a cursor-position request from gh, say) would otherwise be

@@ -12,7 +12,9 @@ import java.io.IOException
 
 object AssetPackGrammarLoader {
     private val loadedPacks = mutableSetOf<String>()
-    private val extensionScopes = mutableMapOf<String, String>()
+    /** Extension or exact file name → the pack and grammar scope that colours it. */
+    private val extensionScopes = mutableMapOf<String, Pair<String, String>>()
+    private val filenameScopes = mutableMapOf<String, Pair<String, String>>()
 
     @Synchronized
     fun loadInstalled(context: Context) {
@@ -34,7 +36,29 @@ object AssetPackGrammarLoader {
     }
 
     @Synchronized
-    fun scopeNameForExtension(extension: String): String? = extensionScopes[extension.lowercase()]
+    fun scopeNameForExtension(extension: String): String? = extensionScopes[extension.lowercase()]?.second
+
+    /** The grammar for [fileName]: its exact name (Dockerfile), else its longest known extension. */
+    @Synchronized
+    fun scopeNameFor(fileName: String): String? {
+        filenameScopes[fileName.lowercase()]?.let { return it.second }
+        val parts = fileName.lowercase().split('.')
+        for (start in 1 until parts.size) {
+            extensionScopes[parts.drop(start).joinToString(".")]?.let { return it.second }
+        }
+        return null
+    }
+
+    /**
+     * Forgets a removed pack's file types. Its grammars stay registered in sora until the app
+     * restarts (the registry can't drop them), but no new editor uses them.
+     */
+    @Synchronized
+    fun forgetPack(packId: String) {
+        extensionScopes.values.removeAll { it.first == packId }
+        filenameScopes.values.removeAll { it.first == packId }
+        loadedPacks -= packId
+    }
 
     @Synchronized
     fun loadPack(packDirectory: File) {
@@ -65,8 +89,9 @@ object AssetPackGrammarLoader {
             val languageId = grammar.get("language")?.takeUnless { it.isJsonNull }?.asString
             val language = languageId?.let(languages::get)
             language?.extensions?.forEach { extension ->
-                extensionScopes[extension.removePrefix(".").lowercase()] = scopeName
+                extensionScopes[extension.removePrefix(".").lowercase()] = packId to scopeName
             }
+            language?.filenames?.forEach { name -> filenameScopes[name.lowercase()] = packId to scopeName }
             val configuration = language?.configurationPath?.let { path ->
                 validateContributionFile(extensionRoot, path)
             }
@@ -104,8 +129,11 @@ object AssetPackGrammarLoader {
             val extensions = declaration.getAsJsonArray("extensions")
                 ?.mapNotNull { it.takeIf(JsonElement::isJsonPrimitive)?.asString }
                 .orEmpty()
+            val filenames = declaration.getAsJsonArray("filenames")
+                ?.mapNotNull { it.takeIf(JsonElement::isJsonPrimitive)?.asString }
+                .orEmpty()
             val configuration = declaration.get("configuration")?.takeUnless { it.isJsonNull }?.asString
-            id to LanguageConfig(extensions, configuration)
+            id to LanguageConfig(extensions, filenames, configuration)
         }.toMap()
     }
 
@@ -120,7 +148,7 @@ object AssetPackGrammarLoader {
         return file
     }
 
-    private data class LanguageConfig(val extensions: List<String>, val configurationPath: String?)
+    private data class LanguageConfig(val extensions: List<String>, val filenames: List<String>, val configurationPath: String?)
     private data class GrammarDefinition(
         val languageId: String,
         val grammarPath: String,

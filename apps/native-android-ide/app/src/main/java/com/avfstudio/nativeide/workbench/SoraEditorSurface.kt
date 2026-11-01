@@ -80,16 +80,22 @@ internal class SoraEditorSurface(
     }
 
     override fun setSelection(selection: EditorSelection) {
-        editor.setSelectionRegion(
-            selection.anchor.line,
-            selection.anchor.character,
-            selection.active.line,
-            selection.active.character,
-        )
+        val content = editor.text
+        fun clamp(position: LspPosition): Pair<Int, Int> {
+            val line = position.line.coerceIn(0, (content.lineCount - 1).coerceAtLeast(0))
+            return line to position.character.coerceIn(0, content.getColumnCount(line))
+        }
+        val (anchorLine, anchorColumn) = clamp(selection.anchor)
+        val (activeLine, activeColumn) = clamp(selection.active)
+        editor.setSelectionRegion(anchorLine, anchorColumn, activeLine, activeColumn)
     }
 
     override fun moveCursor(position: LspPosition, reveal: Boolean) {
-        editor.setSelection(position.line, position.character)
+        // A position from elsewhere (a link, a stale search hit, a file still loading) may lie
+        // past the text; sora throws for that, so it goes to the nearest place that exists.
+        val content = editor.text
+        val line = position.line.coerceIn(0, (content.lineCount - 1).coerceAtLeast(0))
+        editor.setSelection(line, position.character.coerceIn(0, content.getColumnCount(line)))
         if (reveal) editor.ensureSelectionVisible()
     }
 

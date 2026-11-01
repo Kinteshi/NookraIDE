@@ -15,6 +15,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material.icons.outlined.FilterList
+import androidx.compose.material.icons.outlined.FindReplace
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.foundation.text.KeyboardOptions
@@ -67,6 +68,9 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.width
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
@@ -92,7 +96,10 @@ fun SidebarContent(controller: WorkbenchController, view: SidebarView, modifier:
                 }
             }
             if (view == SidebarView.Explorer) {
-                IconButton(onClick = { controller.currentDirectory.takeIf(String::isNotEmpty)?.let(controller::loadDirectory) }) {
+                IconButton(onClick = {
+                    controller.currentDirectory.takeIf(String::isNotEmpty)?.let(controller::loadDirectory)
+                    if (controller.settings.gitDecorations) controller.refreshGitStatus()
+                }) {
                     Icon(Icons.Outlined.Refresh, contentDescription = "Refresh")
                 }
             }
@@ -135,6 +142,8 @@ private fun OfflineFilesList(controller: WorkbenchController) {
 @Composable
 fun ExplorerList(controller: WorkbenchController) {
     val directory = controller.currentDirectory
+    // Changes made in a terminal since the last save or Git action show when Explorer opens.
+    LaunchedEffect(controller.connected) { if (controller.connected && controller.settings.gitDecorations) controller.refreshGitStatus() }
     when {
         controller.offline -> OfflineFilesList(controller)
         !controller.connected && controller.roots.isEmpty() -> EmptyMessage("Connect to a guest to browse its workspace.")
@@ -145,6 +154,7 @@ fun ExplorerList(controller: WorkbenchController) {
         }
         else -> LazyColumn {
             val tree = controller.settings.explorerTree
+            val marks = controller.explorerMarks
             val rows = if (tree) {
                 explorerRows(controller.entries, controller.expandedFolders.toSet(), controller.folderChildren)
             } else {
@@ -174,6 +184,8 @@ fun ExplorerList(controller: WorkbenchController) {
             }
             items(rows, key = { it.entry.path }) { row ->
                 val entry = row.entry
+                val mark = marks[entry.path]
+                val dark = LocalDarkTheme.current
                 var menu by remember { mutableStateOf(false) }
                 Box {
                     PaneRow(
@@ -190,6 +202,8 @@ fun ExplorerList(controller: WorkbenchController) {
                         selected = entry.path == controller.activePath,
                         indent = row.depth,
                         onLongClick = { menu = true },
+                        trailing = mark?.let { { ExplorerMark(it, dark) } },
+                        labelColor = mark?.tone?.color(dark),
                     ) {
                         when {
                             !entry.isDirectory -> controller.openPath(entry.path, preview = true)
@@ -382,6 +396,8 @@ fun PaneRow(
     indent: Int = 0,
     onLongClick: (() -> Unit)? = null,
     trailing: (@Composable () -> Unit)? = null,
+    /** The name's colour when Explorer marks the file (Git, problems). */
+    labelColor: androidx.compose.ui.graphics.Color? = null,
     onClick: () -> Unit,
 ) {
     val colors = MaterialTheme.colorScheme
@@ -406,6 +422,7 @@ fun PaneRow(
             label,
             style = MaterialTheme.typography.bodyMedium,
             color = when {
+                labelColor != null -> labelColor
                 selected -> colors.onSecondaryContainer
                 muted -> colors.onSurfaceVariant
                 else -> colors.onSurface
@@ -488,18 +505,46 @@ private fun SearchView(controller: WorkbenchController) {
     LaunchedEffect(controller.searchFocusRequest) { if (controller.searchFocusRequest > 0) runCatching { focus.requestFocus() } }
     Column(Modifier.fillMaxSize()) {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            OutlinedTextField(
-                value = controller.searchText,
-                onValueChange = {
-                    controller.searchText = it
-                    controller.scheduleSearch()
-                },
-                placeholder = { Text("Search") },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search, autoCorrectEnabled = false),
-                keyboardActions = KeyboardActions(onSearch = { controller.runSearch() }),
-                modifier = Modifier.fillMaxWidth().focusRequester(focus),
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // VS Code's chevron: shows the replace field under the search box.
+                IconButton(onClick = { controller.searchReplaceVisible = !controller.searchReplaceVisible }, modifier = Modifier.size(32.dp)) {
+                    Icon(
+                        if (controller.searchReplaceVisible) Icons.Outlined.ExpandMore else Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+                        contentDescription = "Toggle replace",
+                    )
+                }
+                OutlinedTextField(
+                    value = controller.searchText,
+                    onValueChange = {
+                        controller.searchText = it
+                        controller.scheduleSearch()
+                    },
+                    placeholder = { Text("Search") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search, autoCorrectEnabled = false),
+                    keyboardActions = KeyboardActions(onSearch = { controller.runSearch() }),
+                    modifier = Modifier.weight(1f).focusRequester(focus),
+                )
+            }
+            if (controller.searchReplaceVisible) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Spacer(Modifier.width(32.dp))
+                    OutlinedTextField(
+                        value = controller.searchReplace,
+                        onValueChange = { controller.searchReplace = it },
+                        placeholder = { Text(if (controller.searchRegex) "Replace (\$1 for groups)" else "Replace") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
+                        modifier = Modifier.weight(1f),
+                    )
+                    IconButton(
+                        onClick = controller::confirmReplaceAll,
+                        enabled = controller.searchResults.isNotEmpty() && !controller.replacing && !controller.searchRunning,
+                    ) {
+                        Icon(Icons.Outlined.FindReplace, contentDescription = "Replace all")
+                    }
+                }
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 SearchToggle("Aa", "Match case", controller.searchCaseSensitive) {
                     controller.searchCaseSensitive = it
@@ -573,20 +618,43 @@ private fun SearchView(controller: WorkbenchController) {
                             modifier = Modifier.weight(1f),
                         )
                         Text("${file.matches.size}", style = MaterialTheme.typography.labelSmall, color = colors.primary)
+                        if (controller.searchReplaceVisible) {
+                            Icon(
+                                Icons.Outlined.FindReplace,
+                                contentDescription = "Replace in this file",
+                                tint = colors.onSurfaceVariant,
+                                modifier = Modifier.size(28.dp).clip(RoundedCornerShape(6.dp)).clickable(enabled = !controller.replacing) {
+                                    controller.replaceInSearchFile(file)
+                                }.padding(5.dp),
+                            )
+                        }
                     }
                 }
                 if (file.expanded) {
                     items(file.matches, key = { "match:${file.path}:${it.line}:${it.column}" }) { match ->
-                        Text(
-                            matchPreview(match, colors.primary.copy(alpha = 0.3f)),
-                            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { controller.openSearchMatch(match) }
-                                .padding(start = 40.dp, end = 12.dp, top = 3.dp, bottom = 3.dp),
-                        )
+                        val replacement = controller.replacementPreviewFor(match)
+                        Row(
+                            Modifier.fillMaxWidth().clickable { controller.openSearchMatch(match) }.padding(start = 40.dp, end = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                matchPreview(match, colors.primary.copy(alpha = 0.3f), replacement, colors.error.copy(alpha = 0.25f), colors.tertiary.copy(alpha = 0.3f)),
+                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f).padding(vertical = 3.dp),
+                            )
+                            if (replacement != null) {
+                                Icon(
+                                    Icons.Outlined.FindReplace,
+                                    contentDescription = "Replace this one",
+                                    tint = colors.onSurfaceVariant,
+                                    modifier = Modifier.size(26.dp).clip(RoundedCornerShape(6.dp)).clickable(enabled = !controller.replacing) {
+                                        controller.replaceSearchMatch(file, match)
+                                    }.padding(5.dp),
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -604,8 +672,17 @@ private fun SearchToggle(label: String, description: String, checked: Boolean, o
     )
 }
 
-/** The line with the match highlighted, trimmed so a match far to the right stays visible. */
-private fun matchPreview(match: com.avfstudio.nativeide.transport.SearchEvent.Match, highlight: androidx.compose.ui.graphics.Color) =
+/**
+ * The line with the match highlighted, trimmed so a match far to the right stays visible. With a
+ * [replacement], the match is struck through and the new text follows it, as VS Code previews.
+ */
+private fun matchPreview(
+    match: com.avfstudio.nativeide.transport.SearchEvent.Match,
+    highlight: androidx.compose.ui.graphics.Color,
+    replacement: String? = null,
+    removed: androidx.compose.ui.graphics.Color = highlight,
+    added: androidx.compose.ui.graphics.Color = highlight,
+) =
     buildAnnotatedString {
         val line = match.preview.trimEnd('\n', '\r')
         val indent = line.indexOfFirst { !it.isWhitespace() }.coerceAtLeast(0)
@@ -613,7 +690,27 @@ private fun matchPreview(match: com.avfstudio.nativeide.transport.SearchEvent.Ma
         val end = (match.column + match.length).coerceAtMost(line.length)
         if (start > indent) append("…")
         append(line.substring(start.coerceAtMost(line.length), match.column.coerceIn(0, line.length)))
-        withStyle(SpanStyle(background = highlight)) { append(line.substring(match.column.coerceIn(0, line.length), end.coerceAtLeast(match.column.coerceIn(0, line.length)))) }
+        val matched = line.substring(match.column.coerceIn(0, line.length), end.coerceAtLeast(match.column.coerceIn(0, line.length)))
+        if (replacement == null) {
+            withStyle(SpanStyle(background = highlight)) { append(matched) }
+        } else {
+            withStyle(SpanStyle(background = removed, textDecoration = androidx.compose.ui.text.style.TextDecoration.LineThrough)) { append(matched) }
+            withStyle(SpanStyle(background = added)) { append(replacement) }
+        }
         append(line.substring(end.coerceAtLeast(0)))
         append("  :${match.line}")
     }
+
+/** Explorer's badge: a file's problem count and Git letter, or a dot on a folder with changes inside. */
+@Composable
+private fun ExplorerMark(mark: FileDecoration, dark: Boolean) {
+    val color = mark.tone.color(dark)
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+        if (mark.folder) {
+            Box(Modifier.size(6.dp).background(color, androidx.compose.foundation.shape.CircleShape))
+        } else {
+            if (mark.problems > 0) Text(mark.problems.toString(), style = MaterialTheme.typography.labelSmall, color = color)
+            mark.gitLetter?.let { Text(it, style = MaterialTheme.typography.labelSmall, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold, color = color) }
+        }
+    }
+}

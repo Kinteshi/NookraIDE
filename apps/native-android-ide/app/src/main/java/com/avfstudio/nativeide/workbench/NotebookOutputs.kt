@@ -239,6 +239,12 @@ internal fun outputCopyText(output: JsonObject, view: OutputView?, presentation:
     }
 }
 
+/** The error as IPython printed it: its traceback with colours, or the name and message alone. */
+private fun errorDisplayText(output: JsonObject): String {
+    val traceback = output.getAsJsonArray("traceback")?.map { it.asString }.orEmpty()
+    return if (traceback.isNotEmpty()) traceback.joinToString("\n") else errorText(output)
+}
+
 private fun errorText(output: JsonObject): String = buildString {
     append(output.get("ename")?.asString.orEmpty())
     append(": ")
@@ -267,18 +273,24 @@ private fun CellOutput(
         "stream" -> {
             val stderr = output.get("name")?.asString == "stderr"
             OutputText(
-                NotebookDocument.multiline(output.get("text")).stripAnsi().trimEnd('\n'),
+                NotebookDocument.multiline(output.get("text")).trimEnd('\n'),
                 if (stderr) colors.error else colors.onSurface,
                 modifier.then(if (stderr) Modifier.background(colors.errorContainer.copy(alpha = 0.3f), RoundedCornerShape(6.dp)) else Modifier),
                 lineLimit, presentation.expanded, follow = cell.running, onExpand = ::expand,
+                onTarget = { controller.openTracebackTarget(session, it) },
             )
         }
-        "error" -> OutputText(
-            errorText(output),
-            colors.error,
-            modifier.background(colors.errorContainer.copy(alpha = 0.3f), RoundedCornerShape(6.dp)),
-            lineLimit, presentation.expanded, follow = false, onExpand = ::expand,
-        )
+        "error" -> {
+            // IPython colours its tracebacks; without colours the whole error is red.
+            val traceback = errorDisplayText(output)
+            OutputText(
+                traceback,
+                if ('\u001b' in traceback) colors.onSurface else colors.error,
+                modifier.background(colors.errorContainer.copy(alpha = 0.3f), RoundedCornerShape(6.dp)),
+                lineLimit, presentation.expanded, follow = false, onExpand = ::expand,
+                onTarget = { controller.openTracebackTarget(session, it) },
+            )
+        }
         "execute_result", "display_data" -> {
             val data = output.getAsJsonObject("data") ?: return
             val views = remember(output) { outputViews(output) }
@@ -343,7 +355,7 @@ private fun CellOutput(
                     HtmlOutput(mime("text/html"), dark, modifier)
                 }
                 OutputView.Markdown -> MarkdownText(mime("text/markdown"), modifier)
-                OutputView.Text -> OutputText(mime("text/plain").stripAnsi(), colors.onSurface, modifier, lineLimit, presentation.expanded, follow = false, onExpand = ::expand)
+                OutputView.Text -> OutputText(mime("text/plain"), colors.onSurface, modifier, lineLimit, presentation.expanded, follow = false, onExpand = ::expand)
                 null -> OutputText("[${data.keySet().joinToString()} output]", colors.onSurfaceVariant, modifier)
             }
         }
@@ -364,8 +376,14 @@ private fun OutputText(
     expanded: Boolean = true,
     follow: Boolean = false,
     onExpand: ((Boolean) -> Unit)? = null,
+    /** Traceback references (Cell In[3], line 5; File x.py:12) become links to it. */
+    onTarget: ((TracebackTarget) -> Unit)? = null,
 ) {
     val shown = text.takeLast(200_000)
+    val dark = LocalDarkTheme.current
+    val linkColor = MaterialTheme.colorScheme.primary
+    // ANSI colours as the terminal shows them (VS Code renders them in outputs too).
+    val styled = remember(shown, dark, color, onTarget != null) { ansiAnnotated(shown, terminalPalette(dark), color, onTarget, linkColor) }
     val lines = remember(shown) { shown.count { it == '\n' } + 1 }
     val long = lineLimit > 0 && lines > lineLimit && onExpand != null
     val style = MaterialTheme.typography.bodySmall
@@ -389,7 +407,7 @@ private fun OutputText(
                 Modifier.heightIn(max = with(density) { (lineHeight * lineLimit).toDp() } + 16.dp).verticalScroll(vertical)
             } else Modifier
             Text(
-                shown,
+                styled,
                 fontFamily = FontFamily.Monospace,
                 style = style,
                 color = color,

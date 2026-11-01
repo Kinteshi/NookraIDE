@@ -43,7 +43,8 @@ class WireFixturesTest {
             (MessagePackVfsCodec.decode(bytes(GIT_PROMPT)) as IncomingPacket.Git).event,
         )
         assertEquals(
-            SearchEvent.Match(4, "/w/a.py", 3, 2, 4, "x todo"),
+            // The wire's col is ripgrep's 1-based byte column; the app's column is 0-based.
+            SearchEvent.Match(4, "/w/a.py", 3, 1, 4, "x todo"),
             (MessagePackVfsCodec.decode(bytes(SEARCH_MATCH)) as IncomingPacket.Search).event,
         )
     }

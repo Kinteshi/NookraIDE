@@ -22,6 +22,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material.icons.outlined.Link
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.TableChart
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.ContentCopy
@@ -101,9 +106,7 @@ fun PanelArea(controller: WorkbenchController, modifier: Modifier = Modifier) {
                 )
             }
             Spacer(Modifier.weight(1f))
-            if (controller.panelTab == PanelTab.Terminal) {
-                IconButton(onClick = { controller.newTerminal() }) { Icon(Icons.Outlined.Add, contentDescription = "New terminal") }
-            }
+            if (controller.panelTab == PanelTab.Terminal) TerminalActions(controller)
             IconButton(onClick = { controller.panelVisible = false }) {
                 Icon(Icons.Outlined.KeyboardArrowDown, contentDescription = "Hide panel")
             }
@@ -160,6 +163,7 @@ fun TerminalView(controller: WorkbenchController, modifier: Modifier = Modifier)
             }
             return
         }
+        if (controller.terminalFindVisible) TerminalFindBar(controller, session)
         val background = if (dark) colors.surfaceContainerLowest else colors.surface
         LaunchedEffect(session.id, dark, background) {
             session.emulator.applyColorScheme(terminalPalette(dark), colors.onSurface.toArgb(), background.toArgb())
@@ -402,6 +406,107 @@ fun VariablesView(controller: WorkbenchController) {
             }
             if (result?.truncated == true) {
                 item { EmptyMessage("Only the first 500 names are listed.") }
+            }
+        }
+    }
+}
+
+/** The terminal's own buttons: find in its output, links in it, a new terminal. */
+@Composable
+fun TerminalActions(controller: WorkbenchController) {
+    IconButton(onClick = { if (controller.terminalFindVisible) controller.terminalFindVisible = false else controller.showTerminalFind() }) {
+        Icon(Icons.Outlined.Search, contentDescription = "Find in terminal")
+    }
+    IconButton(onClick = controller::showTerminalLinks) { Icon(Icons.Outlined.Link, contentDescription = "Open a detected link") }
+    IconButton(onClick = { controller.newTerminal() }) { Icon(Icons.Outlined.Add, contentDescription = "New terminal") }
+}
+
+/**
+ * Find in the terminal's output (Ctrl+F there): the matching lines, newest last, with the match
+ * marked. The terminal library can't scroll its view to a line, so the lines are listed here;
+ * a tap on one with a file:line or web address opens it, otherwise copies the line.
+ */
+@Composable
+private fun TerminalFindBar(controller: WorkbenchController, session: TerminalSession) {
+    val colors = MaterialTheme.colorScheme
+    val focus = remember { FocusRequester() }
+    LaunchedEffect(controller.terminalFindFocus) { runCatching { focus.requestFocus() } }
+    var matches by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(emptyList<TerminalMatch>()) }
+    // Output keeps arriving; the list follows it while the bar is open.
+    LaunchedEffect(session.id, controller.terminalFindQuery, controller.terminalFindCaseSensitive) {
+        var seen = -1L
+        while (true) {
+            if (session.textLog.revision != seen) {
+                seen = session.textLog.revision
+                matches = controller.terminalMatches()
+            }
+            kotlinx.coroutines.delay(500)
+        }
+    }
+    Column(Modifier.fillMaxWidth().background(colors.surfaceContainer).padding(horizontal = 8.dp, vertical = 4.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            androidx.compose.foundation.text.BasicTextField(
+                value = controller.terminalFindQuery,
+                onValueChange = { controller.terminalFindQuery = it },
+                singleLine = true,
+                textStyle = MaterialTheme.typography.bodyMedium.copy(color = colors.onSurface),
+                cursorBrush = androidx.compose.ui.graphics.SolidColor(colors.primary),
+                modifier = Modifier
+                    .weight(1f)
+                    .focusRequester(focus)
+                    .background(colors.surfaceContainerHighest, RoundedCornerShape(8.dp))
+                    .padding(horizontal = 10.dp, vertical = 7.dp)
+                    .onPreviewKeyEvent { event ->
+                        if (event.type == KeyEventType.KeyDown && event.key == androidx.compose.ui.input.key.Key.Escape) {
+                            controller.terminalFindVisible = false
+                            true
+                        } else {
+                            false
+                        }
+                    },
+                decorationBox = { field ->
+                    if (controller.terminalFindQuery.isEmpty()) Text("Find in terminal", style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
+                    field()
+                },
+            )
+            Text(
+                when {
+                    controller.terminalFindQuery.isEmpty() -> ""
+                    matches.isEmpty() -> "No results"
+                    else -> "${matches.size} line${if (matches.size == 1) "" else "s"}"
+                },
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.onSurfaceVariant,
+            )
+            FilterChip(
+                selected = controller.terminalFindCaseSensitive,
+                onClick = { controller.terminalFindCaseSensitive = !controller.terminalFindCaseSensitive },
+                label = { Text("Aa", fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace) },
+            )
+            IconButton(onClick = { controller.terminalFindVisible = false }, modifier = Modifier.size(32.dp)) {
+                Icon(Icons.Outlined.Close, contentDescription = "Close find", modifier = Modifier.size(18.dp))
+            }
+        }
+        if (matches.isNotEmpty()) {
+            val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+            LaunchedEffect(matches.size) { listState.scrollToItem((matches.size - 1).coerceAtLeast(0)) }
+            androidx.compose.foundation.lazy.LazyColumn(Modifier.heightIn(max = 150.dp).padding(top = 4.dp), state = listState) {
+                items(matches.size) { index ->
+                    val match = matches[index]
+                    Text(
+                        androidx.compose.ui.text.buildAnnotatedString {
+                            append(match.text)
+                            match.ranges.forEach { range ->
+                                if (range.last < match.text.length) addStyle(androidx.compose.ui.text.SpanStyle(background = colors.primary.copy(alpha = 0.35f)), range.first, range.last + 1)
+                            }
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        modifier = Modifier.fillMaxWidth().clickable { controller.openTerminalLine(match.text) }.padding(vertical = 2.dp),
+                    )
+                }
             }
         }
     }

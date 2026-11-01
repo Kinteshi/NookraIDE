@@ -128,8 +128,10 @@ fun NativeWorkbench() {
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         KeyRouter.handler = controller::routeHardwareKey
+        IntentRouter.handler = controller::handleIntent
         onDispose {
             KeyRouter.handler = null
+            IntentRouter.handler = null
             controller.pickLocalFile = null
             lifecycleOwner.lifecycle.removeObserver(observer)
             controller.dispose()
@@ -353,9 +355,7 @@ private fun CompactContent(controller: WorkbenchController) {
                 listOf(PanelTab.Terminal, PanelTab.Debug, PanelTab.Output, PanelTab.Ports, PanelTab.Variables).forEach { tab ->
                     FilterChip(selected = controller.panelTab == tab, onClick = { controller.panelTab = tab }, label = { Text(tab.title) })
                 }
-                if (controller.panelTab == PanelTab.Terminal) {
-                    IconButton(onClick = { controller.newTerminal() }) { Icon(Icons.Outlined.Add, contentDescription = "New terminal") }
-                }
+                if (controller.panelTab == PanelTab.Terminal) TerminalActions(controller)
             }
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 when (controller.panelTab) {
