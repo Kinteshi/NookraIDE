@@ -209,7 +209,7 @@ private val navigationKeys = listOf(
 
 /** The bar itself: one row that scrolls sideways on a narrow screen. */
 @Composable
-fun KeyBarRow(modifier: Modifier = Modifier) {
+fun KeyBarRow(modifier: Modifier = Modifier, onLatch: () -> Unit = {}) {
     val colors = MaterialTheme.colorScheme
     Row(
         modifier
@@ -221,9 +221,9 @@ fun KeyBarRow(modifier: Modifier = Modifier) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         barKeys.forEach { BarKeyButton(it) }
-        LatchButton("Ctrl", KeyBar.ctrl) { KeyBar.ctrl = KeyBar.toggle(KeyBar.ctrl) }
-        LatchButton("Alt", KeyBar.alt) { KeyBar.alt = KeyBar.toggle(KeyBar.alt) }
-        LatchButton("Shift", KeyBar.shift) { KeyBar.shift = KeyBar.toggle(KeyBar.shift) }
+        LatchButton("Ctrl", KeyBar.ctrl) { KeyBar.ctrl = KeyBar.toggle(KeyBar.ctrl).also { onLatch() } }
+        LatchButton("Alt", KeyBar.alt) { KeyBar.alt = KeyBar.toggle(KeyBar.alt).also { onLatch() } }
+        LatchButton("Shift", KeyBar.shift) { KeyBar.shift = KeyBar.toggle(KeyBar.shift).also { onLatch() } }
         navigationKeys.forEach { BarKeyButton(it) }
     }
 }

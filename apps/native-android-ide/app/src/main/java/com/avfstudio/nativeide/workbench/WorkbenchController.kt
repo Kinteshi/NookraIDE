@@ -88,10 +88,14 @@ import com.avfstudio.nativeide.editor.editorProblems
 import com.avfstudio.nativeide.editor.problemLines
 import com.avfstudio.nativeide.editor.problemMarks
 import com.avfstudio.nativeide.editor.selectionStart
+import com.avfstudio.nativeide.editor.selectionEnd
 import com.avfstudio.nativeide.language.lspDocumentUri
 import com.avfstudio.nativeide.language.untitledPathFor
 import com.avfstudio.nativeide.editor.saveCleanupEdits
 import com.avfstudio.nativeide.editor.SaveCleanups
+import com.avfstudio.nativeide.editor.Indentation
+import com.avfstudio.nativeide.editor.convertIndentation
+import com.avfstudio.nativeide.editor.detectIndentation
 import com.avfstudio.nativeide.language.signatureContext
 import com.avfstudio.nativeide.language.parseDocumentHighlights
 import com.avfstudio.nativeide.language.parseSignatureHelp
@@ -132,6 +136,7 @@ import java.io.IOException
 import java.util.UUID
 import kotlin.math.roundToInt
 import java.util.concurrent.CompletableFuture
+import android.view.HapticFeedbackConstants
 import java.util.concurrent.CompletionException
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
@@ -167,6 +172,10 @@ private const val DAEMON_PORT = 19870
 private val INTERNAL_COMMANDS = listOf("ipykernel", "avf-native-daemon", "avf-jupyter-bridge", "jupyter-bridge")
 /** Two taps on the same file this close together keep its preview tab. */
 private const val DOUBLE_TAP_MS = 500L
+/** How long Undo stays offered after an Explorer delete or move; the daemon keeps a deleted entry 10 s. */
+private const val UNDO_WINDOW_MS = 9_500L
+/** A finished action's buzz (CONFIRM since Android 11). */
+internal val HAPTIC_CONFIRM = if (android.os.Build.VERSION.SDK_INT >= 30) HapticFeedbackConstants.CONFIRM else HapticFeedbackConstants.VIRTUAL_KEY
 private val KEYBINDINGS_TEMPLATE = """
     // Keyboard shortcuts, in VS Code's keybindings.json format. A command starting with "-"
     // removes that default shortcut. "when" clauses are kept but not evaluated here.
@@ -239,6 +248,14 @@ class WorkbenchController(private val context: Context) {
     private val io = Executors.newSingleThreadExecutor()
     private val timer = Executors.newSingleThreadScheduledExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
+
+    /** The workbench's view, set while it is shown, for haptic feedback. */
+    var hapticView: android.view.View? = null
+
+    /** A short buzz (`avf.haptics`): breakpoints, latched modifier keys, a drag picked up or dropped, Undo offered. */
+    fun haptic(kind: Int = HapticFeedbackConstants.CLOCK_TICK) {
+        if (settings.haptics) hapticView?.performHapticFeedback(kind)
+    }
     private val profileStore = ConnectionProfileStore(SharedPreferencesKeyValueStore(context), KeystoreSecretCipher())
     /** The user's `keybindings.json` (kept on this device, like user settings), as parsed. */
     var keybindingRules by mutableStateOf(
@@ -701,12 +718,29 @@ class WorkbenchController(private val context: Context) {
         }
     }
 
+    /**
+     * [document]'s indentation: chosen in the status bar, else found in its text when it opened
+     * (`editor.detectIndentation`), else `editor.tabSize` and `editor.insertSpaces`.
+     */
+    fun indentation(document: DocumentSession? = activeDocument): Indentation {
+        val fallback = Indentation(settings.insertSpaces, settings.tabSize)
+        if (document == null || document.binary) return fallback
+        document.indentation?.let { return it }
+        if (!settings.detectIndentation) return fallback
+        if (!document.indentationDetected) {
+            document.detectedIndentation = detectIndentation(document.text, settings.tabSize)
+            document.indentationDetected = true
+        }
+        return document.detectedIndentation?.let { if (it.insertSpaces) it else it.copy(tabSize = settings.tabSize) } ?: fallback
+    }
+
     /** The editor options from the settings, for [EditorSurface.applyConfig]. */
-    fun editorConfig(): EditorConfig = settings.let {
+    fun editorConfig(document: DocumentSession? = activeDocument): EditorConfig = settings.let {
+        val indentation = indentation(document)
         EditorConfig(
             fontSizeSp = it.editorFontSize,
-            tabSize = it.tabSize,
-            insertSpaces = it.insertSpaces,
+            tabSize = indentation.tabSize,
+            insertSpaces = indentation.insertSpaces,
             autoIndent = it.autoIndent,
             useTabStops = it.useTabStops,
             wordWrap = it.wordWrap,
@@ -1187,6 +1221,7 @@ class WorkbenchController(private val context: Context) {
         if (path == null || line == null || !isGuestPath(path)) return
         val lines = breakpoints[path].orEmpty()
         val updated = if (line in lines) lines - line else lines + line
+        haptic(HapticFeedbackConstants.CONTEXT_CLICK)
         if (updated.isEmpty()) breakpoints.remove(path) else breakpoints[path] = updated
         preferences.edit().putString(
             "breakpoints",
@@ -2429,9 +2464,10 @@ class WorkbenchController(private val context: Context) {
         val files = java.util.concurrent.ConcurrentLinkedQueue<FileEntry>()
         fun walk(path: String, depth: Int): CompletableFuture<Unit> =
             vfs.listDir(path).thenCompose { children ->
-                children.filterNot(FileEntry::isDirectory).forEach(files::add)
+                val shown = children.filterNot { isExcluded(it.path) }
+                shown.filterNot(FileEntry::isDirectory).forEach(files::add)
                 if (files.size > MAX_QUICK_OPEN_FILES || depth >= 8) return@thenCompose CompletableFuture.completedFuture(Unit)
-                val nested = children.filter { it.isDirectory && walksIntoForQuickOpen(it.name) }.map { walk(it.path, depth + 1) }
+                val nested = shown.filter { it.isDirectory && walksIntoForQuickOpen(it.name) }.map { walk(it.path, depth + 1) }
                 CompletableFuture.allOf(*nested.toTypedArray()).thenApply { }
             }.exceptionally { }
         walk(root, 0).whenComplete { _, _ ->
@@ -2462,7 +2498,14 @@ class WorkbenchController(private val context: Context) {
                     folderChildren.remove(path)
                     status = "Explorer error: ${error.message ?: "request failed"}"
                 } else {
-                    folderChildren[path] = sortedEntries(result)
+                    val children = sortedEntries(result)
+                    folderChildren[path] = children
+                    // Compact folders: a folder holding one folder opens through to the first with more.
+                    val only = children.filterNot { isExcluded(it.path) }.singleOrNull()?.takeIf { it.isDirectory }
+                    if (settings.compactFolders && settings.explorerTree && only != null && only.path !in expandedFolders && path in expandedFolders) {
+                        expandedFolders.add(only.path)
+                        loadFolderChildren(only.path)
+                    }
                 }
             }
         }
@@ -3007,7 +3050,15 @@ class WorkbenchController(private val context: Context) {
             status = "Open or select a saved file to delete"
             return
         }
-        dialog = WorkbenchDialog.ConfirmDelete(path, isDirectory)
+        beginDeleteEntries(listOf(path), isDirectory)
+    }
+
+    /** Asks first (`explorer.confirmDelete`); Undo is offered either way. */
+    fun beginDeleteEntries(paths: List<String>, isDirectory: Boolean = false) {
+        // A folder and something inside it: deleting the folder covers both.
+        val roots = paths.distinct().filter { path -> paths.none { other -> other != path && path.startsWith("$other/") } }
+        if (roots.isEmpty()) return
+        if (settings.confirmDelete) dialog = WorkbenchDialog.ConfirmDelete(roots, isDirectory) else deleteEntries(roots)
     }
 
     fun beginSaveAs(document: DocumentSession? = activeDocument) {
@@ -3025,7 +3076,13 @@ class WorkbenchController(private val context: Context) {
     fun submitPathPrompt(prompt: WorkbenchDialog.PathPrompt, value: String) {
         val action = prompt.action
         val name = if (action is PathAction.SaveAs) value.trim() else value
-        entryNameProblem(name, allowSubpath = action !is PathAction.Rename)?.let { problem ->
+        val problem = if (action is PathAction.Move) {
+            // Empty is the workspace itself.
+            name.trim().trim('/').takeIf(String::isNotEmpty)?.let { entryNameProblem(it, allowSubpath = true) }
+        } else {
+            entryNameProblem(name, allowSubpath = action !is PathAction.Rename)
+        }
+        problem?.let { problem ->
             dialog = prompt.copy(error = problem)
             return
         }
@@ -3051,6 +3108,16 @@ class WorkbenchController(private val context: Context) {
                 }
             }
             is PathAction.Rename -> renameEntry(action.path, resolveEntryPath(action.path.substringBeforeLast('/'), name), ::fail)
+            is PathAction.Move -> {
+                val root = workspaceRoot ?: action.paths.first().substringBeforeLast('/')
+                val folder = name.trim().trim('/').let { if (it.isEmpty()) root else resolveEntryPath(root, it) }
+                vfs.create(folder, directory = true).handle { _, _ -> }.whenComplete { _, _ ->
+                    post {
+                        dialog = null
+                        moveEntries(action.paths, folder)
+                    }
+                }
+            }
             is PathAction.SaveAs -> saveDocumentAs(action.documentPath, resolveEntryPath(explorerParent() ?: "/", name), ::fail)
         }
     }
@@ -3080,22 +3147,187 @@ class WorkbenchController(private val context: Context) {
         }
     }
 
-    fun deleteEntry(path: String) {
+    /** The last delete or move in Explorer, while Undo can still take it back (the daemon keeps deletes 10 s). */
+    data class ExplorerUndo(val message: String, val undo: () -> Unit)
+
+    var explorerUndo by mutableStateOf<ExplorerUndo?>(null)
+        private set
+    private val clearExplorerUndo = Runnable { explorerUndo = null }
+
+    private fun offerUndo(message: String, undo: () -> Unit) {
+        mainHandler.removeCallbacks(clearExplorerUndo)
+        explorerUndo = ExplorerUndo(message, undo)
+        mainHandler.postDelayed(clearExplorerUndo, UNDO_WINDOW_MS)
+    }
+
+    fun undoExplorerChange() {
+        val undo = explorerUndo ?: return
+        mainHandler.removeCallbacks(clearExplorerUndo)
+        explorerUndo = null
+        undo.undo()
+    }
+
+    fun dismissExplorerUndo() {
+        mainHandler.removeCallbacks(clearExplorerUndo)
+        explorerUndo = null
+    }
+
+    fun deleteEntry(path: String) = deleteEntries(listOf(path))
+
+    /** Moves [paths] to the daemon's trash one after another, then offers Undo for the daemon's 10 s window. */
+    fun deleteEntries(paths: List<String>) {
         dialog = null
-        vfs.delete(path).whenComplete { _, error ->
-            post {
-                if (error != null) {
-                    status = "Delete failed: ${failureMessage(error)}"
-                    return@post
-                }
-                documents.filter { renamedPath(it.path, path, path) != null }.forEach { document ->
-                    closeDocument(document.path)
-                    repository.forget(document.path)
-                }
-                afterFileSystemChange()
-                status = "Moved ${path.substringAfterLast('/')} to the trash"
+        val trashIds = mutableListOf<String>()
+        val deleted = mutableListOf<String>()
+        fun next(index: Int) {
+            if (index == paths.size) return finishDelete(deleted, trashIds, null)
+            vfs.delete(paths[index]).whenComplete { ack, error ->
+                if (error != null) return@whenComplete finishDelete(deleted, trashIds, error)
+                deleted += paths[index]
+                ack?.trashId?.let(trashIds::add)
+                next(index + 1)
             }
         }
+        next(0)
+    }
+
+    private fun finishDelete(deleted: List<String>, trashIds: List<String>, error: Throwable?) = post {
+        val reopen = mutableListOf<String>()
+        deleted.forEach { path ->
+            documents.filter { renamedPath(it.path, path, path) != null }.toList().forEach { document ->
+                if (!document.dirty) reopen += document.path
+                closeDocument(document.path)
+                repository.forget(document.path)
+            }
+        }
+        explorerSelection.removeAll { selected -> deleted.any { renamedPath(selected, it, it) != null } }
+        if (deleted.isNotEmpty()) afterFileSystemChange()
+        val names = entryNames(deleted)
+        status = when {
+            error != null && deleted.isEmpty() -> "Delete failed: ${failureMessage(error)}"
+            error != null -> "Deleted $names; then failed: ${failureMessage(error)}"
+            else -> "Moved $names to the trash"
+        }
+        if (trashIds.isEmpty()) return@post
+        haptic(HAPTIC_CONFIRM)
+        offerUndo("Deleted $names") {
+            val results = trashIds.map { id -> vfs.restore(id).handle { _, failure -> failure } }
+            CompletableFuture.allOf(*results.toTypedArray()).whenComplete { _, _ ->
+                val failure = results.firstNotNullOfOrNull { it.getNow(null) }
+                post {
+                    afterFileSystemChange()
+                    reopen.forEach(::openPath)
+                    status = if (failure == null) "Restored $names" else "Couldn't restore everything: ${failureMessage(failure)}"
+                }
+            }
+        }
+    }
+
+    private fun entryNames(paths: List<String>) =
+        if (paths.size == 1) paths.single().substringAfterLast('/') else "${paths.size} items"
+
+    // Explorer selection, moves and hidden files ------------------------------------------------
+
+    /** Explorer's multi-selection (Ctrl+tap, Shift+tap, or Select in a row's menu); taps toggle while it isn't empty. */
+    val explorerSelection = mutableStateListOf<String>()
+    /** Explorer's Open Editors section is open. */
+    var openEditorsExpanded by mutableStateOf(true)
+    private var explorerAnchor: String? = null
+
+    fun toggleExplorerSelection(path: String) {
+        if (path in explorerSelection) explorerSelection.remove(path) else explorerSelection.add(path)
+        explorerAnchor = path
+        haptic()
+    }
+
+    /** Shift+tap: everything between the last tapped row and [path], in the order Explorer shows them. */
+    fun selectExplorerRange(path: String, shown: List<String>) {
+        val anchor = explorerAnchor?.let(shown::indexOf)?.takeIf { it >= 0 } ?: return toggleExplorerSelection(path)
+        val target = shown.indexOf(path).takeIf { it >= 0 } ?: return
+        val range = shown.subList(minOf(anchor, target), maxOf(anchor, target) + 1)
+        range.filterNot(explorerSelection::contains).forEach(explorerSelection::add)
+    }
+
+    fun clearExplorerSelection() {
+        explorerSelection.clear()
+        explorerAnchor = null
+    }
+
+    /**
+     * Moves [paths] into [folder] (a drag onto a folder, or Move to…), keeping open tabs on the
+     * moved files. Undo moves them back.
+     */
+    fun moveEntries(paths: List<String>, folder: String, undoable: Boolean = true) {
+        val target = folder.trimEnd('/')
+        val moves = paths.distinct()
+            .filter { path -> paths.none { other -> other != path && path.startsWith("$other/") } }
+            .filter { path -> path.substringBeforeLast('/') != target && target != path && !target.startsWith("$path/") }
+            .map { it to "$target/${it.substringAfterLast('/')}" }
+        if (moves.isEmpty()) {
+            status = if (paths.any { target == it || target.startsWith("$it/") }) "A folder can't go inside itself" else "Already in ${target.substringAfterLast('/')}"
+            return
+        }
+        documents.firstOrNull { document -> document.dirty && moves.any { (from, _) -> renamedPath(document.path, from, from) != null } }?.let { document ->
+            status = "Save ${document.path.substringAfterLast('/')} before moving it"
+            return
+        }
+        val done = mutableListOf<Pair<String, String>>()
+        fun finish(error: Throwable?) = post {
+            val wasActive = activePath
+            val affected = documents.filter { document -> done.any { (from, to) -> renamedPath(document.path, from, to) != null } }.toList()
+            affected.forEach { document ->
+                closeDocument(document.path)
+                repository.forget(document.path)
+            }
+            affected.sortedBy { it.path == wasActive }.forEach { document ->
+                done.firstNotNullOfOrNull { (from, to) -> renamedPath(document.path, from, to) }?.let(::openPath)
+            }
+            clearExplorerSelection()
+            if (done.isNotEmpty()) afterFileSystemChange()
+            val names = entryNames(done.map { it.first })
+            status = when {
+                error != null && done.isEmpty() -> "Move failed: ${failureMessage(error)}"
+                error != null -> "Moved $names; then failed: ${failureMessage(error)}"
+                else -> "Moved $names to ${target.substringAfterLast('/')}"
+            }
+            if (done.isNotEmpty() && undoable) {
+                haptic(HAPTIC_CONFIRM)
+                val back = done.toList()
+                offerUndo("Moved $names") {
+                    back.forEach { (from, to) -> moveEntries(listOf(to), from.substringBeforeLast('/'), undoable = false) }
+                }
+            }
+        }
+        fun next(index: Int) {
+            if (index == moves.size) return finish(null)
+            val (from, to) = moves[index]
+            vfs.rename(from, to).whenComplete { _, error ->
+                if (error != null) return@whenComplete finish(error)
+                done += from to to
+                next(index + 1)
+            }
+        }
+        next(0)
+    }
+
+    /** Move to…: asks for the folder, relative to the workspace. */
+    fun beginMoveEntries(paths: List<String>) {
+        if (paths.isEmpty()) return
+        val start = paths.first().substringBeforeLast('/')
+        val root = workspaceRoot?.trimEnd('/')
+        dialog = WorkbenchDialog.PathPrompt(PathAction.Move(paths), if (root != null && start.startsWith(root)) start.removePrefix(root).trimStart('/') else start)
+    }
+
+    private var excludeCache: Pair<List<String>, List<Regex>> = emptyList<String>() to emptyList()
+
+    /** `files.exclude`: hidden in Explorer and Quick Open. Patterns are relative to the workspace. */
+    fun isExcluded(path: String): Boolean {
+        val patterns = settings.filesExclude
+        if (patterns.isEmpty()) return false
+        if (excludeCache.first != patterns) excludeCache = patterns to patterns.mapNotNull { runCatching { globRegex(it) }.getOrNull() }
+        val root = (workspaceRoot ?: currentDirectory).trimEnd('/')
+        val relative = if (root.isNotEmpty() && path.startsWith("$root/")) path.removePrefix("$root/") else path.substringAfterLast('/')
+        return excludeCache.second.any { it.matches(relative) }
     }
 
     /** Writes [sourcePath]'s text to a new file [target] (never overwriting) and switches to it. */
@@ -3734,7 +3966,8 @@ class WorkbenchController(private val context: Context) {
             onFormatted?.invoke()
             return
         }
-        client.formatting(document.path).whenComplete { edits, error ->
+        val indentation = indentation(document)
+        client.formatting(document.path, indentation.tabSize, indentation.insertSpaces).whenComplete { edits, error ->
             post {
                 when {
                     error != null -> status = "Format failed: ${error.cause?.message ?: error.message}"
@@ -3834,6 +4067,117 @@ class WorkbenchController(private val context: Context) {
         )
     }
 
+    private fun applyTextEdit(edit: TextEdit?, unchanged: String) {
+        val surface = editorSurface ?: return
+        if (edit == null) {
+            status = unchanged
+            return
+        }
+        replaceEditorText(surface, edit.text, edit.selectionStart, edit.selectionEnd)
+    }
+
+    /** Join Lines, Transpose, Sort Lines, Delete Duplicate Lines, Trim Trailing Whitespace and the case transforms. */
+    private fun runTextTransform(commandId: String) {
+        val surface = editorSurface?.takeIf { activeDocument != null && activeNotebook == null } ?: return
+        val text = surface.text
+        val start = surface.selectionOffsets.first
+        val end = surface.selectionOffsets.last
+        when (commandId) {
+            "editor.action.joinLines" -> applyTextEdit(joinLines(text, start, end), "Nothing to join")
+            "editor.action.transposeLetters" -> applyTextEdit(transposeCharacters(text, end), "Nothing to transpose here")
+            "editor.action.sortLinesAscending" -> applyTextEdit(sortLines(text, start, end, descending = false), "Lines are already sorted")
+            "editor.action.sortLinesDescending" -> applyTextEdit(sortLines(text, start, end, descending = true), "Lines are already sorted")
+            "editor.action.removeDuplicateLines" -> applyTextEdit(deleteDuplicateLines(text, start, end), "No duplicate lines")
+            "editor.action.trimTrailingWhitespace" -> applyTextEdit(trimTrailingWhitespace(text, end), "No trailing whitespace")
+            else -> {
+                val transform = CASE_COMMANDS[commandId] ?: return
+                applyTextEdit(transformCase(text, start, end, transform), "Already ${transform.title.lowercase()}")
+            }
+        }
+    }
+
+    /** Selections before each Expand Selection, for Shrink Selection to go back through. */
+    private val expandHistory = mutableListOf<IntRange>()
+    private var expandedTo: IntRange? = null
+
+    /**
+     * Shift+Alt+Right: the next larger syntactic range, from the language server's selection
+     * ranges when it has them, together with words, strings, brackets, lines and indented blocks.
+     */
+    private fun expandSelection() {
+        val document = activeDocument?.takeIf { activeNotebook == null } ?: return
+        val surface = editorSurface ?: return
+        val current = surface.selectionOffsets
+        if (expandedTo != current) expandHistory.clear()
+        val text = surface.text
+        fun choose(server: List<IntRange>) {
+            if (surface.selectionOffsets != current || surface.text != text) return
+            val next = (server + smartSelectRanges(text, current.first, current.last))
+                .filter { it.first <= current.first && it.last >= current.last && (it.first < current.first || it.last > current.last) }
+                .minByOrNull { it.last - it.first }
+                ?: return
+            expandHistory += current
+            expandedTo = next
+            surface.setSelection(EditorSelection(surface.positionAt(next.first), surface.positionAt(next.last)))
+        }
+        val client = languageClientFor(document.path)?.takeIf { it.isReady && it.supportsSelectionRange }
+        if (client == null) {
+            choose(emptyList())
+            return
+        }
+        client.selectionRanges(document.path, surface.positionAt(current.last)).whenComplete { result, _ ->
+            val ranges = mutableListOf<IntRange>()
+            var node = result?.takeIf { it.isJsonArray }?.asJsonArray?.firstOrNull()?.takeIf { it.isJsonObject }?.asJsonObject
+            while (node != null) {
+                node.getAsJsonObject("range")?.toLspRange()?.let { range ->
+                    runCatching { positionToOffset(text, range.start)..positionToOffset(text, range.end) }.getOrNull()?.let(ranges::add)
+                }
+                node = node.get("parent")?.takeIf { it.isJsonObject }?.asJsonObject
+            }
+            post { choose(ranges) }
+        }
+    }
+
+    /** Shift+Alt+Left: back to the selection before the last Expand Selection. */
+    private fun shrinkSelection() {
+        val surface = editorSurface ?: return
+        if (expandedTo != surface.selectionOffsets || expandHistory.isEmpty()) return
+        val previous = expandHistory.removeAt(expandHistory.lastIndex)
+        expandedTo = previous
+        surface.setSelection(EditorSelection(surface.positionAt(previous.first), surface.positionAt(previous.last)))
+    }
+
+    /** Ctrl+K Ctrl+F: formats the selected lines (the cursor's line with nothing selected). */
+    private fun formatSelection() {
+        val document = activeDocument?.takeIf { activeNotebook == null } ?: return
+        val surface = editorSurface ?: return
+        val client = formattingClientFor(document.path)?.takeIf { it.isReady }
+        if (client == null || !client.supportsRangeFormatting) {
+            status = if (client == null) "Formatting requires a connected language server for this file" else "This file's formatter can't format a selection"
+            return
+        }
+        val start = surface.selectionStart()
+        val end = surface.selectionEnd()
+        val lastLine = if (end.line > start.line && end.character == 0) end.line - 1 else end.line
+        val range = LspRange(LspPosition(start.line, 0), LspPosition(lastLine, surface.lineText(lastLine).length))
+        val version = document.version
+        val indentation = indentation(document)
+        client.rangeFormatting(document.path, range, indentation.tabSize, indentation.insertSpaces).whenComplete { edits, error ->
+            post {
+                when {
+                    error != null -> status = "Format failed: ${error.cause?.message ?: error.message}"
+                    document.version != version || !editorHost.isOpen(document.path) -> Unit
+                    edits.isNullOrEmpty() -> status = "Selection is already formatted"
+                    else -> {
+                        editorHost.applyEdits(document.path, edits)
+                        onDocumentEdited(document)
+                        status = "Formatted selection"
+                    }
+                }
+            }
+        }
+    }
+
     /** F8 / Shift+F8: the next or previous diagnostic in the active file, wrapping around. */
     private fun goToProblem(forward: Boolean) {
         val document = activeDocument ?: return
@@ -3899,7 +4243,7 @@ class WorkbenchController(private val context: Context) {
         val client = formattingClientFor(document.path)?.takeIf { it.isReady && it.supportsRangeFormatting } ?: return
         val range = LspRange(surface.positionAt(startOffset), surface.positionAt(endOffset))
         val version = document.version
-        client.rangeFormatting(document.path, range, settings.tabSize, settings.insertSpaces).whenComplete { edits, error ->
+        client.rangeFormatting(document.path, range, indentation(document).tabSize, indentation(document).insertSpaces).whenComplete { edits, error ->
             post {
                 // Typing on since the paste: the edits no longer fit the text.
                 if (error != null || edits.isNullOrEmpty() || document.version != version || !editorHost.isOpen(document.path)) return@post
@@ -4303,6 +4647,43 @@ class WorkbenchController(private val context: Context) {
         status = "Line endings set to $selected"
     }
 
+    /** The status bar's indentation picker: spaces or tabs and the size, for this file only. */
+    fun setIndentation(value: Indentation) {
+        val document = activeDocument ?: return
+        document.indentation = value
+        editorSurface?.applyConfig(editorConfig())
+        documentRevision++
+        status = "Indenting with ${value.label.lowercase()}"
+    }
+
+    fun redetectIndentation() {
+        val document = activeDocument ?: return
+        document.indentation = null
+        document.indentationDetected = false
+        val found = indentation(document)
+        editorSurface?.applyConfig(editorConfig())
+        documentRevision++
+        status = if (document.detectedIndentation == null) "Nothing indented yet: using the settings (${found.label})" else "Detected ${found.label}"
+    }
+
+    /** Rewrites the leading whitespace of every line to [target] (VS Code's Convert Indentation to Spaces/Tabs). */
+    fun convertIndentationTo(target: Indentation) {
+        val document = activeDocument ?: return
+        val surface = editorSurface ?: return
+        val current = indentation(document)
+        val updated = convertIndentation(surface.text, current, target)
+        document.indentation = target
+        if (updated != surface.text) {
+            val selection = surface.selection
+            replaceEditorText(surface, updated, 0, 0)
+            runCatching { surface.setSelection(EditorSelection(selection.active.copy(character = 0), selection.active.copy(character = 0))) }
+        }
+        editorSurface?.applyConfig(editorConfig())
+        documentRevision++
+        dialog = null
+        status = "Converted indentation to ${target.label.lowercase()}"
+    }
+
     private fun zoomEditor(delta: Float) {
         updateSetting(WorkbenchSettings.EDITOR_FONT_SIZE, (settings.editorFontSize + delta).coerceIn(8f, 40f))
     }
@@ -4471,7 +4852,7 @@ class WorkbenchController(private val context: Context) {
         val version = document.version
         val position = surface.selectionStart()
         copilotLog { "request ${document.path.substringAfterLast('/')} ${position.line}:${position.character} v$version invoked=$invoked" }
-        copilot.inlineCompletion(document.path, version, position, settings.tabSize, settings.insertSpaces, invoked)
+        copilot.inlineCompletion(document.path, version, position, indentation(document).tabSize, indentation(document).insertSpaces, invoked)
             .whenComplete { suggestions, error ->
                 post {
                     val current = editorSurface?.selectionStart()
@@ -7015,8 +7396,13 @@ class WorkbenchController(private val context: Context) {
             "editor.action.clipboardCutAction" -> copySelection(true)
             "editor.action.clipboardPasteAction" -> pasteClipboard()
             "editor.action.selectAll" -> surface?.selectAll()
-            "editor.action.indentLines" -> surface?.let { indentOrInsertTab(it, settings.tabSize, settings.insertSpaces) }
-            "editor.action.outdentLines" -> surface?.outdentSelection(settings.tabSize)
+            "editor.action.indentLines" -> surface?.let { indentOrInsertTab(it, indentation().tabSize, indentation().insertSpaces) }
+            "editor.action.outdentLines" -> surface?.outdentSelection(indentation().tabSize)
+            "editor.action.indentUsingSpaces", "editor.action.indentUsingTabs", "changeEditorIndentation" ->
+                if (activeDocument != null && activeNotebook == null) dialog = WorkbenchDialog.IndentationPicker
+            "editor.action.detectIndentation" -> redetectIndentation()
+            "editor.action.indentationToSpaces" -> convertIndentationTo(Indentation(true, indentation().tabSize))
+            "editor.action.indentationToTabs" -> convertIndentationTo(Indentation(false, indentation().tabSize))
             "editor.action.commentLine" -> toggleLineComment()
             "editor.action.blockComment" -> toggleBlockComment()
             "editor.action.marker.next" -> goToProblem(forward = true)
@@ -7042,6 +7428,13 @@ class WorkbenchController(private val context: Context) {
             "toggleFindInSelection" -> if (findVisible) toggleFindInSelection()
             "workbench.action.gotoLine" -> openQuickOpen(":")
             "editor.action.formatDocument" -> formatActiveDocument()
+            "editor.action.formatSelection" -> formatSelection()
+            "editor.action.smartSelect.expand" -> expandSelection()
+            "editor.action.smartSelect.shrink" -> shrinkSelection()
+            "editor.action.joinLines", "editor.action.transposeLetters", "editor.action.sortLinesAscending",
+            "editor.action.sortLinesDescending", "editor.action.removeDuplicateLines", "editor.action.trimTrailingWhitespace",
+            in CASE_COMMANDS.keys,
+            -> runTextTransform(commandId)
             "editor.action.goToDefinition", "editor.action.peekDefinition" -> goToDefinition()
             "editor.action.goToReferences" -> findReferences()
             "editor.action.rename" -> beginRename()

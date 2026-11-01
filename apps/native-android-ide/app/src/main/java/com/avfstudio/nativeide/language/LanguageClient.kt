@@ -100,6 +100,9 @@ class LanguageClient(
     @Volatile var supportsRangeFormatting = false
         private set
     @Volatile var supportsInlayHints = false
+    /** `textDocument/selectionRange`, for Expand Selection. */
+    @Volatile var supportsSelectionRange = false
+        private set
     /** `workspace/symbol`, for Quick Open's `#`. */
     @Volatile var supportsWorkspaceSymbols = false
         private set
@@ -154,6 +157,7 @@ class LanguageClient(
                 supportsRangeFormatting = capabilities?.provides("documentRangeFormattingProvider") == true
                 supportsInlayHints = capabilities?.provides("inlayHintProvider") == true
                 supportsWorkspaceSymbols = capabilities?.provides("workspaceSymbolProvider") == true
+                supportsSelectionRange = capabilities?.provides("selectionRangeProvider") == true
                 notify("initialized", JsonObject())
                 notify("workspace/didChangeConfiguration", JsonObject().apply {
                     add("settings", gson.toJsonTree(configuredSettings))
@@ -274,6 +278,17 @@ class LanguageClient(
     /** The rest of an item (documentation, auto-import edits), for servers that send them on request. */
     fun resolveCompletion(item: JsonObject): CompletableFuture<JsonElement> = request("completionItem/resolve", item)
 
+    fun selectionRanges(path: String, position: LspPosition): CompletableFuture<JsonElement> =
+        request("textDocument/selectionRange", JsonObject().apply {
+            add("textDocument", JsonObject().apply { addProperty("uri", fileUri(path)) })
+            add("positions", JsonArray().apply {
+                add(JsonObject().apply {
+                    addProperty("line", position.line)
+                    addProperty("character", position.character)
+                })
+            })
+        })
+
     fun hover(path: String, position: LspPosition): CompletableFuture<JsonElement> =
         request("textDocument/hover", positionParams(path, position))
 
@@ -319,12 +334,12 @@ class LanguageClient(
     fun rename(path: String, position: LspPosition, newName: String): CompletableFuture<JsonElement> =
         request("textDocument/rename", positionParams(path, position).apply { addProperty("newName", newName) })
 
-    fun formatting(path: String): CompletableFuture<List<LspTextEdit>> =
+    fun formatting(path: String, tabSize: Int = 4, insertSpaces: Boolean = true): CompletableFuture<List<LspTextEdit>> =
         request("textDocument/formatting", JsonObject().apply {
             add("textDocument", JsonObject().apply { addProperty("uri", fileUri(path)) })
             add("options", JsonObject().apply {
-                addProperty("tabSize", 4)
-                addProperty("insertSpaces", true)
+                addProperty("tabSize", tabSize)
+                addProperty("insertSpaces", insertSpaces)
             })
         }).thenApply(::textEdits)
 
@@ -478,6 +493,7 @@ class LanguageClient(
                     })
                 })
                 add("documentHighlight", JsonObject().apply { addProperty("dynamicRegistration", false) })
+                add("selectionRange", JsonObject().apply { addProperty("dynamicRegistration", false) })
                 add("rangeFormatting", JsonObject().apply { addProperty("dynamicRegistration", false) })
                 add("inlayHint", JsonObject().apply { addProperty("dynamicRegistration", false) })
                 add("definition", JsonObject().apply { addProperty("dynamicRegistration", false) })

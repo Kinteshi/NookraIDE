@@ -544,7 +544,7 @@ private fun NativeEditorView(controller: WorkbenchController, document: Document
                 val editorSurface = SoraEditorSurface(this, bracketColorizer)
                 surface = editorSurface
                 shown[0] = editorSurface
-                editorSurface.applyConfig(controller.editorConfig())
+                editorSurface.applyConfig(controller.editorConfig(document))
                 onStylesPublished = {
                     bracketColorizer.update()
                     editorSurface.drawLineMarks()
@@ -593,7 +593,7 @@ private fun NativeEditorView(controller: WorkbenchController, document: Document
             controller.executionPoint
             val surface = (view as NativeCodeEditor).surface
             controller.refreshLineMarks(document.path)
-            surface.applyConfig(controller.editorConfig())
+            surface.applyConfig(controller.editorConfig(document))
             view.setEditable(true)
             // Tab and Escape go to Copilot while a suggestion or a next edit is shown.
             surface.inlineSuggestionShown = controller.inlineSuggestion != null || controller.nextEdit != null

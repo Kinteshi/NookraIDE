@@ -258,6 +258,7 @@ internal object MessagePackVfsCodec {
                 "Ack" -> IncomingPacket.Ack(
                     requestId = requestId,
                     modifiedTs = fields["modified_ts"]?.takeUnless { it.isNilValue }?.asLong(),
+                    trashId = fields["trash_id"]?.takeIf { it.isStringValue }?.asString(),
                 )
                 "ListDirRes" -> IncomingPacket.ListDir(
                     requestId = requestId,
@@ -530,7 +531,8 @@ sealed interface IncomingPacket {
         val modifiedTs: Long,
         val size: Long,
     ) : IncomingPacket
-    data class Ack(val requestId: Long, val modifiedTs: Long?) : IncomingPacket
+    /** [trashId] answers a delete to the trash: what `RestoreReq` takes back within the daemon's 10 s. */
+    data class Ack(val requestId: Long, val modifiedTs: Long?, val trashId: String? = null) : IncomingPacket
     data class ListDir(val requestId: Long, val entries: List<FileEntry>) : IncomingPacket
     data class Stat(val requestId: Long, val entry: FileEntry) : IncomingPacket
     data class Roots(val requestId: Long, val roots: List<String>) : IncomingPacket

@@ -61,6 +61,10 @@ import androidx.compose.foundation.background
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
@@ -112,6 +116,7 @@ fun WorkbenchDialogHost(controller: WorkbenchController) {
                 controller.dialog = null
             }
         }
+        WorkbenchDialog.IndentationPicker -> controller.activeDocument?.let { document -> IndentationDialog(controller, document) }
         WorkbenchDialog.UntitledLanguage -> controller.activeDocument?.let { document ->
             val current = UNTITLED_LANGUAGES.entries.firstOrNull { it.value == document.languageId }?.key ?: "Plain text"
             ChoiceDialog("Language", current, UNTITLED_LANGUAGES.keys.toList(), controller::setUntitledLanguage) {
@@ -242,9 +247,20 @@ fun WorkbenchDialogHost(controller: WorkbenchController) {
         }
         is WorkbenchDialog.ConfirmDelete -> AlertDialog(
             onDismissRequest = { controller.dialog = null },
-            title = { Text(if (dialog.isDirectory) "Delete folder?" else "Delete file?") },
-            text = { Text("${dialog.path.substringAfterLast('/')} will be moved to the guest's trash.") },
-            confirmButton = { TextButton(onClick = { controller.deleteEntry(dialog.path) }) { Text("Delete") } },
+            title = {
+                Text(
+                    when {
+                        dialog.paths.size > 1 -> "Delete ${dialog.paths.size} items?"
+                        dialog.isDirectory -> "Delete folder?"
+                        else -> "Delete file?"
+                    },
+                )
+            },
+            text = {
+                val names = dialog.paths.take(5).joinToString(", ") { it.substringAfterLast('/') } + if (dialog.paths.size > 5) " and ${dialog.paths.size - 5} more" else ""
+                Text("$names will be moved to the guest's trash. Undo brings them back for 10 seconds.")
+            },
+            confirmButton = { TextButton(onClick = { controller.deleteEntries(dialog.paths) }) { Text("Delete") } },
             dismissButton = { TextButton(onClick = { controller.dialog = null }) { Text("Cancel") } },
         )
         WorkbenchDialog.Rename -> AlertDialog(
@@ -611,6 +627,52 @@ private fun ChoiceDialog(title: String, selected: String, options: List<String>,
     )
 }
 
+/** VS Code's indentation quick pick, in one dialog: spaces or tabs, the size, detect again, convert. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun IndentationDialog(controller: WorkbenchController, document: com.avfstudio.nativeide.document.DocumentSession) {
+    val current = controller.indentation(document)
+    AlertDialog(
+        onDismissRequest = { controller.dialog = null },
+        title = { Text("Indentation") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    if (document.indentation == null && document.detectedIndentation != null) "Detected from the file's content" else if (document.indentation != null) "Chosen for this file" else "From the settings",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                    listOf(true to "Spaces", false to "Tabs").forEachIndexed { index, (spaces, label) ->
+                        SegmentedButton(
+                            selected = current.insertSpaces == spaces,
+                            onClick = { controller.setIndentation(current.copy(insertSpaces = spaces)) },
+                            shape = SegmentedButtonDefaults.itemShape(index, 2),
+                        ) { Text(label) }
+                    }
+                }
+                Text(if (current.insertSpaces) "Spaces per level" else "Tab width", style = MaterialTheme.typography.labelLarge)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    (1..8).forEach { size ->
+                        FilterChip(
+                            selected = current.tabSize == size,
+                            onClick = { controller.setIndentation(current.copy(tabSize = size)) },
+                            label = { Text("$size") },
+                        )
+                    }
+                }
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = controller::redetectIndentation) { Text("Detect from content") }
+                    OutlinedButton(onClick = { controller.convertIndentationTo(current.copy(insertSpaces = !current.insertSpaces)) }) {
+                        Text(if (current.insertSpaces) "Convert to tabs" else "Convert to spaces")
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { controller.dialog = null }) { Text("Close") } },
+    )
+}
+
 @Composable
 private fun ConnectDialog(controller: WorkbenchController) {
     AlertDialog(
@@ -780,11 +842,16 @@ private fun PathPromptDialog(controller: WorkbenchController, prompt: WorkbenchD
         is PathAction.NewFolder -> Triple("New folder", "Name", "Create")
         is PathAction.Rename -> Triple("Rename", "New name", "Rename")
         is PathAction.SaveAs -> Triple("Save as", "Path", "Save")
+        is PathAction.Move -> Triple(
+            "Move ${if (prompt.action.paths.size == 1) prompt.action.paths.single().substringAfterLast('/') else "${prompt.action.paths.size} items"}",
+            "Folder in the workspace (created if new; empty is the top)",
+            "Move",
+        )
     }
     var value by remember(prompt.action) {
         // Select the name but not its extension, like VS Code, so typing replaces just the name.
-        val start = prompt.initial.lastIndexOf('/') + 1
-        val dot = prompt.initial.lastIndexOf('.').takeIf { it > start } ?: prompt.initial.length
+        val start = if (prompt.action is PathAction.Move) 0 else prompt.initial.lastIndexOf('/') + 1
+        val dot = prompt.initial.lastIndexOf('.').takeIf { it > start && prompt.action !is PathAction.Move } ?: prompt.initial.length
         mutableStateOf(TextFieldValue(prompt.initial, TextRange(start, dot)))
     }
     val focusRequester = remember { FocusRequester() }

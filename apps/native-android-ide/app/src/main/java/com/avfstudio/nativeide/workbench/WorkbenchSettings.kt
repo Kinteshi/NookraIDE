@@ -24,6 +24,8 @@ data class WorkbenchSettings(
     val editorFontSize: Float = 14f,
     val tabSize: Int = 4,
     val insertSpaces: Boolean = true,
+    /** Tab size and spaces or tabs follow each file's own indentation (`editor.detectIndentation`). */
+    val detectIndentation: Boolean = true,
     val wordWrap: Boolean = false,
     val lineNumbers: Boolean = true,
     val formatOnSave: Boolean = false,
@@ -133,6 +135,22 @@ data class WorkbenchSettings(
     val problemDecorations: Boolean = true,
     /** The launcher's long-press menu lists the recent folders. */
     val launcherShortcuts: Boolean = true,
+    /** Reference counts above functions and classes, from the language server (`editor.codeLens`). */
+    val codeLens: Boolean = true,
+    /** Renaming an HTML tag renames its closing tag too (`editor.linkedEditing`). */
+    val linkedEditing: Boolean = true,
+    /** Ask before deleting from Explorer (`explorer.confirmDelete`); Undo is offered either way. */
+    val confirmDelete: Boolean = true,
+    /** A folder holding only one folder shows as one row, `src/main/java` (`explorer.compactFolders`). */
+    val compactFolders: Boolean = true,
+    /** The open tabs listed above the files in Explorer (`explorer.openEditors.visible`). */
+    val openEditors: Boolean = true,
+    /** Long-press and drag files onto folders to move them (`explorer.enableDragAndDrop`). */
+    val explorerDragAndDrop: Boolean = true,
+    /** Names Explorer and Quick Open hide (`files.exclude`, glob → true). */
+    val filesExclude: List<String> = DEFAULT_FILES_EXCLUDE,
+    /** A short buzz for a breakpoint, a latched modifier, a long-press drag (`avf.haptics`). */
+    val haptics: Boolean = true,
 ) {
     companion object {
         const val THEME_MODE = "avf.theme.mode"
@@ -212,6 +230,18 @@ data class WorkbenchSettings(
         const val GIT_DECORATIONS = "git.decorations.enabled"
         const val PROBLEM_DECORATIONS = "problems.decorations.enabled"
         const val LAUNCHER_SHORTCUTS = "avf.launcher.recentFolders"
+        const val DETECT_INDENTATION = "editor.detectIndentation"
+        const val CODE_LENS = "editor.codeLens"
+        const val LINKED_EDITING = "editor.linkedEditing"
+        const val CONFIRM_DELETE = "explorer.confirmDelete"
+        const val COMPACT_FOLDERS = "explorer.compactFolders"
+        /** VS Code takes a count (0 hides the section); a boolean works here too. */
+        const val OPEN_EDITORS = "explorer.openEditors.visible"
+        const val EXPLORER_DRAG_AND_DROP = "explorer.enableDragAndDrop"
+        const val FILES_EXCLUDE = "files.exclude"
+        const val HAPTICS = "avf.haptics"
+        /** VS Code's defaults for `files.exclude`. */
+        val DEFAULT_FILES_EXCLUDE = listOf("**/.git", "**/.svn", "**/.hg", "**/CVS", "**/.DS_Store", "**/Thumbs.db")
 
         fun from(settings: JsonObject): WorkbenchSettings {
             val defaults = WorkbenchSettings()
@@ -299,6 +329,19 @@ data class WorkbenchSettings(
                 gitDecorations = bool(GIT_DECORATIONS, defaults.gitDecorations),
                 problemDecorations = bool(PROBLEM_DECORATIONS, defaults.problemDecorations),
                 launcherShortcuts = bool(LAUNCHER_SHORTCUTS, defaults.launcherShortcuts),
+                detectIndentation = bool(DETECT_INDENTATION, defaults.detectIndentation),
+                codeLens = bool(CODE_LENS, defaults.codeLens),
+                linkedEditing = bool(LINKED_EDITING, defaults.linkedEditing),
+                confirmDelete = bool(CONFIRM_DELETE, defaults.confirmDelete),
+                compactFolders = bool(COMPACT_FOLDERS, defaults.compactFolders),
+                openEditors = settings.getPath(OPEN_EDITORS)?.takeIf { it.isJsonPrimitive }?.asJsonPrimitive?.let { value ->
+                    if (value.isNumber) value.asInt > 0 else runCatching { value.asBoolean }.getOrNull()
+                } ?: defaults.openEditors,
+                explorerDragAndDrop = bool(EXPLORER_DRAG_AND_DROP, defaults.explorerDragAndDrop),
+                filesExclude = settings.getPath(FILES_EXCLUDE)?.takeIf { it.isJsonObject }?.asJsonObject?.entrySet()
+                    ?.filter { (_, value) -> value.isJsonPrimitive && runCatching { value.asBoolean }.getOrDefault(false) }
+                    ?.map { it.key } ?: defaults.filesExclude,
+                haptics = bool(HAPTICS, defaults.haptics),
             )
         }
     }

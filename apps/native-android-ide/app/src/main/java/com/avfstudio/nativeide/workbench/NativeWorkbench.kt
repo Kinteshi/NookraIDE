@@ -71,6 +71,9 @@ import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.Snackbar
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -145,6 +148,11 @@ fun NativeWorkbench() {
         }
         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surfaceContainer) {
             val activity = LocalContext.current as? android.app.Activity
+            val view = LocalView.current
+            DisposableEffect(view) {
+                controller.hapticView = view
+                onDispose { controller.hapticView = null }
+            }
             DisposableEffect(activity) {
                 KeyBar.inject = { event -> activity?.dispatchKeyEvent(event) ?: false }
                 onDispose { KeyBar.inject = null }
@@ -157,8 +165,17 @@ fun NativeWorkbench() {
             ) {
                 Box(Modifier.weight(1f)) {
                     if (controller.settingsVisible) SettingsScreen(controller) else WorkbenchLayout(controller)
+                    controller.explorerUndo?.let { undo ->
+                        Snackbar(
+                            action = { TextButton(onClick = controller::undoExplorerChange) { Text("Undo") } },
+                            dismissAction = {
+                                IconButton(onClick = controller::dismissExplorerUndo) { Icon(Icons.Outlined.Close, contentDescription = "Dismiss") }
+                            },
+                            modifier = Modifier.align(Alignment.BottomCenter).padding(start = 16.dp, end = 16.dp, bottom = 40.dp).widthIn(max = 560.dp),
+                        ) { Text(undo.message, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                    }
                 }
-                if (controller.settings.keyBar && WindowInsets.isImeVisible) KeyBarRow()
+                if (controller.settings.keyBar && WindowInsets.isImeVisible) KeyBarRow(onLatch = { controller.haptic(android.view.HapticFeedbackConstants.KEYBOARD_TAP) })
             }
         }
         WorkbenchDialogHost(controller)
@@ -479,6 +496,7 @@ private fun StatusBar(controller: WorkbenchController) {
         // An image has no lines, encoding or language to show.
         if (document != null && controller.activeNotebook == null && !document.binary) {
             controller.cursorPosition?.let { StatusItem("Ln ${it.line + 1}, Col ${it.character + 1}") { controller.showGoToLine() } }
+            StatusItem(controller.indentation(document).label) { controller.dialog = WorkbenchDialog.IndentationPicker }
             StatusItem(document.encoding) { controller.dialog = WorkbenchDialog.Encoding }
             StatusItem(if (document.eol == "\r\n") "CRLF" else "LF") { controller.dialog = WorkbenchDialog.LineEnding }
             if (controller.lspLanguageId(document.path) == "python") {

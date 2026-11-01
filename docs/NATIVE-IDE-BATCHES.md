@@ -1432,6 +1432,40 @@ User's pick: 6, 7, 20 and 23 of the backlog list after batch 28 (spec-review ite
 * Test files `~/Projects/batch29.{py,ipynb}`, `batch29-plot-1.svg`, and
   `Pictures/MaterialCode/batch29-plot-*.png` on the tablet.
 
+## 30. Edit commands, LSP extras, indentation, Explorer, notebook find and outline, data viewer, device extras (11-01 from 14:10; in progress)
+User's pick: 2, 3, 4, 11, 12, 16, 17, 21 of the backlog list after batch 29 (spec-review items 4, 5, 6,
+11, 12, 17, 19, 21).
+* (4) Indentation detection (`editor.detectIndentation`, setting "Detect indentation", on): each
+  file's indentation is guessed when it opens, as VS Code does (tabs or spaces by which more lines
+  start with; the tab size from the most common step between neighbouring lines, docstrings left
+  out). The status bar shows "Spaces: 4" / "Tab Size: 4"; it opens a picker for spaces or tabs and
+  the size (this file only), Detect from content, and Convert to tabs/spaces. Tab, Shift+Tab,
+  Enter's indentation, Format Document/Selection, format on paste and Copilot use it. Commands
+  Indent Using Spaces/Tabs, Detect Indentation from Content, Convert Indentation to Spaces/Tabs.
+  Built, unit-tested; tablet check pending.
+* (2) Edit commands, in the palette with VS Code's ids: Join Lines, Transpose Characters, Sort
+  Lines Ascending/Descending (the selected lines, or the file), Delete Duplicate Lines, Trim
+  Trailing Whitespace (Ctrl+K Ctrl+X), Transform to Uppercase/Lowercase/Title/Snake/Kebab Case (the
+  selection or the word at the cursor), Expand/Shrink Selection (Shift+Alt+→/←: the server's
+  `selectionRange` when it has one, with words, strings, brackets, lines and indented blocks), and
+  Format Selection (Ctrl+K Ctrl+F, the selected lines through range formatting). Each is one
+  edit (one Undo). Built, unit-tested; tablet check pending.
+* (11) Undo after deleting from Explorer: the daemon already kept trashed entries 10 s
+  (`RestoreReq`); the app now reads the trash id from the delete's Ack and shows a snackbar "Deleted
+  x · Undo" for 9.5 s, which restores the entries and reopens their tabs. "Confirm before
+  deleting" (`explorer.confirmDelete`, on as in VS Code) turns the question off. Built; tablet
+  check pending.
+* (12) Explorer: multi-select (Ctrl+tap, Shift+tap a range, or Select in a row's menu, then taps
+  toggle; a bar with Move to…, Delete and Clear), drag to move (long-press and drag onto a folder,
+  ".." for the parent; the list scrolls near its edges; a long press without moving opens the
+  menu; setting "Drag to move in Explorer"), Move to… (a folder in the workspace, created if new),
+  Undo for moves, Open Editors above the files (setting), compact folders (`explorer.compactFolders`:
+  a folder holding one folder opens through and shows as `a/b/c`), and `files.exclude` (VS Code's
+  defaults; globs with `**`, `*`, `?`, `{a,b}`, `[…]`; Explorer and Quick Open). Built; tablet
+  check pending.
+* (21, part) Haptic feedback (`avf.haptics`, setting): breakpoints, latched Ctrl/Alt/Shift in the
+  key bar, Explorer selection and drag, Undo offered.
+
 ## Backlog
 To investigate (user, 10-28):
 * (Done in batch 16, with a notebook-side finding.) Plotly figures updating in place (the user's private-notebook-1.ipynb: `plot_handle =

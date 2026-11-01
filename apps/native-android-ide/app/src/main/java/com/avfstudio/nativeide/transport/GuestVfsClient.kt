@@ -290,6 +290,11 @@ class GuestVfsClient(
         request("DeleteReq", mapOf("path" to path, "recursive" to true, "to_trash" to true))
             .thenApply { it as IncomingPacket.Ack }
 
+    /** Puts a deleted entry back where it was; the daemon keeps it for 10 s after the delete. */
+    fun restore(trashId: String): CompletableFuture<IncomingPacket.Ack> =
+        request("RestoreReq", mapOf("trash_id" to trashId))
+            .thenApply { it as IncomingPacket.Ack }
+
     fun startLanguageServer(tool: String, cwd: String, args: List<String> = emptyList()): CompletableFuture<UUID> =
         startRpc(tool, cwd, "Lsp", args)
 

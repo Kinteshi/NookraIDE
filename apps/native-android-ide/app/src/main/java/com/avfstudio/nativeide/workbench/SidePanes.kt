@@ -117,7 +117,7 @@ fun SidebarContent(controller: WorkbenchController, view: SidebarView, modifier:
 
 /** Explorer without a guest: the open folder's files this device has a copy of. */
 @Composable
-private fun OfflineFilesList(controller: WorkbenchController) {
+internal fun OfflineFilesList(controller: WorkbenchController) {
     val workspace = controller.workspaceRoot ?: return
     val files = remember(workspace, controller.documents.size) { controller.offlineFiles(workspace).sorted() }
     Column(Modifier.fillMaxSize()) {
@@ -133,117 +133,6 @@ private fun OfflineFilesList(controller: WorkbenchController) {
             LazyColumn {
                 items(files) { path ->
                     PaneRow(Icons.AutoMirrored.Outlined.InsertDriveFile, path.removePrefix(workspace.trimEnd('/') + "/")) { controller.openPath(path) }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun ExplorerList(controller: WorkbenchController) {
-    val directory = controller.currentDirectory
-    // Changes made in a terminal since the last save or Git action show when Explorer opens.
-    LaunchedEffect(controller.connected) { if (controller.connected && controller.settings.gitDecorations) controller.refreshGitStatus() }
-    when {
-        controller.offline -> OfflineFilesList(controller)
-        !controller.connected && controller.roots.isEmpty() -> EmptyMessage("Connect to a guest to browse its workspace.")
-        directory.isEmpty() -> LazyColumn {
-            items(controller.roots) { root ->
-                PaneRow(Icons.Outlined.Folder, root.substringAfterLast('/').ifEmpty { root }) { controller.loadDirectory(root) }
-            }
-        }
-        else -> LazyColumn {
-            val tree = controller.settings.explorerTree
-            val marks = controller.explorerMarks
-            val rows = if (tree) {
-                explorerRows(controller.entries, controller.expandedFolders.toSet(), controller.folderChildren)
-            } else {
-                controller.entries.map { ExplorerRow(it, 0, expanded = false) }
-            }
-            item {
-                val parent = directory.substringBeforeLast('/', "")
-                // The open workspace is the top, as in VS Code (the daemon may serve folders above it).
-                val atRoot = controller.workspaceRoot?.let { it.trimEnd('/') == directory.trimEnd('/') }
-                    ?: controller.roots.any { it.trimEnd('/') == directory.trimEnd('/') }
-                PaneRow(
-                    Icons.AutoMirrored.Outlined.ArrowBack,
-                    if (atRoot) directory else "..",
-                    muted = true,
-                    trailing = if (tree && rows.any { it.expanded }) {
-                        {
-                            IconButton(onClick = controller::collapseFolders, modifier = Modifier.size(24.dp)) {
-                                Icon(Icons.Outlined.UnfoldLess, contentDescription = "Collapse folders", modifier = Modifier.size(18.dp))
-                            }
-                        }
-                    } else {
-                        null
-                    },
-                ) {
-                    if (!atRoot && parent.isNotEmpty()) controller.loadDirectory(parent)
-                }
-            }
-            items(rows, key = { it.entry.path }) { row ->
-                val entry = row.entry
-                val mark = marks[entry.path]
-                val dark = LocalDarkTheme.current
-                var menu by remember { mutableStateOf(false) }
-                Box {
-                    PaneRow(
-                        when {
-                            // The tree marks folders with VS Code's chevrons (the open folder icon is
-                            // too close to the closed one at this size).
-                            tree && row.expanded -> Icons.Outlined.KeyboardArrowDown
-                            tree && entry.isDirectory -> Icons.AutoMirrored.Outlined.KeyboardArrowRight
-                            entry.isDirectory -> Icons.Outlined.Folder
-                            entry.name.endsWith(".ipynb") -> Icons.Outlined.Code
-                            else -> Icons.AutoMirrored.Outlined.InsertDriveFile
-                        },
-                        entry.name,
-                        selected = entry.path == controller.activePath,
-                        indent = row.depth,
-                        onLongClick = { menu = true },
-                        trailing = mark?.let { { ExplorerMark(it, dark) } },
-                        labelColor = mark?.tone?.color(dark),
-                    ) {
-                        when {
-                            !entry.isDirectory -> controller.openPath(entry.path, preview = true)
-                            tree -> controller.toggleFolder(entry.path)
-                            else -> controller.loadDirectory(entry.path)
-                        }
-                    }
-                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                        if (entry.isDirectory) {
-                            DropdownMenuItem(
-                                text = { Text("New file here") },
-                                leadingIcon = { Icon(Icons.AutoMirrored.Outlined.NoteAdd, contentDescription = null) },
-                                onClick = { menu = false; controller.beginNewEntry(folder = false, parent = entry.path) },
-                            )
-                            if (tree) {
-                                DropdownMenuItem(
-                                    text = { Text("Show only this folder") },
-                                    leadingIcon = { Icon(Icons.Outlined.FolderOpen, contentDescription = null) },
-                                    onClick = { menu = false; controller.loadDirectory(entry.path) },
-                                )
-                            }
-                        }
-                        if (!entry.isDirectory) {
-                            DropdownMenuItem(
-                                text = { Text("Add to Copilot chat") },
-                                leadingIcon = { Icon(Icons.Outlined.AutoAwesome, contentDescription = null) },
-                                onClick = { menu = false; controller.attachFileToChat(entry.path) },
-                            )
-                        }
-                        DropdownMenuItem(
-                            text = { Text("Rename") },
-                            leadingIcon = { Icon(Icons.Outlined.DriveFileRenameOutline, contentDescription = null) },
-                            onClick = { menu = false; controller.beginRenameEntry(entry.path) },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Delete") },
-                            leadingIcon = { Icon(Icons.Outlined.Delete, contentDescription = null) },
-                            onClick = { menu = false; controller.beginDeleteEntry(entry.path, entry.isDirectory) },
-                        )
-                    }
                 }
             }
         }
@@ -398,6 +287,9 @@ fun PaneRow(
     trailing: (@Composable () -> Unit)? = null,
     /** The name's colour when Explorer marks the file (Git, problems). */
     labelColor: androidx.compose.ui.graphics.Color? = null,
+    /** False when [dragModifier] handles the long press (Explorer's drag); a right-click still calls [onLongClick]. */
+    longClick: Boolean = true,
+    dragModifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
     val colors = MaterialTheme.colorScheme
@@ -407,7 +299,9 @@ fun PaneRow(
             .padding(horizontal = 6.dp)
             .background(if (selected) colors.secondaryContainer else androidx.compose.ui.graphics.Color.Transparent, MaterialTheme.shapes.small)
             .then(if (onLongClick != null) Modifier.onSecondaryClick(onLongClick) else Modifier)
-            .combinedClickable(onLongClick = onLongClick, onClick = onClick)
+            .combinedClickable(onLongClick = onLongClick.takeIf { longClick }, onClick = onClick)
+            // After the click handler, so a drag that ends consumes the release before it becomes a tap.
+            .then(dragModifier)
             .padding(start = (10 + indent * 14).dp, end = 10.dp, top = 7.dp, bottom = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -703,7 +597,7 @@ private fun matchPreview(
 
 /** Explorer's badge: a file's problem count and Git letter, or a dot on a folder with changes inside. */
 @Composable
-private fun ExplorerMark(mark: FileDecoration, dark: Boolean) {
+internal fun ExplorerMark(mark: FileDecoration, dark: Boolean) {
     val color = mark.tone.color(dark)
     Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
         if (mark.folder) {

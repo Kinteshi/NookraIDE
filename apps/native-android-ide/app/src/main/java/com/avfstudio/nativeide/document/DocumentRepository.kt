@@ -49,6 +49,11 @@ data class DocumentSession(
     /** Shown but not held as text (an image in the viewer): never cached, saved or sent to servers. */
     val binary: Boolean = false,
 ) {
+    /** Chosen in the status bar (or converted to); wins over detection and the settings. */
+    var indentation: com.avfstudio.nativeide.editor.Indentation? = null
+    /** What `editor.detectIndentation` found when the file opened; null when nothing was indented. */
+    var detectedIndentation: com.avfstudio.nativeide.editor.Indentation? = null
+    var indentationDetected = false
     val languageId: String = path.substringAfterLast('.', "").lowercase()
     val expectedModifiedTs: Long? get() = baseModifiedTs
     /** The text as last loaded or saved, when known: editing back to it (undo) clears [dirty], as in VS Code. */

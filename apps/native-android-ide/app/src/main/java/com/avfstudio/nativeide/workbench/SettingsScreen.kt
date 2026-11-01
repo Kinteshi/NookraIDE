@@ -153,6 +153,11 @@ fun SettingsScreen(controller: WorkbenchController) {
                 }
                 item { SwitchRow("Insert spaces", "Indent with spaces instead of tabs", settings.insertSpaces) { set(WorkbenchSettings.INSERT_SPACES, it) } }
                 item {
+                    SwitchRow("Detect indentation", "Each file keeps its own indentation (spaces or tabs, and how many), found when it opens; the status bar shows and changes it", settings.detectIndentation) {
+                        set(WorkbenchSettings.DETECT_INDENTATION, it)
+                    }
+                }
+                item {
                     SwitchRow("Auto-indent", "Enter keeps the indentation, one level more after : or an open bracket", settings.autoIndent) {
                         set(WorkbenchSettings.AUTO_INDENT, if (it) "full" else "none")
                     }
@@ -209,6 +214,8 @@ fun SettingsScreen(controller: WorkbenchController) {
                     }
                 }
                 item { SwitchRow("Parameter hints", "The signature and the current parameter while typing a call (Ctrl+Shift+Space shows them)", settings.parameterHints) { set(WorkbenchSettings.PARAMETER_HINTS, it) } }
+                item { SwitchRow("Reference counts", "\"3 references\" above functions and classes, from the language server (code lens); tap one to list them", settings.codeLens) { set(WorkbenchSettings.CODE_LENS, it) } }
+                item { SwitchRow("Linked editing", "Renaming an HTML or XML tag renames its closing tag as you type", settings.linkedEditing) { set(WorkbenchSettings.LINKED_EDITING, it) } }
                 item { SwitchRow("Inlay hints", "Inferred types and parameter names at the end of the line, from the language server", settings.inlayHints) { set(WorkbenchSettings.INLAY_HINTS, if (it) "on" else "off") } }
                 item { SwitchRow("Markdown preview follows the editor", "Scrolling a Markdown file scrolls its preview to the same place", settings.markdownScrollSync) { set(WorkbenchSettings.MARKDOWN_SCROLL_SYNC, it) } }
                 item { SwitchRow("Highlight symbol uses", "Marks the other uses of the symbol under the cursor; assignments stronger", settings.occurrencesHighlight) { set(WorkbenchSettings.OCCURRENCES_HIGHLIGHT, if (it) "singleFile" else "off") } }
@@ -240,6 +247,33 @@ fun SettingsScreen(controller: WorkbenchController) {
                     SwitchRow("Explorer tree", "Folders open in place below themselves; off opens one folder at a time", settings.explorerTree) {
                         set(WorkbenchSettings.EXPLORER_TREE, it)
                     }
+                }
+                item {
+                    SwitchRow("Compact folders", "A folder holding only one folder shows as one row, like src/main/java", settings.compactFolders) {
+                        set(WorkbenchSettings.COMPACT_FOLDERS, it)
+                    }
+                }
+                item {
+                    SwitchRow("Open editors in Explorer", "The open tabs above the files, with their unsaved marks and close buttons", settings.openEditors) {
+                        set(WorkbenchSettings.OPEN_EDITORS, it)
+                    }
+                }
+                item {
+                    SwitchRow("Drag to move in Explorer", "Long-press a file or folder and drag it onto a folder; a long press without moving opens its menu", settings.explorerDragAndDrop) {
+                        set(WorkbenchSettings.EXPLORER_DRAG_AND_DROP, it)
+                    }
+                }
+                item {
+                    SwitchRow("Confirm before deleting", "Undo brings a deleted file back for 10 seconds either way", settings.confirmDelete) {
+                        set(WorkbenchSettings.CONFIRM_DELETE, it)
+                    }
+                }
+                item {
+                    ActionRow(
+                        "Hidden files",
+                        "files.exclude in settings.json: ${settings.filesExclude.joinToString(", ").ifEmpty { "none" }}",
+                        onClick = { controller.runCommand("workbench.action.openSettingsJson") },
+                    )
                 }
                 item {
                     SwitchRow("Git marks in Explorer", "Changed files in colour with their letter (M, U, A, D, ! for a conflict); their folders in colour", settings.gitDecorations) {
@@ -563,6 +597,7 @@ fun SettingsScreen(controller: WorkbenchController) {
                     ) { controller.checkGuestTools() }
                 }
                 item { Section("Keyboard and advanced") }
+                item { SwitchRow("Haptic feedback", "A short buzz for breakpoints, latched Ctrl or Alt, picking up and dropping in Explorer, and Undo", settings.haptics) { set(WorkbenchSettings.HAPTICS, it) } }
                 item { ActionRow("Keyboard shortcuts", "VS Code defaults · Ctrl+K Ctrl+S") { controller.dialog = WorkbenchDialog.Keybindings } }
                 item {
                     SwitchRow("Key bar", "Esc, Tab, Ctrl, Alt, Shift and arrows above the on-screen keyboard; tap Ctrl twice to keep it on", settings.keyBar) {

@@ -48,6 +48,8 @@ sealed interface PathAction {
     data class NewFolder(val parent: String) : PathAction
     data class Rename(val path: String) : PathAction
     data class SaveAs(val documentPath: String) : PathAction
+    /** Explorer's Move to…: the folder (relative to the workspace) for [paths]. */
+    data class Move(val paths: List<String>) : PathAction
 }
 
 sealed interface WorkbenchDialog {
@@ -56,6 +58,8 @@ sealed interface WorkbenchDialog {
     data object GotoLine : WorkbenchDialog
     data object Encoding : WorkbenchDialog
     data object LineEnding : WorkbenchDialog
+    /** The active file's indentation: spaces or tabs, the size, detect, convert. */
+    data object IndentationPicker : WorkbenchDialog
     /** The language of an untitled file. */
     data object UntitledLanguage : WorkbenchDialog
     data object Rename : WorkbenchDialog
@@ -81,7 +85,7 @@ sealed interface WorkbenchDialog {
     data class Conflict(val document: DocumentSession) : WorkbenchDialog
     /** Asks for a file or folder name; [error] explains why the last attempt failed. */
     data class PathPrompt(val action: PathAction, val initial: String, val error: String? = null) : WorkbenchDialog
-    data class ConfirmDelete(val path: String, val isDirectory: Boolean) : WorkbenchDialog
+    data class ConfirmDelete(val paths: List<String>, val isDirectory: Boolean) : WorkbenchDialog
     data class GitPrompt(val prompt: com.avfstudio.nativeide.transport.GitEvent.Prompt) : WorkbenchDialog
     data class GitDiff(val title: String, val patch: String) : WorkbenchDialog
     data class GitBranches(val branches: List<com.avfstudio.nativeide.transport.GitBranch>) : WorkbenchDialog
