@@ -93,6 +93,8 @@ data class WorkbenchSettings(
     val nativeTables: Boolean = true,
     /** Text outputs longer than this scroll in a box until expanded (VS Code's default is 30). */
     val outputLineLimit: Int = 30,
+    /** Copilot proposes the next change anywhere in the file after an edit (VS Code's NES). */
+    val nextEditSuggestions: Boolean = true,
     /** Run Cell, Run Above and Run Below on the `# %%` lines of Python files. */
     val interactiveCodeLens: Boolean = true,
     /** Esc, Tab, Ctrl, Alt, Shift and arrow keys in a bar above the on-screen keyboard. */
@@ -174,6 +176,7 @@ data class WorkbenchSettings(
         const val RENDER_PLOTLY = "avf.notebook.plotly"
         const val RENDER_LATEX = "avf.notebook.latex"
         const val KEY_BAR = "avf.keyBar.enabled"
+        const val NEXT_EDIT_SUGGESTIONS = "github.copilot.nextEditSuggestions.enabled"
         const val INTERACTIVE_CODE_LENS = "jupyter.interactiveWindow.codeLens.enable"
         const val PLOTLY_DISPLAY_IDS = "avf.notebook.plotlyDisplayIds"
         const val STATUS_BAR_GUEST = "avf.statusBar.guestResources"
@@ -256,6 +259,7 @@ data class WorkbenchSettings(
                 renderPlotly = bool(RENDER_PLOTLY, defaults.renderPlotly),
                 renderLatex = bool(RENDER_LATEX, defaults.renderLatex),
                 keyBar = bool(KEY_BAR, defaults.keyBar),
+                nextEditSuggestions = bool(NEXT_EDIT_SUGGESTIONS, defaults.nextEditSuggestions),
                 interactiveCodeLens = bool(INTERACTIVE_CODE_LENS, defaults.interactiveCodeLens),
                 plotlyDisplayIds = bool(PLOTLY_DISPLAY_IDS, defaults.plotlyDisplayIds),
                 statusBarGuestResources = bool(STATUS_BAR_GUEST, defaults.statusBarGuestResources),

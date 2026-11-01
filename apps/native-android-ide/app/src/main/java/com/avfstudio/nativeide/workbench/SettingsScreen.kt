@@ -354,6 +354,13 @@ fun SettingsScreen(controller: WorkbenchController) {
                     ) { enabled -> if (enabled) controller.beginCopilotSignIn() else controller.enableCopilot(false) }
                 }
                 item {
+                    SwitchRow(
+                        "Next edit suggestions",
+                        "After an edit, Copilot proposes the next change anywhere in the file; Tab goes to it, Tab again accepts, Esc dismisses",
+                        settings.nextEditSuggestions,
+                    ) { set(WorkbenchSettings.NEXT_EDIT_SUGGESTIONS, it) }
+                }
+                item {
                     SliderRow("Suggestion delay", settings.inlineSuggestDelayMs.toFloat(), 0f..2000f, "%.0f ms") {
                         set(WorkbenchSettings.INLINE_SUGGEST_DELAY, it.roundToInt())
                     }

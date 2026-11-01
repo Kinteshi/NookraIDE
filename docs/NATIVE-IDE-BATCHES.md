@@ -1299,7 +1299,7 @@ User's pick: 1, 6, 7, 8, 9, 10 and 14 of the list after batch 26 (port 39891).
 * (Done in batch 24.) Offline experience: the editor alone when no guest is reachable (open/edit local and cached
   files, no tools).
 
-## 28. Output types, cell drag and undo, Interactive window, key bar; next edit suggestions (11-01; in progress)
+## 28. Output types, cell drag and undo, Interactive window, key bar, next edit suggestions (11-01 11:00–11:50; done, checked)
 User's pick: 2, 5, 6, 7 and 8 of the backlog list after batch 27 (port 39891), then a backlog
 review against the spec.
 * (5) More output types. `image/svg+xml` is drawn natively (AndroidSVG) at its own size, up to the
@@ -1343,8 +1343,24 @@ review against the spec.
   the editor and in a cell. Found on the tablet: Samsung's keyboard resends the word being
   typed ("matha" after "math", from `setComposingRegion`), so the editor's connection now
   tracks that word and takes the new letter; ← drew lower than the other arrows (icons now).
-* Next edit suggestions (2): started after the checks above.
-* Test files `~/Projects/batch28.{py,ipynb}`.
+* (2) Next edit suggestions (setting "Next edit suggestions",
+  `github.copilot.nextEditSuggestions.enabled`, on). 600 ms after an edit (or the suggestion
+  delay, if longer) the app asks Copilot's language server (1.560.0) with
+  `textDocument/copilotInlineEdit`; an edit for the current document version is shown and
+  reported with `textDocument/didShowInlineEdit`, and accepting it runs its command (Copilot's
+  acceptance telemetry). The editor tints and strikes through what goes, and a card under the
+  edit shows the lines as they'd read, with what's new in green. An edit off screen gets a chip at
+  the top or bottom ("↓ Copilot's next edit at line 40"). Tab goes to the edit when the cursor is
+  more than a line away, then accepts it; Esc dismisses; a ghost-text suggestion at the cursor
+  takes Tab first. Palette: "Copilot: Accept Next Edit Suggestion", "Copilot: Suggest the Next
+  Edit". A server without the method says so once and isn't asked again until it restarts.
+  Checked on batch28_nes.py: after renaming `self.x` to `self.xpos` in two places Copilot
+  proposed line 10, Tab went there, Tab accepted; renaming `self.y` then chained lines 7, 10 and
+  14 with Tab, Tab each. The first rename alone got no suggestion. Found on the tablet: an edit
+  on the last line crashed the app (the card's position read the line after the file's end);
+  fixed. Not checked: the off-screen chip. Known: a problem tooltip at the cursor can cover the
+  card until the cursor moves.
+* Test files `~/Projects/batch28.{py,ipynb}`, `batch28_nes.py`.
 
 ## Backlog
 To investigate (user, 10-28):
@@ -1388,7 +1404,7 @@ To investigate (user, 10-28):
   needs a start time and duration per run, a failed state, and a small status row; maybe keep
   the timing in the cell's metadata (JupyterLab's `execution` timestamps) so it survives a
   reopen. Evaluate a setting (show run statistics). Likely S-M.
-* Next edit suggestions (user, 10-29): Copilot proposes the next change near or away from the
+* (Done in batch 28.) Next edit suggestions (user, 10-29): Copilot proposes the next change near or away from the
   cursor, based on the edits just made, as VS Code does
   (`github.copilot.nextEditSuggestions.enabled`). The suggestion is shown as a diff in place
   (removed text struck through, new text beside it) or as a gutter arrow when it is elsewhere

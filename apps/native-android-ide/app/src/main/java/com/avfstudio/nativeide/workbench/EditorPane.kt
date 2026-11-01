@@ -18,6 +18,9 @@ import android.content.Context
 import android.graphics.Typeface
 import android.view.KeyEvent as AndroidKeyEvent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import com.avfstudio.nativeide.editor.LspPosition
+import com.avfstudio.nativeide.editor.LspRange
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -180,6 +183,7 @@ private fun EditorOverlays(controller: WorkbenchController) {
     PythonCellOverlay(controller)
     InlayHintsOverlay(controller)
     InlineGhostText(controller)
+    NextEditOverlay(controller)
     ParameterHints(controller)
 }
 
@@ -574,7 +578,8 @@ private fun NativeEditorView(controller: WorkbenchController, document: Document
             controller.refreshLineMarks(document.path)
             surface.applyConfig(controller.editorConfig())
             view.setEditable(true)
-            surface.inlineSuggestionShown = controller.inlineSuggestion != null
+            // Tab and Escape go to Copilot while a suggestion or a next edit is shown.
+            surface.inlineSuggestionShown = controller.inlineSuggestion != null || controller.nextEdit != null
             controller.editorReady(surface)
         },
     )
@@ -821,6 +826,122 @@ private fun PythonCellOverlay(controller: WorkbenchController) {
                             .clickable { controller.runPythonCell(cell, range) }
                             .padding(horizontal = 6.dp, vertical = 1.dp),
                     )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Copilot's next edit (VS Code's NES): the text it would change is tinted and struck through in
+ * place, the lines as they'd read afterwards in a card below, and a chip at the top or bottom
+ * when the edit is off screen. Tab goes to it, then accepts; Esc dismisses.
+ */
+@Composable
+private fun NextEditOverlay(controller: WorkbenchController) {
+    controller.editorViewportTick
+    controller.cursorPosition
+    val preview = controller.shownNextEdit() ?: return
+    val view = controller.soraEditor() ?: return
+    val density = LocalDensity.current
+    val colors = MaterialTheme.colorScheme
+    val content = view.text
+    if (preview.lastLine >= content.lineCount) return
+    val removed = androidx.compose.ui.graphics.Color(0xFFE5534B)
+    val added = androidx.compose.ui.graphics.Color(0xFF3FB950)
+    val rowHeight = view.rowHeight.toFloat()
+    val cursorLine = view.cursor.leftLine
+    val atCursor = nextEditTab(cursorLine, LspRange(LspPosition(preview.firstLine, 0), LspPosition(preview.lastLine, 0))) == NextEditTab.Accept
+    val visible = preview.lastLine >= view.firstVisibleLine && preview.firstLine <= view.lastVisibleLine
+    // The card goes under the edit's last line, which can be the file's last: past it, count rows.
+    fun top(line: Int): Float {
+        val last = content.lineCount - 1
+        return view.getCharOffsetY(line.coerceIn(0, last), 0) - rowHeight + (line - last).coerceAtLeast(0) * rowHeight
+    }
+    val fontSizeSp = with(density) { view.textSizePx.toSp() }
+    val lineHeight = with(density) { view.rowHeight.toSp() }
+    val keys = if (atCursor) "Tab accept · Esc dismiss" else "Tab go to it · Esc dismiss"
+    Box(Modifier.fillMaxSize().clipToBounds()) {
+        if (!visible) {
+            val below = preview.firstLine > view.lastVisibleLine
+            Surface(
+                color = colors.secondaryContainer,
+                contentColor = colors.onSecondaryContainer,
+                shape = RoundedCornerShape(8.dp),
+                shadowElevation = 3.dp,
+                modifier = Modifier
+                    .align(if (below) Alignment.BottomCenter else Alignment.TopCenter)
+                    .padding(8.dp)
+                    .clickable { controller.runCommand("editor.action.inlineSuggest.commit") },
+            ) {
+                Text(
+                    "${if (below) "↓" else "↑"} Copilot's next edit at line ${preview.firstLine + 1} · $keys",
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                )
+            }
+            return@Box
+        }
+        // The old text that goes: tinted and struck through, line by line.
+        var offset = 0
+        preview.oldText.split('\n').forEachIndexed { index, text ->
+            val line = preview.firstLine + index
+            val from = (preview.oldChange.first - offset).coerceIn(0, text.length)
+            val to = (preview.oldChange.last + 1 - offset).coerceIn(0, text.length)
+            offset += text.length + 1
+            if (to <= from) return@forEachIndexed
+            val x1 = view.getCharOffsetX(line, from)
+            val x2 = view.getCharOffsetX(line, to)
+            val y = top(line)
+            Box(
+                Modifier
+                    .offset { IntOffset(x1.roundToInt(), y.roundToInt()) }
+                    .width(with(density) { (x2 - x1).toDp() })
+                    .height(with(density) { rowHeight.toDp() })
+                    .background(removed.copy(alpha = 0.22f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(Modifier.fillMaxWidth().height(1.dp).background(removed))
+            }
+        }
+        val newText = buildAnnotatedString {
+            append(preview.newText)
+            if (!preview.newChange.isEmpty()) {
+                addStyle(SpanStyle(background = added.copy(alpha = 0.3f)), preview.newChange.first, preview.newChange.last + 1)
+            }
+        }
+        val x = view.measureTextRegionOffset()
+        Column(Modifier.offset { IntOffset(x.roundToInt(), top(preview.lastLine + 1).roundToInt()) }) {
+            Surface(
+                color = colors.surfaceContainerHigh,
+                shape = RoundedCornerShape(6.dp),
+                shadowElevation = 3.dp,
+                modifier = Modifier.border(1.dp, added.copy(alpha = 0.6f), RoundedCornerShape(6.dp)),
+            ) {
+                Column(Modifier.padding(horizontal = 6.dp, vertical = 4.dp)) {
+                    Text(
+                        newText,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = fontSizeSp,
+                        lineHeight = lineHeight,
+                        color = colors.onSurface,
+                        softWrap = false,
+                        maxLines = 16,
+                    )
+                    Row(Modifier.padding(top = 2.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text(
+                            if (atCursor) "Tab accept" else "Tab go to it",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colors.primary,
+                            modifier = Modifier.clickable { controller.runCommand(if (atCursor) "editor.action.inlineSuggest.acceptNextEdit" else "editor.action.inlineSuggest.commit") },
+                        )
+                        Text(
+                            "Esc dismiss",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colors.onSurfaceVariant,
+                            modifier = Modifier.clickable { controller.runCommand("editor.action.inlineSuggest.hide") },
+                        )
+                    }
                 }
             }
         }

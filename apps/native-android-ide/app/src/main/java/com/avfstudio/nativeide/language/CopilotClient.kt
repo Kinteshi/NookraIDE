@@ -23,6 +23,15 @@ data class CopilotSuggestion(
     val item: JsonObject,
 )
 
+/** A next edit suggestion: [text] replaces [range] of the document at [version], anywhere in the file. */
+data class CopilotNextEdit(
+    val text: String,
+    val range: LspRange,
+    val version: Long?,
+    val command: JsonObject?,
+    val item: JsonObject,
+)
+
 /**
  * GitHub Copilot inline completions over `@github/copilot-language-server`, following the
  * protocol documented in github/copilot-language-server-release. Copilot keeps its own
@@ -111,6 +120,27 @@ class CopilotClient(
             })
         }).thenApply(::parseSuggestions)
 
+    /** Next edit suggestions (`textDocument/copilotInlineEdit`): edits that may change text away from the cursor. */
+    fun inlineEdit(path: String, version: Long, position: LspPosition): CompletableFuture<List<CopilotNextEdit>> =
+        language.request("textDocument/copilotInlineEdit", JsonObject().apply {
+            add("textDocument", JsonObject().apply {
+                addProperty("uri", fileUri(path))
+                addProperty("version", version)
+            })
+            add("position", JsonObject().apply {
+                addProperty("line", position.line)
+                addProperty("character", position.character)
+            })
+        }).thenApply(::parseNextEdits)
+
+    fun didShowNextEdit(edit: CopilotNextEdit) {
+        language.notify("textDocument/didShowInlineEdit", JsonObject().apply { add("item", edit.item) })
+    }
+
+    fun acceptedNextEdit(edit: CopilotNextEdit) {
+        edit.command?.let(::executeCommand)
+    }
+
     fun didShow(suggestion: CopilotSuggestion) {
         language.notify("textDocument/didShowCompletion", JsonObject().apply { add("item", suggestion.item) })
     }
@@ -162,6 +192,27 @@ internal fun parseSuggestions(result: JsonElement): List<CopilotSuggestion> {
             ),
             command = item.get("command")?.takeIf { it.isJsonObject }?.asJsonObject,
             item = item,
+        )
+    }
+}
+
+internal fun parseNextEdits(result: JsonElement): List<CopilotNextEdit> {
+    val edits = result.takeIf { it.isJsonObject }?.asJsonObject?.getAsJsonArray("edits") ?: return emptyList()
+    return edits.mapNotNull { element ->
+        val edit = element.takeIf { it.isJsonObject }?.asJsonObject ?: return@mapNotNull null
+        val text = edit.get("text")?.takeIf { it.isJsonPrimitive }?.asString ?: return@mapNotNull null
+        val range = edit.getAsJsonObject("range") ?: return@mapNotNull null
+        val start = range.getAsJsonObject("start") ?: return@mapNotNull null
+        val end = range.getAsJsonObject("end") ?: return@mapNotNull null
+        CopilotNextEdit(
+            text = text.replace("\r\n", "\n"),
+            range = LspRange(
+                LspPosition(start.get("line").asInt, start.get("character").asInt),
+                LspPosition(end.get("line").asInt, end.get("character").asInt),
+            ),
+            version = edit.getAsJsonObject("textDocument")?.get("version")?.takeIf { it.isJsonPrimitive }?.asLong,
+            command = edit.get("command")?.takeIf { it.isJsonObject }?.asJsonObject,
+            item = edit,
         )
     }
 }

@@ -142,6 +142,8 @@ private const val STATUS_SECONDS = 10L
 private const val INTERACTIVE_SUFFIX = " · Interactive"
 /** A run's source in the Interactive window: the .py file and its first line, in the cell's metadata. */
 private const val INTERACTIVE_ORIGIN = "avf_interactive"
+/** Next edit suggestions wait at least this long after typing stops. */
+private const val NEXT_EDIT_DELAY_MS = 600L
 /** Deleted notebook cells kept for Undo, per notebook. */
 private const val DELETED_CELLS_KEPT = 20
 /** Recently opened workspace folders, newest first. */
@@ -370,6 +372,12 @@ class WorkbenchController(private val context: Context) {
     private var pendingNavigation: EditorNavigationTarget? = null
     var inlineSuggestion by mutableStateOf<Pair<String, CopilotSuggestion>?>(null)
         private set
+    /** Copilot's next edit suggestion for a file: a change anywhere in it, drawn over the editor. */
+    var nextEdit by mutableStateOf<Pair<String, com.avfstudio.nativeide.language.CopilotNextEdit>?>(null)
+        private set
+    private var scheduledNextEdit: ScheduledFuture<*>? = null
+    /** The guest's Copilot server answered that it has no next edits; asked again after a restart. */
+    private var nextEditsUnsupported = false
     var cursorPosition by mutableStateOf<LspPosition?>(null)
     private val cursorHistory = ArrayDeque<Pair<String, LspPosition?>>()
     private var restoringCursor = false
@@ -3202,6 +3210,7 @@ class WorkbenchController(private val context: Context) {
                     if (activePath == event.uri) {
                         scheduleOutlineRefresh(event.uri)
                         scheduleInlineSuggestion()
+                        scheduleNextEdit()
                         afterEditForHints(event.uri)
                         // Hints are kept by line; once lines come or go they'd sit on the wrong ones.
                         if (editorSurface?.lineCount != inlayHintLineCount) inlayHintLines = emptyMap()
@@ -3405,6 +3414,7 @@ class WorkbenchController(private val context: Context) {
     fun onActiveDocumentChanged() {
         outlineSymbols = emptyList()
         clearInlineSuggestion()
+        clearNextEdit()
         closeParameterHints()
         clearSymbolHighlights()
         clearInlayHints()
@@ -4353,6 +4363,100 @@ class WorkbenchController(private val context: Context) {
             copilot.accepted(suggestion)
         } catch (error: RuntimeException) {
             status = "Could not apply the Copilot suggestion: ${error.message}"
+        }
+    }
+
+    // Next edit suggestions -----------------------------------------------------------------------
+
+    fun clearNextEdit() {
+        scheduledNextEdit?.cancel(false)
+        if (nextEdit != null) nextEdit = null
+    }
+
+    /** After an edit stops for a moment, asks Copilot where the next change goes (VS Code's NES). */
+    private fun scheduleNextEdit() {
+        clearNextEdit()
+        if (!settings.nextEditSuggestions || nextEditsUnsupported || !copilotEnabled || !copilot.language.isReady) return
+        scheduledNextEdit = timer.schedule(
+            { post { requestNextEdit(invoked = false) } },
+            maxOf(settings.inlineSuggestDelayMs.toLong(), NEXT_EDIT_DELAY_MS),
+            TimeUnit.MILLISECONDS,
+        )
+    }
+
+    private fun requestNextEdit(invoked: Boolean) {
+        if (activePath?.let(::isDevicePath) == true) return
+        val document = activeDocument?.takeUnless { it.binary || activeNotebook != null } ?: return
+        val surface = editorSurface ?: return
+        if (!copilotEnabled || !copilot.language.isReady) {
+            if (invoked) status = "Copilot is not ready; run GitHub Copilot: Sign In"
+            return
+        }
+        val version = document.version
+        val position = surface.selectionStart()
+        copilotLog { "next edit request ${document.path.substringAfterLast('/')} ${position.line}:${position.character} v$version" }
+        copilot.inlineEdit(document.path, version, position).whenComplete { edits, error ->
+            post {
+                val edit = edits?.firstOrNull { it.version == null || it.version == version }
+                copilotLog {
+                    "next edit reply ${edits?.size} range=${edit?.range} text=${edit?.text?.take(80)?.replace("\n", "⏎")} " +
+                        "error=${error?.cause?.message ?: error?.message}"
+                }
+                val message = error?.let { generateSequence(it) { cause -> cause.cause }.last().message.orEmpty() }
+                when {
+                    message != null && ("Unhandled method" in message || "not found" in message.lowercase() || "-32601" in message) -> {
+                        nextEditsUnsupported = true
+                        status = "This Copilot language server has no next edit suggestions"
+                    }
+                    error != null -> if (invoked) status = "Copilot: $message"
+                    activePath != document.path || document.version != version -> Unit
+                    edit != null && editorSurface?.let { nextEditPreviewOf(it, edit) } != null -> {
+                        nextEdit = document.path to edit
+                        copilot.didShowNextEdit(edit)
+                    }
+                    invoked -> status = "Copilot has no next edit here"
+                }
+            }
+        }
+    }
+
+    private fun nextEditPreviewOf(surface: EditorSurface, edit: com.avfstudio.nativeide.language.CopilotNextEdit): NextEditPreview? =
+        nextEditPreview(surface.text.split('\n').map { it.removeSuffix("\r") }, edit.range, edit.text)
+
+    /** The shown next edit as lines before and after, for the editor's overlay. */
+    fun shownNextEdit(): NextEditPreview? {
+        val (path, edit) = nextEdit ?: return null
+        val surface = editorSurface ?: return null
+        if (path != activePath || inlineSuggestion != null) return null
+        return nextEditPreviewOf(surface, edit)
+    }
+
+    /** Tab: go to the next edit when the cursor is elsewhere, accept it once there. */
+    private fun jumpOrAcceptNextEdit() {
+        val (path, edit) = nextEdit ?: return
+        val surface = editorSurface ?: return
+        if (path != activePath) return
+        when (nextEditTab(surface.selectionStart().line, edit.range)) {
+            NextEditTab.Jump -> surface.moveCursor(edit.range.start)
+            NextEditTab.Accept -> acceptNextEdit()
+        }
+    }
+
+    fun acceptNextEdit() {
+        val (path, edit) = nextEdit ?: return
+        val surface = editorSurface ?: return
+        nextEdit = null
+        if (activePath != path) return
+        try {
+            val range = edit.range
+            val endLine = range.end.line.coerceAtMost(surface.lineCount - 1)
+            val endColumn = range.end.character.coerceAtMost(surface.lineText(endLine).length)
+            val change = LspTextEdit(LspRange(range.start, LspPosition(endLine, endColumn)), edit.text)
+            surface.applyEdits(listOf(change))
+            surface.moveCursor(change.endAfterInsert(), reveal = true)
+            copilot.acceptedNextEdit(edit)
+        } catch (error: RuntimeException) {
+            status = "Could not apply the next edit: ${error.message}"
         }
     }
 
@@ -6628,8 +6732,10 @@ class WorkbenchController(private val context: Context) {
             "editor.action.showHover" -> showHover()
             "editor.action.quickFix" -> showCodeActions()
             "editor.action.inlineSuggest.trigger" -> requestInlineSuggestion(invoked = true)
-            "editor.action.inlineSuggest.commit" -> acceptInlineSuggestion()
-            "editor.action.inlineSuggest.hide" -> clearInlineSuggestion()
+            "editor.action.inlineSuggest.commit" -> if (inlineSuggestion != null) acceptInlineSuggestion() else jumpOrAcceptNextEdit()
+            "editor.action.inlineSuggest.hide" -> if (inlineSuggestion != null) clearInlineSuggestion() else clearNextEdit()
+            "editor.action.inlineSuggest.acceptNextEdit" -> acceptNextEdit()
+            "editor.action.inlineSuggest.triggerNextEdit" -> requestNextEdit(invoked = true)
             "github.copilot.signIn" -> beginCopilotSignIn()
             "github.copilot.signOut" -> signOutCopilot()
             "github.copilot.toggleInlineSuggestions" -> {
