@@ -1490,6 +1490,64 @@ Not picked yet. Effort: S about half a day, M about a day, L several days.
   split editor groups and the 3-way merge editor (L, little use on a tablet), tasks.json
   (L, the terminal covers it), MCP and other AI providers (Copilot only, by the user's choice).
 
+Spec review (11-01, after batch 28; `docs/NATIVE-ANDROID-IDE-SPEC.md` against the code). Gaps
+not listed above, found by reading the code, not by use. Effort: S about half a day, M about a
+day, L several days.
+* Editor:
+  1. Completion as you type: today language-server completions come only from Ctrl+Space, in a
+     palette dialog. Wanted: sora's completion window at the cursor fed by the server, with
+     kinds, documentation, `additionalTextEdits` (auto-imports, not applied today), commit
+     characters, `completionItem/resolve`. Setting: `editor.quickSuggestions`. M-L.
+  2. Find widget: an inline bar instead of the Find dialog, with regex, match case, whole word,
+     in selection, preserve case, previous match, match count and all matches highlighted. M.
+  3. Go to Type Definition, Implementation and Declaration; a real Peek (today it jumps); call
+     hierarchy. M.
+  4. More edit commands: join lines, transpose, sort lines, upper/lower case, expand/shrink
+     selection (LSP `selectionRange`), format selection. S-M.
+  5. LSP extras: code lens (reference counts), linked editing (HTML tags), `$/progress` in the
+     status bar (indexing). M.
+  6. Indentation detection from the file's content (`editor.detectIndentation`). S.
+  7. Hex view for binary files. M.
+* Languages:
+  8. Language servers beyond Python and TypeScript/JavaScript, offered on demand like syntax
+     colours: rust-analyzer is in the guest catalog but not wired in the app; Go (gopls), C/C++
+     (clangd), Bash, YAML, JSON, TOML (taplo), Markdown (marksman), Dockerfile and SQL aren't in
+     the catalog. A generic LSP client per language, catalog entries, an install offer. L.
+  9. Language intelligence in notebook cells (diagnostics, hover, go to definition) through ty
+     over the concatenated cells, as the Copilot mirror already does. M-L.
+  10. File icon themes from imported VSIX packs (kept but not used today). S-M.
+* Workbench:
+  11. Undo after deleting a file (the daemon's trash can restore it; the spec asks for a 10 s
+      Undo). S.
+  12. Explorer: multi-select, drag to move, Open Editors section, `files.exclude`, compact
+      folders. M.
+  13. Source Control: stage and discard per hunk from the diff, stash, history (log) view,
+      blame toggle, file timeline. M-L.
+  14. Terminal: split, rename, profiles (zsh, tmux), shell-integration marks (jump between
+      commands, exit status), copy on select. M.
+* Notebooks:
+  15. Markdown cells rendered fully: tables, links, images (attachments), code blocks and
+      LaTeX math (`$…$`, KaTeX as in outputs). Today headings, bullets and inline styles only;
+      commonmark is already in the app. M.
+  16. Raw cells: the model reads them, but the cell toolbar switches only Code and Markdown. S.
+  17. Find and replace across a notebook's cells, and a notebook outline (headings). M.
+  18. Plot viewer: an image output full screen with pinch zoom, save and share. S-M.
+  19. Data viewer: filter rows and page past the first rows. M.
+* Debugging:
+  20. Set a variable's value, inline values in the editor, attach to a process, more adapters
+      (codelldb, js-debug). M-L.
+* Device and quality:
+  21. Share-sheet target (text or files into the workspace), a Quick Settings tile, haptics for
+      latched modifiers and breakpoints. S-M.
+  22. Accessibility pass (TalkBack labels for the editor, tree and outputs). M.
+  23. Instrumented tests and golden screenshots (spec 12; the app has unit tests only). L.
+  24. Batch 28 leftovers: the next-edit card can sit under a problem tooltip; the off-screen
+      chip and the Interactive window's export weren't checked on the tablet. S.
+* Still left out on purpose: multi-cursor, folding, sticky scroll, minimap (Aardink switch);
+  split editor groups and the 3-way merge editor; tasks.json; MCP, other AI providers and the
+  built-in chat agent (Copilot, Claude Code and Gemini through ACP instead); foldable postures
+  and S Pen hover (not on this tablet); remote kernels and localization (no need yet).
+
 To investigate (user, 10-28, second set; planned for 10-29):
 * (Done in batch 19: untitled files reach the servers.) Inline suggestions, completion and hover not working on some files; the Output shows
   "Language intelligence requires a connected Python or TypeScript language server". First look:
