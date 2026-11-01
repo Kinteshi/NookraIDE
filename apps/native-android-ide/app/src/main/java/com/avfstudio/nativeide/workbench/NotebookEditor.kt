@@ -257,7 +257,8 @@ private fun NotebookCellView(
                         .clickable { session.selectedCell = cell.id },
                 ) {
                     if (cell.type == CellType.Markdown && !selected) {
-                        MarkdownText(cell.source.ifBlank { "*Empty Markdown cell*" }, Modifier.padding(12.dp))
+                        val source = remember(session.notebook.path, cell.attachments) { controller.markdownSource(session.notebook.path, cell.attachments) }
+                        NotebookMarkdown(controller, cell.source.ifBlank { "*Empty Markdown cell*" }, source, Modifier.padding(12.dp))
                     } else {
                         CellSourceEditor(controller, session, cell, dark, selected)
                     }
@@ -674,43 +675,6 @@ private fun CellSourceEditor(
             }
         }
     }
-}
-
-/** Headings, bullets, bold, italic and inline code; enough for notebook prose. */
-@Composable
-internal fun MarkdownText(source: String, modifier: Modifier = Modifier) {
-    val colors = MaterialTheme.colorScheme
-    val typography = MaterialTheme.typography
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        source.lines().forEach { raw ->
-            val line = raw.trimEnd()
-            when {
-                line.startsWith("### ") -> Text(inlineMarkdown(line.drop(4), colors.primary), style = typography.titleSmall)
-                line.startsWith("## ") -> Text(inlineMarkdown(line.drop(3), colors.primary), style = typography.titleMedium)
-                line.startsWith("# ") -> Text(inlineMarkdown(line.drop(2), colors.primary), style = typography.titleLarge)
-                line.startsWith("- ") || line.startsWith("* ") ->
-                    Text(inlineMarkdown("•  " + line.drop(2), colors.primary), style = typography.bodyMedium)
-                line.isBlank() -> Spacer(Modifier.size(4.dp))
-                else -> Text(inlineMarkdown(line, colors.primary), style = typography.bodyMedium)
-            }
-        }
-    }
-}
-
-private fun inlineMarkdown(text: String, codeColor: Color): AnnotatedString = buildAnnotatedString {
-    val pattern = Regex("""(\*\*[^*]+\*\*|`[^`]+`|\*[^*]+\*)""")
-    var index = 0
-    pattern.findAll(text).forEach { match ->
-        append(text.substring(index, match.range.first))
-        val token = match.value
-        when {
-            token.startsWith("**") -> withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append(token.removeSurrounding("**")) }
-            token.startsWith("`") -> withStyle(SpanStyle(fontFamily = FontFamily.Monospace, color = codeColor)) { append(token.removeSurrounding("`")) }
-            else -> withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { append(token.removeSurrounding("*")) }
-        }
-        index = match.range.last + 1
-    }
-    append(text.substring(index))
 }
 
 private val ansiPattern = Regex("\u001B\\[[0-9;?]*[ -/]*[@-~]")

@@ -25,6 +25,10 @@ object EditorCommands {
         command("actions.find", "Find", "Ctrl+F"),
         command("editor.action.startFindReplaceAction", "Replace", "Ctrl+H"),
         command("editor.action.nextMatchFindAction", "Find Next", "F3"),
+        command("editor.action.previousMatchFindAction", "Find Previous", "Shift+F3"),
+        command("editor.action.replaceOne", "Replace", "Ctrl+Shift+1"),
+        command("editor.action.replaceAll", "Replace All", "Ctrl+Alt+Enter"),
+        command("toggleFindInSelection", "Find in Selection", "Alt+L"),
         command("workbench.action.gotoLine", "Go to Line", "Ctrl+G"),
         command("editor.action.formatDocument", "Format Document", "Shift+Alt+F"),
         command("editor.action.commentLine", "Toggle Line Comment", "Ctrl+/"),
@@ -155,6 +159,7 @@ object EditorCommands {
         command("jupyter.runcurrentcellandallbelow", "Jupyter: Run Current Cell and Below", ""),
         command("jupyter.execSelectionInteractive", "Jupyter: Run Selection/Line in Interactive Window", ""),
         command("jupyter.createnewinteractive", "Jupyter: Create Interactive Window", ""),
+        command("jupyter.showPlotViewer", "Jupyter: Show Plot Viewer", ""),
     )
 
     /** Keys a Python file with `# %%` cells takes before the editor (the Jupyter extension's). */

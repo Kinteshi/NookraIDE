@@ -19,6 +19,8 @@ import com.avfstudio.nativeide.DARK_SYNTAX_THEME
 import com.avfstudio.nativeide.LIGHT_SYNTAX_THEME
 import com.avfstudio.nativeide.PythonTextMate
 import com.avfstudio.nativeide.editor.SoraBracketColorizer
+import com.avfstudio.nativeide.editor.FIND_CURRENT_COLOR_ID
+import com.avfstudio.nativeide.editor.FIND_MATCH_COLOR_ID
 import com.avfstudio.nativeide.editor.SYMBOL_HIGHLIGHT_COLOR_ID
 import com.avfstudio.nativeide.editor.SYMBOL_WRITE_HIGHLIGHT_COLOR_ID
 import com.avfstudio.nativeide.editor.UNNECESSARY_CODE_COLOR_ID
@@ -123,6 +125,9 @@ fun applyEditorTheme(
     // A symbol's other uses: a light wash of the theme's primary; writes in its tertiary.
     set(SYMBOL_HIGHLIGHT_COLOR_ID, colors.primary.copy(alpha = 0.18f))
     set(SYMBOL_WRITE_HIGHLIGHT_COLOR_ID, colors.tertiary.copy(alpha = 0.26f))
+    // Find matches in the theme's tertiary; the current one stronger.
+    set(FIND_MATCH_COLOR_ID, colors.tertiary.copy(alpha = 0.28f))
+    set(FIND_CURRENT_COLOR_ID, colors.tertiary.copy(alpha = 0.6f))
     set(EditorColorScheme.WHOLE_BACKGROUND, colors.surface)
     set(EditorColorScheme.LINE_NUMBER_BACKGROUND, colors.surface)
     set(EditorColorScheme.LINE_NUMBER, colors.onSurfaceVariant.copy(alpha = 0.55f))

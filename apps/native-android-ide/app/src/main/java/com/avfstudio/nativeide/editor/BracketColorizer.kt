@@ -134,6 +134,9 @@ const val UNNECESSARY_CODE_COLOR_ID = 500_090
 /** Backgrounds of a symbol's other uses (VS Code's wordHighlightBackground) and its writes (…StrongBackground). */
 const val SYMBOL_HIGHLIGHT_COLOR_ID = 500_091
 const val SYMBOL_WRITE_HIGHLIGHT_COLOR_ID = 500_092
+/** Backgrounds of the find widget's matches (VS Code's findMatchHighlightBackground) and of the current one. */
+const val FIND_MATCH_COLOR_ID = 500_093
+const val FIND_CURRENT_COLOR_ID = 500_094
 
 private val SEMANTIC_TOKEN_COLORS = mapOf(
     "class" to (500_010 to 0xFF4EC9B0.toInt()),
@@ -166,6 +169,7 @@ class SoraBracketColorizer(
     private var semanticDecorations: List<EditorDecoration> = emptyList()
     private var tagDecorations: List<TagDecoration> = emptyList()
     private var highlightDecorations: List<TagDecoration> = emptyList()
+    private var findDecorations: List<TagDecoration> = emptyList()
 
     /** Called on the UI thread. */
     fun setSemanticDecorations(decorations: List<EditorDecoration>) {
@@ -184,6 +188,13 @@ class SoraBracketColorizer(
     fun setHighlightDecorations(decorations: List<TagDecoration>) {
         if (decorations == highlightDecorations) return
         highlightDecorations = decorations
+        update()
+    }
+
+    /** Called on the UI thread. */
+    fun setFindDecorations(decorations: List<TagDecoration>) {
+        if (decorations == findDecorations) return
+        findDecorations = decorations
         update()
     }
 
@@ -236,7 +247,7 @@ class SoraBracketColorizer(
             }
             Triple(range.start.line, range.start.character, range.end.character to colorId)
         }.groupBy({ it.first }, { it.second to it.third })
-        val tagsByLine = (tagDecorations + highlightDecorations).groupBy(TagDecoration::line)
+        val tagsByLine = (tagDecorations + highlightDecorations + findDecorations).groupBy(TagDecoration::line)
 
         // Read every line before writing any: while the analyzer holds the span locks, sora's
         // reader returns a fresh placeholder list ([0:TEXT_NORMAL]) instead of the line's real
@@ -374,6 +385,8 @@ class SoraBracketColorizer(
             // VS Code's Dark+/Light+ word highlights; Material themes set their own (WorkbenchTheme).
             editor.colorScheme.setColor(SYMBOL_HIGHLIGHT_COLOR_ID, if (light) 0x40575757 else 0xB8575757.toInt())
             editor.colorScheme.setColor(SYMBOL_WRITE_HIGHLIGHT_COLOR_ID, if (light) 0x400E639C else 0xB8004972.toInt())
+            editor.colorScheme.setColor(FIND_MATCH_COLOR_ID, 0x55EA5C00)
+            editor.colorScheme.setColor(FIND_CURRENT_COLOR_ID, if (light) 0xFFA8AC94.toInt() else 0xFF515C6A.toInt())
             editor.setHighlightBracketPair(true)
             editor.colorScheme.setColor(
                 EditorColorScheme.HIGHLIGHTED_DELIMITERS_FOREGROUND,

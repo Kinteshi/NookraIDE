@@ -35,6 +35,10 @@ data class WorkbenchSettings(
     val trimFinalNewlines: Boolean = false,
     /** Parameter hints while typing a call (`editor.parameterHints.enabled`). */
     val parameterHints: Boolean = true,
+    /** The language server's suggestions pop up while typing (`editor.quickSuggestions`); Ctrl+Space always shows them. */
+    val quickSuggestions: Boolean = true,
+    /** What Find starts with (`editor.find.seedSearchStringFromSelection`): "always" (the word at the cursor), "selection" or "never". */
+    val findSeed: String = "always",
     /** The other uses of the symbol under the cursor (`editor.occurrencesHighlight`). */
     val occurrencesHighlight: Boolean = true,
     /** Inferred types and parameter names from the language server (`editor.inlayHints.enabled`). */
@@ -95,6 +99,8 @@ data class WorkbenchSettings(
     val outputLineLimit: Int = 30,
     /** Copilot proposes the next change anywhere in the file after an edit (VS Code's NES). */
     val nextEditSuggestions: Boolean = true,
+    /** A tap on a plot (image or SVG output) opens it in the plot viewer; its menu always can. */
+    val plotViewerOnTap: Boolean = true,
     /** Run Cell, Run Above and Run Below on the `# %%` lines of Python files. */
     val interactiveCodeLens: Boolean = true,
     /** Esc, Tab, Ctrl, Alt, Shift and arrow keys in a bar above the on-screen keyboard. */
@@ -146,6 +152,9 @@ data class WorkbenchSettings(
         const val PARAMETER_HINTS = "editor.parameterHints.enabled"
         /** VS Code's enum (off/singleFile/multiFile, a boolean before 1.84); only off/false turns it off. */
         const val OCCURRENCES_HIGHLIGHT = "editor.occurrencesHighlight"
+        const val QUICK_SUGGESTIONS = "editor.quickSuggestions"
+        const val FIND_SEED = "editor.find.seedSearchStringFromSelection"
+        const val PLOT_VIEWER_ON_TAP = "avf.notebook.plotViewerOnTap"
         /** VS Code's enum (on/off/onUnlessPressed/offUnlessPressed); there is no key to press here, so off* is off. */
         const val INLAY_HINTS = "editor.inlayHints.enabled"
         const val PINCH_TO_ZOOM = "avf.editor.pinchToZoom"
@@ -228,6 +237,9 @@ data class WorkbenchSettings(
                 insertFinalNewline = bool(INSERT_FINAL_NEWLINE, defaults.insertFinalNewline),
                 trimFinalNewlines = bool(TRIM_FINAL_NEWLINES, defaults.trimFinalNewlines),
                 parameterHints = bool(PARAMETER_HINTS, defaults.parameterHints),
+                quickSuggestions = bool(QUICK_SUGGESTIONS, defaults.quickSuggestions),
+                findSeed = string(FIND_SEED)?.takeIf { it in setOf("always", "selection", "never") } ?: defaults.findSeed,
+                plotViewerOnTap = bool(PLOT_VIEWER_ON_TAP, defaults.plotViewerOnTap),
                 occurrencesHighlight = string(OCCURRENCES_HIGHLIGHT)?.let { it != "off" && it != "false" } ?: defaults.occurrencesHighlight,
                 inlayHints = string(INLAY_HINTS)?.let { !it.startsWith("off") && it != "false" } ?: defaults.inlayHints,
                 pinchToZoom = bool(PINCH_TO_ZOOM, defaults.pinchToZoom),

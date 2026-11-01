@@ -90,6 +90,12 @@ interface EditorSurface {
         set(_) {}
     /** The other uses of the symbol under the cursor, drawn behind the text ([write] ones stronger). */
     fun setSymbolHighlights(highlights: List<Pair<LspRange, Boolean>>) {}
+    /** Selects for the find widget: the keys stay in its box, and no cut/copy/paste bar shows. */
+    fun selectFound(selection: EditorSelection) = setSelection(selection)
+    /** Shows the suggest popup now (Ctrl+Space), whatever was typed. */
+    fun triggerSuggest() {}
+    /** The find widget's matches, [current] (an index in [matches], or -1) stronger. */
+    fun setFindHighlights(matches: List<LspRange>, current: Int) {}
     fun observe(listener: (EditorEvent) -> Unit): Closeable
 }
 

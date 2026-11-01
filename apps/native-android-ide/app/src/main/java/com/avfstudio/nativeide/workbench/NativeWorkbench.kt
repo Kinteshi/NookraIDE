@@ -162,6 +162,7 @@ fun NativeWorkbench() {
             }
         }
         WorkbenchDialogHost(controller)
+        PlotViewerDialog(controller)
     }
 }
 

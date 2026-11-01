@@ -7,6 +7,8 @@ import com.avfstudio.nativeide.editor.EditorEvent
 import com.avfstudio.nativeide.editor.EditorProblem
 import com.avfstudio.nativeide.editor.EditorSelection
 import com.avfstudio.nativeide.editor.EditorSurface
+import com.avfstudio.nativeide.editor.FIND_CURRENT_COLOR_ID
+import com.avfstudio.nativeide.editor.FIND_MATCH_COLOR_ID
 import com.avfstudio.nativeide.editor.LineMarks
 import com.avfstudio.nativeide.editor.LspPosition
 import com.avfstudio.nativeide.editor.LspRange
@@ -242,6 +244,38 @@ internal class SoraEditorSurface(
             }
         }
         styleOverlay.setHighlightDecorations(decorations)
+    }
+
+    /** sora's setSelectionRegion asks for focus; an unfocusable editor can't take it from the find box. */
+    override fun selectFound(selection: EditorSelection) {
+        val focusable = editor.isFocusable
+        val touch = editor.isFocusableInTouchMode
+        if (!editor.hasFocus()) editor.isFocusable = false
+        try {
+            setSelection(selection)
+        } finally {
+            editor.isFocusable = focusable
+            editor.isFocusableInTouchMode = touch
+        }
+        editor.post { editor.getComponent(io.github.rosemoe.sora.widget.component.EditorTextActionWindow::class.java).dismiss() }
+    }
+
+    override fun triggerSuggest() {
+        (editor.editorLanguage as? SoraCompletionLanguage)?.invokedNext = true
+        editor.getComponent(io.github.rosemoe.sora.widget.component.EditorAutoCompletion::class.java).requireCompletion()
+    }
+
+    override fun setFindHighlights(matches: List<LspRange>, current: Int) {
+        val content = editor.text
+        val decorations = matches.flatMapIndexed { index, range ->
+            val color = if (index == current) FIND_CURRENT_COLOR_ID else FIND_MATCH_COLOR_ID
+            (range.start.line..range.end.line).filter { it in 0 until content.lineCount }.map { line ->
+                val start = if (line == range.start.line) range.start.character else 0
+                val end = if (line == range.end.line) range.end.character else content.getColumnCount(line)
+                TagDecoration(line, start, end, background = color)
+            }
+        }
+        styleOverlay.setFindDecorations(decorations)
     }
 
     override var inlineSuggestionShown: Boolean

@@ -83,38 +83,6 @@ fun WorkbenchDialogHost(controller: WorkbenchController) {
         null -> Unit
         WorkbenchDialog.Connect -> ConnectDialog(controller)
         WorkbenchDialog.QuickOpen -> QuickOpenDialog(controller)
-        WorkbenchDialog.Find -> AlertDialog(
-            onDismissRequest = { controller.dialog = null },
-            title = { Text("Find and replace") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    val focus = remember { FocusRequester() }
-                    LaunchedEffect(Unit) { focus.requestFocus() }
-                    OutlinedTextField(
-                        value = controller.findQuery,
-                        onValueChange = { controller.findQuery = it },
-                        label = { Text("Find") },
-                        singleLine = true,
-                        modifier = Modifier.focusRequester(focus),
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                        keyboardActions = KeyboardActions(onSearch = { controller.findInEditor(true) }),
-                    )
-                    OutlinedTextField(
-                        value = controller.replaceQuery,
-                        onValueChange = { controller.replaceQuery = it },
-                        label = { Text("Replace") },
-                        singleLine = true,
-                    )
-                }
-            },
-            confirmButton = { TextButton(onClick = { controller.findInEditor(true) }) { Text("Find next") } },
-            dismissButton = {
-                Row {
-                    TextButton(onClick = controller::replaceAll) { Text("Replace all") }
-                    TextButton(onClick = { controller.dialog = null }) { Text("Close") }
-                }
-            },
-        )
         WorkbenchDialog.GotoLine -> AlertDialog(
             onDismissRequest = { controller.dialog = null },
             title = { Text("Go to line") },
@@ -409,14 +377,6 @@ fun WorkbenchDialogHost(controller: WorkbenchController) {
             confirmButton = { TextButton(onClick = controller::saveKeybindingsJson) { Text("Save") } },
             dismissButton = { TextButton(onClick = { controller.dialog = null }) { Text("Cancel") } },
         )
-        is WorkbenchDialog.Completion -> PaletteDialog(
-            placeholder = "Filter completions",
-            query = controller.commandFilter,
-            onQuery = { controller.commandFilter = it },
-            items = dialog.choices.filter { fuzzyMatch(controller.commandFilter, it.label) },
-            onDismiss = { controller.dialog = null },
-            onPick = controller::applyCompletion,
-        ) { choice -> PaletteRow(choice.label, choice.detail) }
         is WorkbenchDialog.CodeActions -> PaletteDialog(
             placeholder = "Quick fixes and refactorings",
             query = controller.commandFilter,

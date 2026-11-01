@@ -25,7 +25,6 @@ internal fun InputStream.readUtf8Limited(maxBytes: Int): String {
 
 data class LanguageLocation(val uri: String, val range: JsonObject)
 data class EditorNavigationTarget(val path: String, val line: Int, val character: Int)
-data class CompletionChoice(val label: String, val detail: String?, val edit: LspTextEdit?)
 /** A code action and the server that offered it (it resolves and runs its own commands). */
 data class CodeActionChoice(
     val title: String,

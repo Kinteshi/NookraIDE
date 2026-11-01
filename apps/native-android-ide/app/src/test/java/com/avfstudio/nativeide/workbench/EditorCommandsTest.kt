@@ -79,6 +79,7 @@ class EditorCommandsTest {
             "L" to KeyEvent.KEYCODE_L,
             "T" to KeyEvent.KEYCODE_T,
             "U" to KeyEvent.KEYCODE_U,
+            "1" to KeyEvent.KEYCODE_1,
             "F2" to KeyEvent.KEYCODE_F2,
             "F3" to KeyEvent.KEYCODE_F3,
             "F8" to KeyEvent.KEYCODE_F8,

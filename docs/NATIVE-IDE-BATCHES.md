@@ -1362,6 +1362,76 @@ review against the spec.
   card until the cursor moves.
 * Test files `~/Projects/batch28.{py,ipynb}`, `batch28_nes.py`.
 
+## 29. Completion while typing, find widget, Markdown cells, plot viewer (11-01 12:00–13:50; done, checked)
+User's pick: 6, 7, 20 and 23 of the backlog list after batch 28 (spec-review items 1, 2, 15, 18).
+* (6) Completion while typing. The language server's completions now fill sora's suggest popup
+  at the cursor (the palette dialog is gone; Ctrl+Space opens the popup). A `Language` wrapper
+  (`SoraCompletionLanguage`) asks on sora's completion thread after each typed letter or trigger
+  character (`.` for Python; TypeScript's own set), posting the request to the main thread so it
+  follows the edit's didChange, and keeps one list per word being typed, filtering it as the word
+  grows (fuzzy, prefix and word-boundary first, then the server's `sortText`); it asks again only
+  when the server marked the list incomplete. Not in a line comment, not after a digit. Items show
+  their kind, `labelDetails` and module; the edit runs from the item's insert range (or the word)
+  to the cursor; `additionalTextEdits` (auto-imports) are applied in the same undo step, and for
+  servers that send them only on `completionItem/resolve` after the insert. Snippet text loses its
+  placeholders (snippets are backlog 3). Client capabilities now announce labelDetails,
+  insert/replace, resolve and itemDefaults. Files without a server keep the grammar's word
+  completion. Setting "Suggestions while typing" (`editor.quickSuggestions`). Checked with ty on
+  batch29.py: `counter.mos` offered `most_common` (method, signature), Enter took it;
+  `defaultdic` offered `DefaultDict (import typing)`, `collections.defaultdict` and Django names,
+  and Enter inserted `DefaultDict` and `from typing import DefaultDict` on line 1. Found on the
+  tablet, all fixed: a problem's tooltip at the cursor covered the popup (it now waits while the
+  popup shows); sora leaves no item selected, so Enter typed a new line (the first item is now
+  selected after each refresh); Samsung's keyboard ends the word it composes on Enter, which
+  closed the popup before the key arrived (Enter, Tab, ↑, ↓, Esc now go to the popup before the
+  keyboard app); a list from a request a newer key had replaced could still show and then
+  accept nothing (checked before publishing, and accepted at the cursor if it shows anyway);
+  sora drops the popup when keys come within 70 ms (off: the kept list makes each key cheap);
+  Replace All's edit opened the popup (only edits while the editor has focus ask now); the
+  first request after the app starts can take seconds while ty indexes, so the wait is 15 s.
+* (7) Find widget at the top right of the editor, replacing the Find dialog: match case, whole
+  word and regex beside the query, "3 of 12" (20,000 matches at most, then "20000+"), previous
+  and next, Find in Selection (its offsets follow edits inside it), close; the chevron opens
+  Replace with Preserve Case, Replace and Replace All (one edit, one Undo). Regex `^`/`$` work
+  per line and a match may cross lines; `$1`, `${name}`, `\n`, `\t` in the replacement. All
+  matches get a background, the current one stronger (theme colours, VS Code's in imported
+  themes). Typing searches from where the cursor was. Keys as VS Code: Enter/Shift+Enter, F3/
+  Shift+F3, Alt+C/W/R/P/L, Ctrl+Shift+1, Ctrl+Alt+Enter, Ctrl+H, Escape (in the widget or the
+  editor). The query starts from the selection or the word at the cursor, selected so typing
+  replaces it; setting "Find starts with" (`editor.find.seedSearchStringFromSelection`: word at
+  cursor, selection, last search). Checked on batch29.py: DefaultDict seeded "? of 2", Next
+  "1 of 2", Replace All with OrderedDict ("Replaced 2 occurrences"), `tot` incremental "1 of 4",
+  Enter, Enter "4 of 4", Escape closed it. Found on the tablet, fixed: sora's selection call takes
+  focus, so after the first match the next keys went into the code (matches are now selected
+  without taking focus or showing the cut/copy/paste bar); the keyboard app turns Enter in a
+  one-line box into an action, so Enter didn't move (the box's search action is Next, the
+  replace box's is Replace).
+* (20) Markdown cells (and `text/markdown` outputs) drawn natively from CommonMark: headings
+  (h1/h2 underlined), paragraphs with bold, italic, strikethrough, inline code and links (they
+  open like the Markdown preview's: workspace files in the editor, web links in the browser),
+  bullet and numbered lists nested, task lists, quotes, code blocks (Python coloured), tables
+  (each column as wide as its widest cell, scrolling sideways), rules, and images from the
+  notebook's folder, `attachment:` (cell attachments), `data:` or the web, SVG too. A cell with
+  math (when "Draw LaTeX" is on) or raw HTML is drawn as a small page sized to its content, with
+  the preview's styles; its math is taken out before Markdown and put back for KaTeX (Jupyter's
+  way), so `\` and `_` survive and "$5 and $10" stays text. Checked with batch29.ipynb: every
+  element above, the local image, $E = mc^2$ and a display sum, the HTML block. Found on the
+  tablet, fixed: page cells took the view's whole height (now they measure their content); KaTeX's
+  auto-render still turned "$5 and $10" into math (only the formulas found are drawn now).
+* (23) Plot viewer: a tap on an image or SVG output (setting "Open plots with a tap",
+  `avf.notebook.plotViewerOnTap`), the output menu's "Open in plot viewer" or "Jupyter: Show Plot
+  Viewer" opens it full screen: zoom and pan as the image viewer (pinch, double tap, Ctrl and
+  the wheel, fit), ← → or the side arrows through the notebook's (or Interactive window's)
+  plots, "Plot 2 of 2 · batch29.ipynb · cell [2] · SVG". Save beside the notebook
+  (`name-plot-1.png`, the next free number), save to Pictures/MaterialCode, copy the image, share
+  (Android's share sheet through a FileProvider; an SVG goes as a PNG at twice its size).
+  Checked: tap opened plot two, fit (536%), back to plot one (PNG 120×60), saved
+  batch29-plot-1.svg and a PNG in Pictures/MaterialCode, the share sheet ("1 imagem", closed
+  without sharing), "Plot copied". Found on the tablet, fixed: the bar sat under the window's
+  caption.
+* Test files `~/Projects/batch29.{py,ipynb}`, `batch29-plot-1.svg`, and
+  `Pictures/MaterialCode/batch29-plot-*.png` on the tablet.
+
 ## Backlog
 To investigate (user, 10-28):
 * (Done in batch 16, with a notebook-side finding.) Plotly figures updating in place (the user's private-notebook-1.ipynb: `plot_handle =
@@ -1494,11 +1564,11 @@ Spec review (11-01, after batch 28; `docs/NATIVE-ANDROID-IDE-SPEC.md` against th
 not listed above, found by reading the code, not by use. Effort: S about half a day, M about a
 day, L several days.
 * Editor:
-  1. Completion as you type: today language-server completions come only from Ctrl+Space, in a
+  1. (Done in batch 29.) Completion as you type: today language-server completions come only from Ctrl+Space, in a
      palette dialog. Wanted: sora's completion window at the cursor fed by the server, with
      kinds, documentation, `additionalTextEdits` (auto-imports, not applied today), commit
      characters, `completionItem/resolve`. Setting: `editor.quickSuggestions`. M-L.
-  2. Find widget: an inline bar instead of the Find dialog, with regex, match case, whole word,
+  2. (Done in batch 29; in-selection without a shaded scope.) Find widget: an inline bar instead of the Find dialog, with regex, match case, whole word,
      in selection, preserve case, previous match, match count and all matches highlighted. M.
   3. Go to Type Definition, Implementation and Declaration; a real Peek (today it jumps); call
      hierarchy. M.
@@ -1526,12 +1596,12 @@ day, L several days.
   14. Terminal: split, rename, profiles (zsh, tmux), shell-integration marks (jump between
       commands, exit status), copy on select. M.
 * Notebooks:
-  15. Markdown cells rendered fully: tables, links, images (attachments), code blocks and
+  15. (Done in batch 29.) Markdown cells rendered fully: tables, links, images (attachments), code blocks and
       LaTeX math (`$…$`, KaTeX as in outputs). Today headings, bullets and inline styles only;
       commonmark is already in the app. M.
   16. Raw cells: the model reads them, but the cell toolbar switches only Code and Markdown. S.
   17. Find and replace across a notebook's cells, and a notebook outline (headings). M.
-  18. Plot viewer: an image output full screen with pinch zoom, save and share. S-M.
+  18. (Done in batch 29.) Plot viewer: an image output full screen with pinch zoom, save and share. S-M.
   19. Data viewer: filter rows and page past the first rows. M.
 * Debugging:
   20. Set a variable's value, inline values in the editor, attach to a process, more adapters

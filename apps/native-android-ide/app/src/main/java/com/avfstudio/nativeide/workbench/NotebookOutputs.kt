@@ -29,6 +29,7 @@ import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material.icons.outlined.OpenInFull
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -179,6 +180,13 @@ private fun OutputMenuButton(
                     )
                 }
             }
+            if (shown == OutputView.Image || shown == OutputView.Svg) {
+                DropdownMenuItem(
+                    text = { Text("Open in plot viewer") },
+                    leadingIcon = { Icon(Icons.Outlined.OpenInFull, contentDescription = null) },
+                    onClick = { onOpenChange(false); controller.openPlotViewer(session, cell, index) },
+                )
+            }
             HorizontalDivider()
             DropdownMenuItem(text = { Text("Clear this output") }, onClick = { onOpenChange(false); controller.clearOutput(session, cell, index) })
             DropdownMenuItem(text = { Text("Clear cell outputs") }, onClick = { onOpenChange(false); controller.clearCellOutputs(session, cell) })
@@ -313,6 +321,12 @@ private fun CellOutput(
             }
             fun mime(name: String) = NotebookDocument.multiline(data.get(name))
             val dark = LocalDarkTheme.current
+            // "Open plots with a tap": the plot viewer, to zoom, browse, save and share.
+            val openPlot = if (settings.plotViewerOnTap) {
+                Modifier.noKeyFocus().clickable { controller.openPlotViewer(session, cell, index) }
+            } else {
+                Modifier
+            }
             if (data.has(WIDGET_VIEW_MIME)) {
                 // ipywidgets: their text form, and why the widget itself isn't drawn.
                 Column(modifier) {
@@ -337,7 +351,7 @@ private fun CellOutput(
                         bitmap,
                         contentDescription = "Cell output image",
                         contentScale = ContentScale.Fit,
-                        modifier = modifier.heightIn(max = 520.dp).background(Color.White, RoundedCornerShape(6.dp)),
+                        modifier = modifier.heightIn(max = 520.dp).background(Color.White, RoundedCornerShape(6.dp)).then(openPlot),
                     )
                 } else {
                     OutputText("[image that could not be decoded]", colors.onSurfaceVariant, modifier)
@@ -361,13 +375,16 @@ private fun CellOutput(
                 } else {
                     HtmlOutput(mime("text/html"), dark, modifier)
                 }
-                OutputView.Svg -> SvgOutput(mime(SVG_MIME), modifier) { OutputText(mime("text/plain"), colors.onSurface, modifier) }
+                OutputView.Svg -> SvgOutput(mime(SVG_MIME), modifier.then(openPlot)) { OutputText(mime("text/plain"), colors.onSurface, modifier) }
                 OutputView.Latex -> {
                     val page = remember(output, dark) { latexPage(mime(LATEX_MIME), dark) }
                     ScriptOutput(page, modifier, minHeightDp = 24)
                 }
                 OutputView.Json -> JsonTree(data.get(JSON_MIME), presentation, modifier) { cell.outputPresentation[index] = it }
-                OutputView.Markdown -> MarkdownText(mime("text/markdown"), modifier)
+                OutputView.Markdown -> {
+                    val source = remember(session.notebook.path) { controller.markdownSource(session.notebook.path, null) }
+                    NotebookMarkdown(controller, mime("text/markdown"), source, modifier)
+                }
                 OutputView.Text -> OutputText(mime("text/plain"), colors.onSurface, modifier, lineLimit, presentation.expanded, follow = false, onExpand = ::expand)
                 null -> OutputText("[${data.keySet().joinToString()} output]", colors.onSurfaceVariant, modifier)
             }

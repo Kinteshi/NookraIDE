@@ -70,7 +70,7 @@ private const val MAX_DECODED_SIDE = 4096
 private const val MAX_ZOOM = 32f
 
 /** What the viewer shows: the picture's size in its own pixels and how to draw it at 1:1. */
-private class ViewerContent(
+internal class ViewerContent(
     val width: Float,
     val height: Float,
     val info: String,
@@ -78,7 +78,7 @@ private class ViewerContent(
     val draw: DrawScope.(Size) -> Unit,
 )
 
-private sealed interface Loaded {
+internal sealed interface Loaded {
     data object Loading : Loaded
     data class Failed(val message: String) : Loaded
     class Ready(val content: ViewerContent) : Loaded
@@ -110,7 +110,7 @@ fun SvgPreview(controller: WorkbenchController, path: String, text: () -> String
     ViewerFrame(controller, path, loaded, modifier)
 }
 
-private fun decodeImage(bytes: ByteArray, path: String): Loaded {
+internal fun decodeImage(bytes: ByteArray, path: String): Loaded {
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
     if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
@@ -141,7 +141,7 @@ private fun decodeImage(bytes: ByteArray, path: String): Loaded {
     )
 }
 
-private fun svgContent(source: String): Loaded {
+internal fun svgContent(source: String): Loaded {
     val svg = SVG.getFromString(source)
     val viewBox = svg.documentViewBox
     val width = svg.documentWidth.takeIf { it > 0 } ?: viewBox?.width()?.takeIf { it > 0 } ?: 300f
@@ -175,7 +175,7 @@ private fun formatBytes(bytes: Long): String = when {
  * VS Code's CSS pixels). Small images start at actual size, large ones fitted.
  */
 @Composable
-private fun ViewerFrame(controller: WorkbenchController, path: String, loaded: Loaded, modifier: Modifier) {
+internal fun ViewerFrame(controller: WorkbenchController, path: String, loaded: Loaded, modifier: Modifier) {
     val colors = MaterialTheme.colorScheme
     Box(modifier.fillMaxSize().background(colors.surfaceContainerLowest).clipToBounds(), contentAlignment = Alignment.Center) {
         when (loaded) {

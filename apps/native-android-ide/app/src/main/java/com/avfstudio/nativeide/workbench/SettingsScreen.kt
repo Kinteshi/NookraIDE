@@ -194,6 +194,20 @@ fun SettingsScreen(controller: WorkbenchController) {
                 item { SwitchRow("Trim trailing whitespace on save", "Not on the cursor's line when saving automatically; Markdown files are left alone", settings.trimTrailingWhitespace) { set(WorkbenchSettings.TRIM_TRAILING_WHITESPACE, it) } }
                 item { SwitchRow("Insert final newline on save", "Ends the file with a line break", settings.insertFinalNewline) { set(WorkbenchSettings.INSERT_FINAL_NEWLINE, it) } }
                 item { SwitchRow("Trim final newlines on save", "Keeps a single line break at the end of the file", settings.trimFinalNewlines) { set(WorkbenchSettings.TRIM_FINAL_NEWLINES, it) } }
+                item { SwitchRow("Suggestions while typing", "The language server's completions pop up as you type, with auto-imports (Ctrl+Space always shows them)", settings.quickSuggestions) { set(WorkbenchSettings.QUICK_SUGGESTIONS, it) } }
+                item {
+                    SettingRow("Find starts with", "What Ctrl+F puts in the find box") {
+                        SingleChoiceSegmentedButtonRow {
+                            listOf("always" to "Word at cursor", "selection" to "Selection", "never" to "Last search").forEachIndexed { index, (value, label) ->
+                                SegmentedButton(
+                                    selected = settings.findSeed == value,
+                                    onClick = { set(WorkbenchSettings.FIND_SEED, value) },
+                                    shape = SegmentedButtonDefaults.itemShape(index, 3),
+                                ) { Text(label) }
+                            }
+                        }
+                    }
+                }
                 item { SwitchRow("Parameter hints", "The signature and the current parameter while typing a call (Ctrl+Shift+Space shows them)", settings.parameterHints) { set(WorkbenchSettings.PARAMETER_HINTS, it) } }
                 item { SwitchRow("Inlay hints", "Inferred types and parameter names at the end of the line, from the language server", settings.inlayHints) { set(WorkbenchSettings.INLAY_HINTS, if (it) "on" else "off") } }
                 item { SwitchRow("Markdown preview follows the editor", "Scrolling a Markdown file scrolls its preview to the same place", settings.markdownScrollSync) { set(WorkbenchSettings.MARKDOWN_SCROLL_SYNC, it) } }
@@ -426,6 +440,11 @@ fun SettingsScreen(controller: WorkbenchController) {
                         "Python files with # %% cells: Run Cell, Run Above and Run Below; Ctrl+Enter and Shift+Enter run cells in the Interactive window either way",
                         settings.interactiveCodeLens,
                     ) { set(WorkbenchSettings.INTERACTIVE_CODE_LENS, it) }
+                }
+                item {
+                    SwitchRow("Open plots with a tap", "A tap on a plot opens it full screen to zoom, browse the notebook's plots, save or share; its output menu always can", settings.plotViewerOnTap) {
+                        set(WorkbenchSettings.PLOT_VIEWER_ON_TAP, it)
+                    }
                 }
                 item {
                     SwitchRow("Draw LaTeX", "Formulas from SymPy and IPython's Math() in cell outputs; loads KaTeX from jsDelivr the first time", settings.renderLatex) {

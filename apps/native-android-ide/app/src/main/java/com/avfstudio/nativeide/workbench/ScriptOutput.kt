@@ -120,7 +120,7 @@ internal fun ScriptOutput(page: String, modifier: Modifier = Modifier, minHeight
  * Libraries draw after the page loads (Bokeh polls for BokehJS, Vega fetches its scripts), so the
  * height is read a few times over the first seconds. CSS pixels are dp in a WebView.
  */
-private fun measure(view: WebView, page: String, onHeight: (Int) -> Unit) {
+internal fun measure(view: WebView, page: String, onHeight: (Int) -> Unit) {
     val handler = Handler(Looper.getMainLooper())
     listOf(0L, 300L, 800L, 1500L, 3000L, 6000L).forEach { delay ->
         handler.postDelayed({

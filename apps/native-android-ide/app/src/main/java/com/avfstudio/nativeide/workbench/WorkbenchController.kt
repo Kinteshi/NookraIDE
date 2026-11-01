@@ -71,6 +71,7 @@ import com.avfstudio.nativeide.editor.LspRange
 import com.avfstudio.nativeide.editor.LspTextEdit
 import com.avfstudio.nativeide.editor.SoraTextEditorHost
 import com.avfstudio.nativeide.editor.applyLspTextEdits
+import com.avfstudio.nativeide.editor.positionToOffset
 import com.avfstudio.nativeide.editor.endAfterInsert
 import com.avfstudio.nativeide.language.CopilotClient
 import com.avfstudio.nativeide.language.CopilotSuggestion
@@ -2789,6 +2790,15 @@ class WorkbenchController(private val context: Context) {
         }
     }
 
+    /** Links and images of a notebook's Markdown, relative to [notebookPath]'s folder. */
+    internal fun markdownSource(notebookPath: String, attachments: JsonObject?): MarkdownSource =
+        MarkdownSource(
+            "https://$MARKDOWN_BASE_HOST${notebookPath.substringBeforeLast('/', "")}/",
+            attachments,
+            { url -> post { openMarkdownLink(url) } },
+            ::readPreviewImage,
+        )
+
     /** Markdown and SVG files have a preview beside or instead of their text. */
     fun hasPreview(path: String): Boolean = isMarkdownPath(path) || isSvgPath(path)
 
@@ -3211,6 +3221,7 @@ class WorkbenchController(private val context: Context) {
                         scheduleOutlineRefresh(event.uri)
                         scheduleInlineSuggestion()
                         scheduleNextEdit()
+                        scheduleFindRefresh()
                         afterEditForHints(event.uri)
                         // Hints are kept by line; once lines come or go they'd sit on the wrong ones.
                         if (editorSurface?.lineCount != inlayHintLineCount) inlayHintLines = emptyMap()
@@ -3413,6 +3424,7 @@ class WorkbenchController(private val context: Context) {
 
     fun onActiveDocumentChanged() {
         outlineSymbols = emptyList()
+        closeFind()
         clearInlineSuggestion()
         clearNextEdit()
         closeParameterHints()
@@ -3489,46 +3501,44 @@ class WorkbenchController(private val context: Context) {
         }
     }
 
-    private fun showCompletion() {
-        val (document, position) = activeLspPosition() ?: return
-        val client = languageClientFor(document.path) ?: return
-        client.completion(document.path, position).whenComplete { response, error ->
+    /** The suggest popup's source for [document]: its language server, asked on the main thread after the edit's didChange. */
+    internal fun completionProvider(document: DocumentSession): CompletionProvider = object : CompletionProvider {
+        override val languageId: String = document.path.substringAfterLast('.', "").lowercase()
+        override val triggerCharacters: Set<String>
+            get() = languageClientFor(document.path)?.completionTriggerCharacters.orEmpty()
+        override val quickSuggestions: Boolean
+            get() = settings.quickSuggestions
+
+        override fun completions(line: Int, column: Int, trigger: String?, incomplete: Boolean): CompletableFuture<LspCompletionList>? {
+            val client = languageClientFor(document.path)?.takeIf { it.isReady } ?: return null
+            val result = CompletableFuture<LspCompletionList>()
+            // Posted, so the edit's didChange (sent as the edit's event finishes) goes first.
             post {
-                if (error != null) {
-                    status = "Completion failed: ${error.cause?.message ?: error.message}"
-                    return@post
+                client.completion(document.path, LspPosition(line, column), trigger, incomplete).whenComplete { response, error ->
+                    if (error != null) result.completeExceptionally(error) else result.complete(parseCompletionList(response))
                 }
-                val items = when {
-                    response.isJsonArray -> response.asJsonArray
-                    response.isJsonObject -> response.asJsonObject.getAsJsonArray("items") ?: JsonArray()
-                    else -> JsonArray()
-                }
-                val defaultRange = completionWordRange(document.text, position)
-                val choices = items.mapNotNull { item ->
-                    val value = item.takeIf { it.isJsonObject }?.asJsonObject ?: return@mapNotNull null
-                    val label = value.get("label")?.takeUnless { it.isJsonNull }?.asString ?: return@mapNotNull null
-                    val textEdit = value.getAsJsonObject("textEdit")
-                    val replaceRange = textEdit?.getAsJsonObject("replace") ?: textEdit?.getAsJsonObject("range")
-                    val edit = if (replaceRange != null && textEdit.has("newText")) {
-                        replaceRange.toLspRange()?.let { LspTextEdit(it, textEdit.get("newText").asString) }
-                    } else {
-                        LspTextEdit(defaultRange, value.get("insertText")?.takeUnless { it.isJsonNull }?.asString ?: label)
-                    }
-                    CompletionChoice(label, value.get("detail")?.takeUnless { it.isJsonNull }?.asString, edit)
-                }
-                if (choices.isEmpty()) status = "No completion suggestions" else dialog = WorkbenchDialog.Completion(choices)
             }
+            return result
+        }
+
+        override fun accepted(item: LspCompletionItem) {
+            post { resolveAcceptedCompletion(document, item) }
         }
     }
 
-    fun applyCompletion(choice: CompletionChoice) {
-        dialog = null
-        val document = activeDocument ?: return
-        val edit = choice.edit ?: return
-        editorHost.applyEdits(document.path, listOf(edit))
-        val end = edit.endAfterInsert()
-        editorSurface?.moveCursor(end)
-        onDocumentEdited(document)
+    /** Servers that add an item's auto-import only on `completionItem/resolve` (VS Code applies it after the insert too). */
+    private fun resolveAcceptedCompletion(document: DocumentSession, item: LspCompletionItem) {
+        if (item.additionalEdits.isNotEmpty()) return
+        val client = languageClientFor(document.path)?.takeIf { it.isReady && it.supportsCompletionResolve } ?: return
+        client.resolveCompletion(item.raw).whenComplete { response, error ->
+            post {
+                val edits = response?.takeIf { error == null && it.isJsonObject }?.asJsonObject
+                    ?.let { parseCompletionItem(it) }?.additionalEdits.orEmpty()
+                if (edits.isEmpty() || activePath != document.path) return@post
+                editorHost.applyEdits(document.path, edits)
+                onDocumentEdited(document)
+            }
+        }
     }
 
     private fun showHover() {
@@ -4065,39 +4075,196 @@ class WorkbenchController(private val context: Context) {
         editorSurface?.setSymbolHighlights(emptyList())
     }
 
-    fun findInEditor(next: Boolean) {
+    // Find widget ------------------------------------------------------------------------------
+
+    /** VS Code's find widget over the editor (Ctrl+F, Ctrl+H). */
+    var findVisible by mutableStateOf(false)
+        private set
+    var findReplaceVisible by mutableStateOf(false)
+    var findRegex by mutableStateOf(false)
+    var findCaseSensitive by mutableStateOf(false)
+    var findWholeWord by mutableStateOf(false)
+    var findPreserveCase by mutableStateOf(false)
+    /** "Find in Selection": the offsets searched, or null for the whole file. */
+    var findScope by mutableStateOf<IntRange?>(null)
+        private set
+    var findResult by mutableStateOf(FindResult(emptyList()))
+        private set
+    /** The match the selection is on (an index in [findResult]), or -1. */
+    var findCurrent by mutableIntStateOf(-1)
+        private set
+    /** Bumped to put the keyboard in the find (or, with [findFocusReplace], the replace) field. */
+    var findFocus by mutableIntStateOf(0)
+        private set
+    var findFocusReplace by mutableStateOf(false)
+        private set
+    /** Where the cursor was when the query last changed: typing searches from there. */
+    private var findOrigin = 0
+    private var scheduledFindRefresh: ScheduledFuture<*>? = null
+    private var findTextLength = 0
+
+    private val findPattern: SearchPattern
+        get() = SearchPattern(findQuery, findRegex, findCaseSensitive, findWholeWord)
+
+    fun showFind(replace: Boolean) {
+        val surface = editorSurface ?: return
+        if (activeDocument == null) return
+        val selection = surface.selectionOffsets
+        val selected = surface.text.substring(selection.first, selection.last.coerceAtMost(surface.text.length))
+        val seed = when {
+            settings.findSeed == "never" -> null
+            selected.isNotEmpty() -> selected.takeUnless { '\n' in it }
+            settings.findSeed == "always" -> wordAtPosition(surface.text, surface.selectionStart()).ifEmpty { null }
+            else -> null
+        }
+        if (seed != null) findQuery = if (findRegex) escapeRegexLiteral(seed) else seed
+        findVisible = true
+        if (replace) findReplaceVisible = true
+        findFocusReplace = replace && seed != null
+        findFocus++
+        findOrigin = selection.first
+        findTextLength = surface.text.length
+        refreshFind(reveal = false)
+        findCurrent = findResult.matches.indexOfFirst { it.start == selection.first && it.end == selection.last }
+        drawFindHighlights()
+    }
+
+    fun closeFind() {
+        if (!findVisible) return
+        findVisible = false
+        findScope = null
+        findResult = FindResult(emptyList())
+        findCurrent = -1
+        scheduledFindRefresh?.cancel(false)
+        editorSurface?.setFindHighlights(emptyList(), -1)
+        editorSurface?.focus()
+    }
+
+    /** The query or an option changed: search again from where the cursor was, and go to the first match. */
+    fun onFindQueryChanged(query: String = findQuery) {
+        findQuery = query
+        refreshFind(reveal = true)
+    }
+
+    fun toggleFindInSelection() {
+        val surface = editorSurface ?: return
+        findScope = if (findScope != null) null else {
+            val selection = surface.selectionOffsets
+            // An empty selection searches its line, as VS Code does.
+            if (selection.first == selection.last) {
+                val line = surface.selectionStart().line
+                val start = positionToOffset(surface.text, LspPosition(line, 0))
+                start until start + surface.lineText(line).length
+            } else {
+                selection.first until selection.last
+            }
+        }
+        refreshFind(reveal = true)
+    }
+
+    private fun refreshFind(reveal: Boolean) {
+        val surface = editorSurface ?: return
+        val text = surface.text
+        // Edits inside the scope move its end (the edit is almost always a replace in it).
+        findScope = findScope?.let { scope ->
+            val end = (scope.last + 1 + text.length - findTextLength).coerceIn(scope.first, text.length)
+            scope.first until end
+        }
+        findTextLength = text.length
+        findResult = findMatches(text, findPattern, findScope)
+        val matches = findResult.matches
+        val selection = surface.selectionOffsets
+        findCurrent = matches.indexOfFirst { it.start == selection.first && it.end == selection.last }
+        if (reveal && matches.isNotEmpty()) {
+            selectMatch(matchAtOrAfter(matches, maxOf(findOrigin, findScope?.first ?: 0)))
+        } else {
+            drawFindHighlights()
+        }
+    }
+
+    /** An edit while the widget is open: count and highlight again once typing pauses. */
+    private fun scheduleFindRefresh() {
+        if (!findVisible) return
+        scheduledFindRefresh?.cancel(false)
+        scheduledFindRefresh = timer.schedule({ post { if (findVisible) refreshFind(reveal = false) } }, 200, TimeUnit.MILLISECONDS)
+    }
+
+    private fun drawFindHighlights() {
+        val surface = editorSurface ?: return
+        val matches = findResult.matches
+        surface.setFindHighlights(matches.map { LspRange(surface.positionAt(it.start), surface.positionAt(it.end)) }, findCurrent)
+    }
+
+    private fun selectMatch(index: Int) {
+        val surface = editorSurface ?: return
+        val match = findResult.matches.getOrNull(index) ?: return
+        findCurrent = index
+        val start = surface.positionAt(match.start)
+        val end = surface.positionAt(match.end)
+        // Reveal the match first, then select it (moving the cursor would drop the selection).
+        surface.moveCursor(end)
+        surface.selectFound(EditorSelection(start, end))
+        drawFindHighlights()
+    }
+
+    /** Enter / F3 (next) and Shift+Enter / Shift+F3 (previous); opens the widget when it is closed. */
+    fun findNext(forward: Boolean) {
+        val surface = editorSurface ?: return
+        if (!findVisible || findQuery.isEmpty()) {
+            showFind(replace = false)
+            if (findQuery.isEmpty()) return
+        }
+        val matches = findResult.matches
+        if (matches.isEmpty()) {
+            status = findResult.error ?: "No results for \"$findQuery\""
+            return
+        }
+        val selection = surface.selectionOffsets
+        val index = if (forward) {
+            matchAtOrAfter(matches, if (findCurrent >= 0) selection.first + 1 else selection.first)
+        } else {
+            matchBefore(matches, selection.first)
+        }
+        findOrigin = matches[index].start
+        selectMatch(index)
+    }
+
+    /** Replaces the current match and goes to the next (VS Code's Replace, Ctrl+Shift+1). */
+    fun replaceOne() {
         val document = activeDocument ?: return
         val surface = editorSurface ?: return
-        if (findQuery.isEmpty()) {
-            dialog = WorkbenchDialog.Find
+        val match = findResult.matches.getOrNull(findCurrent)
+        val selection = surface.selectionOffsets
+        if (match == null || match.start != selection.first || match.end != selection.last) {
+            findNext(forward = true)
             return
         }
         val text = surface.text
-        val selected = surface.selectionOffsets
-        val foundAt = if (next) {
-            text.indexOf(findQuery, selected.last.coerceAtMost(text.length)).takeIf { it >= 0 } ?: text.indexOf(findQuery)
-        } else {
-            val from = (selected.first - 1).coerceAtLeast(0)
-            text.lastIndexOf(findQuery, from).takeIf { it >= 0 } ?: text.lastIndexOf(findQuery)
-        }
-        if (foundAt < 0) {
-            status = "No matches for \"$findQuery\" in ${document.path.substringAfterLast('/')}"
-            return
-        }
-        val end = surface.positionAt(foundAt + findQuery.length)
-        // Reveal the match first, then select it (moving the cursor would drop the selection).
-        surface.moveCursor(end)
-        surface.setSelection(EditorSelection(surface.positionAt(foundAt), end))
+        val value = findReplacement(text, match, findPattern, replaceQuery, findPreserveCase)
+        surface.applyEdits(listOf(LspTextEdit(LspRange(surface.positionAt(match.start), surface.positionAt(match.end)), value)))
+        onDocumentEdited(document)
+        findOrigin = match.start + value.length
+        surface.moveCursor(surface.positionAt(findOrigin))
+        refreshFind(reveal = true)
     }
 
+    /** Replaces every match (in the scope) in one edit, so one Undo brings them back (Ctrl+Alt+Enter). */
     fun replaceAll() {
         val document = activeDocument ?: return
-        if (findQuery.isEmpty()) return
-        val count = document.text.windowed(findQuery.length).count { it == findQuery }
-        document.updateText(document.text.replace(findQuery, replaceQuery))
-        editorSurface?.setText(document.text)
+        val surface = editorSurface ?: return
+        val text = surface.text
+        val matches = findMatches(text, findPattern, findScope, limit = Int.MAX_VALUE).matches
+        if (matches.isEmpty()) return
+        val edits = matches.map { match ->
+            LspTextEdit(
+                LspRange(surface.positionAt(match.start), surface.positionAt(match.end)),
+                findReplacement(text, match, findPattern, replaceQuery, findPreserveCase),
+            )
+        }
+        surface.applyEdits(edits)
         onDocumentEdited(document)
-        status = "Replaced $count occurrence(s)"
+        refreshFind(reveal = false)
+        status = "Replaced ${matches.size} occurrence${if (matches.size == 1) "" else "s"}"
     }
 
     /** The status bar's line number: a small dialog with a number pad, kinder to touch than Quick Open. */
@@ -5744,6 +5911,150 @@ class WorkbenchController(private val context: Context) {
         }
     }
 
+    // Plot viewer -------------------------------------------------------------------------------
+
+    /** The plot viewer's notebook (or Interactive window) and which of its plots it shows. */
+    data class PlotViewerState(val session: NotebookSession, val index: Int)
+
+    var plotViewer by mutableStateOf<PlotViewerState?>(null)
+        private set
+
+    fun openPlotViewer(session: NotebookSession, cell: NotebookCell, outputIndex: Int) {
+        val index = notebookPlots(session.notebook.cells).indexOfFirst { it.cellId == cell.id && it.outputIndex == outputIndex }
+        plotViewer = PlotViewerState(session, index.coerceAtLeast(0))
+    }
+
+    /** "Jupyter: Show Plot Viewer": the newest plot of the active notebook or Interactive window. */
+    fun showPlotViewer() {
+        val session = activeNotebook ?: activeInteractive ?: shownInteractive
+        val count = session?.let { notebookPlots(it.notebook.cells).size } ?: 0
+        if (session == null || count == 0) {
+            status = "No plots in this notebook yet"
+            return
+        }
+        plotViewer = PlotViewerState(session, count - 1)
+    }
+
+    fun showPlot(index: Int) {
+        plotViewer = plotViewer?.copy(index = index)
+    }
+
+    fun closePlotViewer() {
+        plotViewer = null
+    }
+
+    /** Writes the plot beside the notebook as `name-plot-1.png` (the next free number), as VS Code's Save does. */
+    fun savePlotToWorkspace(session: NotebookSession, plot: NotebookPlot, attempt: Int = 1) {
+        val path = session.notebook.path.substringBefore(" · ")
+        if (isDevicePath(path) || !vfs.isConnected()) {
+            status = "Connect to the guest to save beside the notebook"
+            return
+        }
+        val stem = if ('.' in path.substringAfterLast('/')) path.substringBeforeLast('.') else path
+        val target = "$stem-plot-$attempt.${plot.extension}"
+        vfs.stat(target).whenComplete { _, missing ->
+            if (missing == null) {
+                if (attempt < 200) savePlotToWorkspace(session, plot, attempt + 1) else post { status = "Save failed: too many plots named like ${target.substringAfterLast('/')}" }
+                return@whenComplete
+            }
+            vfs.create(target, false)
+                .thenCompose { vfs.write(target, 0, plotBytes(plot), truncate = true, expectedModifiedTs = null) }
+                .whenComplete { _, error ->
+                    post {
+                        if (error != null) {
+                            status = "Save failed: ${error.cause?.message ?: error.message}"
+                        } else {
+                            afterFileSystemChange()
+                            status = "Saved ${target.substringAfterLast('/')}"
+                        }
+                    }
+                }
+        }
+    }
+
+    /** A PNG of [plot] for other apps (an SVG drawn at twice its size; most apps don't take SVG). */
+    private fun plotPng(plot: NotebookPlot): Pair<ByteArray, String> {
+        if (plot.mime != SVG_MIME) return plotBytes(plot) to plot.mime
+        val svg = com.caverock.androidsvg.SVG.getFromString(plot.data)
+        val box = svg.documentViewBox
+        val width = svg.documentWidth.takeIf { it > 0 } ?: box?.width()?.takeIf { it > 0 } ?: 640f
+        val height = svg.documentHeight.takeIf { it > 0 } ?: box?.height()?.takeIf { it > 0 } ?: 480f
+        if (box == null) svg.setDocumentViewBox(0f, 0f, width, height)
+        val scale = minOf(2f, 4096f / maxOf(width, height))
+        val bitmap = android.graphics.Bitmap.createBitmap((width * scale).toInt().coerceAtLeast(1), (height * scale).toInt().coerceAtLeast(1), android.graphics.Bitmap.Config.ARGB_8888)
+        bitmap.eraseColor(android.graphics.Color.WHITE)
+        svg.renderToCanvas(android.graphics.Canvas(bitmap), android.graphics.RectF(0f, 0f, bitmap.width.toFloat(), bitmap.height.toFloat()))
+        val out = java.io.ByteArrayOutputStream()
+        bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out)
+        return out.toByteArray() to "image/png"
+    }
+
+    private fun plotName(plot: NotebookPlot, mime: String): String {
+        val notebook = (plotViewer?.session?.notebook?.path ?: "plot").substringAfterLast('/').substringBefore(" · ").substringBeforeLast('.')
+        return "$notebook-plot-${java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.ROOT).format(java.util.Date())}" +
+            if (mime == "image/jpeg") ".jpg" else ".png"
+    }
+
+    /** Pictures/MaterialCode on this device, where the gallery finds it. */
+    fun savePlotToPictures(plot: NotebookPlot) {
+        io.execute {
+            val result = runCatching {
+                val (bytes, mime) = plotPng(plot)
+                val resolver = context.contentResolver
+                val values = android.content.ContentValues().apply {
+                    put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, plotName(plot, mime))
+                    put(android.provider.MediaStore.MediaColumns.MIME_TYPE, mime)
+                    put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, "${android.os.Environment.DIRECTORY_PICTURES}/MaterialCode")
+                }
+                val uri = resolver.insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+                    ?: throw java.io.IOException("Android refused to create the picture")
+                resolver.openOutputStream(uri)?.use { it.write(bytes) } ?: throw java.io.IOException("Could not write the picture")
+            }
+            post { status = result.fold({ "Saved to Pictures/MaterialCode" }, { "Save failed: ${it.message}" }) }
+        }
+    }
+
+    /** The plot as a file other apps can read, through the app's FileProvider. */
+    private fun sharedPlotUri(plot: NotebookPlot): Pair<android.net.Uri, String> {
+        val (bytes, mime) = plotPng(plot)
+        val folder = java.io.File(context.cacheDir, "shared").apply { mkdirs() }
+        folder.listFiles()?.forEach { it.delete() }
+        val file = java.io.File(folder, plotName(plot, mime))
+        file.writeBytes(bytes)
+        return androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.files", file) to mime
+    }
+
+    fun sharePlot(plot: NotebookPlot) {
+        io.execute {
+            val result = runCatching { sharedPlotUri(plot) }
+            post {
+                result.onSuccess { (uri, mime) ->
+                    val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                        type = mime
+                        putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                        addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    context.startActivity(
+                        android.content.Intent.createChooser(send, "Share plot").addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+                    )
+                }.onFailure { status = "Share failed: ${it.message}" }
+            }
+        }
+    }
+
+    fun copyPlot(plot: NotebookPlot) {
+        io.execute {
+            val result = runCatching { sharedPlotUri(plot) }
+            post {
+                result.onSuccess { (uri, _) ->
+                    context.getSystemService(ClipboardManager::class.java)
+                        ?.setPrimaryClip(ClipData.newUri(context.contentResolver, "Plot", uri))
+                    status = "Plot copied"
+                }.onFailure { status = "Copy failed: ${it.message}" }
+            }
+        }
+    }
+
     // Variables ---------------------------------------------------------------------------------
 
     /** The notebook the Variables view shows: the active one, else the last one looked at. */
@@ -6564,6 +6875,12 @@ class WorkbenchController(private val context: Context) {
         if (event.action != AndroidKeyEvent.ACTION_DOWN) return false
         val identity = event.downTime to event.keyCode
         if (identity == lastHandledKey) return true
+        // Escape in the editor closes the find widget first, as in VS Code.
+        if (findVisible && focusArea == FocusArea.Editor && event.keyCode == AndroidKeyEvent.KEYCODE_ESCAPE && event.hasNoModifiers()) {
+            lastHandledKey = identity
+            closeFind()
+            return true
+        }
         val dispatcher = when {
             focusArea == FocusArea.Editor -> if (activePythonCells().isNotEmpty()) cellEditorDispatcher else editorDispatcher
             activeNotebook != null && focusArea in setOf(FocusArea.Notebook, FocusArea.Other) -> notebookDispatcher
@@ -6715,18 +7032,20 @@ class WorkbenchController(private val context: Context) {
             -> activeDocument?.let { document ->
                 if (surface != null && editCurrentLine(document, surface, commandId)) onDocumentEdited(document)
             }
-            "actions.find", "editor.action.startFindReplaceAction" -> {
-                replaceQuery = ""
-                dialog = WorkbenchDialog.Find
-            }
-            "editor.action.nextMatchFindAction" -> findInEditor(true)
-            "editor.action.previousMatchFindAction" -> findInEditor(false)
+            "actions.find" -> showFind(replace = false)
+            "editor.action.startFindReplaceAction" -> showFind(replace = true)
+            "editor.action.nextMatchFindAction" -> findNext(forward = true)
+            "editor.action.previousMatchFindAction" -> findNext(forward = false)
+            "closeFindWidget" -> closeFind()
+            "editor.action.replaceAll" -> if (findVisible) replaceAll()
+            "editor.action.replaceOne" -> if (findVisible) replaceOne()
+            "toggleFindInSelection" -> if (findVisible) toggleFindInSelection()
             "workbench.action.gotoLine" -> openQuickOpen(":")
             "editor.action.formatDocument" -> formatActiveDocument()
             "editor.action.goToDefinition", "editor.action.peekDefinition" -> goToDefinition()
             "editor.action.goToReferences" -> findReferences()
             "editor.action.rename" -> beginRename()
-            "editor.action.triggerSuggest" -> showCompletion()
+            "editor.action.triggerSuggest" -> surface?.triggerSuggest()
             "editor.action.triggerParameterHints" -> activePath?.let { requestSignature(it, trigger = null, invoked = true) }
             "closeParameterHints" -> closeParameterHints()
             "editor.action.showHover" -> showHover()
@@ -6791,6 +7110,7 @@ class WorkbenchController(private val context: Context) {
             "jupyter.runcurrentcellandallbelow" -> runPythonCells(CellRange.CurrentAndBelow)
             "jupyter.execSelectionInteractive" -> runSelectionInteractive()
             "jupyter.createnewinteractive" -> showInteractive()
+            "jupyter.showPlotViewer" -> showPlotViewer()
             "jupyter.selectKernel" -> activeNotebook?.let(::chooseKernel)
             "jupyter.runAll" -> activeNotebook?.let(::runAllCells)
             "jupyter.restartKernel" -> activeNotebook?.let(::restartKernel)

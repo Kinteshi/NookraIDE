@@ -185,6 +185,9 @@ private fun EditorOverlays(controller: WorkbenchController) {
     InlineGhostText(controller)
     NextEditOverlay(controller)
     ParameterHints(controller)
+    if (controller.findVisible) {
+        Box(Modifier.fillMaxSize()) { FindWidget(controller, Modifier.align(Alignment.TopEnd)) }
+    }
 }
 
 /** For a Markdown file: its preview beside the editor (Ctrl+K V) or instead of it (Ctrl+Shift+V). */
@@ -520,7 +523,21 @@ private fun NativeEditorView(controller: WorkbenchController, document: Document
                         ?: editorLanguage
                 }
                 applyEditorTheme(this, context, colors, dark, controller.settings.syntaxColors)
-                setEditorLanguage(language)
+                // A problem's tooltip at the cursor would cover the suggest popup; it waits while the popup shows (VS Code's too).
+                val suggest = PreselectingCompletion(this)
+                // sora skips a request made within 70 ms of the last (and hides the popup); the
+                // kept list makes each key cheap, so fast typing keeps its suggestions.
+                props.cancelCompletionNs = 0
+                replaceComponent(io.github.rosemoe.sora.widget.component.EditorAutoCompletion::class.java, suggest)
+                val tooltipClass = io.github.rosemoe.sora.widget.component.EditorDiagnosticTooltipWindow::class.java
+                getComponent(tooltipClass).isEnabled = false
+                val tooltip = object : io.github.rosemoe.sora.widget.component.EditorDiagnosticTooltipWindow(this) {
+                    override fun show() {
+                        if (!suggest.isShowing) super.show()
+                    }
+                }
+                replaceComponent(tooltipClass, tooltip)
+                setEditorLanguage(SoraCompletionLanguage(language, controller.completionProvider(document)) { post { tooltip.dismiss() } })
                 props.symbolPairAutoCompletion = false
                 val bracketColorizer = SoraBracketColorizer(this, document.languageId)
                 overlay = bracketColorizer
@@ -1112,8 +1129,36 @@ internal class NativeCodeEditor(
         super.deleteText()
     }
 
+    /**
+     * The suggest popup's keys, before the keyboard app sees them: on Enter it would first end the
+     * word it is composing, which closes the popup, and Enter would then type a new line.
+     */
+    override fun dispatchKeyEventPreIme(event: AndroidKeyEvent): Boolean {
+        val suggest = getComponent(io.github.rosemoe.sora.widget.component.EditorAutoCompletion::class.java)
+        if (suggest.isShowing && event.hasNoModifiers()) {
+            val down = event.action == AndroidKeyEvent.ACTION_DOWN
+            when (event.keyCode) {
+                AndroidKeyEvent.KEYCODE_ENTER, AndroidKeyEvent.KEYCODE_NUMPAD_ENTER, AndroidKeyEvent.KEYCODE_TAB -> if (down) suggest.select()
+                AndroidKeyEvent.KEYCODE_DPAD_UP -> if (down) suggest.moveUp()
+                AndroidKeyEvent.KEYCODE_DPAD_DOWN -> if (down) suggest.moveDown()
+                AndroidKeyEvent.KEYCODE_ESCAPE -> if (down) suggest.hide()
+                else -> return super.dispatchKeyEventPreIme(event)
+            }
+            return true
+        }
+        return super.dispatchKeyEventPreIme(event)
+    }
+
     override fun dispatchKeyEvent(event: AndroidKeyEvent): Boolean {
-        if (hasInlineSuggestion && event.action == AndroidKeyEvent.ACTION_DOWN && event.hasNoModifiers()) {
+        val suggest = getComponent(io.github.rosemoe.sora.widget.component.EditorAutoCompletion::class.java)
+        // The suggest popup takes Tab, Enter and the arrows (sora's own handling) and Escape first.
+        if (suggest.isShowing && event.action == AndroidKeyEvent.ACTION_DOWN && event.hasNoModifiers() &&
+            event.keyCode == AndroidKeyEvent.KEYCODE_ESCAPE
+        ) {
+            suggest.hide()
+            return true
+        }
+        if (hasInlineSuggestion && !suggest.isShowing && event.action == AndroidKeyEvent.ACTION_DOWN && event.hasNoModifiers()) {
             when (event.keyCode) {
                 AndroidKeyEvent.KEYCODE_TAB -> {
                     onCommand("editor.action.inlineSuggest.commit")

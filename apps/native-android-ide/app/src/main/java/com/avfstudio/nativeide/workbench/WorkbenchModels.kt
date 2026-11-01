@@ -53,7 +53,6 @@ sealed interface PathAction {
 sealed interface WorkbenchDialog {
     data object Connect : WorkbenchDialog
     data object QuickOpen : WorkbenchDialog
-    data object Find : WorkbenchDialog
     data object GotoLine : WorkbenchDialog
     data object Encoding : WorkbenchDialog
     data object LineEnding : WorkbenchDialog
@@ -77,7 +76,6 @@ sealed interface WorkbenchDialog {
     data class TerminalLinks(val links: List<TerminalLink>) : WorkbenchDialog
     /** Replace All in Search: [matches] occurrences in [files] files. */
     data class ConfirmReplaceAll(val matches: Int, val files: Int) : WorkbenchDialog
-    data class Completion(val choices: List<CompletionChoice>) : WorkbenchDialog
     data class CodeActions(val choices: List<CodeActionChoice>) : WorkbenchDialog
     data class Hover(val text: String) : WorkbenchDialog
     data class Conflict(val document: DocumentSession) : WorkbenchDialog

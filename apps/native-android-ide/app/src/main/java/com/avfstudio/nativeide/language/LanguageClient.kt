@@ -90,6 +90,11 @@ class LanguageClient(
         private set
     @Volatile var supportsSignatureHelp = false
         private set
+    /** Characters after which the server offers completions (`.` for Python; `.`, `"`, `/` for TypeScript). */
+    @Volatile var completionTriggerCharacters: Set<String> = emptySet()
+        private set
+    @Volatile var supportsCompletionResolve = false
+        private set
     @Volatile var supportsDocumentHighlight = false
         private set
     @Volatile var supportsRangeFormatting = false
@@ -141,6 +146,10 @@ class LanguageClient(
                 signatureTriggerCharacters = characters("triggerCharacters")
                 signatureRetriggerCharacters = characters("retriggerCharacters")
                 supportsSignatureHelp = signatureProvider != null
+                val completionProvider = capabilities?.get("completionProvider")?.takeIf { it.isJsonObject }?.asJsonObject
+                completionTriggerCharacters = completionProvider?.getAsJsonArray("triggerCharacters")
+                    ?.mapNotNull { it.takeIf { c -> c.isJsonPrimitive }?.asString }?.toSet().orEmpty()
+                supportsCompletionResolve = completionProvider?.get("resolveProvider")?.takeIf { it.isJsonPrimitive }?.asBoolean == true
                 supportsDocumentHighlight = capabilities?.provides("documentHighlightProvider") == true
                 supportsRangeFormatting = capabilities?.provides("documentRangeFormattingProvider") == true
                 supportsInlayHints = capabilities?.provides("inlayHintProvider") == true
@@ -249,8 +258,21 @@ class LanguageClient(
             add("range", gson.toJsonTree(range))
         })
 
-    fun completion(path: String, position: LspPosition): CompletableFuture<JsonElement> =
-        request("textDocument/completion", positionParams(path, position))
+    /**
+     * Completions at [position]. [trigger] is the trigger character typed, if that is what asked;
+     * [incomplete] re-asks for a list the server marked incomplete.
+     */
+    fun completion(path: String, position: LspPosition, trigger: String? = null, incomplete: Boolean = false): CompletableFuture<JsonElement> =
+        request("textDocument/completion", positionParams(path, position).apply {
+            add("context", JsonObject().apply {
+                // LSP CompletionTriggerKind: 1 Invoked, 2 TriggerCharacter, 3 TriggerForIncompleteCompletions.
+                addProperty("triggerKind", if (incomplete) 3 else if (trigger != null) 2 else 1)
+                if (trigger != null) addProperty("triggerCharacter", trigger)
+            })
+        })
+
+    /** The rest of an item (documentation, auto-import edits), for servers that send them on request. */
+    fun resolveCompletion(item: JsonObject): CompletableFuture<JsonElement> = request("completionItem/resolve", item)
 
     fun hover(path: String, position: LspPosition): CompletableFuture<JsonElement> =
         request("textDocument/hover", positionParams(path, position))
@@ -429,7 +451,21 @@ class LanguageClient(
                 })
                 add("completion", JsonObject().apply {
                     addProperty("dynamicRegistration", false)
-                    add("completionItem", JsonObject().apply { addProperty("snippetSupport", false) })
+                    addProperty("contextSupport", true)
+                    add("completionItem", JsonObject().apply {
+                        addProperty("snippetSupport", false)
+                        addProperty("labelDetailsSupport", true)
+                        addProperty("insertReplaceSupport", true)
+                        addProperty("preselectSupport", true)
+                        add("documentationFormat", JsonArray().apply { add("plaintext"); add("markdown") })
+                        add("resolveSupport", JsonObject().apply {
+                            add("properties", JsonArray().apply { add("documentation"); add("detail"); add("additionalTextEdits") })
+                        })
+                    })
+                    add("completionItemKind", JsonObject().apply { add("valueSet", JsonArray().apply { (1..25).forEach(::add) }) })
+                    add("completionList", JsonObject().apply {
+                        add("itemDefaults", JsonArray().apply { add("editRange"); add("insertTextFormat"); add("data") })
+                    })
                 })
                 add("hover", JsonObject().apply { addProperty("dynamicRegistration", false) })
                 add("signatureHelp", JsonObject().apply {

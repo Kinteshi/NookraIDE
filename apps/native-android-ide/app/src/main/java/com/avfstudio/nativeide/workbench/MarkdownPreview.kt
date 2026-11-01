@@ -60,17 +60,15 @@ internal object MarkdownRenderer {
         .build()
 
     fun render(markdown: String): String = renderer.render(parser.parse(markdown))
+
+    fun parse(markdown: String): org.commonmark.node.Node = parser.parse(markdown)
 }
 
-private fun Color.css(): String = "#%06X".format(toArgb() and 0xFFFFFF)
+internal fun Color.css(): String = "#%06X".format(toArgb() and 0xFFFFFF)
 
-/** The page around the rendered Markdown, in the app's colours; only its own nonce'd script runs. */
-internal fun markdownPage(body: String, colors: ColorScheme, nonce: String): String = """
-    <!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src https: data:; style-src 'unsafe-inline'; script-src 'nonce-$nonce'">
-    <style>
+/** The preview's look in the app's colours (shared with notebook Markdown cells drawn as pages). */
+internal fun markdownStyles(colors: ColorScheme): String = """
     html,body{margin:0;background:transparent;color:${colors.onSurface.css()};font:15px/1.6 sans-serif;word-wrap:break-word}
-    main{padding:12px 20px 40vh;max-width:880px}
     h1,h2{border-bottom:1px solid ${colors.outlineVariant.css()};padding-bottom:.3em}
     h1,h2,h3,h4,h5,h6{line-height:1.25;margin:1.2em 0 .6em}
     a{color:${colors.primary.css()};text-decoration:none}
@@ -84,6 +82,15 @@ internal fun markdownPage(body: String, colors: ColorScheme, nonce: String): Str
     img{max-width:100%}
     hr{border:0;border-top:1px solid ${colors.outlineVariant.css()}}
     li>input[type=checkbox]{margin-right:.4em}
+""".trimIndent()
+
+/** The page around the rendered Markdown, in the app's colours; only its own nonce'd script runs. */
+internal fun markdownPage(body: String, colors: ColorScheme, nonce: String): String = """
+    <!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src https: data:; style-src 'unsafe-inline'; script-src 'nonce-$nonce'">
+    <style>
+    ${markdownStyles(colors)}
+    main{padding:12px 20px 40vh;max-width:880px}
     </style></head><body><main id="content">$body</main>
     <script nonce="$nonce">
     function setContent(html) { document.getElementById('content').innerHTML = html; }
