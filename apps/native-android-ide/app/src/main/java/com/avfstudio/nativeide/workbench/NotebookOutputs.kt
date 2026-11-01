@@ -418,11 +418,19 @@ private const val TABLE_MEASURED_ROWS = 200
  * A DataFrame as a native table: theme colours, header rows that stay while the rows scroll,
  * numbers aligned right, and a tap on a column header sorts by it (ascending, descending, off).
  */
+/** The Variables view's data viewer: the notebook's native table, taller, with its own sort state. */
+@Composable
+internal fun DataViewerTable(table: OutputTable) {
+    var presentation by remember(table) { mutableStateOf(OutputPresentation()) }
+    OutputTableView(table, presentation, Modifier, maxBodyHeight = 560.dp) { presentation = it }
+}
+
 @Composable
 private fun OutputTableView(
     table: OutputTable,
     presentation: OutputPresentation,
     modifier: Modifier,
+    maxBodyHeight: Dp = 420.dp,
     onPresentation: (OutputPresentation) -> Unit,
 ) {
     val colors = MaterialTheme.colorScheme
@@ -473,7 +481,7 @@ private fun OutputTableView(
                             }
                         }
                     }
-                    Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+                    Column(Modifier.heightIn(max = maxBodyHeight).verticalScroll(rememberScrollState())) {
                         rows.take(TABLE_ROW_LIMIT).forEachIndexed { r, line ->
                             Row(Modifier.background(if (r % 2 == 0) colors.surface else colors.surfaceContainerLow)) {
                                 line.forEachIndexed { column, cell ->

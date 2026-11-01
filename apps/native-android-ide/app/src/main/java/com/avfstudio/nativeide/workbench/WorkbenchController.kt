@@ -143,6 +143,8 @@ private const val SESSION_UNTITLED_KEY = "session-untitled"
 /** Device files open at the last stop, read again through their content URI. */
 private const val SESSION_DEVICE_KEY = "session-device"
 private const val KEYBINDINGS_KEY = "user-keybindings"
+/** Rows the data viewer asks the kernel for. */
+private const val DATA_VIEWER_ROWS = 1000
 /** The native daemon's default port; hidden in Ports with the connection's own. */
 private const val DAEMON_PORT = 19870
 /** Commands whose ports are the app's own plumbing (kernels, the Jupyter bridge, the daemon). */
@@ -5012,6 +5014,8 @@ class WorkbenchController(private val context: Context) {
                 } else {
                     session.kernelName = spec.displayName
                     session.kernelState = "Idle"
+                    session.variables = null
+                    refreshVariablesIfShown(session)
                     session.focusRequest++
                     if (session.notebook.kernelName != spec.name) session.notebook.setKernel(spec.name, spec.displayName, spec.language)
                     documentRevision++
@@ -5108,9 +5112,67 @@ class WorkbenchController(private val context: Context) {
                 }
                 session.kernelState = if (session.executing.isEmpty()) "Idle" else "Busy"
                 documentRevision++
+                if (session.executing.isEmpty()) refreshVariablesIfShown(session)
             }
         }
         session.kernelState = "Busy"
+    }
+
+    // Variables ---------------------------------------------------------------------------------
+
+    /** The notebook the Variables view shows: the active one, else the last one looked at. */
+    private var variablesNotebook: String? = null
+
+    val variablesSession: NotebookSession?
+        get() = activeNotebook?.also { variablesNotebook = it.document.path } ?: variablesNotebook?.let(notebooks::get)
+
+    private val variablesShown: Boolean
+        get() = panelTab == PanelTab.Variables && (panelVisible || compactDestination == CompactDestination.Terminal)
+
+    /** After a run, the view follows the kernel; a closed view asks nothing (it costs the kernel a moment). */
+    private fun refreshVariablesIfShown(session: NotebookSession) {
+        if (variablesShown && variablesSession === session) refreshVariables(session)
+    }
+
+    fun refreshVariables(session: NotebookSession? = variablesSession) {
+        session ?: return
+        if (!session.kernel.isStarted || session.kernelName == null) {
+            session.variables = null
+            session.variablesError = null
+            return
+        }
+        if (session.variablesLoading) return
+        session.variablesLoading = true
+        session.kernel.variables().whenComplete { result, error ->
+            post {
+                session.variablesLoading = false
+                session.variablesError = error?.let { it.cause?.message ?: it.message ?: "The kernel didn't answer" }
+                if (error == null) session.variables = result
+            }
+        }
+    }
+
+    /** Opens the Variables view (the notebook toolbar's button, "Jupyter: Show Variables"). */
+    fun showVariables() {
+        panelVisible = true
+        panelTab = PanelTab.Variables
+        compactDestination = CompactDestination.Terminal
+        refreshVariables()
+    }
+
+    /** A DataFrame, Series or array in the data viewer: its first [DATA_VIEWER_ROWS] rows as a sortable table. */
+    fun openDataViewer(session: NotebookSession, variable: com.avfstudio.nativeide.notebook.KernelVariable) {
+        dialog = WorkbenchDialog.DataViewer(variable.name)
+        session.kernel.table(variable.name, DATA_VIEWER_ROWS).whenComplete { table, error ->
+            post {
+                if ((dialog as? WorkbenchDialog.DataViewer)?.name != variable.name) return@post
+                dialog = when {
+                    error != null -> WorkbenchDialog.DataViewer(variable.name, error = error.cause?.message ?: error.message ?: "The kernel didn't answer")
+                    table == null -> WorkbenchDialog.DataViewer(variable.name, error = "${variable.name} can't be shown as a table")
+                    else -> WorkbenchDialog.DataViewer(variable.name, table)
+                }
+            }
+        }
     }
 
     /** The status bar says when the cell's last run finished, how, and how long it took. */
@@ -5171,6 +5233,8 @@ class WorkbenchController(private val context: Context) {
             post {
                 session.kernelState = if (error == null) "Idle" else "Restart failed"
                 session.notebook.cells.forEach { it.executionCount = null }
+                session.variables = null
+                refreshVariablesIfShown(session)
             }
         }
     }
@@ -5833,6 +5897,7 @@ class WorkbenchController(private val context: Context) {
                 dialog = WorkbenchDialog.Keybindings
             }
             "workbench.action.openGlobalKeybindingsFile" -> openKeybindingsJson()
+            "jupyter.showVariables" -> showVariables()
             "ports.focus" -> {
                 panelVisible = true
                 panelTab = PanelTab.Ports

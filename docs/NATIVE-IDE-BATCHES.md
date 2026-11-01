@@ -1199,6 +1199,27 @@ User's pick: 1, 5, 7, 8, 13 and 11 of the list after batch 24 (port 39891).
   KeybindingsTest, QuickOpenTest, the port packet test), plus the daemon's port tests (one new:
   finding a socket's process).
 
+## 26. Variable explorer (10-31 21:25–21:35; done, checked)
+User's pick: 12 of the list after batch 25.
+* Variables (a panel tab; the notebook toolbar's `{}` button; "Jupyter: Show Variables"), as
+  VS Code's Jupyter Variables: the notebook's kernel's names with type, size (rows × columns,
+  length) and a short value; modules, functions, classes, `_` names and IPython's own are left
+  out (first 500 names). A filter field and a refresh button; a tap on a plain row shows its
+  whole value. It follows the active notebook (or the last one shown) and refreshes after each
+  run while the tab is open; a closed tab asks the kernel nothing, so no setting.
+* DataFrames, Series and 1–2 dimensional arrays open in a data viewer: their first 1,000 rows
+  in the notebook's native table (index first, numbers right-aligned, tap a column to sort).
+* Bridge: `variables` and `table` requests go through the same queue as cell runs (one at a
+  time, after the cells before them). Each one is a silent execute (no history, no execution
+  count) that defines a small helper and reads its JSON back as a user expression. Other kernels
+  than Python say the view is for Python. The guest daemon was updated (sha256 82ab7469…d85f)
+  and the bridge reinstalled with `tools install jupyter`.
+* Checked with batch25.ipynb on Python (fourteen): after Run all the view listed arr (3 × 4),
+  config, df (DataFrame 500 × 3), ratio, rng, summary (Series), total and words; df opened in
+  the viewer (500 rows) and sorted by radius descending; arr opened as a 3 × 4 table; a new cell
+  `extra = 7` ran as [3] (the silent looks took no counts) and `extra` appeared.
+* Test file `~/Projects/batch25.ipynb` stays. 211 tests pass (new: KernelVariablesTest).
+
 ## Next pass (registered 10-27 23:35, updated 10-28 13:06)
 * Batch 15 did the carried-over tests (Copilot signed out, the setup paths, reconnect cap,
   Copilot model list, prompt prefix). Left over:
@@ -1333,7 +1354,7 @@ Not picked yet. Effort: S about half a day, M about a day, L several days.
   17. ANSI colours in outputs (they are stripped today) and clickable traceback lines. S-M.
   18. More output types: `image/svg+xml`, `application/json` as a tree, `text/latex` (KaTeX). M.
   19. Cell reordering by drag, and undo for a deleted cell. M.
-  20. Variable explorer (`%whos`-style, opening DataFrames in the native table). L.
+  20. (Done in batch 26.) Variable explorer (`%whos`-style, opening DataFrames in the native table). L.
   21. Interactive window: run `# %%` cells of a `.py` file in a kernel. L.
 * Device and quality (spec 10, 11):
   22. Launcher shortcuts for recent folders, and "Open with" for code files from other apps. S-M.

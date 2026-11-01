@@ -172,6 +172,96 @@ del _avf_plotly_display_ids
 """
 
 
+# The Variables view: defined in the kernel by a silent execute (no history, no output) before
+# each look, so a restarted kernel needs nothing else. The results come back as user_expressions
+# whose repr is the JSON itself. Names starting with "_" are left out, so these two never show.
+VARIABLES_HELPER = """\
+class _AvfJson:
+    def __init__(self, text):
+        self.text = text
+
+    def __repr__(self):
+        return self.text
+
+
+def _avf_variables(limit=500):
+    import json, reprlib, types
+    ip = get_ipython()
+    hidden = getattr(ip, "user_ns_hidden", {})
+    skip = (types.ModuleType, types.FunctionType, types.BuiltinFunctionType, types.MethodType, type)
+    short = reprlib.Repr()
+    short.maxstring = short.maxother = 160
+    short.maxlist = short.maxtuple = short.maxset = short.maxdict = 12
+    rows = []
+    names = sorted((n for n in list(ip.user_ns) if not n.startswith("_") and n not in hidden), key=str.lower)
+    for name in names:
+        value = ip.user_ns.get(name)
+        if isinstance(value, skip) or name in ("In", "Out", "exit", "quit", "get_ipython"):
+            continue
+        if len(rows) >= limit:
+            return _AvfJson(json.dumps({"variables": rows, "truncated": True}))
+        kind = type(value)
+        module = getattr(kind, "__module__", "") or ""
+        size = ""
+        viewable = False
+        try:
+            shape = getattr(value, "shape", None)
+            if isinstance(shape, tuple) and all(isinstance(n, int) for n in shape):
+                size = " \\u00d7 ".join(str(n) for n in shape) or "scalar"
+                viewable = (module.startswith("pandas") and kind.__name__ in ("DataFrame", "Series")) or (
+                    module.startswith("numpy") and kind.__name__ == "ndarray" and 1 <= len(shape) <= 2)
+            elif hasattr(value, "__len__") and not isinstance(value, (str, bytes)):
+                size = str(len(value))
+            elif isinstance(value, (str, bytes)):
+                size = str(len(value))
+        except Exception:
+            pass
+        try:
+            if viewable and kind.__name__ == "DataFrame":
+                text = "columns: " + ", ".join(str(c) for c in list(value.columns)[:20])
+            elif viewable:
+                text = "dtype: " + str(value.dtype)
+            else:
+                text = short.repr(value)
+        except Exception as error:
+            text = "<repr failed: %s>" % type(error).__name__
+        rows.append({"name": name, "type": kind.__name__, "module": module, "size": size, "value": text, "viewable": viewable})
+    return _AvfJson(json.dumps({"variables": rows, "truncated": False}))
+
+
+def _avf_table(name, limit=1000):
+    import json, math
+    value = get_ipython().user_ns[name]
+    kind = type(value).__name__
+    def cell(item):
+        if isinstance(item, float) and (math.isnan(item) or math.isinf(item)):
+            return str(item)
+        return item if isinstance(item, (int, float, bool)) or item is None else str(item)
+    if kind == "Series":
+        value = value.to_frame()
+        kind = "DataFrame"
+    if kind == "DataFrame":
+        head = value.head(limit)
+        return _AvfJson(json.dumps({
+            "columns": [str(c) for c in head.columns],
+            "index_name": str(head.index.name) if head.index.name is not None else "",
+            "index": [str(i) for i in head.index],
+            "rows": [[cell(x) for x in row] for row in head.itertuples(index=False, name=None)],
+            "total": int(len(value)),
+        }, default=str))
+    rows = value[:limit].tolist()
+    if value.ndim == 1:
+        rows = [[x] for x in rows]
+    return _AvfJson(json.dumps({
+        "columns": [str(c) for c in range(len(rows[0]) if rows else 0)],
+        "index_name": "",
+        "index": [str(i) for i in range(len(rows))],
+        "rows": [[cell(x) for x in row] for row in rows],
+        "total": int(value.shape[0]),
+    }, default=str))
+"""
+
+
 def to_nbformat_output(message):
     kind = message["header"]["msg_type"]
     content = message["content"]
@@ -248,6 +338,7 @@ class Bridge:
         self.kernel, self.client = manager, client
         spec = self.specs.get_kernel_spec(params["name"])
         self.plotly_display_ids = bool(params.get("plotly_display_ids")) and spec.language == "python"
+        self.language = spec.language
         self._prepare_kernel()
         return {"name": params["name"]}
 
@@ -294,6 +385,33 @@ class Bridge:
         content = reply["content"]
         respond(request_id, {"status": content.get("status"), "execution_count": content.get("execution_count")})
 
+    def inspect(self, expression):
+        """Evaluates [expression] after defining the Variables helper, silently, and returns its JSON."""
+        if self.client is None:
+            raise RuntimeError("Start a kernel first")
+        if getattr(self, "language", "python") != "python":
+            return {"unsupported": True}
+        msg_id = self.client.execute(
+            VARIABLES_HELPER, silent=True, store_history=False, allow_stdin=False,
+            user_expressions={"result": expression},
+        )
+        reply = self.client.get_shell_msg(timeout=60)
+        while reply.get("parent_header", {}).get("msg_id") != msg_id:
+            reply = self.client.get_shell_msg(timeout=60)
+        content = reply["content"]
+        if content.get("status") != "ok":
+            raise RuntimeError(content.get("evalue") or "The kernel could not list its variables")
+        result = content.get("user_expressions", {}).get("result", {})
+        if result.get("status") != "ok":
+            raise RuntimeError("%s: %s" % (result.get("ename", "Error"), result.get("evalue", "")))
+        return json.loads(result.get("data", {}).get("text/plain", "null"))
+
+    def variables(self, _params):
+        return self.inspect("_avf_variables()")
+
+    def table(self, params):
+        return self.inspect("_avf_table(%r, %d)" % (str(params["name"]), int(params.get("limit", 1000))))
+
     def complete(self, params):
         if self.client is None:
             return {"matches": []}
@@ -327,10 +445,15 @@ class Bridge:
         return None
 
     def _run_work(self):
+        # One at a time, in order: a look at the variables waits for the cells before it, and the
+        # shell replies of two requests never interleave.
         while True:
-            request_id, params = self.work.get()
+            method, request_id, params = self.work.get()
             try:
-                self.execute(params, request_id)
+                if method == "execute":
+                    self.execute(params, request_id)
+                else:
+                    respond(request_id, getattr(self, method)(params))
             except Exception as error:  # noqa: BLE001 - reported to the client
                 respond(request_id, error=str(error) or error.__class__.__name__)
 
@@ -338,8 +461,8 @@ class Bridge:
         method = message.get("method")
         request_id = message.get("id")
         params = message.get("params") or {}
-        if method == "execute":
-            self.work.put((request_id, params))
+        if method in ("execute", "variables", "table"):
+            self.work.put((method, request_id, params))
             return
         handler = {
             "kernelspecs": self.kernelspecs,

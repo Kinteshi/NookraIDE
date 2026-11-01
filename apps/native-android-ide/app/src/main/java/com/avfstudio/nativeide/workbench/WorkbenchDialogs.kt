@@ -317,6 +317,29 @@ fun WorkbenchDialogHost(controller: WorkbenchController) {
             dismissButton = { TextButton(onClick = { controller.dialog = null }) { Text("Cancel") } },
         )
         WorkbenchDialog.Keybindings -> KeybindingsDialog(controller)
+        is WorkbenchDialog.DataViewer -> AlertDialog(
+            onDismissRequest = { controller.dialog = null },
+            properties = DialogProperties(usePlatformDefaultWidth = false),
+            modifier = Modifier.padding(24.dp),
+            title = { Text(dialog.name, fontFamily = FontFamily.Monospace) },
+            text = {
+                when {
+                    dialog.error != null -> Text(dialog.error, color = MaterialTheme.colorScheme.error)
+                    dialog.table == null -> Text("Asking the kernel…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    else -> Column {
+                        DataViewerTable(dialog.table.table)
+                        val shown = dialog.table.table.body.size
+                        Text(
+                            if (dialog.table.total > shown) "First $shown of ${dialog.table.total} rows · tap a column to sort them" else "${dialog.table.total} rows · tap a column to sort",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 6.dp),
+                        )
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { controller.dialog = null }) { Text("Close") } },
+        )
         is WorkbenchDialog.RecordKeybinding -> RecordKeybindingDialog(controller, dialog.commandId)
         WorkbenchDialog.KeybindingsJson -> AlertDialog(
             onDismissRequest = { controller.dialog = null },

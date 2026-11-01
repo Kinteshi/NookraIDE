@@ -36,6 +36,7 @@ import androidx.compose.material.icons.outlined.ArrowUpward
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.ClearAll
+import androidx.compose.material.icons.outlined.DataObject
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.FastForward
 import androidx.compose.material.icons.outlined.Memory
@@ -142,6 +143,7 @@ fun NotebookEditor(controller: WorkbenchController, session: NotebookSession) {
             ToolbarButton(Icons.Outlined.Stop, "Interrupt") { controller.interruptKernel(session) }
             ToolbarButton(Icons.Outlined.RestartAlt, "Restart kernel") { controller.restartKernel(session) }
             ToolbarButton(Icons.Outlined.ClearAll, "Clear outputs") { controller.clearAllOutputs(session) }
+            ToolbarButton(Icons.Outlined.DataObject, "Variables") { controller.showVariables() }
             ToolbarButton(Icons.Outlined.Save, "Save") { controller.saveNotebook(session) }
         }
         val listState = rememberLazyListState()

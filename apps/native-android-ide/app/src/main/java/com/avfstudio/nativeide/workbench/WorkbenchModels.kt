@@ -28,6 +28,7 @@ enum class PanelTab(val title: String) {
     Problems("Problems"),
     Output("Output"),
     Ports("Ports"),
+    Variables("Variables"),
 }
 
 enum class CompactDestination(val title: String) {
@@ -60,6 +61,12 @@ sealed interface WorkbenchDialog {
     data object Rename : WorkbenchDialog
     data object SettingsJson : WorkbenchDialog
     data object Keybindings : WorkbenchDialog
+    /** A DataFrame or array from the Variables view; [table] is null while it loads, [error] when it failed. */
+    data class DataViewer(
+        val name: String,
+        val table: com.avfstudio.nativeide.notebook.VariableTable? = null,
+        val error: String? = null,
+    ) : WorkbenchDialog
     /** Keyboard Shortcuts waits for the keys to give [commandId]. */
     data class RecordKeybinding(val commandId: String) : WorkbenchDialog
     data object KeybindingsJson : WorkbenchDialog
@@ -182,6 +189,10 @@ class NotebookSession(
     internal var cellCompletion by mutableStateOf<CellCompletion?>(null)
     /** Copilot's suggestion for the focused cell, drawn as ghost text there. */
     internal var cellSuggestion by mutableStateOf<CellSuggestion?>(null)
+    /** The Variables view: the last list from the kernel, whether a look is under way, and why it failed. */
+    var variables by mutableStateOf<com.avfstudio.nativeide.notebook.KernelVariables?>(null)
+    var variablesLoading by mutableStateOf(false)
+    var variablesError by mutableStateOf<String?>(null)
 }
 
 /** One file's matches in the Search view. */

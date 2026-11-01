@@ -22,6 +22,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.TableChart
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.OpenInBrowser
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
@@ -113,6 +115,7 @@ fun PanelArea(controller: WorkbenchController, modifier: Modifier = Modifier) {
                 PanelTab.Output -> OutputLog(controller)
                 PanelTab.Debug -> DebugPanel(controller)
                 PanelTab.Ports -> PortsView(controller)
+                PanelTab.Variables -> VariablesView(controller)
             }
         }
     }
@@ -290,6 +293,115 @@ fun PortsView(controller: WorkbenchController) {
                 TextButton(onClick = { controller.showInternalPorts = !controller.showInternalPorts }) {
                     Text(if (controller.showInternalPorts) "Hide system and app ports" else "Show system and app ports ($hidden)")
                 }
+            }
+        }
+    }
+}
+
+/**
+ * Variables (VS Code's Jupyter Variables): the names the notebook's kernel holds, with type,
+ * size and a short value, refreshed after each run while this tab is open. DataFrames, Series
+ * and arrays open in the data viewer; a tap on another row shows its whole value line.
+ */
+@Composable
+fun VariablesView(controller: WorkbenchController) {
+    val colors = MaterialTheme.colorScheme
+    val session = controller.variablesSession
+    LaunchedEffect(session, session?.kernelName) { controller.refreshVariables(session) }
+    var filter by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf("") }
+    var expanded by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<String?>(null) }
+    Column(Modifier.fillMaxSize()) {
+        val result = session?.variables
+        when {
+            session == null -> {
+                EmptyMessage("Open a notebook to see its kernel's variables.")
+                return@Column
+            }
+            session.kernelName == null -> {
+                EmptyMessage("Start ${session.document.path.substringAfterLast('/')}'s kernel (run a cell) to see its variables.")
+                return@Column
+            }
+            result?.unsupported == true -> {
+                EmptyMessage("Variables are listed for Python kernels.")
+                return@Column
+            }
+        }
+        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                "${session!!.document.path.substringAfterLast('/')} · ${session.kernelName}",
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.onSurfaceVariant,
+                maxLines = 1,
+                modifier = Modifier.weight(1f),
+            )
+            androidx.compose.foundation.text.BasicTextField(
+                value = filter,
+                onValueChange = { filter = it },
+                singleLine = true,
+                textStyle = MaterialTheme.typography.bodySmall.copy(color = colors.onSurface),
+                cursorBrush = androidx.compose.ui.graphics.SolidColor(colors.primary),
+                modifier = Modifier.width(180.dp).background(colors.surfaceContainerHigh, RoundedCornerShape(8.dp)).padding(horizontal = 10.dp, vertical = 6.dp),
+                decorationBox = { field ->
+                    if (filter.isEmpty()) Text("Filter", style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
+                    field()
+                },
+            )
+            IconButton(onClick = { controller.refreshVariables(session) }, enabled = !session.variablesLoading) {
+                Icon(Icons.Outlined.Refresh, contentDescription = "Refresh variables", modifier = Modifier.size(18.dp))
+            }
+        }
+        session.variablesError?.let {
+            Text("Couldn't list the variables: $it", style = MaterialTheme.typography.bodySmall, color = colors.error, modifier = Modifier.padding(horizontal = 16.dp))
+        }
+        val variables = result?.variables.orEmpty().filter { filter.isBlank() || it.name.contains(filter, true) || it.type.contains(filter, true) }
+        if (result != null && variables.isEmpty()) {
+            EmptyMessage(if (filter.isBlank()) "No variables yet." else "No variable matches \"$filter\".")
+        } else if (result == null) {
+            EmptyMessage(if (session.variablesLoading) "Asking the kernel…" else "")
+        }
+        if (variables.isNotEmpty()) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp)) {
+                listOf("Name" to 0.22f, "Type" to 0.14f, "Size" to 0.12f, "Value" to 0.52f).forEach { (label, weight) ->
+                    Text(label, style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant, modifier = Modifier.weight(weight))
+                }
+            }
+        }
+        androidx.compose.foundation.lazy.LazyColumn(Modifier.weight(1f)) {
+            items(variables.size) { index ->
+                val variable = variables[index]
+                val open = expanded == variable.name
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            if (variable.viewable) controller.openDataViewer(session, variable) else expanded = if (open) null else variable.name
+                        }
+                        .background(if (index % 2 == 0) colors.surfaceContainerLow else colors.surfaceContainer)
+                        .padding(horizontal = 16.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    val mono = androidx.compose.ui.text.font.FontFamily.Monospace
+                    Text(variable.name, style = MaterialTheme.typography.bodySmall, fontFamily = mono, color = colors.primary, maxLines = 1, modifier = Modifier.weight(0.22f))
+                    Text(variable.type, style = MaterialTheme.typography.bodySmall, maxLines = 1, modifier = Modifier.weight(0.14f))
+                    Text(variable.size, style = MaterialTheme.typography.bodySmall, maxLines = 1, modifier = Modifier.weight(0.12f))
+                    Row(Modifier.weight(0.52f), verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            variable.value,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = mono,
+                            color = colors.onSurfaceVariant,
+                            maxLines = if (open) 12 else 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                        if (variable.viewable) {
+                            Icon(Icons.Outlined.TableChart, contentDescription = "Open in the data viewer", tint = colors.primary, modifier = Modifier.size(16.dp))
+                        }
+                    }
+                }
+            }
+            if (result?.truncated == true) {
+                item { EmptyMessage("Only the first 500 names are listed.") }
             }
         }
     }

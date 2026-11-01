@@ -120,6 +120,17 @@ class KernelClient(transport: GuestVfsClient) {
             )
         }
 
+    /** The kernel's variables (Python kernels; others answer `unsupported`), after the cells queued before. */
+    fun variables(): CompletableFuture<KernelVariables> =
+        connection.request("variables", JsonObject(), timeoutSeconds = null).thenApply(::parseKernelVariables)
+
+    /** Up to [limit] rows of the DataFrame, Series or array called [name], for the data viewer. */
+    fun table(name: String, limit: Int): CompletableFuture<VariableTable?> =
+        connection.request("table", JsonObject().apply {
+            addProperty("name", name)
+            addProperty("limit", limit)
+        }, timeoutSeconds = null).thenApply(::parseVariableTable)
+
     fun interrupt(): CompletableFuture<Unit> = connection.request("interrupt", JsonNull.INSTANCE).thenApply { }
 
     fun restart(): CompletableFuture<Unit> =

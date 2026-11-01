@@ -350,7 +350,7 @@ private fun CompactContent(controller: WorkbenchController) {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                listOf(PanelTab.Terminal, PanelTab.Debug, PanelTab.Output, PanelTab.Ports).forEach { tab ->
+                listOf(PanelTab.Terminal, PanelTab.Debug, PanelTab.Output, PanelTab.Ports, PanelTab.Variables).forEach { tab ->
                     FilterChip(selected = controller.panelTab == tab, onClick = { controller.panelTab = tab }, label = { Text(tab.title) })
                 }
                 if (controller.panelTab == PanelTab.Terminal) {
@@ -362,6 +362,7 @@ private fun CompactContent(controller: WorkbenchController) {
                     PanelTab.Debug -> DebugPanel(controller)
                     PanelTab.Output -> OutputLog(controller)
                     PanelTab.Ports -> PortsView(controller)
+                    PanelTab.Variables -> VariablesView(controller)
                     else -> TerminalView(controller)
                 }
             }

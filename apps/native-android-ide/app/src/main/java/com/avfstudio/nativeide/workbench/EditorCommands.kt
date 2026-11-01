@@ -131,6 +131,7 @@ object EditorCommands {
         command("jupyter.runAll", "Notebook: Run All Cells", ""),
         command("jupyter.interruptKernel", "Notebook: Interrupt Kernel", ""),
         command("jupyter.restartKernel", "Notebook: Restart Kernel", ""),
+        command("jupyter.showVariables", "Jupyter: Show Variables", ""),
         command("github.signIn", "GitHub: Sign In (Copilot Chat and Git)", ""),
         command("github.copilot.chat.signIn", "GitHub Copilot: Sign In to Chat", ""),
         command("github.copilot.chat.signInCli", "Copilot: Sign In to Chat with copilot login", ""),
