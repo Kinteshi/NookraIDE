@@ -2,6 +2,7 @@ package com.avfstudio.nativeide.workbench
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
@@ -23,6 +24,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material.icons.outlined.Link
@@ -217,6 +220,8 @@ private fun TerminalPane(controller: WorkbenchController, session: TerminalSessi
                 .fillMaxWidth()
                 .focusRequester(endedFocus)
                 .focusable(enabled = session.exited)
+                // The I-beam over the terminal's text, as VS Code's terminal shows it.
+                .pointerHoverIcon(androidx.compose.ui.input.pointer.PointerIcon.Text)
                 .pointerInput(session.id, session.exited) {
                     awaitEachGesture {
                         awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
@@ -575,9 +580,10 @@ private fun TerminalCommandsButton(controller: WorkbenchController) {
 
 /**
  * Find in the terminal's output (Ctrl+F there): the matching lines, newest last, with the match
- * marked. The terminal library can't scroll its view to a line, so the lines are listed here;
- * a tap on one with a file:line or web address opens it, otherwise copies the line.
+ * marked. Enter and Shift+Enter (or a tap on a line) scroll the terminal to a match; a long press
+ * on a line with a file:line or web address opens it, otherwise copies the line.
  */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun TerminalFindBar(controller: WorkbenchController, session: TerminalSession) {
     val colors = MaterialTheme.colorScheme
@@ -601,6 +607,9 @@ private fun TerminalFindBar(controller: WorkbenchController, session: TerminalSe
                 value = controller.terminalFindQuery,
                 onValueChange = { controller.terminalFindQuery = it },
                 singleLine = true,
+                // Enter from a soft keyboard (or one that goes through the input method) comes as the action.
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search),
+                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { controller.stepTerminalMatch(matches, previous = true) }),
                 textStyle = MaterialTheme.typography.bodyMedium.copy(color = colors.onSurface),
                 cursorBrush = androidx.compose.ui.graphics.SolidColor(colors.primary),
                 modifier = Modifier
@@ -609,11 +618,17 @@ private fun TerminalFindBar(controller: WorkbenchController, session: TerminalSe
                     .background(colors.surfaceContainerHighest, RoundedCornerShape(8.dp))
                     .padding(horizontal = 10.dp, vertical = 7.dp)
                     .onPreviewKeyEvent { event ->
-                        if (event.type == KeyEventType.KeyDown && event.key == androidx.compose.ui.input.key.Key.Escape) {
-                            controller.terminalFindVisible = false
-                            true
-                        } else {
-                            false
+                        when {
+                            event.type != KeyEventType.KeyDown -> false
+                            event.key == androidx.compose.ui.input.key.Key.Escape -> {
+                                controller.terminalFindVisible = false
+                                true
+                            }
+                            event.key == androidx.compose.ui.input.key.Key.Enter || event.key == androidx.compose.ui.input.key.Key.NumPadEnter -> {
+                                controller.stepTerminalMatch(matches, previous = !event.isShiftPressed)
+                                true
+                            }
+                            else -> false
                         }
                     },
                 decorationBox = { field ->
@@ -641,7 +656,8 @@ private fun TerminalFindBar(controller: WorkbenchController, session: TerminalSe
         }
         if (matches.isNotEmpty()) {
             val listState = androidx.compose.foundation.lazy.rememberLazyListState()
-            LaunchedEffect(matches.size) { listState.scrollToItem((matches.size - 1).coerceAtLeast(0)) }
+            val selected = matches.indexOfFirst { it.line == controller.terminalFindLine }
+            LaunchedEffect(matches.size, selected) { listState.scrollToItem((if (selected >= 0) selected else matches.size - 1).coerceAtLeast(0)) }
             androidx.compose.foundation.lazy.LazyColumn(Modifier.heightIn(max = 150.dp).padding(top = 4.dp), state = listState) {
                 items(matches.size) { index ->
                     val match = matches[index]
@@ -656,7 +672,14 @@ private fun TerminalFindBar(controller: WorkbenchController, session: TerminalSe
                         fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
                         maxLines = 1,
                         overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                        modifier = Modifier.fillMaxWidth().clickable { controller.openTerminalLine(match.text) }.padding(vertical = 2.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(if (index == selected) colors.secondaryContainer else colors.surfaceContainer)
+                            .combinedClickable(
+                                onClick = { controller.revealTerminalLine(session, match.line) },
+                                onLongClick = { controller.openTerminalLine(match.text) },
+                            )
+                            .padding(vertical = 2.dp),
                     )
                 }
             }

@@ -396,6 +396,76 @@ fn default_servers() -> HashMap<String, ServerCommand> {
             },
         ),
         (
+            "gopls".to_owned(),
+            ServerCommand {
+                program: "gopls".to_owned(),
+                args: Vec::new(),
+            },
+        ),
+        (
+            "bash-language-server".to_owned(),
+            ServerCommand {
+                program: "avf-node-agent".to_owned(),
+                args: vec!["bash-language-server".to_owned(), "start".to_owned()],
+            },
+        ),
+        (
+            "yaml-language-server".to_owned(),
+            ServerCommand {
+                program: "avf-node-agent".to_owned(),
+                args: vec!["yaml-language-server".to_owned(), "--stdio".to_owned()],
+            },
+        ),
+        (
+            "json-language-server".to_owned(),
+            ServerCommand {
+                program: "avf-node-agent".to_owned(),
+                args: vec!["json-language-server".to_owned(), "--stdio".to_owned()],
+            },
+        ),
+        (
+            "html-language-server".to_owned(),
+            ServerCommand {
+                program: "avf-node-agent".to_owned(),
+                args: vec!["html-language-server".to_owned(), "--stdio".to_owned()],
+            },
+        ),
+        (
+            "css-language-server".to_owned(),
+            ServerCommand {
+                program: "avf-node-agent".to_owned(),
+                args: vec!["css-language-server".to_owned(), "--stdio".to_owned()],
+            },
+        ),
+        (
+            "docker-langserver".to_owned(),
+            ServerCommand {
+                program: "avf-node-agent".to_owned(),
+                args: vec!["docker-langserver".to_owned(), "--stdio".to_owned()],
+            },
+        ),
+        (
+            "sql-language-server".to_owned(),
+            ServerCommand {
+                program: "avf-node-agent".to_owned(),
+                args: vec!["sql-language-server".to_owned(), "up".to_owned(), "--method".to_owned(), "stdio".to_owned()],
+            },
+        ),
+        (
+            "taplo".to_owned(),
+            ServerCommand {
+                program: "taplo".to_owned(),
+                args: vec!["lsp".to_owned(), "stdio".to_owned()],
+            },
+        ),
+        (
+            "marksman".to_owned(),
+            ServerCommand {
+                program: "marksman".to_owned(),
+                args: vec!["server".to_owned()],
+            },
+        ),
+        (
             "vtsls".to_owned(),
             ServerCommand {
                 program: "vtsls".to_owned(),
@@ -636,6 +706,19 @@ fn validate_json_rpc(message: &str) -> Result<(), &'static str> {
 mod tests {
     use super::*;
     use tokio::io::AsyncReadExt;
+
+    #[test]
+    fn every_catalog_language_server_can_be_started() {
+        let router = LspRouter::new(Duration::from_secs(60));
+        let catalog = crate::tools::load_catalog().unwrap();
+        for manifest in catalog.tools.iter().filter(|tool| tool.kind == "lsp") {
+            assert!(
+                router.command_matches(&manifest.name, &manifest.command),
+                "{} isn't in the daemon's server table with the catalog's command",
+                manifest.name
+            );
+        }
+    }
 
     #[test]
     fn ruff_server_command_is_registered_exactly() {

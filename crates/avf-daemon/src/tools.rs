@@ -85,6 +85,19 @@ pub struct DownloadSpec {
     /// `~/.local/bin`, which may differ from the member's file name.
     #[serde(default)]
     pub keep_directory: bool,
+    /// What the download is: a gzip tarball (the default), one gzipped executable, or the
+    /// executable itself.
+    #[serde(default)]
+    pub format: DownloadFormat,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DownloadFormat {
+    #[default]
+    TarGz,
+    Gzip,
+    Raw,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -106,9 +119,9 @@ impl DownloadSpec {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Catalog {
+pub(crate) struct Catalog {
     schema_version: u32,
-    tools: Vec<ToolManifest>,
+    pub(crate) tools: Vec<ToolManifest>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -168,7 +181,7 @@ pub(crate) fn default_home() -> Result<PathBuf, String> {
         .ok_or_else(|| "HOME must be set to an absolute directory path.".to_owned())
 }
 
-fn load_catalog() -> Result<Catalog, String> {
+pub(crate) fn load_catalog() -> Result<Catalog, String> {
     let catalog: Catalog = serde_json::from_str(CATALOG_JSON)
         .map_err(|e| format!("The bundled guest tool catalog is invalid: {e}"))?;
     if catalog.schema_version != 1 {
@@ -703,6 +716,10 @@ fn install_downloaded_archive(
         ));
     }
 
+    if download.format != DownloadFormat::TarGz {
+        return install_single_executable(home, name, download, archive, staging);
+    }
+
     let extract_dir = staging.join("extract");
     fs::create_dir(&extract_dir)
         .map_err(|error| format!("Cannot create extraction directory for '{name}': {error}"))?;
@@ -744,6 +761,42 @@ fn install_downloaded_archive(
     let bin_dir = local_bin_directory(home)?;
     install_executable(name, &bin_dir, &download.binary, |staged| {
         fs::copy(&extracted, staged)
+            .map(|_| ())
+            .map_err(|error| format!("Cannot stage the '{name}' executable: {error}"))
+    })
+}
+
+/// Installs a download that is the executable itself, or the executable gzipped (taplo, marksman).
+fn install_single_executable(
+    home: &Path,
+    name: &str,
+    download: &DownloadSpec,
+    downloaded: &Path,
+    staging: &Path,
+) -> Result<(), String> {
+    let executable = match download.format {
+        DownloadFormat::Gzip => {
+            let unpacked = staging.join("unpacked");
+            let output = fs::File::create(&unpacked)
+                .map_err(|error| format!("Cannot create the unpacked '{name}': {error}"))?;
+            let status = Command::new("gzip")
+                .arg("--decompress")
+                .arg("--stdout")
+                .arg(downloaded)
+                .stdin(Stdio::null())
+                .stdout(output)
+                .status()
+                .map_err(|error| format!("Could not start gzip to unpack '{name}': {error}."))?;
+            if !status.success() {
+                return Err(format!("Unpacking '{name}' failed with {status}."));
+            }
+            unpacked
+        }
+        _ => downloaded.to_path_buf(),
+    };
+    let bin_dir = local_bin_directory(home)?;
+    install_executable(name, &bin_dir, &download.binary, |staged| {
+        fs::copy(&executable, staged)
             .map(|_| ())
             .map_err(|error| format!("Cannot stage the '{name}' executable: {error}"))
     })
@@ -982,6 +1035,65 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
+    fn catalog_has_the_language_servers_offered_on_demand() {
+        assert_eq!(catalog_lookup("gopls").unwrap().install.apt, Some(vec!["gopls".to_owned()]));
+        assert_eq!(
+            catalog_lookup("bash-language-server").unwrap().command,
+            ["avf-node-agent", "bash-language-server", "start"]
+        );
+        let taplo = catalog_lookup("taplo").unwrap();
+        assert_eq!(taplo.install.download.unwrap().format, DownloadFormat::Gzip);
+        let marksman = catalog_lookup("marksman").unwrap();
+        assert_eq!(marksman.install.download.unwrap().format, DownloadFormat::Raw);
+        assert_eq!(
+            catalog_lookup("ripgrep").unwrap().install.download.unwrap().format,
+            DownloadFormat::TarGz
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn single_file_downloads_install_their_executable() {
+        use sha2::{Digest, Sha256};
+        use std::io::Write;
+
+        let home = tempdir().unwrap();
+        let staging = tempdir().unwrap();
+        let raw = staging.path().join("tool");
+        fs::write(&raw, b"#!/bin/sh\necho raw\n").unwrap();
+        let gzipped = staging.path().join("tool.gz");
+        let mut encoder = Command::new("gzip")
+            .arg("--stdout")
+            .stdin(Stdio::piped())
+            .stdout(fs::File::create(&gzipped).unwrap())
+            .spawn()
+            .unwrap();
+        encoder.stdin.take().unwrap().write_all(b"#!/bin/sh\necho gz\n").unwrap();
+        assert!(encoder.wait().unwrap().success());
+        for (path, format, binary, expected) in [
+            (&raw, DownloadFormat::Raw, "raw-tool", "echo raw"),
+            (&gzipped, DownloadFormat::Gzip, "gz-tool", "echo gz"),
+        ] {
+            let sha256 = Sha256::digest(fs::read(path).unwrap())
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>();
+            let artifact = DownloadArtifact { url: String::new(), sha256, archive_member: None };
+            let spec = DownloadSpec {
+                binary: binary.to_owned(),
+                archive_member: binary.to_owned(),
+                artifacts: Default::default(),
+                keep_directory: false,
+                format,
+            };
+            let work = tempdir().unwrap();
+            install_downloaded_archive(home.path(), binary, &spec, &artifact, path, work.path()).unwrap();
+            let installed = fs::read_to_string(home.path().join(".local/bin").join(binary)).unwrap();
+            assert!(installed.contains(expected), "{installed}");
+        }
+    }
+
+    #[test]
     fn catalog_lookup_only_returns_allowlisted_tools() {
         assert_eq!(catalog_lookup("basedpyright").unwrap().kind, "lsp");
         assert_eq!(catalog_lookup("ruff").unwrap().command, ["ruff", "server"]);
@@ -1173,6 +1285,7 @@ mod tests {
             )]
             .into(),
             keep_directory: false,
+            format: DownloadFormat::TarGz,
         }
     }
 

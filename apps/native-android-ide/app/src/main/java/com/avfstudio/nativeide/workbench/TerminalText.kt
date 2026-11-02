@@ -146,6 +146,10 @@ class TerminalTextLog(private val maxLines: Int = 10_000) {
     @Synchronized
     fun snapshot(): List<String> = lines.toList() + listOfNotNull(current.toString().takeIf(String::isNotEmpty))
 
+    /** [snapshot] with the number of its first line (counted from the first line ever written). */
+    @Synchronized
+    fun numberedSnapshot(): Pair<Long, List<String>> = dropped to snapshot()
+
     @Synchronized
     fun clear() {
         dropped += lines.size
@@ -169,10 +173,10 @@ data class ShellCommand(
     val exitCode: Int? = null,
 )
 
-/** A line of the terminal's output that has the find text. */
-data class TerminalMatch(val line: Int, val text: String, val ranges: List<IntRange>)
+/** A line of the terminal's output that has the find text; [line] counts from [findInTerminal]'s `firstLine`. */
+data class TerminalMatch(val line: Long, val text: String, val ranges: List<IntRange>)
 
-fun findInTerminal(lines: List<String>, query: String, caseSensitive: Boolean, limit: Int = 500): List<TerminalMatch> {
+fun findInTerminal(lines: List<String>, query: String, caseSensitive: Boolean, limit: Int = 500, firstLine: Long = 0): List<TerminalMatch> {
     if (query.isEmpty()) return emptyList()
     val matches = mutableListOf<TerminalMatch>()
     lines.forEachIndexed { index, line ->
@@ -182,7 +186,7 @@ fun findInTerminal(lines: List<String>, query: String, caseSensitive: Boolean, l
             ranges += from until from + query.length
             from = line.indexOf(query, from + query.length, ignoreCase = !caseSensitive)
         }
-        if (ranges.isNotEmpty()) matches += TerminalMatch(index, line, ranges)
+        if (ranges.isNotEmpty()) matches += TerminalMatch(firstLine + index, line, ranges)
     }
     return matches.takeLast(limit)
 }

@@ -31,6 +31,12 @@ internal interface CompletionProvider {
     fun completions(line: Int, column: Int, trigger: String?, incomplete: Boolean): CompletableFuture<LspCompletionList>?
     /** After an item is inserted: fetch its auto-import edits if the server sends them only on resolve. */
     fun accepted(item: LspCompletionItem)
+    /** The snippets for this file's language (packs and the workspace's `.code-snippets` files). */
+    fun snippets(): List<Snippet>
+    /** `editor.snippetSuggestions`. */
+    val snippetSuggestions: SnippetSuggestions
+    /** A snippet body ready to insert at [line], [column]: indented like the line, variables filled in. */
+    fun prepareSnippet(body: String, line: Int, column: Int): com.avfstudio.nativeide.editor.ParsedSnippet
 }
 
 /**
@@ -72,6 +78,11 @@ internal class SoraCompletionLanguage(
             val future = provider.completions(position.line, column, trigger, incomplete = cached?.list?.incomplete == true)
             if (future == null) {
                 cache = null
+                // No server: the snippets, then the grammar's words.
+                snippetItems(word, wordStart, invoked).takeIf { it.isNotEmpty() }?.let { snippets ->
+                    onItems()
+                    publisher.addItems(snippets.map { it.second })
+                }
                 base.requireAutoComplete(content, position, publisher, extraArguments)
                 return
             }
@@ -79,11 +90,34 @@ internal class SoraCompletionLanguage(
         }
         cache = Cached(position.line, wordStart, before, list)
         val items = filterCompletions(list.items, word).take(MAX_SHOWN)
-        if (items.isEmpty()) return
+        val snippets = snippetItems(word, wordStart, invoked)
+        if (items.isEmpty() && snippets.isEmpty()) return
         // A newer key may have replaced this request while the server answered; its items would be stale.
         publisher.checkCancelled()
         onItems()
-        publisher.addItems(items.map { SoraLspItem(it, word.length, wordStart, provider) })
+        val lspItems: List<CompletionItem> = items.map { SoraLspItem(it, word.length, wordStart, provider) }
+        publisher.addItems(
+            when (provider.snippetSuggestions) {
+                SnippetSuggestions.Top -> snippets.map { it.second } + lspItems
+                SnippetSuggestions.Bottom, SnippetSuggestions.None -> lspItems + snippets.map { it.second }
+                // Mixed by how well each matches what was typed (the server's order otherwise).
+                SnippetSuggestions.Inline -> {
+                    val scored = items.map { completionScore(word, it.filterText) ?: 0 }.zip(lspItems)
+                    (scored + snippets).sortedByDescending { it.first }.map { it.second }
+                }
+            },
+        )
+    }
+
+    /** Snippets whose prefix matches the typed [word] (any with Ctrl+Space on nothing), with their match score. */
+    private fun snippetItems(word: String, wordStart: Int, invoked: Boolean): List<Pair<Int, CompletionItem>> {
+        if (provider.snippetSuggestions == SnippetSuggestions.None || (word.isEmpty() && !invoked)) return emptyList()
+        return provider.snippets().flatMap { snippet ->
+            snippet.prefixes.mapNotNull { prefix ->
+                val score = if (word.isEmpty()) 0 else completionScore(word, prefix) ?: return@mapNotNull null
+                score to SoraSnippetItem(snippet, prefix, word.length, wordStart, provider) as CompletionItem
+            }
+        }
     }
 
     /** Waits for the server (a fresh one indexing auto-imports can take seconds), giving up when sora cancels (another key) or after [REQUEST_TIMEOUT_MS]. */
@@ -178,13 +212,21 @@ private class SoraLspItem(
         val line = requestLine
         val column = editor.cursor.takeIf { it.leftLine == requestLine }?.leftColumn ?: requestColumn
         val (range, insert) = completionEdit(item, line, wordStart, column)
-        text.replace(range.start.line, range.start.character, line, column, insert)
-        val stop = if (item.snippet) snippetToPlain(item.insertText).second else insert.length
-        val head = insert.substring(0, stop.coerceIn(0, insert.length))
-        val lines = head.split('\n')
-        val cursorLine = range.start.line + lines.size - 1
-        val cursorColumn = if (lines.size == 1) range.start.character + head.length else lines.last().length
-        editor.setSelection(cursorLine, cursorColumn)
+        val native = editor as? NativeCodeEditor
+        if (item.snippet && native != null) {
+            // A snippet: its stops, Tab between them.
+            val from = text.indexer.getCharIndex(range.start.line, range.start.character)
+            val to = text.indexer.getCharIndex(line, column)
+            native.insertSnippet(provider.prepareSnippet(item.insertText, range.start.line, range.start.character), from, to)
+        } else {
+            text.replace(range.start.line, range.start.character, line, column, insert)
+            val stop = if (item.snippet) snippetToPlain(item.insertText).second else insert.length
+            val head = insert.substring(0, stop.coerceIn(0, insert.length))
+            val lines = head.split('\n')
+            val cursorLine = range.start.line + lines.size - 1
+            val cursorColumn = if (lines.size == 1) range.start.character + head.length else lines.last().length
+            editor.setSelection(cursorLine, cursorColumn)
+        }
         // Auto-imports: last first, so earlier positions stay right; the cursor follows them.
         item.additionalEdits.sortedWith(compareBy({ it.range.start.line }, { it.range.start.character })).asReversed().forEach { edit ->
             val (start, end) = edit.range
@@ -193,5 +235,28 @@ private class SoraLspItem(
             }
         }
         provider.accepted(item)
+    }
+}
+
+/** A snippet in the suggest popup: its prefix, its name beside it; accepting it starts its stops. */
+private class SoraSnippetItem(
+    private val snippet: Snippet,
+    prefix: String,
+    typed: Int,
+    private val wordStart: Int,
+    private val provider: CompletionProvider,
+) : CompletionItem(prefix, snippet.name) {
+    init {
+        prefixLength = typed
+        kind = CompletionItemKind.Snippet
+        icon = SimpleCompletionIconDrawer.draw(CompletionItemKind.Snippet)
+    }
+
+    override fun performCompletion(editor: CodeEditor, text: Content, requestLine: Int, requestColumn: Int) {
+        val native = editor as? NativeCodeEditor ?: return
+        val column = editor.cursor.takeIf { it.leftLine == requestLine }?.leftColumn ?: requestColumn
+        val from = text.indexer.getCharIndex(requestLine, wordStart.coerceAtMost(column))
+        val to = text.indexer.getCharIndex(requestLine, column)
+        native.insertSnippet(provider.prepareSnippet(snippet.body, requestLine, wordStart.coerceAtMost(column)), from, to)
     }
 }

@@ -333,6 +333,15 @@ private fun LazyListScope.editor(settings: WorkbenchSettings, set: SetSetting) {
 private fun LazyListScope.intelligence(settings: WorkbenchSettings, set: SetSetting) {
     item { Section("While typing") }
     item { SwitchRow(Icons.Outlined.AutoFixHigh, "Suggestions while typing", "The language server's completions pop up as you type, with auto-imports (Ctrl+Space always shows them)", settings.quickSuggestions) { set(WorkbenchSettings.QUICK_SUGGESTIONS, it) } }
+    item {
+        ChoiceRow(
+            Icons.Outlined.DataObject,
+            "Snippets in suggestions",
+            "Where snippets (from imported packs and .vscode/*.code-snippets) go among the suggestions; Tab moves through a snippet's fields",
+            SnippetSuggestions.entries.map { it.key to it.label },
+            settings.snippetSuggestions.key,
+        ) { set(WorkbenchSettings.SNIPPET_SUGGESTIONS, it) }
+    }
     item { SwitchRow(Icons.Outlined.Functions, "Parameter hints", "The signature and the current parameter while typing a call (Ctrl+Shift+Space shows them)", settings.parameterHints) { set(WorkbenchSettings.PARAMETER_HINTS, it) } }
     item { Section("In the code") }
     item { SwitchRow(Icons.Outlined.Mouse, "Hover", "Resting a mouse or touchpad pointer on code shows its type, docs and problems (Ctrl+K Ctrl+I at the cursor)", settings.editorHover) { set(WorkbenchSettings.EDITOR_HOVER, it) } }
@@ -391,6 +400,7 @@ private fun LazyListScope.files(controller: WorkbenchController, settings: Workb
         }
     }
     item { SwitchRow(Icons.Outlined.Rule, "Git marks", "Changed files in colour with their letter (M, U, A, D, ! for a conflict); their folders in colour", settings.gitDecorations) { set(WorkbenchSettings.GIT_DECORATIONS, it) } }
+    item { SwitchRow(Icons.Outlined.History, "Git blame on the cursor's line", "Who last changed the line and when, faintly at its end (saved files; Git: Toggle Blame Editor Decoration)", settings.gitBlame) { set(WorkbenchSettings.GIT_BLAME, it) } }
     item { SwitchRow(Icons.Outlined.ErrorOutline, "Problem marks", "Files with errors or warnings in red or yellow with their count", settings.problemDecorations) { set(WorkbenchSettings.PROBLEM_DECORATIONS, it) } }
     item { Section("Tabs and files") }
     item {
@@ -621,26 +631,20 @@ private fun LazyListScope.guest(controller: WorkbenchController, settings: Workb
         }
     }
     item { Section("Guest tools") }
-    items(GuestDependency.entries) { dependency ->
-        val state = controller.guestTool(dependency)
-        SettingRow(
-            Icons.Outlined.Extension,
-            dependency.label,
-            when (state) {
-                is DependencyState.Found -> "${dependency.usedFor} · ${state.path}"
-                DependencyState.Missing -> "${dependency.usedFor} · not installed"
-                DependencyState.Unknown -> dependency.usedFor
-            },
-        ) {
-            when (state) {
-                DependencyState.Missing -> FilledTonalButton(onClick = {
-                    controller.settingsVisible = false
-                    controller.offerInstall(dependency)
-                }) { Text("Install") }
-                is DependencyState.Found -> Icon(Icons.Outlined.CheckCircle, contentDescription = "Installed", tint = MaterialTheme.colorScheme.primary)
-                DependencyState.Unknown -> Unit
-            }
-        }
+    items(GuestDependency.entries.filter { dependency -> OtherLanguageServer.entries.none { it.dependency == dependency } }) { dependency ->
+        GuestToolRow(controller, dependency)
+    }
+    item { Section("Language servers for other languages") }
+    item {
+        SwitchRow(
+            Icons.Outlined.Translate,
+            "Start them for their files",
+            "Go, C/C++, Rust, Bash, YAML, JSON, HTML, CSS, Dockerfile, SQL, TOML and Markdown get completion, problems and navigation; each is offered for install the first time one of its files opens",
+            settings.otherLanguageServers,
+        ) { set(WorkbenchSettings.OTHER_LANGUAGE_SERVERS, it) }
+    }
+    if (settings.otherLanguageServers) {
+        items(OtherLanguageServer.entries) { server -> GuestToolRow(controller, server.dependency) }
     }
     controller.forwarderFix?.let { fix ->
         item {
@@ -825,6 +829,29 @@ private fun SliderRow(
                 valueRange = range,
                 steps = steps,
             )
+        }
+    }
+}
+
+@Composable
+private fun GuestToolRow(controller: WorkbenchController, dependency: GuestDependency) {
+    val state = controller.guestTool(dependency)
+    SettingRow(
+        Icons.Outlined.Extension,
+        dependency.label,
+        when (state) {
+            is DependencyState.Found -> "${dependency.usedFor} · ${state.path}"
+            DependencyState.Missing -> "${dependency.usedFor} · not installed"
+            DependencyState.Unknown -> dependency.usedFor
+        },
+    ) {
+        when (state) {
+            DependencyState.Missing -> FilledTonalButton(onClick = {
+                controller.settingsVisible = false
+                controller.offerInstall(dependency)
+            }) { Text("Install") }
+            is DependencyState.Found -> Icon(Icons.Outlined.CheckCircle, contentDescription = "Installed", tint = MaterialTheme.colorScheme.primary)
+            DependencyState.Unknown -> Unit
         }
     }
 }

@@ -541,6 +541,17 @@ pub enum GitOp {
         path: String,
         content: Vec<u8>,
     },
+    /// Applies a patch (one hunk of a file's diff) to the index (`cached`) or the working tree,
+    /// forwards or `reverse`d: stage, unstage or discard part of a file.
+    ApplyPatch {
+        patch: String,
+        cached: bool,
+        reverse: bool,
+    },
+    /// A commit's message and full patch (`git show`), for the history views.
+    ShowCommit {
+        rev: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -688,6 +699,13 @@ mod tests {
             other => panic!("expected a Git request, got {other:?}"),
         };
         assert_eq!(git("81a347697481a352657183a67265715f696401a47265706fa22f77a26f70a6537461747573"), GitOp::Status);
+        assert_eq!(git("81a347697481a352657183a67265715f696407a47265706fa22f77a26f7081a5537461736881a26f7081a3506f7081a5696e64657801"), GitOp::Stash { op: StashOp::Pop { index: 1 } });
+        assert_eq!(git("81a347697481a352657183a67265715f696408a47265706fa22f77a26f7081a5537461736881a26f70a44c697374"), GitOp::Stash { op: StashOp::List });
+        assert_eq!(
+            git("81a347697481a352657183a67265715f696409a47265706fa22f77a26f7081aa4170706c79506174636883a57061746368a170a6636163686564c3a772657665727365c2"),
+            GitOp::ApplyPatch { patch: "p".into(), cached: true, reverse: false }
+        );
+        assert_eq!(git("81a347697481a352657183a67265715f69640aa47265706fa22f77a26f7081aa53686f77436f6d6d697481a3726576a448454144"), GitOp::ShowCommit { rev: "HEAD".into() });
         assert_eq!(git("81a347697481a352657183a67265715f696402a47265706fa22f77a26f7081a5537461676591a4612e7079"), GitOp::Stage(vec!["a.py".into()]));
         assert_eq!(
             git("81a347697481a352657183a67265715f696403a47265706fa22f77a26f7081a6436f6d6d697483a76d657373616765a36d7367a5616d656e64c2a77369676e6f6666c2"),

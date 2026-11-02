@@ -36,6 +36,7 @@ import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.ArrowDownward
 import androidx.compose.material.icons.outlined.ArrowUpward
 import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.ArrowDropDown
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.ClearAll
 import androidx.compose.material.icons.outlined.DataObject
@@ -269,10 +270,7 @@ private fun NotebookCellView(
                 CellProblemsList(controller, session, cell)
                 if (selected) {
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.noKeyFocus()) {
-                        TextButton(modifier = Modifier.noKeyFocus(), onClick = {
-                            cell.type = if (cell.type == CellType.Code) CellType.Markdown else CellType.Code
-                            controller.onCellEdited(session)
-                        }) { Text(if (cell.type == CellType.Code) "Markdown" else "Code") }
+                        CellTypePicker(controller, session, cell)
                         Spacer(Modifier.weight(1f))
                         CellActions(controller, session, cell)
                     }
@@ -282,6 +280,37 @@ private fun NotebookCellView(
         if (cell.type == CellType.Code) CellOutputs(controller, session, cell, selected)
     }
 }
+
+/** The selected cell's kind: Code, Markdown or Raw, from a menu (as VS Code's language picker on a cell). */
+@Composable
+private fun CellTypePicker(controller: WorkbenchController, session: NotebookSession, cell: NotebookCell) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        TextButton(modifier = Modifier.noKeyFocus(), onClick = { open = true }) {
+            Text(cell.type.title)
+            Icon(Icons.Outlined.ArrowDropDown, contentDescription = null, modifier = Modifier.size(18.dp))
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            CellType.entries.forEach { type ->
+                DropdownMenuItem(
+                    text = { Text(type.title) },
+                    leadingIcon = { if (type == cell.type) Icon(Icons.Outlined.Check, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                    onClick = {
+                        open = false
+                        controller.setCellType(session, cell, type)
+                    },
+                )
+            }
+        }
+    }
+}
+
+private val CellType.title: String
+    get() = when (this) {
+        CellType.Code -> "Code"
+        CellType.Markdown -> "Markdown"
+        CellType.Raw -> "Raw"
+    }
 
 /** Move, insert and delete: the selected cell's toolbar, and its sticky header. */
 @Composable

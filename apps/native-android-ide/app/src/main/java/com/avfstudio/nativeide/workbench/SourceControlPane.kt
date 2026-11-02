@@ -17,6 +17,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.CallSplit
 import androidx.compose.material.icons.automirrored.outlined.Undo
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.ChevronRight
+import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.outlined.CloudUpload
 import androidx.compose.material.icons.outlined.MoreVert
@@ -124,6 +126,11 @@ private fun RepositoryView(controller: WorkbenchController, status: com.avfstudi
                 DropdownMenuItem(text = { Text("Push") }, leadingIcon = { Icon(Icons.Outlined.CloudUpload, null) }, onClick = { menu = false; controller.gitPush() })
                 DropdownMenuItem(text = { Text("Fetch") }, leadingIcon = { Icon(Icons.Outlined.Sync, null) }, onClick = { menu = false; controller.gitFetch() })
                 DropdownMenuItem(text = { Text("Checkout to…") }, leadingIcon = { Icon(Icons.AutoMirrored.Outlined.CallSplit, null) }, onClick = { menu = false; controller.showBranches() })
+                DropdownMenuItem(text = { Text("Stash") }, onClick = { menu = false; controller.stashChanges(includeUntracked = false) })
+                DropdownMenuItem(text = { Text("Stash (include untracked)") }, onClick = { menu = false; controller.stashChanges(includeUntracked = true) })
+                DropdownMenuItem(text = { Text("Pop latest stash") }, onClick = { menu = false; controller.popLatestStash() })
+                DropdownMenuItem(text = { Text("Stashes…") }, onClick = { menu = false; controller.showStashes() })
+                DropdownMenuItem(text = { Text("File history (active file)") }, onClick = { menu = false; controller.showFileHistory() })
                 DropdownMenuItem(text = { Text("Clone…") }, onClick = { menu = false; controller.runCommand("git.clone") })
             }
         }
@@ -184,6 +191,35 @@ private fun RepositoryView(controller: WorkbenchController, status: com.avfstudi
             ChangeRow(entry, letter, onOpen = { controller.showGitDiff(entry, staged = false) }) {
                 Tooltip("Discard changes") { IconButton(onClick = { controller.requestDiscard(listOf(entry)) }) { Icon(Icons.AutoMirrored.Outlined.Undo, "Discard changes") } }
                 Tooltip("Stage changes") { IconButton(onClick = { controller.stageFiles(listOf(entry.path)) }) { Icon(Icons.Outlined.Add, "Stage changes") } }
+            }
+        }
+        // VS Code's Source Control Graph, as a list: the branch's commits, newest first.
+        item {
+            Row(
+                Modifier.fillMaxWidth().clickable(onClick = controller::toggleGitHistory).padding(start = 12.dp, end = 16.dp, top = 10.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(if (controller.gitHistoryOpen) Icons.Outlined.ExpandMore else Icons.Outlined.ChevronRight, contentDescription = null, modifier = Modifier.size(18.dp))
+                Text("History", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f).padding(start = 4.dp))
+            }
+        }
+        if (controller.gitHistoryOpen) {
+            val history = controller.gitHistory
+            when {
+                history == null -> item { EmptyMessage("Reading history…") }
+                history.isEmpty() -> item { EmptyMessage("No commits yet.") }
+                else -> items(history, key = { "commit:${it.hash}" }) { commit ->
+                    Column(Modifier.fillMaxWidth().clickable { controller.showCommit(commit) }.padding(start = 34.dp, end = 12.dp, top = 5.dp, bottom = 5.dp)) {
+                        Text(commit.subject, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(
+                            "${commit.author} · ${relativeTime(commit.timestamp)} · ${commit.hash.take(7)}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colors.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
             }
         }
     }

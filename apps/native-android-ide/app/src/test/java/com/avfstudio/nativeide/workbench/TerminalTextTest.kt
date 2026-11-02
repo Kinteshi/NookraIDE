@@ -38,9 +38,10 @@ class TerminalTextTest {
     @Test
     fun findsLinesWithEveryMatch() {
         val matches = findInTerminal(listOf("Error one", "ok", "error error"), "error", caseSensitive = false)
-        assertEquals(listOf(0, 2), matches.map { it.line })
+        assertEquals(listOf(0L, 2L), matches.map { it.line })
         assertEquals(listOf(0..4, 6..10), matches[1].ranges)
-        assertEquals(listOf(2), findInTerminal(listOf("Error one", "ok", "error error"), "error", caseSensitive = true).map { it.line })
+        assertEquals(listOf(2L), findInTerminal(listOf("Error one", "ok", "error error"), "error", caseSensitive = true).map { it.line })
+        assertEquals(listOf(12L), findInTerminal(listOf("a", "b", "c"), "c", caseSensitive = false, firstLine = 10).map { it.line })
     }
 
     @Test

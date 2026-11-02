@@ -19,6 +19,14 @@ sealed interface GitOperation {
     data class Push(val setUpstream: Boolean = false, val forceWithLease: Boolean = false) : GitOperation
     data object Init : GitOperation
     data class Clone(val url: String, val dest: String) : GitOperation
+    /** [path] as it was in commit [rev], with that commit's change to it (`git show`). */
+    data class Show(val rev: String, val path: String) : GitOperation
+    /** A whole commit: message, files changed and patch. */
+    data class ShowCommit(val rev: String) : GitOperation
+    data class Blame(val path: String) : GitOperation
+    data class Stash(val op: StashOperation) : GitOperation
+    /** Part of a file's diff applied to the index ([cached]) or the working tree, maybe [reverse]d. */
+    data class ApplyPatch(val patch: String, val cached: Boolean, val reverse: Boolean) : GitOperation
 
     fun pack(packer: MessagePacker) {
         fun struct(name: String, fields: List<Pair<String, Any?>>) {
@@ -57,8 +65,50 @@ sealed interface GitOperation {
             is Pull -> struct("Pull", listOf("rebase" to rebase))
             is Push -> struct("Push", listOf("set_upstream" to setUpstream, "force_with_lease" to forceWithLease))
             is Clone -> struct("Clone", listOf("url" to url, "dest" to dest))
+            is Show -> struct("Show", listOf("rev" to rev, "path" to path))
+            is ShowCommit -> struct("ShowCommit", listOf("rev" to rev))
+            is Blame -> struct("Blame", listOf("path" to path))
+            is ApplyPatch -> struct("ApplyPatch", listOf("patch" to patch, "cached" to cached, "reverse" to reverse))
+            is Stash -> {
+                packer.packMapHeader(1)
+                packer.packString("Stash")
+                packer.packMapHeader(1)
+                packer.packString("op")
+                when (op) {
+                    StashOperation.List -> packer.packString("List")
+                    is StashOperation.Push -> {
+                        packer.packMapHeader(1)
+                        packer.packString("Push")
+                        packer.packMapHeader(1)
+                        packer.packString("include_untracked")
+                        packer.packBoolean(op.includeUntracked)
+                    }
+                    is StashOperation.Pop, is StashOperation.Apply, is StashOperation.Drop -> {
+                        val (name, index) = when (op) {
+                            is StashOperation.Pop -> "Pop" to op.index
+                            is StashOperation.Apply -> "Apply" to op.index
+                            is StashOperation.Drop -> "Drop" to op.index
+                            else -> error("unreachable")
+                        }
+                        packer.packMapHeader(1)
+                        packer.packString(name)
+                        packer.packMapHeader(1)
+                        packer.packString("index")
+                        packer.packInt(index)
+                    }
+                }
+            }
         }
     }
+}
+
+/** The daemon's `StashOp`. */
+sealed interface StashOperation {
+    data object List : StashOperation
+    data class Push(val includeUntracked: Boolean) : StashOperation
+    data class Pop(val index: Int) : StashOperation
+    data class Apply(val index: Int) : StashOperation
+    data class Drop(val index: Int) : StashOperation
 }
 
 enum class GitFileStatus { Untracked, Added, Modified, Deleted, Renamed, Copied, Conflicted }

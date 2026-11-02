@@ -7,7 +7,7 @@ use std::{
     path::{Component, Path, PathBuf},
     process::{Child, Command, ExitStatus, Stdio},
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc,
     },
     thread,
@@ -29,6 +29,8 @@ const OUTPUT_LIMIT: usize = 2 * 1024 * 1024;
 const MAX_PATHS: usize = 256;
 const MAX_PATH_LENGTH: usize = 4096;
 const MAX_COMMIT_MESSAGE_LENGTH: usize = 64 * 1024;
+const MAX_PATCH_LENGTH: usize = 4 * 1024 * 1024;
+static PATCH_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 const MAX_ASKPASS_PROMPT: usize = 4096;
 const MAX_ASKPASS_ANSWER: usize = 64 * 1024;
 const MAX_CREDENTIAL_HELPERS: usize = 16;
@@ -296,7 +298,7 @@ pub(crate) fn run_askpass_helper() -> Result<(), String> {
         .map_err(|error| format!("could not return the Git credential answer: {error}"))
 }
 
-static NEXT_PROMPT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+static NEXT_PROMPT_ID: AtomicU64 = AtomicU64::new(1);
 
 struct AskpassDirectory(PathBuf);
 
@@ -834,6 +836,12 @@ fn execute_blocking(vfs: Vfs, repo: Repo, op: GitOp) -> Result<GitResult, String
             Ok(GitResult::Success)
         }
         GitOp::MergeStatus => merge_status(&repo),
+        GitOp::ApplyPatch {
+            patch,
+            cached,
+            reverse,
+        } => apply_patch(&repo, &patch, cached, reverse),
+        GitOp::ShowCommit { rev } => show_commit(&repo, &rev),
         GitOp::Resolve { .. } => unreachable!("Resolve is handled before entering the worker"),
     }
 }
@@ -900,12 +908,20 @@ fn git_base_args<'a>() -> Vec<&'a str> {
 }
 
 fn run_git(repo: &Repo, args: &[&str]) -> Result<CommandOutput, String> {
+    run_git_pathspecs(repo, args, true)
+}
+
+/// `literal_pathspecs` off only for commands that take no paths from the app: `git stash -u`
+/// cleans the untracked files it stashed with a `:/` pathspec, which literal pathspecs turn into
+/// a file name (the files then stay, and popping the stash fails on them).
+fn run_git_pathspecs(repo: &Repo, args: &[&str], literal_pathspecs: bool) -> Result<CommandOutput, String> {
     let args = git_args(args);
     let mut command = Command::new("git");
+    command.arg("-C").arg(&repo.absolute);
+    if literal_pathspecs {
+        command.arg("--literal-pathspecs");
+    }
     command
-        .arg("-C")
-        .arg(&repo.absolute)
-        .arg("--literal-pathspecs")
         .args(args)
         .current_dir(&repo.absolute)
         .stdin(Stdio::null())
@@ -1487,6 +1503,52 @@ fn show(repo: &Repo, rev: &str, path: &str) -> Result<GitResult, String> {
     Ok(GitResult::Text(success_text(output, "show")?))
 }
 
+/// `git apply` of a patch the app cut from a file's diff (one hunk). Git refuses paths outside the
+/// worktree and patches that don't apply; the patch goes through a file in the Git directory.
+fn apply_patch(repo: &Repo, patch: &str, cached: bool, reverse: bool) -> Result<GitResult, String> {
+    if patch.is_empty() || patch.len() > MAX_PATCH_LENGTH || patch.contains('\0') {
+        return Err("the patch is empty, too large or not text".to_owned());
+    }
+    let git_dir = run_git(repo, &["rev-parse", "--absolute-git-dir"])?;
+    let git_dir = PathBuf::from(success_text(git_dir, "repository lookup")?.trim());
+    let file = git_dir.join(format!(
+        "avf-apply-{}-{}.patch",
+        std::process::id(),
+        PATCH_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    ));
+    fs::write(&file, patch).map_err(|error| format!("cannot write the patch: {error}"))?;
+    let file_arg = file.to_string_lossy().into_owned();
+    let mut args = vec!["apply", "--whitespace=nowarn"];
+    if cached {
+        args.push("--cached");
+    }
+    if reverse {
+        args.push("--reverse");
+    }
+    args.push(&file_arg);
+    let result = git_success(repo, &args, "apply the change");
+    let _ = fs::remove_file(&file);
+    result
+}
+
+fn show_commit(repo: &Repo, rev: &str) -> Result<GitResult, String> {
+    validate_revision(rev)?;
+    let output = run_git(
+        repo,
+        &[
+            "show",
+            "--no-ext-diff",
+            "--no-color",
+            "--format=fuller",
+            "--stat",
+            "--patch",
+            "--end-of-options",
+            rev,
+        ],
+    )?;
+    Ok(GitResult::Text(success_text(output, "show")?))
+}
+
 fn stash(repo: &Repo, op: StashOp) -> Result<GitResult, String> {
     let output = match op {
         StashOp::List => run_git(repo, &["stash", "list"])?,
@@ -1495,7 +1557,7 @@ fn stash(repo: &Repo, op: StashOp) -> Result<GitResult, String> {
             if include_untracked {
                 args.push("--include-untracked");
             }
-            run_git(repo, &args)?
+            run_git_pathspecs(repo, &args, false)?
         }
         StashOp::Pop { index } => run_stash_index(repo, "pop", index)?,
         StashOp::Apply { index } => run_stash_index(repo, "apply", index)?,
@@ -1519,7 +1581,7 @@ fn run_stash_index(repo: &Repo, action: &str, index: usize) -> Result<CommandOut
         return Err("stash index is out of range".to_owned());
     }
     let reference = format!("stash@{{{index}}}");
-    run_git(repo, &["stash", action, &reference])
+    run_git_pathspecs(repo, &["stash", action, &reference], false)
 }
 
 fn remotes(repo: &Repo) -> Result<GitResult, String> {
@@ -1663,6 +1725,19 @@ mod tests {
                 .status()
                 .expect("run test Git command");
             assert!(status.success(), "test Git command failed: {args:?}");
+        }
+
+        fn git_output(&self, args: &[&str]) -> String {
+            let output = Command::new("git")
+                .arg("-C")
+                .arg(&self.root)
+                .args(args)
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .output()
+                .expect("run test Git command");
+            assert!(output.status.success(), "test Git command failed: {args:?}");
+            String::from_utf8_lossy(&output.stdout).into_owned()
         }
 
         fn path(&self) -> String {
@@ -1885,6 +1960,81 @@ mod tests {
         assert_eq!(path, "file.txt");
         assert!(patch.contains("-one"));
         assert!(patch.contains("+two"));
+    }
+
+    #[tokio::test]
+    async fn applies_one_hunk_to_the_index_and_reverts_another() {
+        let repo = TestRepo::new();
+        let lines = (1..=30).map(|n| format!("line {n}\n")).collect::<String>();
+        fs::write(repo.root.join("file.txt"), &lines).unwrap();
+        repo.git(&["add", "file.txt"]);
+        repo.git(&["commit", "--quiet", "-m", "initial"]);
+        fs::write(
+            repo.root.join("file.txt"),
+            lines.replace("line 2\n", "line two\n").replace("line 28\n", "line twenty-eight\n"),
+        )
+        .unwrap();
+        let GitResult::Diff { patch, .. } = execute(
+            &repo.vfs,
+            &repo.path(),
+            GitOp::DiffFile { path: "file.txt".into(), staged: false },
+        )
+        .await
+        .unwrap() else {
+            panic!("expected diff");
+        };
+        // The file's header and its first hunk only.
+        let second = patch.match_indices("\n@@").nth(1).unwrap().0;
+        let first_hunk = format!("{}\n", &patch[..second]);
+        execute(
+            &repo.vfs,
+            &repo.path(),
+            GitOp::ApplyPatch { patch: first_hunk, cached: true, reverse: false },
+        )
+        .await
+        .unwrap();
+        let staged = repo.git_output(&["diff", "--cached"]);
+        assert!(staged.contains("+line two") && !staged.contains("twenty-eight"), "{staged}");
+        // Discard the second hunk from the working tree.
+        let header_end = patch.find("\n@@").unwrap() + 1;
+        let second_hunk = format!("{}{}", &patch[..header_end], &patch[second + 1..]);
+        execute(
+            &repo.vfs,
+            &repo.path(),
+            GitOp::ApplyPatch { patch: second_hunk, cached: false, reverse: true },
+        )
+        .await
+        .unwrap();
+        let file = fs::read_to_string(repo.root.join("file.txt")).unwrap();
+        assert!(file.contains("line two") && file.contains("line 28\n"), "{file}");
+        let GitResult::Text(shown) = execute(&repo.vfs, &repo.path(), GitOp::ShowCommit { rev: "HEAD".into() })
+            .await
+            .unwrap() else {
+            panic!("expected text");
+        };
+        assert!(shown.contains("initial") && shown.contains("+line 1"), "{shown}");
+        assert!(execute(&repo.vfs, &repo.path(), GitOp::ShowCommit { rev: "--all".into() }).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn stash_with_untracked_files_pops_back() {
+        let repo = TestRepo::new();
+        fs::write(repo.root.join("file.txt"), "one\n").unwrap();
+        repo.git(&["add", "file.txt"]);
+        repo.git(&["commit", "--quiet", "-m", "initial"]);
+        fs::write(repo.root.join("file.txt"), "two\n").unwrap();
+        fs::create_dir(repo.root.join(".vscode")).unwrap();
+        fs::write(repo.root.join(".vscode/new.txt"), "new\n").unwrap();
+        execute(&repo.vfs, &repo.path(), GitOp::Stash { op: StashOp::Push { include_untracked: true } })
+            .await
+            .unwrap();
+        assert!(!repo.root.join(".vscode/new.txt").exists());
+        assert_eq!(fs::read_to_string(repo.root.join("file.txt")).unwrap(), "one\n");
+        execute(&repo.vfs, &repo.path(), GitOp::Stash { op: StashOp::Pop { index: 0 } })
+            .await
+            .unwrap();
+        assert!(repo.root.join(".vscode/new.txt").exists());
+        assert_eq!(fs::read_to_string(repo.root.join("file.txt")).unwrap(), "two\n");
     }
 
     #[tokio::test]

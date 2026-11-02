@@ -28,7 +28,8 @@ private const val TOOLTIP_DELAY_MS = 500L
 /**
  * A plain Material tooltip over [content] (an icon button): [text], and the key of [command]
  * when it has one ("Find Next (F3)"). It shows when a mouse, touchpad or stylus pointer rests on
- * it, and on a long press.
+ * it, and on a long press. Not on keyboard focus (Material's own input handling would show it
+ * there, and with a keyboard attached the first button keeps focus and its tooltip with it).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -47,14 +48,18 @@ fun Tooltip(text: String, command: String? = null, content: @Composable () -> Un
             PlainTooltip { Text(if (key.isEmpty() || text.endsWith(")")) text else "$text ($key)") }
         },
         state = state,
-        // Material shows it for a mouse's hover; a touchpad's pointer can come as a finger that
-        // hovers, which [hoverTooltip] covers.
+        // Hover (a touchpad's pointer can come as a hovering finger) and long press are ours.
         modifier = Modifier.hoverTooltip { show -> scope.launch { if (show) state.show() else state.dismiss() } },
+        enableUserInput = false,
         content = content,
     )
 }
 
-/** Calls [onHover] with true once a hovering pointer (any kind but a touching finger) rests, false when it leaves. */
+/**
+ * Calls [onHover] with true once a hovering pointer (any kind but a touching finger) rests, or a
+ * finger is held down (a long press), and false when the pointer leaves or presses. A long
+ * press's tooltip stays until Material's own timeout dismisses it.
+ */
 private fun Modifier.hoverTooltip(onHover: (Boolean) -> Unit): Modifier = pointerInput(Unit) {
     coroutineScopeHover(onHover)
 }
@@ -62,9 +67,12 @@ private fun Modifier.hoverTooltip(onHover: (Boolean) -> Unit): Modifier = pointe
 private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.coroutineScopeHover(onHover: (Boolean) -> Unit) {
     kotlinx.coroutines.coroutineScope {
         var pending: Job? = null
+        var pressAt = androidx.compose.ui.geometry.Offset.Zero
+        var longPressed = false
         awaitPointerEventScope {
             while (true) {
-                val event = awaitPointerEvent()
+                // Before the button sees them, so a long press's release doesn't click it.
+                val event = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
                 val change = event.changes.firstOrNull() ?: continue
                 when (event.type) {
                     PointerEventType.Enter -> if (change.type != PointerType.Touch || !change.pressed) {
@@ -74,7 +82,35 @@ private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.coroutin
                             onHover(true)
                         }
                     }
-                    PointerEventType.Exit, PointerEventType.Press -> {
+                    PointerEventType.Press -> {
+                        pending?.cancel()
+                        onHover(false)
+                        pressAt = change.position
+                        longPressed = false
+                        pending = if (change.type == PointerType.Touch) {
+                            launch {
+                                delay(viewConfiguration.longPressTimeoutMillis)
+                                longPressed = true
+                                onHover(true)
+                            }
+                        } else {
+                            null
+                        }
+                    }
+                    // A finger that moves or lifts before the long press is a tap or a scroll.
+                    PointerEventType.Move -> if (change.type == PointerType.Touch && change.pressed &&
+                        (change.position - pressAt).getDistance() > viewConfiguration.touchSlop
+                    ) {
+                        pending?.cancel()
+                        pending = null
+                    }
+                    PointerEventType.Release -> if (change.type == PointerType.Touch) {
+                        pending?.cancel()
+                        pending = null
+                        if (longPressed) change.consume()
+                        longPressed = false
+                    }
+                    PointerEventType.Exit -> {
                         pending?.cancel()
                         pending = null
                         onHover(false)

@@ -1655,6 +1655,60 @@ User's pick (11-02): backlog 26, 27, 28 (found in batch 32), "to round them up".
   in a new terminal, then opens it. Checked the offer for zsh and dismissed it (nothing was
   installed in the guest).
 
+## 34. Pointer fixes, terminal find, snippets, language servers on demand, Source Control extras (11-02 15:20–16:25; WIP, mostly checked)
+User's pick (11-02): backlog 1-10 of the 11-02 table (items 31, 32, 33, 29, 30, the 14/24
+leftovers, 16 and 5 of the reviews, 8 and 13 of the 11-01 review). 299 app unit tests, 95
+daemon and the protocol tests pass. The guest runs the new daemon (`.previous` is batch 32's).
+* (31) Hover card blinking: the card's pointer tracking covered the whole editor (its `layout`
+  reported the pane's size), and Compose re-sends the last hover event when the layout changes;
+  the editor then saw the pointer "leave" and "rest" again. The card now tracks only its own
+  bounds, and the editor ignores re-sent hover moves (same event time). Checked with a
+  simulated touchpad: the card stays until the pointer leaves.
+* (32) Pointer shape: sora already asks for the I-beam over text for mouse and touchpad
+  pointers (logged `PointerIcon type=TEXT` for source 0x2002); the editor now also answers for
+  other pointer sources (stylus), and the terminal shows the I-beam. Not seen on screen
+  (screencap doesn't draw the touchpad's pointer): **to confirm with the user's pointer**.
+* (33) Double click, hold and drag selects by whole words; a triple click selects the line and
+  dragging extends by lines (VS Code). Checked with a simulated touchpad.
+* Tooltips no longer open on keyboard focus (with a keyboard attached, the first toolbar
+  button kept focus and its tooltip stuck after launch); hover and our own long press (whose
+  release doesn't click) show them. Checked: no stuck tooltip after launch.
+* (29) Terminal find: a tap on a match, or Enter / Shift+Enter in the field, scrolls the
+  terminal to it (middle of the view) and marks it; a long press opens a link or copies the
+  line. Checked with "250" in `seq 1 400`.
+* (30) Find in selection shades the range it searches. Checked.
+* (14/24 leftovers) Copy on select checked (long press in a terminal: "Copied the selection").
+  The next-edit off-screen chip is **still unchecked**.
+* (16) Raw cells: the cell toolbar's kind is a menu (Code, Markdown, Raw), and the palette has
+  Notebook: Change Cell to Code/Markdown/Raw. Checked both ways.
+* (5) Snippets: VS Code snippet syntax (tab stops, defaults, nested stops, choices, mirrors,
+  variables such as TM_FILENAME, CLIPBOARD, CURRENT_YEAR, regex transforms); Tab/Shift+Tab move
+  between fields, the active one is outlined, Escape or leaving the snippet ends it. Sources:
+  imported packs' `contributes.snippets`, the workspace's `.vscode/*.code-snippets` (reloaded
+  on save) and language-server snippet completions. Palette: Snippets: Insert Snippet and
+  Configure Workspace Snippets. Setting: Code intelligence → Snippets in suggestions
+  (`editor.snippetSuggestions`). Checked: a workspace snippet offered as "prr", its two `name`
+  fields typed together, Tab to the end. The outlines lagged a character behind typing; a
+  redraw after layout was added (**not rechecked**). Server snippet completions not tried.
+* (8) Language servers for other languages (`avf.languageServers.others`, Settings → Guest):
+  Go (gopls), C/C++ (clangd), Rust (rust-analyzer) from Debian; Bash, YAML, JSON, HTML, CSS,
+  Dockerfile and SQL from npm on MaterialCode's own Node.js (avf-node-agent, pinned versions);
+  TOML (Taplo 0.10.0) and Markdown (Marksman 2026-02-08) as pinned, checksum-verified downloads
+  (the daemon learned single-file and gzipped downloads). Each starts with its files and is
+  offered for install once a session when missing; workspace symbols ask every running server.
+  Checked: Cargo.toml offered Taplo, which installed (**it stays in the guest**), and its
+  folding and an error underline showed. **Not tried on the tablet**: the apt and npm servers,
+  Marksman.
+* (13) Source Control: Stage / Unstage / Discard per hunk in the diff (daemon `ApplyPatch`);
+  Stash, Stash (include untracked), Pop latest, Stashes… (Apply, Pop, Drop with a confirming
+  second tap); a History section (a tap shows the commit); File history of the active file;
+  Git blame on the cursor's line (`git.blame.editorDecoration.enabled`, off by default).
+  Fixed on the way: `git stash -u` left the untracked files (the daemon's literal pathspecs
+  broke stash's own cleanup), and a commit's `---` and file headers were coloured as removals.
+  All checked on a scratch repository (since deleted).
+* Left on the device: Taplo in ~/.local/bin; copy on select back off; the AVFPTR log property
+  cleared; staged files removed. The pointer debug logs stay, gated by `log.tag.AVFPTR`.
+
 ## Backlog
 To investigate (user, 10-28):
 * (Done in batch 16, with a notebook-side finding.) Plotly figures updating in place (the user's private-notebook-1.ipynb: `plot_handle =
@@ -1750,7 +1804,7 @@ Not picked yet. Effort: S about half a day, M about a day, L several days.
   3. (Done in batch 24, at the line end.) Inlay hints: inferred types and parameter names, with a setting. M.
   4. (Done in batch 25.) Quick Open prefixes as in VS Code (`@` symbols in the file, `#` workspace symbols, `:`
      line, `>` commands). M.
-  5. Snippets: VS Code snippet files from asset packs, and LSP snippet completions with tab
+  5. (Done in batch 34.) Snippets: VS Code snippet files from asset packs, and LSP snippet completions with tab
      stops. M-L.
   6. (Done in batch 23.) `files.trimTrailingWhitespace`, `files.insertFinalNewline`, `editor.formatOnPaste`. S.
   7. (Done in batch 31, with a folding layout for sora.) Code folding (LSP folding ranges or indentation). M. Checked in batch 25: sora 0.23.6
@@ -1802,7 +1856,7 @@ day, L several days.
   6. (Done in batch 30.) Indentation detection from the file's content (`editor.detectIndentation`). S.
   7. (Done in batch 32.) Hex view for binary files. M.
 * Languages:
-  8. Language servers beyond Python and TypeScript/JavaScript, offered on demand like syntax
+  8. (Done in batch 34; Taplo checked, the others not yet.) Language servers beyond Python and TypeScript/JavaScript, offered on demand like syntax
      colours: rust-analyzer is in the guest catalog but not wired in the app; Go (gopls), C/C++
      (clangd), Bash, YAML, JSON, TOML (taplo), Markdown (marksman), Dockerfile and SQL aren't in
      the catalog. A generic LSP client per language, catalog entries, an install offer. L.
@@ -1814,15 +1868,15 @@ day, L several days.
       Undo). S.
   12. (Done in batch 30.) Explorer: multi-select, drag to move, Open Editors section, `files.exclude`, compact
       folders. M.
-  13. Source Control: stage and discard per hunk from the diff, stash, history (log) view,
+  13. (Done in batch 34.) Source Control: stage and discard per hunk from the diff, stash, history (log) view,
       blame toggle, file timeline. M-L.
-  14. (Done in batch 32; copy on select not checked on the tablet.) Terminal: split, rename, profiles (zsh, tmux), shell-integration marks (jump between
+  14. (Done in batch 32; copy on select checked in batch 34.) Terminal: split, rename, profiles (zsh, tmux), shell-integration marks (jump between
       commands, exit status), copy on select. M.
 * Notebooks:
   15. (Done in batch 29.) Markdown cells rendered fully: tables, links, images (attachments), code blocks and
       LaTeX math (`$…$`, KaTeX as in outputs). Today headings, bullets and inline styles only;
       commonmark is already in the app. M.
-  16. Raw cells: the model reads them, but the cell toolbar switches only Code and Markdown. S.
+  16. (Done in batch 34.) Raw cells: the model reads them, but the cell toolbar switches only Code and Markdown. S.
   17. (Done in batch 30.) Find and replace across a notebook's cells, and a notebook outline (headings). M.
   18. (Done in batch 29.) Plot viewer: an image output full screen with pinch zoom, save and share. S-M.
   19. (Done in batch 30.) Data viewer: filter rows and page past the first rows. M.
@@ -1834,7 +1888,7 @@ day, L several days.
       latched modifiers and breakpoints. S-M.
   22. Accessibility pass (TalkBack labels for the editor, tree and outputs). M.
   23. Instrumented tests and golden screenshots (spec 12; the app has unit tests only). L.
-  24. (Done in batch 32, except the off-screen chip, still unchecked.) Batch 28 leftovers: the next-edit card can sit under a problem tooltip; the off-screen
+  24. (Done in batch 32, except the off-screen chip, still unchecked after batch 34.) Batch 28 leftovers: the next-edit card can sit under a problem tooltip; the off-screen
       chip and the Interactive window's export weren't checked on the tablet. S.
 * Pointer (registered 11-01, user: "I don't know if they should be appearing, but at the moment they are not"):
   25. (Done in batch 32.) Tooltips on hover with a mouse or touchpad, as VS Code shows them. Today none show: the
@@ -1854,26 +1908,34 @@ day, L several days.
       the profile and the exit-status mark; keep them with the daemon's session. S.
   28. (Done in batch 33.) Zsh, fish and tmux aren't in the guest; offer to install a profile's program from the
       "isn't installed" message (as other guest tools are offered). S.
-  29. Terminal find lists the matching lines but can't scroll to them (batch 27); the scroll
+  29. (Done in batch 34.) Terminal find lists the matching lines but can't scroll to them (batch 27); the scroll
       bridge from batch 32 can now take a tap on a match to its row. S.
-  30. Find in selection (batch 29) works without the shaded area VS Code draws over the
+  30. (Done in batch 34.) Find in selection (batch 29) works without the shaded area VS Code draws over the
       selection it searches. S.
 * Pointer in the code editor (user, 11-02, to investigate; register only):
-  31. The hover card "blinks and disappears" when the pointer rests on code. First look: the card
+  31. (Done in batch 34.) The hover card "blinks and disappears" when the pointer rests on code. First look: the card
       is laid out over the whole editor (its `layout` reports the pane's size to place itself),
       so once it shows, the editor view likely gets a hover exit as if the pointer had left;
       with the card's own enter/exit tracking that closes it again. Give the card only its own
       bounds (offset placement), then recheck with a mouse and the touchpad. S.
-  32. The pointer is the arrow over code instead of the text I-beam (VS Code shows the I-beam,
+  32. (Done in batch 34; to confirm with the user's pointer.) The pointer is the arrow over code instead of the text I-beam (VS Code shows the I-beam,
       a hand over links and the gutter's arrow). sora asks for `TYPE_TEXT` over text
       (`onResolvePointerIcon`), so Compose's host view probably decides the icon for the views
       inside it; check, and set it from the editor's region if so. Notebook cells (Compose text
       fields) and the terminal to check too. S-M.
-  33. Double click, hold and drag (select by words) does nothing. sora's mouse handling selects
+  33. (Done in batch 34.) Double click, hold and drag (select by words) does nothing. sora's mouse handling selects
       the word on a double click and then ignores moves until release
       (`EditorTouchEventHandler.onMouseEvent`: `if (mouseDoubleClick) return true`). Extend the
       selection by whole words while dragging after a double click (and by lines after a triple
       click, as VS Code), in the editor view; check the touchpad's tap-and-drag too. S-M.
+* Left from batch 34 (11-02):
+  34. Confirm with the user's mouse/touchpad: the I-beam over code and the terminal, and that
+      the hover card no longer blinks (only a simulated touchpad was used). S.
+  35. Check the snippet field outlines after the redraw fix, and a language server's snippet
+      completion (a call with parameter stops). S.
+  36. Try the language servers not yet run on the tablet: gopls, clangd, rust-analyzer (apt,
+      needs sudo), the npm ones (Bash, YAML, JSON, HTML, CSS, Dockerfile, SQL) and Marksman. S-M.
+  37. The next-edit off-screen chip, still unchecked (from batch 28). S.
 * Still left out on purpose: multi-cursor, sticky scroll, minimap (Aardink switch; folding came in batch 31);
   split editor groups and the 3-way merge editor; tasks.json; MCP, other AI providers and the
   built-in chat agent (Copilot, Claude Code and Gemini through ACP instead); foldable postures

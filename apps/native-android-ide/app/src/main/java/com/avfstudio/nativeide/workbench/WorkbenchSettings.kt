@@ -39,6 +39,12 @@ data class WorkbenchSettings(
     val parameterHints: Boolean = true,
     /** The language server's suggestions pop up while typing (`editor.quickSuggestions`); Ctrl+Space always shows them. */
     val quickSuggestions: Boolean = true,
+    /** Who last changed the cursor's line, at its end (`git.blame.editorDecoration.enabled`). */
+    val gitBlame: Boolean = false,
+    /** Language servers for Go, C/C++, Rust, Bash, YAML, JSON, HTML, CSS, Dockerfile, SQL, TOML and Markdown (`avf.languageServers.others`). */
+    val otherLanguageServers: Boolean = true,
+    /** Where snippets go among the suggestions (`editor.snippetSuggestions`). */
+    val snippetSuggestions: SnippetSuggestions = SnippetSuggestions.Inline,
     /** What Find starts with (`editor.find.seedSearchStringFromSelection`): "always" (the word at the cursor), "selection" or "never". */
     val findSeed: String = "always",
     /** The other uses of the symbol under the cursor (`editor.occurrencesHighlight`). */
@@ -193,6 +199,9 @@ data class WorkbenchSettings(
         /** VS Code's enum (off/singleFile/multiFile, a boolean before 1.84); only off/false turns it off. */
         const val OCCURRENCES_HIGHLIGHT = "editor.occurrencesHighlight"
         const val QUICK_SUGGESTIONS = "editor.quickSuggestions"
+        const val GIT_BLAME = "git.blame.editorDecoration.enabled"
+        const val OTHER_LANGUAGE_SERVERS = "avf.languageServers.others"
+        const val SNIPPET_SUGGESTIONS = "editor.snippetSuggestions"
         const val FIND_SEED = "editor.find.seedSearchStringFromSelection"
         const val PLOT_VIEWER_ON_TAP = "avf.notebook.plotViewerOnTap"
         /** VS Code's enum (on/off/onUnlessPressed/offUnlessPressed); there is no key to press here, so off* is off. */
@@ -301,6 +310,9 @@ data class WorkbenchSettings(
                 trimFinalNewlines = bool(TRIM_FINAL_NEWLINES, defaults.trimFinalNewlines),
                 parameterHints = bool(PARAMETER_HINTS, defaults.parameterHints),
                 quickSuggestions = bool(QUICK_SUGGESTIONS, defaults.quickSuggestions),
+                gitBlame = bool(GIT_BLAME, defaults.gitBlame),
+                otherLanguageServers = bool(OTHER_LANGUAGE_SERVERS, defaults.otherLanguageServers),
+                snippetSuggestions = SnippetSuggestions.entries.firstOrNull { it.key == string(SNIPPET_SUGGESTIONS) } ?: defaults.snippetSuggestions,
                 findSeed = string(FIND_SEED)?.takeIf { it in setOf("always", "selection", "never") } ?: defaults.findSeed,
                 plotViewerOnTap = bool(PLOT_VIEWER_ON_TAP, defaults.plotViewerOnTap),
                 occurrencesHighlight = string(OCCURRENCES_HIGHLIGHT)?.let { it != "off" && it != "false" } ?: defaults.occurrencesHighlight,

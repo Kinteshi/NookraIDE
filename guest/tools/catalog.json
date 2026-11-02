@@ -94,6 +94,205 @@
       "initializationOptions": {}
     },
     {
+      "name": "gopls",
+      "version": "system",
+      "kind": "lsp",
+      "languages": ["go"],
+      "command": ["gopls"],
+      "install": {
+        "apt": ["gopls"]
+      },
+      "settingsSection": "gopls",
+      "env_allowlist": [],
+      "initializationOptions": {}
+    },
+    {
+      "name": "clangd",
+      "version": "system",
+      "kind": "lsp",
+      "languages": ["c", "cpp"],
+      "command": ["clangd"],
+      "install": {
+        "apt": ["clangd"]
+      },
+      "settingsSection": "clangd",
+      "env_allowlist": [],
+      "initializationOptions": {}
+    },
+    {
+      "name": "bash-language-server",
+      "version": "5.8.1",
+      "kind": "lsp",
+      "languages": ["shellscript"],
+      "command": ["avf-node-agent", "bash-language-server", "start"],
+      "install": {
+        "script": {
+          "binary": "avf-node-agent",
+          "asset": "avf-node-agent.sh",
+          "setup": ["setup", "bash-language-server"]
+        }
+      },
+      "settingsSection": "bashIde",
+      "env_allowlist": [],
+      "initializationOptions": {}
+    },
+    {
+      "name": "yaml-language-server",
+      "version": "2.0.0",
+      "kind": "lsp",
+      "languages": ["yaml"],
+      "command": ["avf-node-agent", "yaml-language-server", "--stdio"],
+      "install": {
+        "script": {
+          "binary": "avf-node-agent",
+          "asset": "avf-node-agent.sh",
+          "setup": ["setup", "yaml-language-server"]
+        }
+      },
+      "settingsSection": "yaml",
+      "env_allowlist": [],
+      "initializationOptions": {}
+    },
+    {
+      "name": "json-language-server",
+      "version": "4.10.0",
+      "kind": "lsp",
+      "languages": ["json", "jsonc"],
+      "command": ["avf-node-agent", "json-language-server", "--stdio"],
+      "install": {
+        "script": {
+          "binary": "avf-node-agent",
+          "asset": "avf-node-agent.sh",
+          "setup": ["setup", "json-language-server"]
+        }
+      },
+      "settingsSection": "json",
+      "env_allowlist": [],
+      "initializationOptions": {}
+    },
+    {
+      "name": "html-language-server",
+      "version": "4.10.0",
+      "kind": "lsp",
+      "languages": ["html"],
+      "command": ["avf-node-agent", "html-language-server", "--stdio"],
+      "install": {
+        "script": {
+          "binary": "avf-node-agent",
+          "asset": "avf-node-agent.sh",
+          "setup": ["setup", "html-language-server"]
+        }
+      },
+      "settingsSection": "html",
+      "env_allowlist": [],
+      "initializationOptions": {}
+    },
+    {
+      "name": "css-language-server",
+      "version": "4.10.0",
+      "kind": "lsp",
+      "languages": ["css", "scss", "less"],
+      "command": ["avf-node-agent", "css-language-server", "--stdio"],
+      "install": {
+        "script": {
+          "binary": "avf-node-agent",
+          "asset": "avf-node-agent.sh",
+          "setup": ["setup", "css-language-server"]
+        }
+      },
+      "settingsSection": "css",
+      "env_allowlist": [],
+      "initializationOptions": {}
+    },
+    {
+      "name": "docker-langserver",
+      "version": "0.15.0",
+      "kind": "lsp",
+      "languages": ["dockerfile"],
+      "command": ["avf-node-agent", "docker-langserver", "--stdio"],
+      "install": {
+        "script": {
+          "binary": "avf-node-agent",
+          "asset": "avf-node-agent.sh",
+          "setup": ["setup", "docker-langserver"]
+        }
+      },
+      "settingsSection": "docker",
+      "env_allowlist": [],
+      "initializationOptions": {}
+    },
+    {
+      "name": "sql-language-server",
+      "version": "1.7.1",
+      "kind": "lsp",
+      "languages": ["sql"],
+      "command": ["avf-node-agent", "sql-language-server", "up", "--method", "stdio"],
+      "install": {
+        "script": {
+          "binary": "avf-node-agent",
+          "asset": "avf-node-agent.sh",
+          "setup": ["setup", "sql-language-server"]
+        }
+      },
+      "settingsSection": "sqlLanguageServer",
+      "env_allowlist": [],
+      "initializationOptions": {}
+    },
+    {
+      "name": "taplo",
+      "version": "0.10.0",
+      "kind": "lsp",
+      "languages": ["toml"],
+      "command": ["taplo", "lsp", "stdio"],
+      "install": {
+        "download": {
+          "binary": "taplo",
+          "archive_member": "taplo",
+          "format": "gzip",
+          "artifacts": {
+            "aarch64": {
+              "url": "https://github.com/tamasfe/taplo/releases/download/0.10.0/taplo-linux-aarch64.gz",
+              "sha256": "033681d01eec8376c3fd38fa3703c79316f5e14bb013d859943b60a07bccdcc3"
+            },
+            "x86_64": {
+              "url": "https://github.com/tamasfe/taplo/releases/download/0.10.0/taplo-linux-x86_64.gz",
+              "sha256": "8fe196b894ccf9072f98d4e1013a180306e17d244830b03986ee5e8eabeb6156"
+            }
+          }
+        }
+      },
+      "settingsSection": "evenBetterToml",
+      "env_allowlist": [],
+      "initializationOptions": {}
+    },
+    {
+      "name": "marksman",
+      "version": "2026-02-08",
+      "kind": "lsp",
+      "languages": ["markdown"],
+      "command": ["marksman", "server"],
+      "install": {
+        "download": {
+          "binary": "marksman",
+          "archive_member": "marksman",
+          "format": "raw",
+          "artifacts": {
+            "aarch64": {
+              "url": "https://github.com/artempyanykh/marksman/releases/download/2026-02-08/marksman-linux-arm64",
+              "sha256": "db8e124527f7f8048e3e6c91821b9c52ef173d92c01e47d221bf1337afd962fb"
+            },
+            "x86_64": {
+              "url": "https://github.com/artempyanykh/marksman/releases/download/2026-02-08/marksman-linux-x64",
+              "sha256": "be5098e8213219269c47fc0d916a66fa31ce0602ec967475c722260aabf26087"
+            }
+          }
+        }
+      },
+      "settingsSection": "marksman",
+      "env_allowlist": [],
+      "initializationOptions": {}
+    },
+    {
       "name": "copilot-language-server",
       "version": "1.560.0",
       "kind": "lsp",

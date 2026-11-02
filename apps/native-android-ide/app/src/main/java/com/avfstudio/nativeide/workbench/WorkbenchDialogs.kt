@@ -137,9 +137,63 @@ fun WorkbenchDialogHost(controller: WorkbenchController) {
             properties = DialogProperties(usePlatformDefaultWidth = false),
             modifier = Modifier.padding(24.dp).fillMaxWidth(),
             title = { Text(dialog.title) },
-            text = { DiffView(dialog.patch) },
+            text = {
+                // A file's change: each hunk can be staged, unstaged or discarded on its own.
+                val actions: (@Composable (Int) -> Unit)? = dialog.entry?.let {
+                    { index ->
+                        @Composable
+                        fun HunkButton(action: WorkbenchController.HunkAction, text: String) {
+                            TextButton(
+                                onClick = { controller.applyHunk(dialog, index, action) },
+                                enabled = controller.gitBusy == null,
+                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp),
+                                modifier = Modifier.height(28.dp),
+                            ) { Text(text, style = MaterialTheme.typography.labelMedium) }
+                        }
+                        if (dialog.staged) {
+                            HunkButton(WorkbenchController.HunkAction.Unstage, "Unstage")
+                        } else {
+                            HunkButton(WorkbenchController.HunkAction.Discard, "Discard")
+                            HunkButton(WorkbenchController.HunkAction.Stage, "Stage")
+                        }
+                    }
+                }
+                DiffView(dialog.patch, singleFile = dialog.entry != null, hunkActions = actions)
+            },
             confirmButton = { TextButton(onClick = { controller.dialog = null }) { Text("Close") } },
         )
+        is WorkbenchDialog.GitStashes -> AlertDialog(
+            onDismissRequest = { controller.dialog = null },
+            title = { Text("Stashes") },
+            text = {
+                LazyColumn(Modifier.heightIn(max = 440.dp)) {
+                    items(dialog.stashes) { (index, description) ->
+                        var dropping by remember { mutableStateOf(false) }
+                        Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                            Text("stash@{$index}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(description, style = MaterialTheme.typography.bodyMedium, maxLines = 2)
+                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                TextButton(onClick = { controller.stashAction(index, com.avfstudio.nativeide.transport.StashOperation.Apply(index)) }) { Text("Apply") }
+                                TextButton(onClick = { controller.stashAction(index, com.avfstudio.nativeide.transport.StashOperation.Pop(index)) }) { Text("Pop") }
+                                // Dropping loses the stash: a second tap confirms, as VS Code asks first.
+                                TextButton(onClick = {
+                                    if (dropping) controller.stashAction(index, com.avfstudio.nativeide.transport.StashOperation.Drop(index)) else dropping = true
+                                }) { Text(if (dropping) "Drop it" else "Drop", color = if (dropping) MaterialTheme.colorScheme.error else androidx.compose.ui.graphics.Color.Unspecified) }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { controller.dialog = null }) { Text("Close") } },
+        )
+        is WorkbenchDialog.GitFileHistory -> PaletteDialog(
+            placeholder = "${dialog.path.substringAfterLast('/')}: pick a commit to see its change",
+            query = controller.commandFilter,
+            onQuery = { controller.commandFilter = it },
+            items = dialog.commits.filter { fuzzyMatch(controller.commandFilter, it.subject) || it.hash.startsWith(controller.commandFilter) },
+            onDismiss = { controller.dialog = null },
+            onPick = { commit -> controller.showFileAtCommit(dialog.path, commit) },
+        ) { commit -> PaletteRow(commit.subject, "${commit.author} · ${relativeTime(commit.timestamp)} · ${commit.hash.take(7)}") }
         is WorkbenchDialog.GitBranches -> GitBranchesDialog(controller, dialog)
         is WorkbenchDialog.ConfirmClose -> AlertDialog(
             onDismissRequest = controller::cancelClosing,
@@ -342,6 +396,16 @@ fun WorkbenchDialogHost(controller: WorkbenchController) {
                 profile.name + if (profile.name == controller.settings.terminalDefaultProfile) "  (default)" else "",
                 (listOf(profile.path) + profile.args).joinToString(" "),
             )
+        }
+        is WorkbenchDialog.InsertSnippet -> PaletteDialog(
+            placeholder = "Select a snippet",
+            query = controller.commandFilter,
+            onQuery = { controller.commandFilter = it },
+            items = dialog.snippets.filter { snippet -> fuzzyMatch(controller.commandFilter, snippet.name) || snippet.prefixes.any { fuzzyMatch(controller.commandFilter, it) } },
+            onDismiss = { controller.dialog = null },
+            onPick = controller::insertSnippet,
+        ) { snippet ->
+            PaletteRow(snippet.name, listOfNotNull(snippet.prefixes.firstOrNull(), snippet.description ?: snippet.source).joinToString("  ·  "))
         }
         is WorkbenchDialog.TerminalLinks -> PaletteDialog(
             placeholder = "Open a link from the terminal",
@@ -1163,8 +1227,9 @@ private fun GitCloneDialog(controller: WorkbenchController) {
  * default where the dialog is wide enough.
  */
 @Composable
-private fun DiffView(patch: String) {
-    val wide = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp >= 700
+private fun DiffView(patch: String, singleFile: Boolean = true, hunkActions: (@Composable (Int) -> Unit)? = null) {
+    // Side by side reads one file's patch; a commit's several files read better inline.
+    val wide = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp >= 700 && singleFile
     run {
         var sideBySide by remember { mutableStateOf(wide) }
         Column {
@@ -1172,13 +1237,13 @@ private fun DiffView(patch: String) {
                 androidx.compose.material3.FilterChip(selected = sideBySide, onClick = { sideBySide = true }, label = { Text("Side by side") })
                 androidx.compose.material3.FilterChip(selected = !sideBySide, onClick = { sideBySide = false }, label = { Text("Inline") })
             }
-            if (sideBySide) SideBySideDiff(patch) else DiffText(patch)
+            if (sideBySide) SideBySideDiff(patch, hunkActions) else DiffText(patch, hunkActions)
         }
     }
 }
 
 @Composable
-private fun SideBySideDiff(patch: String) {
+private fun SideBySideDiff(patch: String, hunkActions: (@Composable (Int) -> Unit)?) {
     val colors = MaterialTheme.colorScheme
     val rows = remember(patch) { sideBySideRows(patch) }
     val removedTint = colors.errorContainer.copy(alpha = 0.45f)
@@ -1221,16 +1286,16 @@ private fun SideBySideDiff(patch: String) {
             )
         }
     }
+    // Each hunk row's number among the hunks, for its actions.
+    val hunkIndex = remember(rows) {
+        var next = 0
+        rows.map { if (it.kind == DiffKind.Hunk) next++ else -1 }
+    }
     LazyColumn(Modifier.heightIn(max = 560.dp)) {
-        items(rows) { row ->
+        items(rows.size) { position ->
+            val row = rows[position]
             if (row.kind == DiffKind.Hunk) {
-                Text(
-                    row.left.orEmpty(),
-                    style = style,
-                    color = colors.onSecondaryContainer,
-                    maxLines = 1,
-                    modifier = Modifier.fillMaxWidth().background(colors.secondaryContainer).padding(horizontal = 6.dp),
-                )
+                HunkHeader(row.left.orEmpty(), style, hunkIndex[position], hunkActions)
                 return@items
             }
             val spans = if (row.kind == DiffKind.Changed) changedSpans(row.left.orEmpty(), row.right.orEmpty()) else null
@@ -1251,16 +1316,44 @@ private fun SideBySideDiff(patch: String) {
     }
 }
 
+/** A hunk's `@@` line, with its Stage / Unstage / Discard buttons when the diff is a file's change. */
 @Composable
-private fun DiffText(patch: String) {
+private fun HunkHeader(text: String, style: androidx.compose.ui.text.TextStyle, index: Int, actions: (@Composable (Int) -> Unit)?) {
     val colors = MaterialTheme.colorScheme
-    val lines = remember(patch) { patch.lines().dropWhile { !it.startsWith("@@") }.ifEmpty { patch.lines() } }
+    Row(Modifier.fillMaxWidth().background(colors.secondaryContainer).padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(text, style = style, color = colors.onSecondaryContainer, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        if (actions != null && index >= 0) actions(index)
+    }
+}
+
+@Composable
+private fun DiffText(patch: String, hunkActions: (@Composable (Int) -> Unit)? = null) {
+    val colors = MaterialTheme.colorScheme
+    // A file's change starts at its first hunk; a commit keeps its message and file headers.
+    val lines = remember(patch) { if (hunkActions != null) patch.lines().dropWhile { !it.startsWith("@@") }.ifEmpty { patch.lines() } else patch.lines() }
+    val hunkIndex = remember(lines) {
+        var next = 0
+        lines.map { if (it.startsWith("@@")) next++ else -1 }
+    }
+    // Only lines inside a hunk are additions and removals (a commit's `---` and file headers aren't).
+    val inHunk = remember(lines) {
+        var inside = false
+        lines.map { line ->
+            if (line.startsWith("@@")) inside = true else if (line.startsWith("diff --git")) inside = false
+            inside
+        }
+    }
     LazyColumn(Modifier.heightIn(max = 560.dp)) {
-        items(lines) { line ->
+        items(lines.size) { position ->
+            val line = lines[position]
+            if (line.startsWith("@@") && hunkActions != null) {
+                HunkHeader(line, MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace), hunkIndex[position], hunkActions)
+                return@items
+            }
             val (background, foreground) = when {
                 line.startsWith("@@") -> colors.secondaryContainer to colors.onSecondaryContainer
-                line.startsWith("+") -> androidx.compose.ui.graphics.Color(0x3348B04F) to colors.onSurface
-                line.startsWith("-") -> colors.errorContainer.copy(alpha = 0.5f) to colors.onSurface
+                inHunk[position] && line.startsWith("+") -> androidx.compose.ui.graphics.Color(0x3348B04F) to colors.onSurface
+                inHunk[position] && line.startsWith("-") -> colors.errorContainer.copy(alpha = 0.5f) to colors.onSurface
                 else -> androidx.compose.ui.graphics.Color.Transparent to colors.onSurfaceVariant
             }
             Text(

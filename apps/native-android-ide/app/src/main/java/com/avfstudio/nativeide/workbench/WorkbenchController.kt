@@ -38,6 +38,11 @@ import com.avfstudio.nativeide.language.parseInlayHints
 import com.avfstudio.nativeide.ai.parseDeviceCodePrompt
 import com.avfstudio.nativeide.assets.AssetPackGrammarLoader
 import com.avfstudio.nativeide.assets.AssetPackInstaller
+import com.avfstudio.nativeide.editor.snippetVariable
+import com.avfstudio.nativeide.editor.parseSnippet
+import com.avfstudio.nativeide.editor.indentSnippetBody
+import com.avfstudio.nativeide.editor.SnippetContext
+import com.avfstudio.nativeide.editor.ParsedSnippet
 import com.avfstudio.nativeide.assets.LANGUAGE_PACKS
 import com.avfstudio.nativeide.assets.LanguagePack
 import com.avfstudio.nativeide.assets.languagePackFor
@@ -121,6 +126,8 @@ import com.avfstudio.nativeide.transport.KeystoreSecretCipher
 import com.avfstudio.nativeide.transport.GitEvent
 import com.avfstudio.nativeide.transport.GitFileStatus
 import com.avfstudio.nativeide.transport.GitOperation
+import com.avfstudio.nativeide.transport.GitCommit
+import com.avfstudio.nativeide.transport.StashOperation
 import com.avfstudio.nativeide.transport.GitResult
 import com.avfstudio.nativeide.transport.GitStatusEntry
 import com.avfstudio.nativeide.transport.GuestStats
@@ -212,6 +219,8 @@ val UNTITLED_LANGUAGES = linkedMapOf(
     "JSX" to "jsx",
 )
 private const val MAX_IMPORTED_THEME_BYTES = 8 * 1024 * 1024
+/** A workspace `.code-snippets` file larger than this is skipped. */
+private const val MAX_SNIPPET_FILE_BYTES = 1024 * 1024
 private const val MAX_OUTPUT_LINES = 500
 /** Longest wait between reconnect attempts while the app is in front. */
 private const val FOREGROUND_RECONNECT_CAP_S = 10L
@@ -245,7 +254,7 @@ class WorkbenchController(private val context: Context) {
         "python" to LanguageClient(vfs),
         "python-format" to LanguageClient(vfs),
         "typescript" to LanguageClient(vfs),
-    )
+    ) + OtherLanguageServer.entries.associate { it.id to LanguageClient(vfs) }
     private val appVersion =
         runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull() ?: "0"
     val copilot = CopilotClient(vfs, appVersion)
@@ -1262,7 +1271,7 @@ class WorkbenchController(private val context: Context) {
     val guestComponents: List<String>
         get() = buildList {
             languageClients.filterValues { it.isStarted }.keys.forEach { language ->
-                add(if (language == "python") "${settings.pythonLanguageServer} (Python)" else languageServerTool(language))
+                add(if (language == "python") "${settings.pythonLanguageServer} (Python)" else serverName(language))
             }
             if (copilot.language.isStarted) add("Copilot language server (~280 MB)")
             if (chatAgent.isStarted) add("${chatAgentKind.label} chat agent (${chatAgentKind.memoryNote})")
@@ -1750,8 +1759,13 @@ class WorkbenchController(private val context: Context) {
                     return@post
                 }
                 then(result)
-                if (operation !is GitOperation.Status && operation !is GitOperation.DiffFile && operation !is GitOperation.Branches) {
+                val readOnly = operation is GitOperation.Status || operation is GitOperation.DiffFile || operation is GitOperation.Branches ||
+                    operation is GitOperation.Log || operation is GitOperation.Show || operation is GitOperation.ShowCommit ||
+                    operation is GitOperation.Blame || (operation is GitOperation.Stash && operation.op == StashOperation.List)
+                if (!readOnly) {
                     refreshGitStatus()
+                    if (gitHistoryOpen) loadGitHistory()
+                    activePath?.let { path -> if (settings.gitBlame) loadBlame(path) }
                 }
             }
         }
@@ -1888,7 +1902,7 @@ class WorkbenchController(private val context: Context) {
         }
     }
 
-    fun showGitDiff(entry: GitStatusEntry, staged: Boolean) {
+    fun showGitDiff(entry: GitStatusEntry, staged: Boolean, closeIfEmpty: Boolean = false) {
         // A conflicted file opens in the editor, where each conflict has its Accept actions.
         if (entry.status == GitFileStatus.Untracked || entry.status == GitFileStatus.Conflicted) {
             workspaceRoot?.let { openPath("${it.trimEnd('/')}/${entry.path}") }
@@ -1896,11 +1910,135 @@ class WorkbenchController(private val context: Context) {
         }
         runGit(null, GitOperation.DiffFile(entry.path, staged)) { result ->
             val diff = result as? GitResult.Diff ?: return@runGit
+            if (diff.patch.isBlank() && closeIfEmpty) {
+                if (dialog is WorkbenchDialog.GitDiff) dialog = null
+                return@runGit
+            }
             dialog = WorkbenchDialog.GitDiff(
                 "${entry.path.substringAfterLast('/')} (${if (staged) "staged" else "working tree"})",
                 diff.patch.ifBlank { "No textual changes." },
+                entry,
+                staged,
             )
         }
+    }
+
+    // Hunks, stashes, history and blame ----------------------------------------------------------
+
+    enum class HunkAction(val label: String, val done: String) {
+        Stage("Staging", "Staged the change"),
+        Unstage("Unstaging", "Unstaged the change"),
+        Discard("Discarding", "Discarded the change"),
+    }
+
+    /**
+     * Stages, unstages or discards hunk [index] of [diff] (VS Code's Stage/Revert Selected Ranges
+     * for one change), then shows what is left of the file's diff on that side.
+     */
+    fun applyHunk(diff: WorkbenchDialog.GitDiff, index: Int, action: HunkAction) {
+        val entry = diff.entry ?: return
+        val patch = singleHunkPatch(diff.patch, index) ?: return
+        val (cached, reverse) = when (action) {
+            HunkAction.Stage -> true to false
+            HunkAction.Unstage -> true to true
+            HunkAction.Discard -> false to true
+        }
+        runGit(action.label, GitOperation.ApplyPatch(patch, cached, reverse)) {
+            status = action.done
+            showGitDiff(entry, diff.staged, closeIfEmpty = true)
+        }
+    }
+
+    fun stashChanges(includeUntracked: Boolean) =
+        runGit("Stashing", GitOperation.Stash(StashOperation.Push(includeUntracked))) { status = "Stashed the changes" }
+
+    /** Git: Stashes: the list, with Apply, Pop and Drop. */
+    fun showStashes() = runGit(null, GitOperation.Stash(StashOperation.List)) { result ->
+        val stashes = parseStashList((result as? GitResult.Text)?.text.orEmpty())
+        if (stashes.isEmpty()) status = "No stashes" else dialog = WorkbenchDialog.GitStashes(stashes)
+    }
+
+    fun popLatestStash() = runGit("Popping stash", GitOperation.Stash(StashOperation.Pop(0))) { status = "Popped the latest stash" }
+
+    fun stashAction(index: Int, operation: StashOperation) {
+        dialog = null
+        val label = when (operation) {
+            is StashOperation.Pop -> "Popping stash"
+            is StashOperation.Apply -> "Applying stash"
+            is StashOperation.Drop -> "Dropping stash"
+            else -> null
+        }
+        runGit(label, GitOperation.Stash(operation)) {
+            status = when (operation) {
+                is StashOperation.Drop -> "Dropped stash@{$index}"
+                else -> "Applied stash@{$index}"
+            }
+        }
+    }
+
+    /** The Source Control view's History section: open, and the commits it shows (newest first). */
+    var gitHistoryOpen by mutableStateOf(false)
+        private set
+    var gitHistory by mutableStateOf<List<GitCommit>?>(null)
+        private set
+
+    fun toggleGitHistory() {
+        gitHistoryOpen = !gitHistoryOpen
+        if (gitHistoryOpen) loadGitHistory()
+    }
+
+    private fun loadGitHistory() = runGit(null, GitOperation.Log(limit = 100)) { result ->
+        gitHistory = (result as? GitResult.Commits)?.commits.orEmpty()
+    }
+
+    /** A commit's message, files and patch. */
+    fun showCommit(commit: GitCommit) = runGit(null, GitOperation.ShowCommit(commit.hash)) { result ->
+        dialog = WorkbenchDialog.GitDiff("${commit.hash.take(7)} ${commit.subject}", (result as? GitResult.Text)?.text.orEmpty())
+    }
+
+    /** Git: View File History (VS Code's Timeline): the active file's commits. */
+    fun showFileHistory(path: String? = activePath) {
+        val root = workspaceRoot
+        if (path == null || root == null || !path.startsWith(root.trimEnd('/') + "/")) {
+            status = "Open a file in the workspace to see its history"
+            return
+        }
+        val relative = path.removePrefix(root.trimEnd('/') + "/")
+        runGit(null, GitOperation.Log(limit = 200, path = relative)) { result ->
+            val commits = (result as? GitResult.Commits)?.commits.orEmpty()
+            if (commits.isEmpty()) status = "${relative.substringAfterLast('/')} has no commits yet" else {
+                commandFilter = ""
+                dialog = WorkbenchDialog.GitFileHistory(relative, commits)
+            }
+        }
+    }
+
+    /** One commit's change to [path] (a timeline pick). */
+    fun showFileAtCommit(path: String, commit: GitCommit) = runGit(null, GitOperation.Show(commit.hash, path)) { result ->
+        dialog = WorkbenchDialog.GitDiff("${path.substringAfterLast('/')} · ${commit.hash.take(7)} ${commit.subject}", (result as? GitResult.Text)?.text.orEmpty())
+    }
+
+    /** The active file's blame by line, for the cursor line's note (`git.blame.editorDecoration.enabled`). */
+    var blameLines by mutableStateOf<Map<Int, BlameLine>>(emptyMap())
+        private set
+    private var blamePath: String? = null
+
+    fun loadBlame(path: String) {
+        val root = workspaceRoot ?: return
+        if (!settings.gitBlame || !path.startsWith(root.trimEnd('/') + "/") || path in notebooks) {
+            blameLines = emptyMap()
+            return
+        }
+        blamePath = path
+        runGit(null, GitOperation.Blame(path.removePrefix(root.trimEnd('/') + "/"))) { result ->
+            if (blamePath == path) blameLines = parseBlame((result as? GitResult.Text)?.text.orEmpty())
+        }
+    }
+
+    /** Git: Toggle Blame Editor Decoration. */
+    fun toggleBlame() {
+        updateSetting(WorkbenchSettings.GIT_BLAME, !settings.gitBlame)
+        if (!settings.gitBlame) blameLines = emptyMap()
     }
 
     fun answerGitPrompt(prompt: GitEvent.Prompt, answer: String?) {
@@ -2593,6 +2731,7 @@ class WorkbenchController(private val context: Context) {
                     updateLanguageSettings()
                 }
                 workspaceRoot = workspace
+                reloadWorkspaceSnippets(workspace)
                 refreshGitStatus()
                 documents.forEach { ensureLanguageServers(it.path) }
                 startCopilot()
@@ -3190,6 +3329,8 @@ class WorkbenchController(private val context: Context) {
                 when (result) {
                     is SaveResult.Saved -> {
                         status = "Saved ${document.path}"
+                        if (document.path.endsWith(".code-snippets")) workspaceRoot?.let(::reloadWorkspaceSnippets)
+                        if (settings.gitBlame && document.path == activePath) loadBlame(document.path)
                         refreshGitStatus()
                         closeIfPendingAfterSave(document.path)
                     }
@@ -3755,8 +3896,12 @@ class WorkbenchController(private val context: Context) {
         if (isDevicePath(path)) null else when (path.substringAfterLast('.', "").lowercase()) {
             "py", "pyi" -> languageClients["python"]
             "ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs" -> languageClients["typescript"]
-            else -> null
+            else -> otherLanguageServer(path)?.let { languageClients[it.first.id] }
         }
+
+    /** [path]'s server among the other languages', while `avf.languageServers.others` is on. */
+    private fun otherLanguageServer(path: String): Pair<OtherLanguageServer, String>? =
+        if (settings.otherLanguageServers) OtherLanguageServer.forPath(path) else null
 
     private fun languageClientsFor(path: String): List<LanguageClient> =
         if (isDevicePath(path)) emptyList() else listOfNotNull(
@@ -3778,14 +3923,15 @@ class WorkbenchController(private val context: Context) {
             "tsx" -> "typescriptreact"
             "js", "mjs", "cjs" -> "javascript"
             "jsx" -> "javascriptreact"
-            else -> null
+            else -> otherLanguageServer(path)?.second
         }
 
     private fun languageServerTool(language: String): String =
         when (language) {
             "python" -> settings.pythonLanguageServer
             "python-format" -> "ruff"
-            else -> settings.typescriptLanguageServer
+            "typescript" -> settings.typescriptLanguageServer
+            else -> language
         }
 
     private fun copilotLanguageId(path: String): String =
@@ -3841,6 +3987,9 @@ class WorkbenchController(private val context: Context) {
         }
     }
 
+    /** Language servers already offered for install this session (declining isn't asked again until a restart). */
+    private val offeredServerInstalls = mutableSetOf<GuestDependency>()
+
     /** Starts the servers a document needs, so idle languages cost no guest memory. */
     private fun ensureLanguageServers(path: String) {
         val workspace = workspaceRoot ?: return
@@ -3857,10 +4006,12 @@ class WorkbenchController(private val context: Context) {
                     if (error != null) {
                         val message = error.cause?.message ?: error.message.orEmpty()
                         status = "$tool: $message"
-                        // A server the guest doesn't have yet (TypeScript 7): offer it once, then start it.
-                        missingDependencyIn(message)?.takeIf { dialog == null }?.let { dependency ->
-                            offerInstall(dependency, "${dependency.label} isn't installed in the guest.") { ensureLanguageServers(path) }
-                        }
+                        // A server the guest doesn't have yet (TypeScript 7, gopls…): offer it once a session, then start it.
+                        (missingDependencyIn(message) ?: OtherLanguageServer.missingIn(message)?.dependency)
+                            ?.takeIf { dialog == null && offeredServerInstalls.add(it) }
+                            ?.let { dependency ->
+                                offerInstall(dependency, "${dependency.label} isn't installed in the guest.") { ensureLanguageServers(path) }
+                            }
                         return@post
                     }
                     status = "$tool ready"
@@ -3912,6 +4063,7 @@ class WorkbenchController(private val context: Context) {
 
     fun onActiveDocumentChanged() {
         outlineSymbols = emptyList()
+        blameLines = emptyMap()
         closeFind()
         clearInlineSuggestion()
         clearNextEdit()
@@ -3971,7 +4123,11 @@ class WorkbenchController(private val context: Context) {
         val document = activeDocument ?: return null
         val client = languageClientFor(document.path)
         if (client?.isReady != true) {
-            status = "Language intelligence requires a connected Python or TypeScript language server"
+            status = if (OtherLanguageServer.forPath(document.path) != null && !settings.otherLanguageServers) {
+                "Language servers for this file's language are off (Settings → Intelligence)"
+            } else {
+                "Language intelligence needs a running language server for this file"
+            }
             return null
         }
         val start = editorSurface?.selectionStart() ?: return null
@@ -4014,6 +4170,136 @@ class WorkbenchController(private val context: Context) {
 
         override fun accepted(item: LspCompletionItem) {
             post { resolveAcceptedCompletion(document, item) }
+        }
+
+        // Read on sora's thread: plain reads of lists the main thread replaces whole.
+        override fun snippets(): List<Snippet> = snippetsFor(document.path)
+
+        override val snippetSuggestions: SnippetSuggestions
+            get() = settings.snippetSuggestions
+
+        override fun prepareSnippet(body: String, line: Int, column: Int): ParsedSnippet = prepareSnippetFor(document.path, body, line, column)
+    }
+
+    // Snippets ------------------------------------------------------------------------------------
+
+    /** The installed packs' snippets (reloaded when packs change), and the file extensions their languages declare. */
+    @Volatile private var packSnippets: List<Snippet> = emptyList()
+    @Volatile private var packLanguageExtensions: Map<String, String> = emptyMap()
+    private var packSnippetsRevision = -1
+    /** The workspace's snippet files (`.code-snippets` in `.vscode`). */
+    @Volatile private var workspaceSnippets: List<Snippet> = emptyList()
+
+    private fun reloadPackSnippets() {
+        packSnippetsRevision = grammarRevision
+        io.execute {
+            val (snippets, extensions) = runCatching { loadPackSnippets(packsDirectory) }.getOrDefault(emptyList<Snippet>() to emptyMap())
+            post {
+                packSnippets = snippets
+                packLanguageExtensions = extensions
+            }
+        }
+    }
+
+    /** Reads the `.code-snippets` files in the workspace's `.vscode` folder (at connect, and when one is saved). */
+    private fun reloadWorkspaceSnippets(root: String) {
+        val folder = "${root.trimEnd('/')}/.vscode"
+        vfs.listDir(folder).thenCompose { entries ->
+            val files = entries.filter { !it.isDirectory && it.name.endsWith(".code-snippets") && it.size in 1..MAX_SNIPPET_FILE_BYTES.toLong() }
+            val reads = files.map { entry -> entry to repository.readBytes(entry.path, MAX_SNIPPET_FILE_BYTES) }
+            CompletableFuture.allOf(*reads.map { it.second }.toTypedArray()).thenApply {
+                reads.flatMap { (entry, read) -> parseSnippetFile(String(read.join(), Charsets.UTF_8), null, ".vscode/${entry.name}") }
+            }
+        }.whenComplete { snippets, _ -> post { workspaceSnippets = snippets.orEmpty() } }
+    }
+
+    /** VS Code's language id for [path], for snippet scopes: the app's own, else one an installed pack declares. */
+    fun snippetLanguageId(path: String): String {
+        val known = copilotLanguageId(path)
+        if (known != "plaintext") return known
+        return packLanguageExtensions[path.substringAfterLast('.', "").lowercase()] ?: known
+    }
+
+    /** The snippets [path]'s language gets: the workspace's first, then the packs'. */
+    fun snippetsFor(path: String): List<Snippet> {
+        if (packSnippetsRevision != grammarRevision) post { if (packSnippetsRevision != grammarRevision) reloadPackSnippets() }
+        val language = snippetLanguageId(path)
+        return workspaceSnippets.forLanguage(language) + packSnippets.forLanguage(language)
+    }
+
+    /** [body] indented for [line] (tabs as the file's indentation) with its variables read from the editor and file. */
+    private fun prepareSnippetFor(path: String, body: String, line: Int, column: Int): ParsedSnippet {
+        val view = soraEditor()
+        val lineText = view?.text?.takeIf { line < it.lineCount }?.getLineString(line).orEmpty()
+        val indentation = lineText.takeWhile { it == ' ' || it == '\t' }
+        val unit = if (view?.insertSpaces != false) " ".repeat(view?.tabWidth ?: settings.tabSize) else "\t"
+        val selected = view?.takeIf { it.cursor.isSelected }?.let { it.text.substring(it.cursor.left, it.cursor.right) }.orEmpty()
+        var wordStart = column.coerceAtMost(lineText.length)
+        while (wordStart > 0 && isIdentifierCharacter(lineText[wordStart - 1])) wordStart--
+        var wordEnd = column.coerceAtMost(lineText.length)
+        while (wordEnd < lineText.length && isIdentifierCharacter(lineText[wordEnd])) wordEnd++
+        val comments = commentTokens(path.substringAfterLast('.', "").lowercase())
+        val context = SnippetContext(
+            filePath = path,
+            workspace = workspaceRoot,
+            selectedText = selected,
+            currentLine = lineText,
+            currentWord = lineText.substring(wordStart, wordEnd),
+            lineIndex = line,
+            clipboard = runCatching { this.context.getSystemService(ClipboardManager::class.java)?.primaryClip?.getItemAt(0)?.coerceToText(this.context)?.toString() }.getOrNull(),
+            lineComment = comments.line,
+            blockComment = comments.block,
+        )
+        return parseSnippet(indentSnippetBody(body, indentation, unit)) { name -> snippetVariable(name, context) }
+    }
+
+    /** Snippets: Insert Snippet: the active file's snippets in a palette; the pick goes at the cursor. */
+    fun showInsertSnippet() {
+        val path = activePath
+        if (path == null || activeNotebook != null || soraEditor() == null) {
+            status = "Open a file to insert a snippet"
+            return
+        }
+        val snippets = snippetsFor(path)
+        if (snippets.isEmpty()) {
+            status = "No snippets for ${snippetLanguageId(path)}: import a pack with snippets, or add .vscode/*.code-snippets"
+            return
+        }
+        commandFilter = ""
+        dialog = WorkbenchDialog.InsertSnippet(snippets)
+    }
+
+    fun insertSnippet(snippet: Snippet) {
+        dialog = null
+        val view = soraEditor() ?: return
+        val path = activePath ?: return
+        val cursor = view.cursor
+        view.insertSnippet(prepareSnippetFor(path, snippet.body, cursor.leftLine, cursor.leftColumn), cursor.left, cursor.right)
+        view.requestFocus()
+    }
+
+    /** Snippets: Configure Workspace Snippets: `.vscode/workspace.code-snippets`, made from a template if missing. */
+    fun configureWorkspaceSnippets() {
+        val root = workspaceRoot ?: run {
+            status = "Open a folder first"
+            return
+        }
+        val path = "${root.trimEnd('/')}/.vscode/workspace.code-snippets"
+        vfs.stat(path).whenComplete { _, missing ->
+            post {
+                if (missing == null) {
+                    openPath(path)
+                    return@post
+                }
+                // .vscode may exist already: its error is ignored, the file's isn't.
+                vfs.create("${root.trimEnd('/')}/.vscode", directory = true).handle { _, _ -> null }
+                    .thenCompose { vfs.create(path, directory = false) }
+                    .thenCompose { repository.writeAll(path, WORKSPACE_SNIPPETS_TEMPLATE.toByteArray(), null) }.whenComplete { _, error ->
+                    post {
+                        if (error != null) status = "Couldn't create $path: ${error.cause?.message ?: error.message}" else openPath(path)
+                    }
+                }
+            }
         }
     }
 
@@ -4086,7 +4372,7 @@ class WorkbenchController(private val context: Context) {
         val client = languageClientFor(document.path)?.takeIf { it.isReady }
         if (client == null) {
             if (problems.isNotEmpty()) hoverCard = HoverCard(document.path, position, problems, null)
-            else if (!fromPointer) status = "Language intelligence requires a connected Python or TypeScript language server"
+            else if (!fromPointer) status = "Language intelligence needs a running language server for this file"
             return
         }
         client.hover(document.path, position).whenComplete { response, error ->
@@ -4999,7 +5285,7 @@ class WorkbenchController(private val context: Context) {
         "python" -> settings.pythonLanguageServer
         "python-format" -> "Ruff"
         "typescript" -> if (settings.typescriptLanguageServer == "vtsls") "vtsls" else "TypeScript"
-        else -> language
+        else -> OtherLanguageServer.byId(language)?.label ?: language
     }
 
     // Inlay hints ---------------------------------------------------------------------------------
@@ -6691,13 +6977,44 @@ class WorkbenchController(private val context: Context) {
         panelTab = PanelTab.Terminal
         compactDestination = CompactDestination.Terminal
         terminalFindVisible = true
+        terminalFindLine = null
         terminalFindFocus++
     }
 
     /** The active terminal's lines that have the find text (the view re-reads as output arrives). */
     fun terminalMatches(): List<TerminalMatch> {
         val session = activeTerminal ?: return emptyList()
-        return findInTerminal(session.textLog.snapshot(), terminalFindQuery, terminalFindCaseSensitive)
+        val (firstLine, lines) = session.textLog.numberedSnapshot()
+        return findInTerminal(lines, terminalFindQuery, terminalFindCaseSensitive, firstLine = firstLine)
+    }
+
+    /** The match the find bar last went to (Enter, Shift+Enter or a tap), as its line; null for none yet. */
+    var terminalFindLine by mutableStateOf<Long?>(null)
+
+    /**
+     * Scrolls the terminal so [line] (a text-log line) sits in the middle of the view, as VS Code's
+     * terminal find reveals a match. Rows come from the text log, long lines wrapped at the width.
+     */
+    fun revealTerminalLine(session: TerminalSession, line: Long) {
+        terminalFindLine = line
+        val scroll = session.scroll ?: return
+        val dimensions = session.emulator.dimensions
+        val rows = session.textLog.rowsSince(line, dimensions.columns)
+        val target = (rows - (dimensions.rows + 1) / 2).coerceIn(0, scroll.maxScrollback)
+        scroll.scrollBy(target - scroll.position)
+    }
+
+    /** Enter / Shift+Enter in the find bar: the next (older is previous) match from the last one, newest first. */
+    fun stepTerminalMatch(matches: List<TerminalMatch>, previous: Boolean) {
+        val session = activeTerminal ?: return
+        if (matches.isEmpty()) return
+        val current = terminalFindLine?.let { line -> matches.indexOfFirst { it.line == line } }?.takeIf { it >= 0 }
+        val next = when {
+            current == null -> matches.size - 1
+            previous -> (current - 1 + matches.size) % matches.size
+            else -> (current + 1) % matches.size
+        }
+        revealTerminalLine(session, matches[next].line)
     }
 
     /**
@@ -7672,6 +7989,16 @@ class WorkbenchController(private val context: Context) {
         if (index >= 0) moveCell(session, cell, target.coerceIn(session.notebook.cells.indices) - index)
     }
 
+    /**
+     * Code, Markdown or Raw (nbconvert's raw cells: text kept as is, never run or rendered). A cell
+     * leaving Code drops its outputs and count when saved, as nbformat has them only on code cells.
+     */
+    fun setCellType(session: NotebookSession, cell: NotebookCell, type: CellType) {
+        if (cell.type == type) return
+        cell.type = type
+        onCellEdited(session)
+    }
+
     fun onCellEdited(session: NotebookSession) {
         session.notebook.dirty = true
         documentRevision++
@@ -8360,7 +8687,7 @@ class WorkbenchController(private val context: Context) {
     private var symbolSearchGeneration = 0
 
     private fun workspaceSymbolClients(): List<LanguageClient> =
-        listOfNotNull(languageClients["python"], languageClients["typescript"]).filter { it.isReady && it.supportsWorkspaceSymbols }
+        languageClients.values.filter { it.isReady && it.supportsWorkspaceSymbols }
 
     fun searchWorkspaceSymbols(query: String) {
         scheduledSymbolSearch?.cancel(false)
@@ -8737,6 +9064,14 @@ class WorkbenchController(private val context: Context) {
             "editor.action.triggerParameterHints" -> activePath?.let { requestSignature(it, trigger = null, invoked = true) }
             "closeParameterHints" -> closeParameterHints()
             "editor.action.showHover" -> showHover()
+            "editor.action.insertSnippet" -> showInsertSnippet()
+            "git.viewFileHistory" -> showFileHistory()
+            "git.blame.toggleEditorDecoration" -> toggleBlame()
+            "git.stash" -> stashChanges(includeUntracked = false)
+            "git.stashIncludeUntracked" -> stashChanges(includeUntracked = true)
+            "git.stashPopLatest" -> popLatestStash()
+            "git.stashes" -> showStashes()
+            "workbench.action.openSnippets" -> configureWorkspaceSnippets()
             "notebook.cell.showHover" -> selectedCodeCell()?.let { (session, cell) -> showCellHover(session, cell, session.cellCaret, fromPointer = false) }
             "notebook.cell.goToDefinition" -> selectedCodeCell()?.let { (session, cell) -> goToCellDefinition(session, cell, session.cellCaret) }
             "editor.action.quickFix" -> showCodeActions()
@@ -8787,6 +9122,14 @@ class WorkbenchController(private val context: Context) {
                         session.focusRequest++
                     }
                 }
+            }
+            "notebook.cell.changeToCode", "notebook.cell.changeToMarkdown", "notebook.cell.changeToRaw" -> activeNotebook?.let { session ->
+                val cell = session.notebook.cells.firstOrNull { it.id == session.selectedCell } ?: return@let
+                setCellType(session, cell, when (commandId) {
+                    "notebook.cell.changeToCode" -> CellType.Code
+                    "notebook.cell.changeToMarkdown" -> CellType.Markdown
+                    else -> CellType.Raw
+                })
             }
             "notebook.undoDeleteCell" -> activeNotebook?.let(::undoDeleteCell)
             "notebook.outline" -> sidebar = SidebarView.Outline

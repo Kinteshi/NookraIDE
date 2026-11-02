@@ -189,6 +189,11 @@ private fun LanguagePackBanner(controller: WorkbenchController, pack: com.avfstu
 /** What the pane draws over the code: inlay hints, Copilot's ghost text and parameter hints. */
 @Composable
 private fun EditorOverlays(controller: WorkbenchController) {
+    LaunchedEffect(controller.settings.gitBlame, controller.activePath, controller.workspaceRoot) {
+        if (controller.settings.gitBlame) controller.activePath?.let(controller::loadBlame)
+    }
+    FindScopeOverlay(controller)
+    SnippetStopsOverlay(controller)
     FoldingOverlay(controller)
     MergeConflictOverlay(controller)
     PythonCellOverlay(controller)
@@ -701,6 +706,77 @@ private fun ParameterHints(controller: WorkbenchController) {
 }
 
 /**
+ * Find in selection's scope shaded while the find widget is open, as VS Code shades the range it
+ * searches (`editor.findRangeHighlightBackground`): from the scope's first character to its last,
+ * whole rows between.
+ */
+@Composable
+private fun FindScopeOverlay(controller: WorkbenchController) {
+    controller.editorViewportTick
+    controller.documentRevision
+    val scope = controller.findScope?.takeIf { controller.findVisible && controller.activeNotebook == null } ?: return
+    val view = controller.soraEditor() ?: return
+    val content = view.text
+    if (scope.first >= content.length || scope.isEmpty()) return
+    val shade = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+    androidx.compose.foundation.Canvas(Modifier.fillMaxSize().clipToBounds()) {
+        textRangeRects(view, scope.first, minOf(scope.last + 1, content.length), size.width).forEach { rect ->
+            drawRect(shade, topLeft = rect.topLeft, size = rect.size)
+        }
+    }
+}
+
+/**
+ * The rows a text range covers on screen ([from] and [to] text offsets, end exclusive): from its
+ * first character to its last, rows between as wide as [width]. Only the visible rows.
+ */
+private fun textRangeRects(view: NativeCodeEditor, from: Int, to: Int, width: Float): List<androidx.compose.ui.geometry.Rect> {
+    val content = view.text
+    val start = content.indexer.getCharPosition(from.coerceIn(0, content.length))
+    val end = content.indexer.getCharPosition(to.coerceIn(0, content.length))
+    val textLeft = view.measureTextRegionOffset()
+    val rowHeight = view.rowHeight.toFloat()
+    val rects = mutableListOf<androidx.compose.ui.geometry.Rect>()
+    for (line in maxOf(start.line, view.firstVisibleLine)..minOf(end.line, view.lastVisibleLine)) {
+        if (view.isLineHidden(line)) continue
+        val bottom = view.getCharOffsetY(line, 0)
+        val left = if (line == start.line) view.getCharOffsetX(line, start.column) else maxOf(textLeft, view.getCharOffsetX(line, 0))
+        val right = if (line == end.line) view.getCharOffsetX(line, end.column) else width
+        rects += androidx.compose.ui.geometry.Rect(left, bottom - rowHeight, maxOf(right, left), bottom)
+    }
+    return rects
+}
+
+/**
+ * The inserted snippet's stops, as VS Code marks them: the active one outlined in the accent
+ * colour (an empty one as a thin bar), the others faintly; the final stop isn't marked.
+ */
+@Composable
+private fun SnippetStopsOverlay(controller: WorkbenchController) {
+    controller.editorViewportTick
+    val view = controller.soraEditor() ?: return
+    view.snippetRevision
+    val session = view.snippetSession ?: return
+    val colors = MaterialTheme.colorScheme
+    val density = LocalDensity.current
+    androidx.compose.foundation.Canvas(Modifier.fillMaxSize().clipToBounds()) {
+        val stroke = with(density) { 1.dp.toPx() }
+        session.stops.forEachIndexed { index, stop ->
+            if (stop.index == 0) return@forEachIndexed
+            val active = index == session.current
+            val color = if (active) colors.primary else colors.outline.copy(alpha = 0.6f)
+            stop.spans.forEach { span ->
+                textRangeRects(view, span[0], span[1], size.width).forEach { rect ->
+                    val box = if (rect.width < stroke * 2) rect.copy(right = rect.left + stroke * 2) else rect
+                    if (active) drawRect(colors.primary.copy(alpha = 0.10f), topLeft = box.topLeft, size = box.size)
+                    drawRect(color, topLeft = box.topLeft, size = box.size, style = androidx.compose.ui.graphics.drawscope.Stroke(stroke))
+                }
+            }
+        }
+    }
+}
+
+/**
  * VS Code's hover: problems at the pointer (or the cursor, Ctrl+K Ctrl+I) and the language
  * server's Markdown, in a card above the word (below it near the top). It stays while the pointer
  * moves onto it, and closes on another word, a click, typing, scrolling or Escape.
@@ -727,6 +803,14 @@ private fun HoverCardOverlay(controller: WorkbenchController) {
         modifier = Modifier
             .widthIn(max = 560.dp)
             .heightIn(max = 320.dp)
+            .layout { measurable, constraints ->
+                val placeable = measurable.measure(constraints.copy(minWidth = 0, minHeight = 0))
+                val left = x.roundToInt().coerceIn(0, (constraints.maxWidth - placeable.width).coerceAtLeast(0))
+                val above = lineTop.roundToInt() - placeable.height - gap
+                val top = if (above >= 0) above else (lineTop + view.rowHeight).roundToInt() + gap
+                layout(constraints.maxWidth, constraints.maxHeight) { placeable.place(left, top) }
+            }
+            // After the placement, so only the card itself (not the whole pane) takes the pointer.
             .pointerInput(card) {
                 awaitPointerEventScope {
                     while (true) {
@@ -736,13 +820,6 @@ private fun HoverCardOverlay(controller: WorkbenchController) {
                         }
                     }
                 }
-            }
-            .layout { measurable, constraints ->
-                val placeable = measurable.measure(constraints.copy(minWidth = 0, minHeight = 0))
-                val left = x.roundToInt().coerceIn(0, (constraints.maxWidth - placeable.width).coerceAtLeast(0))
-                val above = lineTop.roundToInt() - placeable.height - gap
-                val top = if (above >= 0) above else (lineTop + view.rowHeight).roundToInt() + gap
-                layout(constraints.maxWidth, constraints.maxHeight) { placeable.place(left, top) }
             },
     ) {
         val problems = card.problems.map { problem ->
@@ -770,7 +847,10 @@ private fun InlayHintsOverlay(controller: WorkbenchController) {
     val lenses = controller.codeLenses
     val view = controller.soraEditor() ?: return
     val folds = (view as? NativeCodeEditor)?.takeIf { it.foldingEnabled }?.foldState
-    if (lines.isEmpty() && lenses.isEmpty() && folds?.isEmpty != false) return
+    // Git blame for the cursor's line, while the file is as saved (unsaved edits move lines).
+    val blameLine = controller.cursorPosition?.line?.takeIf { controller.settings.gitBlame && controller.activeDocument?.dirty == false }
+    val blame = blameLine?.let { controller.blameLines[it] }
+    if (lines.isEmpty() && lenses.isEmpty() && folds?.isEmpty != false && blame == null) return
     val density = LocalDensity.current
     val colors = MaterialTheme.colorScheme
     val fontSize = with(density) { (view.textSizePx * 0.86f).toSp() }
@@ -784,7 +864,8 @@ private fun InlayHintsOverlay(controller: WorkbenchController) {
             val hints = lines[line].orEmpty()
             val lineLenses = lenses[line].orEmpty()
             val folded = folds?.isFolded(line) == true
-            if (hints.isEmpty() && lineLenses.isEmpty() && !folded) continue
+            val lineBlame = blame?.takeIf { line == blameLine }
+            if (hints.isEmpty() && lineLenses.isEmpty() && !folded && lineBlame == null) continue
             if (line == ghostLine || line >= content.lineCount) continue
             val column = content.getColumnCount(line)
             val x = view.getCharOffsetX(line, column) + gap
@@ -821,6 +902,18 @@ private fun InlayHintsOverlay(controller: WorkbenchController) {
                         modifier = Modifier
                             .background(colors.surfaceContainerHighest.copy(alpha = 0.7f), RoundedCornerShape(4.dp))
                             .padding(horizontal = 4.dp),
+                    )
+                }
+                // VS Code's blame decoration: who, when and the commit's subject.
+                lineBlame?.let { line ->
+                    Text(
+                        if (line.uncommitted) "You, not committed yet" else "${line.author}, ${relativeTime(line.time)} • ${line.summary}",
+                        fontSize = fontSize,
+                        fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                        color = colors.onSurfaceVariant.copy(alpha = 0.6f),
+                        maxLines = 1,
+                        softWrap = false,
+                        modifier = Modifier.padding(start = 8.dp),
                     )
                 }
                 // Code lenses (reference counts): VS Code puts them on a line above, which sora can't add.
@@ -1327,6 +1420,104 @@ internal class NativeCodeEditor(
         }
     }
 
+    // Snippets ------------------------------------------------------------------------------------
+
+    /** The inserted snippet Tab moves through, until Escape, its final stop or the cursor leaving it. */
+    var snippetSession: com.avfstudio.nativeide.editor.SnippetSession? = null
+        private set
+    /** Bumped as the session's stops move, for the outlines drawn over them. */
+    var snippetRevision by androidx.compose.runtime.mutableIntStateOf(0)
+        private set
+    private var syncingMirrors = false
+
+    /**
+     * Replaces [from]..[to] (text offsets) with [snippet] and selects its first stop; Tab and
+     * Shift+Tab then move between stops (VS Code's snippet mode). A snippet without stops just
+     * leaves the cursor at its end.
+     */
+    fun insertSnippet(snippet: com.avfstudio.nativeide.editor.ParsedSnippet, from: Int, to: Int) {
+        endSnippet()
+        val start = text.indexer.getCharPosition(from)
+        val end = text.indexer.getCharPosition(to.coerceAtLeast(from))
+        text.replace(start.line, start.column, end.line, end.column, snippet.text)
+        val session = com.avfstudio.nativeide.editor.SnippetSession(from, snippet)
+        if (session.isFinal) {
+            selectOffsets(from + snippet.stops.first().spans.first().start, from + snippet.stops.first().spans.first().start)
+            return
+        }
+        snippetSession = session
+        selectSnippetStop()
+    }
+
+    fun endSnippet() {
+        if (snippetSession == null) return
+        snippetSession = null
+        snippetRevision++
+    }
+
+    /** Tab / Shift+Tab: the next or previous stop; the final one ends the session there. */
+    fun moveSnippet(forward: Boolean): Boolean {
+        val session = snippetSession ?: return false
+        if (!session.move(forward)) {
+            if (forward) endSnippet()
+            return forward
+        }
+        selectSnippetStop()
+        return true
+    }
+
+    private fun selectSnippetStop() {
+        val session = snippetSession ?: return
+        val span = session.active.spans.first()
+        val final = session.isFinal
+        // Ending first, so the selection change below doesn't look like leaving the snippet.
+        if (final) snippetSession = null
+        selectOffsets(span[0].coerceIn(0, text.length), span[1].coerceIn(0, text.length))
+        snippetRevision++
+    }
+
+    /** Typing in one of the active stop's places copies it to the others (`$1` mirrors). */
+    private fun syncSnippetMirrors(edited: Int) {
+        val session = snippetSession ?: return
+        val spans = session.active.spans
+        val source = spans.firstOrNull { edited in it[0]..it[1] } ?: return
+        val value = text.substring(source[0], source[1])
+        syncingMirrors = true
+        try {
+            // Last first, so earlier offsets stay right (the session follows each replace).
+            spans.filter { it !== source }.sortedByDescending { it[0] }.forEach { span ->
+                if (text.substring(span[0], span[1]) == value) return@forEach
+                val start = text.indexer.getCharPosition(span[0])
+                val end = text.indexer.getCharPosition(span[1])
+                text.replace(start.line, start.column, end.line, end.column, value)
+            }
+        } finally {
+            syncingMirrors = false
+        }
+    }
+
+    init {
+        subscribeAlways(ContentChangeEvent::class.java) { event ->
+            val session = snippetSession ?: return@subscribeAlways
+            when (event.action) {
+                ContentChangeEvent.ACTION_SET_NEW_TEXT -> endSnippet()
+                ContentChangeEvent.ACTION_INSERT, ContentChangeEvent.ACTION_DELETE -> {
+                    val start = event.changeStart.index
+                    val length = event.changedText.length
+                    if (event.action == ContentChangeEvent.ACTION_INSERT) session.onEdit(start, 0, length) else session.onEdit(start, length, 0)
+                    snippetRevision++
+                    // Once more after sora has measured the edited line, so the outlines sit on it.
+                    post { snippetRevision++ }
+                    if (!syncingMirrors && session.active.spans.size > 1) post { syncSnippetMirrors(start) }
+                }
+            }
+        }
+        subscribeAlways(SelectionChangeEvent::class.java) {
+            val session = snippetSession ?: return@subscribeAlways
+            if (cursor.left !in session.extent || cursor.right !in session.extent) endSnippet()
+        }
+    }
+
     // Zoom by touchpad and wheel ----------------------------------------------------------------
 
     /** `editor.mouseWheelZoom`: Ctrl and the mouse wheel change the font size. */
@@ -1365,6 +1556,7 @@ internal class NativeCodeEditor(
     /** `editor.hover.delay`. */
     var pointerRestDelayMs = 300L
     private var restAt: Pair<Int, Int>? = null
+    private var lastHoverTime = 0L
     /** The word last reported (line, start, end); moving within it keeps the card. */
     private var restedWord: Triple<Int, Int, Int>? = null
     private val restRunnable = Runnable {
@@ -1395,9 +1587,13 @@ internal class NativeCodeEditor(
     private fun trackPointer(event: android.view.MotionEvent) {
         // `adb shell setprop log.tag.AVFPTR DEBUG` logs where a hovering pointer is and what it's over.
         if (android.util.Log.isLoggable("AVFPTR", android.util.Log.DEBUG)) {
-            android.util.Log.d("AVFPTR", "hover ${event.actionMasked} ${event.x},${event.y} at ${textPositionAt(event.x, event.y)}")
+            android.util.Log.d("AVFPTR", "hover ${event.actionMasked} src=0x${Integer.toHexString(event.source)} tool=${event.getToolType(0)} t=${event.eventTime} ${event.x},${event.y} at ${textPositionAt(event.x, event.y)}")
         }
         val callback = onPointerRest ?: return
+        // Compose resends the last hover event when the layout changes (our card appearing), with the
+        // pointer's place shifted in freeform windows; the original's time gives it away.
+        if (event.actionMasked == android.view.MotionEvent.ACTION_HOVER_MOVE && event.eventTime == lastHoverTime) return
+        lastHoverTime = event.eventTime
         when (event.actionMasked) {
             android.view.MotionEvent.ACTION_HOVER_ENTER, android.view.MotionEvent.ACTION_HOVER_MOVE -> {
                 removeCallbacks(restRunnable)
@@ -1417,6 +1613,123 @@ internal class NativeCodeEditor(
                 if (restedWord != null) callback(-2, -2)
             }
         }
+    }
+
+    /**
+     * The I-beam over text. sora answers only for pointers marked as a mouse; a stylus or a
+     * pointer device reporting another source gets it too, as in VS Code.
+     */
+    override fun onResolvePointerIcon(event: android.view.MotionEvent, pointerIndex: Int): android.view.PointerIcon? {
+        val icon = super.onResolvePointerIcon(event, pointerIndex)
+        if (icon != null || !event.isFromSource(android.view.InputDevice.SOURCE_CLASS_POINTER)) return icon
+        val x = event.getX(pointerIndex)
+        val y = event.getY(pointerIndex)
+        if (x < measureTextRegionOffset() || isScreenPointOnText(x, y).not()) return null
+        return android.view.PointerIcon.getSystemIcon(context, android.view.PointerIcon.TYPE_TEXT)
+    }
+
+    // Selecting by words and lines with the mouse ------------------------------------------------
+
+    /** Quick primary clicks in a row at about the same place (2: a word, 3: a line). */
+    private var clickCount = 0
+    private var lastClickUp = 0L
+    private var clickDownX = 0f
+    private var clickDownY = 0f
+    /** While a double or triple click is held: the first word's (or line's) text offsets, and whether dragging extends by lines. */
+    private var dragAnchor: IntRange? = null
+    private var dragByLines = false
+
+    /** The word (or the one other character) at [line], [column] as text offsets; the end exclusive. */
+    private fun wordRangeAt(line: Int, column: Int): IntRange {
+        val lineText = text.getLineString(line)
+        val base = text.indexer.getCharIndex(line, 0)
+        if (lineText.isEmpty()) return base until base
+        val at = column.coerceIn(0, lineText.length - 1)
+        var start = at
+        var end = at + 1
+        if (isIdentifierCharacter(lineText[at])) {
+            while (start > 0 && isIdentifierCharacter(lineText[start - 1])) start--
+            while (end < lineText.length && isIdentifierCharacter(lineText[end])) end++
+        } else if (lineText[at].isWhitespace()) {
+            while (start > 0 && lineText[start - 1].isWhitespace()) start--
+            while (end < lineText.length && lineText[end].isWhitespace()) end++
+        }
+        return base + start until base + end
+    }
+
+    /** The whole line with its line break, as text offsets. */
+    private fun lineRange(line: Int): IntRange {
+        val start = text.indexer.getCharIndex(line, 0)
+        val end = if (line + 1 < text.lineCount) text.indexer.getCharIndex(line + 1, 0) else text.length
+        return start until end
+    }
+
+    private fun selectOffsets(from: Int, to: Int, cause: Int = SelectionChangeEvent.CAUSE_UNKNOWN) {
+        val start = text.indexer.getCharPosition(from)
+        val end = text.indexer.getCharPosition(to)
+        setSelectionRegion(start.line, start.column, end.line, end.column, cause)
+    }
+
+    /**
+     * VS Code's mouse selection on top of sora's: a double click then a drag extends the selection
+     * by whole words, a triple click selects the line and a drag extends it by lines (sora selects
+     * the word and then ignores the drag). A touchpad's tap and drag arrives the same way.
+     */
+    override fun onTouchEvent(event: android.view.MotionEvent): Boolean {
+        if (android.util.Log.isLoggable("AVFPTR", android.util.Log.DEBUG)) {
+            android.util.Log.d("AVFPTR", "touch ${event.actionMasked} src=0x${Integer.toHexString(event.source)} buttons=${event.buttonState} ${event.x},${event.y} clicks=$clickCount anchor=$dragAnchor")
+        }
+        if (!isEnabled || !event.isFromSource(android.view.InputDevice.SOURCE_MOUSE)) return super.onTouchEvent(event)
+        when (event.actionMasked) {
+            android.view.MotionEvent.ACTION_DOWN -> {
+                if (event.buttonState and android.view.MotionEvent.BUTTON_PRIMARY == 0 || event.x < measureTextRegionOffset()) {
+                    clickCount = 0
+                    return super.onTouchEvent(event)
+                }
+                val slop = android.view.ViewConfiguration.get(context).scaledDoubleTapSlop
+                val quick = event.eventTime - lastClickUp < android.view.ViewConfiguration.getDoubleTapTimeout() &&
+                    kotlin.math.hypot(event.x - clickDownX, event.y - clickDownY) < slop
+                clickCount = if (quick) clickCount + 1 else 1
+                clickDownX = event.x
+                clickDownY = event.y
+                if (clickCount >= 3) {
+                    val line = io.github.rosemoe.sora.util.IntPair.getFirst(getPointPositionOnScreen(event.x, event.y)).coerceIn(0, text.lineCount - 1)
+                    val range = lineRange(line)
+                    selectOffsets(range.first, range.last + 1, SelectionChangeEvent.CAUSE_MOUSE_INPUT)
+                    dragAnchor = range
+                    dragByLines = true
+                    requestFocus()
+                    return true
+                }
+                val handled = super.onTouchEvent(event)
+                if (clickCount == 2 && cursor.isSelected) {
+                    dragAnchor = cursor.left until cursor.right
+                    dragByLines = false
+                }
+                return handled
+            }
+            android.view.MotionEvent.ACTION_MOVE -> {
+                val anchor = dragAnchor ?: return super.onTouchEvent(event)
+                val packed = getPointPositionOnScreen(event.x, event.y)
+                val line = io.github.rosemoe.sora.util.IntPair.getFirst(packed).coerceIn(0, text.lineCount - 1)
+                val column = io.github.rosemoe.sora.util.IntPair.getSecond(packed)
+                val under = if (dragByLines) lineRange(line) else wordRangeAt(line, column)
+                selectOffsets(minOf(anchor.first, under.first), maxOf(anchor.last, under.last) + 1, SelectionChangeEvent.CAUSE_MOUSE_INPUT)
+                return true
+            }
+            android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
+                val moved = kotlin.math.hypot(event.x - clickDownX, event.y - clickDownY) >= android.view.ViewConfiguration.get(context).scaledTouchSlop
+                lastClickUp = if (moved || event.actionMasked == android.view.MotionEvent.ACTION_CANCEL) 0L else event.eventTime
+                if (moved) clickCount = 0
+                if (dragAnchor != null) {
+                    dragAnchor = null
+                    // sora resets its own mouse state (its double click) on the release.
+                    super.onTouchEvent(event)
+                    return true
+                }
+            }
+        }
+        return super.onTouchEvent(event)
     }
 
     /** Forget the reported word (the card closed for another reason), so resting there again shows it. */
@@ -1571,6 +1884,20 @@ internal class NativeCodeEditor(
                 }
                 AndroidKeyEvent.KEYCODE_ESCAPE -> {
                     onCommand("editor.action.inlineSuggest.hide")
+                    return true
+                }
+            }
+        }
+        if (snippetSession != null && !suggest.isShowing && event.action == AndroidKeyEvent.ACTION_DOWN) {
+            val shiftOnly = event.metaState and AndroidKeyEvent.META_SHIFT_MASK != 0 && !event.isCtrlPressed && !event.isAltPressed
+            when {
+                event.keyCode == AndroidKeyEvent.KEYCODE_TAB && event.hasNoModifiers() -> return moveSnippet(forward = true)
+                event.keyCode == AndroidKeyEvent.KEYCODE_TAB && shiftOnly -> {
+                    moveSnippet(forward = false)
+                    return true
+                }
+                event.keyCode == AndroidKeyEvent.KEYCODE_ESCAPE && event.hasNoModifiers() && !hasParameterHints -> {
+                    endSnippet()
                     return true
                 }
             }

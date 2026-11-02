@@ -95,6 +95,8 @@ sealed interface WorkbenchDialog {
     data class TerminalRename(val id: UUID, val name: String) : WorkbenchDialog
     /** Terminal: Create New Terminal (With Profile)… */
     data object TerminalProfiles : WorkbenchDialog
+    /** Snippets: Insert Snippet's picker over the active file's snippets. */
+    data class InsertSnippet(val snippets: List<Snippet>) : WorkbenchDialog
     /** Terminal: Open Detected Link…, newest first. */
     data class TerminalLinks(val links: List<TerminalLink>) : WorkbenchDialog
     /** Replace All in Search: [matches] occurrences in [files] files. */
@@ -105,7 +107,20 @@ sealed interface WorkbenchDialog {
     data class PathPrompt(val action: PathAction, val initial: String, val error: String? = null) : WorkbenchDialog
     data class ConfirmDelete(val paths: List<String>, val isDirectory: Boolean) : WorkbenchDialog
     data class GitPrompt(val prompt: com.avfstudio.nativeide.transport.GitEvent.Prompt) : WorkbenchDialog
-    data class GitDiff(val title: String, val patch: String) : WorkbenchDialog
+    /**
+     * A diff to read: a file's change ([entry], [staged] side; its hunks can be staged, unstaged
+     * or discarded one by one) or a commit's ([entry] null: read only).
+     */
+    data class GitDiff(
+        val title: String,
+        val patch: String,
+        val entry: com.avfstudio.nativeide.transport.GitStatusEntry? = null,
+        val staged: Boolean = false,
+    ) : WorkbenchDialog
+    /** The stashes (`git stash list`), each with Apply, Pop and Drop. */
+    data class GitStashes(val stashes: List<Pair<Int, String>>) : WorkbenchDialog
+    /** A file's commits, newest first (VS Code's Timeline); a pick shows that commit's change to it. */
+    data class GitFileHistory(val path: String, val commits: List<com.avfstudio.nativeide.transport.GitCommit>) : WorkbenchDialog
     data class GitBranches(val branches: List<com.avfstudio.nativeide.transport.GitBranch>) : WorkbenchDialog
     data class GitConfirmDiscard(val paths: List<String>, val untracked: Int) : WorkbenchDialog
     data object GitClone : WorkbenchDialog
