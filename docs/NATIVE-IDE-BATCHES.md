@@ -1858,6 +1858,22 @@ day, L several days.
       bridge from batch 32 can now take a tap on a match to its row. S.
   30. Find in selection (batch 29) works without the shaded area VS Code draws over the
       selection it searches. S.
+* Pointer in the code editor (user, 11-02, to investigate; register only):
+  31. The hover card "blinks and disappears" when the pointer rests on code. First look: the card
+      is laid out over the whole editor (its `layout` reports the pane's size to place itself),
+      so once it shows, the editor view likely gets a hover exit as if the pointer had left;
+      with the card's own enter/exit tracking that closes it again. Give the card only its own
+      bounds (offset placement), then recheck with a mouse and the touchpad. S.
+  32. The pointer is the arrow over code instead of the text I-beam (VS Code shows the I-beam,
+      a hand over links and the gutter's arrow). sora asks for `TYPE_TEXT` over text
+      (`onResolvePointerIcon`), so Compose's host view probably decides the icon for the views
+      inside it; check, and set it from the editor's region if so. Notebook cells (Compose text
+      fields) and the terminal to check too. S-M.
+  33. Double click, hold and drag (select by words) does nothing. sora's mouse handling selects
+      the word on a double click and then ignores moves until release
+      (`EditorTouchEventHandler.onMouseEvent`: `if (mouseDoubleClick) return true`). Extend the
+      selection by whole words while dragging after a double click (and by lines after a triple
+      click, as VS Code), in the editor view; check the touchpad's tap-and-drag too. S-M.
 * Still left out on purpose: multi-cursor, sticky scroll, minimap (Aardink switch; folding came in batch 31);
   split editor groups and the 3-way merge editor; tasks.json; MCP, other AI providers and the
   built-in chat agent (Copilot, Claude Code and Gemini through ACP instead); foldable postures
