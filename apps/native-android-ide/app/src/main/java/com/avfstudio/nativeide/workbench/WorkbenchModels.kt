@@ -192,6 +192,8 @@ class TerminalSession(val id: UUID, val emulator: TerminalEmulator, title: Strin
     var title by mutableStateOf(title)
     var exitCode by mutableStateOf<Int?>(null)
     var exited by mutableStateOf(false)
+    /** The shell answered the spawn (a failed start reports an error instead). */
+    @Volatile var spawned = false
     /** The profile it started with (for a split's twin). */
     var profile: TerminalProfile? = null
     /** Bumped when shell integration reports a command starting or ending. */

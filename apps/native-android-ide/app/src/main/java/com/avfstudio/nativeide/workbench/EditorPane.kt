@@ -68,6 +68,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -726,6 +727,16 @@ private fun HoverCardOverlay(controller: WorkbenchController) {
         modifier = Modifier
             .widthIn(max = 560.dp)
             .heightIn(max = 320.dp)
+            .pointerInput(card) {
+                awaitPointerEventScope {
+                    while (true) {
+                        when (awaitPointerEvent().type) {
+                            androidx.compose.ui.input.pointer.PointerEventType.Enter -> controller.hoverCardHovered = true
+                            androidx.compose.ui.input.pointer.PointerEventType.Exit -> controller.leaveHoverCard()
+                        }
+                    }
+                }
+            }
             .layout { measurable, constraints ->
                 val placeable = measurable.measure(constraints.copy(minWidth = 0, minHeight = 0))
                 val left = x.roundToInt().coerceIn(0, (constraints.maxWidth - placeable.width).coerceAtLeast(0))
@@ -1349,7 +1360,7 @@ internal class NativeCodeEditor(
 
     // Pointer rest (the hover card) -------------------------------------------------------------
 
-    /** A mouse, touchpad or stylus pointer rested on text (line, column), or (-1, -1) once it moved off that word. */
+    /** A mouse, touchpad or stylus pointer rested on text (line, column); (-1, -1) once it moved off that word, (-2, -2) off the editor. */
     var onPointerRest: ((Int, Int) -> Unit)? = null
     /** `editor.hover.delay`. */
     var pointerRestDelayMs = 300L
@@ -1382,6 +1393,10 @@ internal class NativeCodeEditor(
     }
 
     private fun trackPointer(event: android.view.MotionEvent) {
+        // `adb shell setprop log.tag.AVFPTR DEBUG` logs where a hovering pointer is and what it's over.
+        if (android.util.Log.isLoggable("AVFPTR", android.util.Log.DEBUG)) {
+            android.util.Log.d("AVFPTR", "hover ${event.actionMasked} ${event.x},${event.y} at ${textPositionAt(event.x, event.y)}")
+        }
         val callback = onPointerRest ?: return
         when (event.actionMasked) {
             android.view.MotionEvent.ACTION_HOVER_ENTER, android.view.MotionEvent.ACTION_HOVER_MOVE -> {
@@ -1395,10 +1410,11 @@ internal class NativeCodeEditor(
                 restAt = at
                 if (at != null && restedWord == null) postDelayed(restRunnable, pointerRestDelayMs)
             }
-            // Leaving for the card itself keeps it; the next move over the text decides.
+            // Off the editor (perhaps onto the card): the workbench closes the card unless it's on it.
             android.view.MotionEvent.ACTION_HOVER_EXIT -> {
                 removeCallbacks(restRunnable)
                 restAt = null
+                if (restedWord != null) callback(-2, -2)
             }
         }
     }

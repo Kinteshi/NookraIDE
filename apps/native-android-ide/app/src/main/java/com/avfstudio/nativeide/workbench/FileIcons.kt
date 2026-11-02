@@ -41,7 +41,10 @@ data class IconThemeChoice(val id: String, val label: String, val pack: String?)
  */
 class FileIconTheme(
     json: JsonObject,
-    private val root: File? = null,
+    /** Where the theme file is: picture paths are relative to it. */
+    private val folder: File? = null,
+    /** The pack's folder; pictures outside it aren't used. */
+    private val root: File? = folder,
     /** The theme's fonts by id; the first one is the default for glyphs without a `fontId`. */
     val fonts: Map<String, FontFamily> = emptyMap(),
 ) {
@@ -69,8 +72,8 @@ class FileIconTheme(
             val definition = value.takeIf { it.isJsonObject }?.asJsonObject ?: return@mapNotNull null
             definition.get("iconPath")?.takeIf { it.isJsonPrimitive }?.asString?.let { iconPath ->
                 // Pictures must stay inside the theme's pack.
-                val file = base?.let { File(it, iconPath.removePrefix("./")).canonicalFile }
-                    ?.takeIf { it.path.startsWith(base.path + File.separator) && it.isFile }
+                val file = folder?.let { File(it, iconPath.removePrefix("./")).canonicalFile }
+                    ?.takeIf { base != null && it.path.startsWith(base.path + File.separator) && it.isFile }
                     ?: return@mapNotNull null
                 return@mapNotNull id to FileIcon.Picture(file)
             }
@@ -176,7 +179,7 @@ class FileIconTheme(
                         }
                         fontId to FontFamily(Font(loadable))
                     }?.toMap().orEmpty()
-                    FileIconTheme(json, folder, fonts)
+                    FileIconTheme(json, folder, extension, fonts)
                 }.getOrNull()
             }
             return null

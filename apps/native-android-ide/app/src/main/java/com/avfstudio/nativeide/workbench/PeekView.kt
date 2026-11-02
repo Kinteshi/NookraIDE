@@ -185,7 +185,7 @@ private fun PeekPreview(controller: WorkbenchController, location: LanguageLocat
                     color = colors.onSurfaceVariant,
                     modifier = Modifier.padding(start = 8.dp, end = 12.dp),
                 )
-                Text(text.removeSuffix("\r"), fontFamily = FontFamily.Monospace, fontSize = fontSize, color = colors.onSurface, maxLines = 1, softWrap = false)
+                Text(text.removeSuffix("\r").replace("\t", " ".repeat(controller.settings.tabSize)), fontFamily = FontFamily.Monospace, fontSize = fontSize, color = colors.onSurface, maxLines = 1, softWrap = false)
             }
         }
     }

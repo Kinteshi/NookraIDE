@@ -323,7 +323,7 @@ internal class SoraEditorSurface(
             if (event.newTextSize != spToPx(appliedFontSizeSp)) listener(EditorEvent.Zoomed("", pxToSp(event.newTextSize)))
         }
         editor.onPointerRest = { line, column ->
-            if (hoverEnabled || line < 0) listener(EditorEvent.PointerRested("", if (line < 0) null else LspPosition(line, column)))
+            if (hoverEnabled || line < 0) listener(EditorEvent.PointerRested("", if (line < 0) null else LspPosition(line, column), left = line == -2))
         }
         return Closeable {
             editor.onPointerRest = null

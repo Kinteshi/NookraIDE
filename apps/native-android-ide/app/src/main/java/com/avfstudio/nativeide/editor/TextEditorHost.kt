@@ -21,8 +21,8 @@ sealed interface EditorEvent {
     data class FocusChanged(override val uri: String, val focused: Boolean) : EditorEvent
     /** The user pinched the editor to [fontSizeSp]. */
     data class Zoomed(override val uri: String, val fontSizeSp: Float) : EditorEvent
-    /** A mouse or touchpad pointer rested on [position] (null: it moved on or left the editor). */
-    data class PointerRested(override val uri: String, val position: LspPosition?) : EditorEvent
+    /** A mouse or touchpad pointer rested on [position] (null: it moved off the word; [left]: off the editor). */
+    data class PointerRested(override val uri: String, val position: LspPosition?, val left: Boolean = false) : EditorEvent
 }
 
 /**

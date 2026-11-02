@@ -1543,9 +1543,9 @@ icons, and a default file icon theme in Explorer. 279 unit tests pass.
   which Android can't load, so it is converted to TTF (res/font/seti.ttf, 57 KB). Setting "File
   icons" (`workbench.iconTheme`: Seti or plain). Folders keep the tree's arrows, as in VS Code.
 
-## 32. Pinch fixes, tooltips and hover, go to type/implementation, hex view, notebook intelligence, icon themes, terminal, leftovers (11-02 10:00–; in progress)
+## 32. Pinch fixes, tooltips and hover, go to type/implementation, hex view, notebook intelligence, icon themes, terminal, leftovers (11-02 10:00–11:05; done, checked)
 User's pick (11-02): backlog 1, 3, 5, 6, 8, 9, 17 of the 11-01 table (spec-review items 3, 7, 9,
-10, 14, 25, 24), and "pinch to zoom is not working".
+10, 14, 25, 24), and "pinch to zoom is not working". 290 unit tests pass (daemon 90, protocol 22).
 * Pinch to zoom. A touchscreen pinch did zoom the editor (checked with a virtual HID touchscreen:
   14 → 39); what failed:
   * The Book Cover's touchpad: Android 14+ sends a touchpad pinch as a mouse gesture
@@ -1565,13 +1565,75 @@ User's pick (11-02): backlog 1, 3, 5, 6, 8, 9, 17 of the 11-01 table (spec-revie
   rests 0.5 s, and on a long press (which doesn't also press the button). The touchpad's pointer
   arrives as a hovering finger, which Material's own tooltips ignore, so the hover is detected
   for any pointer. Setting "Tooltips" (`avf.workbench.tooltips`, Keyboard and device). Checked:
-  long press on Run all shows "Run all" and runs nothing.
-* Editor hover: resting a mouse or touchpad pointer on code shows a card above the word with the
+  long press on Run all, and "Toggle side bar (Ctrl+B)" from a resting touchpad pointer.
+* Editor hover: a mouse or touchpad pointer resting on code shows a card above the word with the
   problems there (icon, message, source(code)) and the language server's hover as Markdown;
   Ctrl+K Ctrl+I shows the same card at the cursor (it was a dialog). It stays while the pointer
-  moves within the word or onto the card, and closes on another word, a click, typing,
-  scrolling or Escape. Settings "Hover" (`editor.hover.enabled`) and "Hover delay"
-  (`editor.hover.delay`, 300 ms) under Code intelligence.
+  is on the word or the card, and closes on another word, leaving the editor (0.5 s), a click,
+  typing, scrolling or Escape. Settings "Hover" (`editor.hover.enabled`) and "Hover delay"
+  (`editor.hover.delay`, 300 ms) under Code intelligence. Checked: "class Greeter()" from a
+  resting touchpad pointer, "def outer(values) -> Unknown" from Ctrl+K Ctrl+I.
+  `adb shell setprop log.tag.AVFPTR DEBUG` logs where a hovering pointer is.
+* (3 → backlog 1) Go to Type Definition, Go to Implementations (Ctrl+F12), Go to Declaration and
+  their Peek commands; Peek Definition (Alt+F12) and Go to References (Shift+F12) open a peek
+  under the line (above it near the bottom): the file around the location with its lines
+  marked, and a list by file when there are several (tap shows, double tap or Open goes there;
+  Escape closes). Several definitions open the peek, as VS Code does. Find All References moved
+  to Shift+Alt+F12 and the References view lists each reference's line. A reference count (code
+  lens) opens the peek. Call hierarchy (Shift+Alt+H, Show Incoming/Outgoing Calls) in the side
+  bar: incoming or outgoing, expanded level by level; a tap goes to the call. Checked with ty:
+  peek of `greet`, References (2) of `Greeter` with the list, Peek Type Definition of `ZETA`
+  (builtins.pyi `class int`), incoming calls of `greet`. ty has no Go to Implementations (the
+  status bar says so).
+* (7 → backlog 3) Hex view: a binary file (NUL bytes) opens read-only in hex instead of failing:
+  offset, 16 bytes, text; 64 KB pages read as they scroll in; Go to offset (decimal, 0x… or …h);
+  tapping a byte shows it decoded (uint8 to float64, binary). Checked on /bin/ls (199,576 bytes):
+  the ELF header, and 0x20010 in the third page.
+* (10 → backlog 6) Icon themes from VSIX packs: Settings → Appearance → Import icon theme, then
+  pick it under File icons (an imported theme is used right away, as VS Code offers). Font
+  themes (TTF, OTF; WOFF converted to TTF on the device) and picture themes (SVG through
+  AndroidSVG, PNG), folder icons by name and open/closed in the Explorer tree, light variants.
+  Checked with Material Icon Theme 5.40 from Open VSX (1,283 files): Python, Jupyter, Markdown,
+  image, SVG, SQL and folder icons in Explorer, Open Editors and the tabs. Switched back to
+  Seti afterwards; Material Icon Theme stays installed.
+* (14 → backlog 8) Terminal:
+  * Profiles: bash, zsh, fish, sh, tmux (`new-session -A -s main`) and the user's own
+    (`terminal.integrated.profiles.linux`), from the arrow beside + or Terminal: Create New
+    Terminal (With Profile); the default one in Settings → Terminal
+    (`terminal.integrated.defaultProfile.linux`). The daemon now takes a shell's arguments.
+    A missing program says so: "tmux isn't installed in the guest: sudo apt install tmux" (the
+    guest has none of zsh, fish, tmux today).
+  * Split (Ctrl+Shift+5): two terminals side by side, either active; Unsplit in the arrow's
+    menu. Rename… (the name selected, so typing replaces it); Kill terminal.
+  * Shell integration (`terminal.integrated.shellIntegration.enabled`): the daemon starts bash
+    (`--init-file`, after ~/.bashrc) and zsh (`ZDOTDIR`) with OSC 133 prompt/command/exit marks
+    and OSC 633;E command lines. The tab shows the last exit status (a dot in the primary or
+    error colour); Commands lists the recent ones with ✓ or the exit code, a tap scrolls the
+    terminal to it, with Copy output and Run again; Ctrl+Up / Ctrl+Down step through them;
+    Terminal: Copy Last Command Output. termlib keeps its scroll controller internal; a small
+    bridge file reaches it.
+  * Copy on selection (`terminal.integrated.copyOnSelection`, off as in VS Code).
+  * Checked: `false` (exit 1) and `ls` listed, the ls output copied, a tap on `ls` scrolled its
+    prompt to the top past `seq 1 100`, the split, rename, the tmux message. Copy on selection
+    wasn't checked on the tablet.
+  * The guest daemon was updated (b32-update, from a transient unit).
+* (9 → backlog 5) Language intelligence in notebook cells (`avf.notebook.languageServer`,
+  Settings → Notebooks): the Python server (ty) gets the notebook as one hidden file of its
+  cells (`notebook.ipynb.avf-cells.py`; magics and `!` lines as comments; IPython's names and
+  top-level await not reported). Problems under each code cell (wavy lines in the text, the first
+  three listed below with their line; a tap goes there), hover from a resting pointer or Ctrl+K
+  Ctrl+I, and F12 to the definition in another cell or a file. Checked: "Cannot resolve imported
+  module `pandas`" on cell 1, F12 on `sales` in cell 2 put the caret on its assignment in cell 1,
+  the hover card in the cell. ty resolves imports with the interpreter chosen for the workspace
+  (django here, without pandas), not the notebook's kernel: see the backlog.
+* (24 → backlog 17) Batch 28 leftovers: sora's problem tooltip no longer covers the next-edit
+  card, the hover card or the peek (it waits, and closes when one opens). The Interactive window's
+  export wrote a 0-byte notebook: it wrote without the daemon's flush; fixed (and the plot
+  viewer's "save beside the notebook", same bug). Checked: cells-2.ipynb with both cells and
+  their outputs. The next-edit off-screen chip is still unchecked (Copilot didn't propose one).
+* Test files left in ~/Projects/b30: ls.bin, cells.py, cells.ipynb (the empty one from before the
+  fix), cells-2.ipynb; in /sdcard/Download: avf-daemon-b32, b32.sh, b32-update.log,
+  b32-cells.py, material-icon-theme-5.40.0.vsix.
 
 ## Backlog
 To investigate (user, 10-28):
@@ -1711,22 +1773,22 @@ day, L several days.
      characters, `completionItem/resolve`. Setting: `editor.quickSuggestions`. M-L.
   2. (Done in batch 29; in-selection without a shaded scope.) Find widget: an inline bar instead of the Find dialog, with regex, match case, whole word,
      in selection, preserve case, previous match, match count and all matches highlighted. M.
-  3. Go to Type Definition, Implementation and Declaration; a real Peek (today it jumps); call
+  3. (Done in batch 32.) Go to Type Definition, Implementation and Declaration; a real Peek (today it jumps); call
      hierarchy. M.
   4. (Done in batch 30.) More edit commands: join lines, transpose, sort lines, upper/lower case, expand/shrink
      selection (LSP `selectionRange`), format selection. S-M.
   5. (Done in batch 30.) LSP extras: code lens (reference counts), linked editing (HTML tags), `$/progress` in the
      status bar (indexing). M.
   6. (Done in batch 30.) Indentation detection from the file's content (`editor.detectIndentation`). S.
-  7. Hex view for binary files. M.
+  7. (Done in batch 32.) Hex view for binary files. M.
 * Languages:
   8. Language servers beyond Python and TypeScript/JavaScript, offered on demand like syntax
      colours: rust-analyzer is in the guest catalog but not wired in the app; Go (gopls), C/C++
      (clangd), Bash, YAML, JSON, TOML (taplo), Markdown (marksman), Dockerfile and SQL aren't in
      the catalog. A generic LSP client per language, catalog entries, an install offer. L.
-  9. Language intelligence in notebook cells (diagnostics, hover, go to definition) through ty
+  9. (Done in batch 32.) Language intelligence in notebook cells (diagnostics, hover, go to definition) through ty
      over the concatenated cells, as the Copilot mirror already does. M-L.
-  10. (Default Seti theme in batch 31; imported VSIX icon themes still open.) File icon themes from imported VSIX packs (kept but not used today). S-M.
+  10. (Done: Seti in batch 31, imported VSIX icon themes in batch 32.) File icon themes from imported VSIX packs (kept but not used today). S-M.
 * Workbench:
   11. (Done in batch 30.) Undo after deleting a file (the daemon's trash can restore it; the spec asks for a 10 s
       Undo). S.
@@ -1734,7 +1796,7 @@ day, L several days.
       folders. M.
   13. Source Control: stage and discard per hunk from the diff, stash, history (log) view,
       blame toggle, file timeline. M-L.
-  14. Terminal: split, rename, profiles (zsh, tmux), shell-integration marks (jump between
+  14. (Done in batch 32; copy on select not checked on the tablet.) Terminal: split, rename, profiles (zsh, tmux), shell-integration marks (jump between
       commands, exit status), copy on select. M.
 * Notebooks:
   15. (Done in batch 29.) Markdown cells rendered fully: tables, links, images (attachments), code blocks and
@@ -1752,10 +1814,10 @@ day, L several days.
       latched modifiers and breakpoints. S-M.
   22. Accessibility pass (TalkBack labels for the editor, tree and outputs). M.
   23. Instrumented tests and golden screenshots (spec 12; the app has unit tests only). L.
-  24. Batch 28 leftovers: the next-edit card can sit under a problem tooltip; the off-screen
+  24. (Done in batch 32, except the off-screen chip, still unchecked.) Batch 28 leftovers: the next-edit card can sit under a problem tooltip; the off-screen
       chip and the Interactive window's export weren't checked on the tablet. S.
 * Pointer (registered 11-01, user: "I don't know if they should be appearing, but at the moment they are not"):
-  25. Tooltips on hover with a mouse or touchpad, as VS Code shows them. Today none show: the
+  25. (Done in batch 32.) Tooltips on hover with a mouse or touchpad, as VS Code shows them. Today none show: the
       app has no TooltipBox; about 66 icon buttons have a label (contentDescription) only for
       TalkBack. Wanted: Material 3 plain tooltips on hover (and long press) for icon buttons in
       the activity bar, toolbars, the find widget, the notebook and cell toolbars, Explorer and
@@ -1764,6 +1826,14 @@ day, L several days.
       pointer on a symbol (`editor.hover.enabled`, `editor.hover.delay`), as Ctrl+K Ctrl+I shows
       it now. Check how the Book Cover touchpad's hover events arrive (a `hid` test mouse moved no
       pointer on 10-29). Setting for the editor hover. S-M.
+* Found in batch 32 (11-02):
+  26. Notebook language intelligence uses the workspace's interpreter (ty's environment), not the
+      notebook's kernel: imports the kernel has (pandas) show as unresolved. Point ty at the
+      kernel's Python for the hidden cells file, or a per-notebook environment. S-M.
+  27. Terminals reattached after an app restart are titled "Projects" (their folder) and lose
+      the profile and the exit-status mark; keep them with the daemon's session. S.
+  28. Zsh, fish and tmux aren't in the guest; offer to install a profile's program from the
+      "isn't installed" message (as other guest tools are offered). S.
 * Still left out on purpose: multi-cursor, sticky scroll, minimap (Aardink switch; folding came in batch 31);
   split editor groups and the 3-way merge editor; tasks.json; MCP, other AI providers and the
   built-in chat agent (Copilot, Claude Code and Gemini through ACP instead); foldable postures

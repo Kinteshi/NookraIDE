@@ -22,19 +22,22 @@ class FileIconsTest {
     fun picturesFoldersAndLightOverrides() {
         val root = Files.createTempDirectory("icons").toFile()
         File(root, "icons").mkdirs()
+        File(root, "dist").mkdirs()
+        // A picture that exists, outside the pack.
+        val outside = File(root.parentFile, "outside.svg").apply { writeText("<svg/>") }
         listOf("file.svg", "python.svg", "folder.svg", "folder-open.svg", "folder-src.svg", "python-light.svg").forEach { File(root, "icons/$it").writeText("<svg/>") }
         val theme = FileIconTheme(
             JsonParser.parseString(
                 """
                 {
                   "iconDefinitions": {
-                    "file": {"iconPath": "./icons/file.svg"},
-                    "python": {"iconPath": "./icons/python.svg"},
-                    "python_light": {"iconPath": "./icons/python-light.svg"},
-                    "folder": {"iconPath": "./icons/folder.svg"},
-                    "folder_open": {"iconPath": "./icons/folder-open.svg"},
-                    "folder_src": {"iconPath": "./icons/folder-src.svg"},
-                    "escape": {"iconPath": "../../etc/passwd"}
+                    "file": {"iconPath": "./../icons/file.svg"},
+                    "python": {"iconPath": "./../icons/python.svg"},
+                    "python_light": {"iconPath": "./../icons/python-light.svg"},
+                    "folder": {"iconPath": "./../icons/folder.svg"},
+                    "folder_open": {"iconPath": "./../icons/folder-open.svg"},
+                    "folder_src": {"iconPath": "./../icons/folder-src.svg"},
+                    "escape": {"iconPath": "../../outside.svg"}
                   },
                   "file": "file",
                   "folder": "folder",
@@ -46,6 +49,7 @@ class FileIconsTest {
                 }
                 """.trimIndent(),
             ).asJsonObject,
+            File(root, "dist"),
             root,
         )
         fun picture(icon: FileIcon?) = (icon as FileIcon.Picture).file.name
@@ -58,6 +62,7 @@ class FileIconsTest {
         assertEquals("folder-open.svg", picture(theme.folderIconFor("docs", expanded = true, dark = true)))
         assertTrue(theme.hasFolderIcons && theme.hidesExplorerArrows)
         root.deleteRecursively()
+        outside.delete()
     }
 
     @Test

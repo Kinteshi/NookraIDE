@@ -309,7 +309,8 @@ fun WorkbenchDialogHost(controller: WorkbenchController) {
         )
         WorkbenchDialog.Keybindings -> KeybindingsDialog(controller)
         is WorkbenchDialog.TerminalRename -> {
-            var name by remember(dialog.id) { mutableStateOf(dialog.name) }
+            // The current name selected, so typing replaces it (VS Code's rename box).
+            var name by remember(dialog.id) { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(dialog.name, androidx.compose.ui.text.TextRange(0, dialog.name.length))) }
             AlertDialog(
                 onDismissRequest = { controller.dialog = null },
                 title = { Text("Rename terminal") },
@@ -319,10 +320,10 @@ fun WorkbenchDialogHost(controller: WorkbenchController) {
                         onValueChange = { name = it },
                         label = { Text("Name") },
                         singleLine = true,
-                        keyboardActions = KeyboardActions(onDone = { controller.renameTerminal(dialog.id, name) }),
+                        keyboardActions = KeyboardActions(onDone = { controller.renameTerminal(dialog.id, name.text) }),
                     )
                 },
-                confirmButton = { TextButton(onClick = { controller.renameTerminal(dialog.id, name) }) { Text("Rename") } },
+                confirmButton = { TextButton(onClick = { controller.renameTerminal(dialog.id, name.text) }) { Text("Rename") } },
                 dismissButton = { TextButton(onClick = { controller.dialog = null }) { Text("Cancel") } },
             )
         }

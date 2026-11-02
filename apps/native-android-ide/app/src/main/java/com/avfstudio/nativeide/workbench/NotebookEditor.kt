@@ -531,6 +531,7 @@ private fun CellSourceEditor(
         val (cellId, offset) = session.cellCaretRequest ?: return@LaunchedEffect
         if (cellId != cell.id) return@LaunchedEffect
         field = field.copy(selection = TextRange(offset.coerceIn(0, field.text.length)))
+        session.cellCaret = offset.coerceIn(0, field.text.length)
         session.cellCaretRequest = null
     }
     // Find's current match in this cell becomes its selection, so closing find leaves it selected.

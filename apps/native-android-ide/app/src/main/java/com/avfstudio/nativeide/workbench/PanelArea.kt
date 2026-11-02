@@ -181,15 +181,18 @@ fun TerminalView(controller: WorkbenchController, modifier: Modifier = Modifier)
             return
         }
         if (controller.terminalFindVisible) TerminalFindBar(controller, session)
-        val split = controller.splitTerminalId?.takeIf { it != session.id }?.let { id -> controller.terminals.firstOrNull { it.id == id } }
-        if (split == null) {
+        val pair = controller.terminalSplit?.takeIf { session.id == it.first || session.id == it.second }
+            ?.let { (left, right) -> controller.terminals.firstOrNull { it.id == left } to controller.terminals.firstOrNull { it.id == right } }
+        val left = pair?.first
+        val right = pair?.second
+        if (left == null || right == null) {
             TerminalPane(controller, session, Modifier.weight(1f).fillMaxWidth())
         } else {
             // VS Code's split terminal: the two side by side; a tap makes one active.
             Row(Modifier.weight(1f).fillMaxWidth()) {
-                TerminalPane(controller, session, Modifier.weight(1f).fillMaxHeight())
+                TerminalPane(controller, left, Modifier.weight(1f).fillMaxHeight())
                 androidx.compose.material3.VerticalDivider(color = colors.outlineVariant)
-                TerminalPane(controller, split, Modifier.weight(1f).fillMaxHeight())
+                TerminalPane(controller, right, Modifier.weight(1f).fillMaxHeight())
             }
         }
     }
@@ -217,7 +220,7 @@ private fun TerminalPane(controller: WorkbenchController, session: TerminalSessi
                 .pointerInput(session.id, session.exited) {
                     awaitEachGesture {
                         awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-                        if (controller.splitTerminalId != null) controller.activeTerminalId = session.id
+                        if (controller.terminalSplit != null) controller.activeTerminalId = session.id
                         if (session.exited) {
                             endedFocus.requestFocus()
                             return@awaitEachGesture
@@ -239,7 +242,7 @@ private fun TerminalPane(controller: WorkbenchController, session: TerminalSessi
                         .onFocusChanged { state ->
                             if (state.hasFocus) {
                                 controller.focusArea = FocusArea.Terminal
-                                if (controller.splitTerminalId != null) controller.activeTerminalId = session.id
+                                if (controller.terminalSplit != null) controller.activeTerminalId = session.id
                             } else if (controller.focusArea == FocusArea.Terminal) {
                                 controller.focusArea = FocusArea.Other
                             }
@@ -495,7 +498,7 @@ fun TerminalActions(controller: WorkbenchController) {
                     more = false
                     controller.runCommand("workbench.action.terminal.rename")
                 })
-                if (controller.splitTerminalId != null) {
+                if (controller.terminalSplit != null) {
                     DropdownMenuItem(text = { Text("Unsplit") }, onClick = {
                         more = false
                         controller.unsplitTerminal()

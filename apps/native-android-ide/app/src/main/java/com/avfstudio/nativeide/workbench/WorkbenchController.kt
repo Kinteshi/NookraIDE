@@ -3714,7 +3714,7 @@ class WorkbenchController(private val context: Context) {
             is EditorEvent.FocusChanged -> post {
                 if (event.focused) focusArea = FocusArea.Editor else if (focusArea == FocusArea.Editor) focusArea = FocusArea.Other
             }
-            is EditorEvent.PointerRested -> post { onPointerRested(event.uri, event.position) }
+            is EditorEvent.PointerRested -> post { if (event.left) onPointerLeftEditor() else onPointerRested(event.uri, event.position) }
             is EditorEvent.Zoomed -> post {
                 editorViewportTick++
                 // Saved once the fingers stop, rounded like the Settings slider.
@@ -4041,7 +4041,24 @@ class WorkbenchController(private val context: Context) {
         showHoverAt(document, position, fromPointer = true)
     }
 
+    /** The pointer is on the hover card (it stays while it is). */
+    var hoverCardHovered = false
+    private var scheduledHoverHide: ScheduledFuture<*>? = null
+
+    /** The pointer left the editor: the card goes shortly after, unless it went onto the card. */
+    private fun onPointerLeftEditor() {
+        scheduledHoverHide?.cancel(false)
+        scheduledHoverHide = timer.schedule({ post { if (!hoverCardHovered) hideHoverCard() } }, 500, TimeUnit.MILLISECONDS)
+    }
+
+    fun leaveHoverCard() {
+        hoverCardHovered = false
+        hideHoverCard()
+    }
+
     fun hideHoverCard() {
+        scheduledHoverHide?.cancel(false)
+        hoverCardHovered = false
         hoverRequest++
         if (hoverCard != null) {
             hoverCard = null
@@ -6457,22 +6474,19 @@ class WorkbenchController(private val context: Context) {
     val defaultTerminalProfile: TerminalProfile
         get() = terminalProfiles.firstOrNull { it.name == settings.terminalDefaultProfile } ?: terminalProfiles.firstOrNull() ?: TerminalProfile("bash", "bash")
 
-    /** The terminal shown beside the active one (VS Code's split terminal), if any. */
-    var splitTerminalId by mutableStateOf<UUID?>(null)
+    /** Two terminals shown side by side (VS Code's split terminal), left first; either can be active. */
+    var terminalSplit by mutableStateOf<Pair<UUID, UUID>?>(null)
         private set
 
     /** Split: a second terminal of the same shell beside the active one (Ctrl+Shift+5). */
     fun splitTerminal() {
         val active = activeTerminal
         val id = newTerminal(profile = active?.profile) ?: return
-        if (active != null) {
-            splitTerminalId = id
-            activeTerminalId = active.id
-        }
+        if (active != null) terminalSplit = active.id to id
     }
 
     fun unsplitTerminal() {
-        splitTerminalId = null
+        terminalSplit = null
     }
 
     fun renameTerminal(id: UUID, name: String) {
@@ -6565,15 +6579,28 @@ class WorkbenchController(private val context: Context) {
                 session.emulator.writeInput(event.data, 0, event.data.size)
                 session.textLog.append(event.data)
             }
-            is PtyEvent.Spawned -> if (initialCommand != null) {
-                timer.schedule({ vfs.ptyInput(session.id, "$initialCommand\r".toByteArray()) }, 400, TimeUnit.MILLISECONDS)
+            is PtyEvent.Spawned -> {
+                session.spawned = true
+                if (initialCommand != null) {
+                    timer.schedule({ vfs.ptyInput(session.id, "$initialCommand\r".toByteArray()) }, 400, TimeUnit.MILLISECONDS)
+                }
             }
             is PtyEvent.Exit -> post {
                 session.exited = true
                 session.exitCode = event.code
                 session.emulator.writeInput("\r\n[process exited with code ${event.code ?: "?"}]\r\n".toByteArray())
             }
-            is PtyEvent.Error -> if (event.message == "unknown terminal session") {
+            // The shell never started (a profile's program missing): say so, and how to get it.
+            is PtyEvent.Error -> if (!session.spawned && event.message.startsWith("could not start shell")) {
+                post {
+                    session.exited = true
+                    val program = session.profile?.path?.substringAfterLast('/') ?: "the shell"
+                    val missing = "No viable candidates" in event.message || "No such file" in event.message
+                    session.emulator.writeInput(
+                        (if (missing) "[$program isn't installed in the guest: sudo apt install $program]\r\n" else "[${event.message}]\r\n").toByteArray(),
+                    )
+                }
+            } else if (event.message == "unknown terminal session") {
                 // After the daemon restarts (an update, a guest reboot) its shells are gone. Every
                 // key or resize sent to one gets this error back; say it once.
                 post { endLostTerminal(session) }
@@ -6741,7 +6768,7 @@ class WorkbenchController(private val context: Context) {
     }
 
     fun closeTerminal(id: UUID) {
-        if (splitTerminalId == id || (splitTerminalId != null && activeTerminalId == id)) splitTerminalId = null
+        if (terminalSplit?.let { id == it.first || id == it.second } == true) terminalSplit = null
         val session = terminals.firstOrNull { it.id == id } ?: return
         if (!session.exited) vfs.ptyKill(id)
         vfs.removePtyListener(id)
@@ -7181,8 +7208,9 @@ class WorkbenchController(private val context: Context) {
                 if (attempt < 20) exportInteractive(session, path, attempt + 1) else post { status = "Export failed: too many notebooks named like ${target.substringAfterLast('/')}" }
                 return@whenComplete
             }
+            // writeAll flushes: the daemon keeps a write buffered until then (a bare write left 0 bytes).
             vfs.create(target, false)
-                .thenCompose { vfs.write(target, 0, text.toByteArray(), truncate = true, expectedModifiedTs = null) }
+                .thenCompose { repository.writeAll(target, text.toByteArray(), null) }
                 .whenComplete { _, error ->
                     post {
                         if (error != null) {
@@ -7243,7 +7271,7 @@ class WorkbenchController(private val context: Context) {
                 return@whenComplete
             }
             vfs.create(target, false)
-                .thenCompose { vfs.write(target, 0, plotBytes(plot), truncate = true, expectedModifiedTs = null) }
+                .thenCompose { repository.writeAll(target, plotBytes(plot), null) }
                 .whenComplete { _, error ->
                     post {
                         if (error != null) {
