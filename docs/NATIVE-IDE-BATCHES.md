@@ -1724,6 +1724,16 @@ day, L several days.
   23. Instrumented tests and golden screenshots (spec 12; the app has unit tests only). L.
   24. Batch 28 leftovers: the next-edit card can sit under a problem tooltip; the off-screen
       chip and the Interactive window's export weren't checked on the tablet. S.
+* Pointer (registered 11-01, user: "I don't know if they should be appearing, but at the moment they are not"):
+  25. Tooltips on hover with a mouse or touchpad, as VS Code shows them. Today none show: the
+      app has no TooltipBox; about 66 icon buttons have a label (contentDescription) only for
+      TalkBack. Wanted: Material 3 plain tooltips on hover (and long press) for icon buttons in
+      the activity bar, toolbars, the find widget, the notebook and cell toolbars, Explorer and
+      the status bar, with the keybinding where one exists ("Find Next (F3)"). And the editor's
+      hover: the language server's hover card (type, docs) and problems after resting the
+      pointer on a symbol (`editor.hover.enabled`, `editor.hover.delay`), as Ctrl+K Ctrl+I shows
+      it now. Check how the Book Cover touchpad's hover events arrive (a `hid` test mouse moved no
+      pointer on 10-29). Setting for the editor hover. S-M.
 * Still left out on purpose: multi-cursor, folding, sticky scroll, minimap (Aardink switch);
   split editor groups and the 3-way merge editor; tasks.json; MCP, other AI providers and the
   built-in chat agent (Copilot, Claude Code and Gemini through ACP instead); foldable postures
