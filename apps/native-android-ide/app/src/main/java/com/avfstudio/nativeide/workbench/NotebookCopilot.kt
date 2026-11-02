@@ -20,7 +20,7 @@ import com.avfstudio.nativeide.notebook.NotebookCell
  */
 internal class NotebookMirror(val text: String, val startLines: Map<String, Int>)
 
-internal fun notebookMirror(cells: List<NotebookCell>): NotebookMirror {
+internal fun notebookMirror(cells: List<NotebookCell>, forLanguageServer: Boolean = false): NotebookMirror {
     val text = StringBuilder()
     val starts = mutableMapOf<String, Int>()
     var line = 0
@@ -28,12 +28,38 @@ internal fun notebookMirror(cells: List<NotebookCell>): NotebookMirror {
         text.append(if (cell.type == CellType.Code) "# %%\n" else "# %% [markdown]\n")
         line++
         starts[cell.id] = line
-        val body = if (cell.type == CellType.Code) cell.source else cell.source.lines().joinToString("\n") { "# $it" }
+        val body = when {
+            cell.type != CellType.Code -> cell.source.lines().joinToString("\n") { "# $it" }
+            forLanguageServer -> withoutMagics(cell.source)
+            else -> cell.source
+        }
         text.append(body).append("\n\n")
         line += body.count { it == '\n' } + 2
     }
     return NotebookMirror(text.toString(), starts)
 }
+
+/**
+ * IPython's magics (`%pip`, `%%time`) and shell escapes (`!ls`) as comments, same length, so a
+ * Python language server reads the rest of the cell and its columns still match.
+ */
+internal fun withoutMagics(source: String): String = source.split('\n').joinToString("\n") { line ->
+    val code = line.trimStart()
+    if (code.startsWith("%") || code.startsWith("!")) {
+        val indent = line.length - code.length
+        line.substring(0, indent) + "#" + code.substring(1)
+    } else {
+        line
+    }
+}
+
+/** Names IPython defines in every notebook; a plain Python server reports them as undefined. */
+internal val IPYTHON_NAMES = setOf("display", "get_ipython", "In", "Out", "exit", "quit")
+
+/** Whether a server's problem in a notebook only comes from it being a notebook (top-level await, IPython's names). */
+internal fun isNotebookOnlyProblem(message: String): Boolean =
+    IPYTHON_NAMES.any { name -> message.contains("`$name`") || message.contains("\"$name\"") || message.contains("'$name'") } ||
+        (message.contains("await", ignoreCase = true) && message.contains("async", ignoreCase = true))
 
 /** Line and column of [offset] in [source]. */
 internal fun cellPosition(source: String, offset: Int): Pair<Int, Int> {

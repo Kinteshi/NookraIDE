@@ -95,6 +95,7 @@ import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material.icons.outlined.Web
 import androidx.compose.material.icons.outlined.Mouse
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
+import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.ZoomIn
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
@@ -151,6 +152,7 @@ enum class SettingsCategory(val title: String, val summary: String, val icon: Im
 @Composable
 fun SettingsScreen(controller: WorkbenchController) {
     LaunchedEffect(controller.connected) { if (controller.connected) controller.checkGuestTools() }
+    LaunchedEffect(Unit) { controller.refreshIconThemeChoices() }
     var picked by rememberSaveable { mutableStateOf<SettingsCategory?>(null) }
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -278,11 +280,13 @@ private fun LazyListScope.appearance(controller: WorkbenchController, settings: 
         ChoiceRow(
             Icons.Outlined.InsertDriveFile,
             "File icons",
-            "VS Code's default Seti icons by file type in Explorer, tabs and Open Editors, or plain ones",
-            listOf("vs-seti" to "Seti", "none" to "Plain"),
+            "Icons by file type in Explorer, tabs and Open Editors: VS Code's default Seti, an imported icon theme, or plain ones",
+            listOf("vs-seti" to "Seti") + controller.iconThemeChoices.map { it.id to it.label } + listOf("none" to "Plain"),
             settings.iconTheme,
+            below = controller.iconThemeChoices.isNotEmpty(),
         ) { set(WorkbenchSettings.ICON_THEME, it) }
     }
+    item { ActionRow(Icons.Outlined.FileOpen, "Import icon theme", "File icons from a .vsix (Material Icon Theme, vscode-icons…; Open VSX has them)") { controller.pickAssetPack?.invoke("vsix") } }
 }
 
 private fun LazyListScope.editor(settings: WorkbenchSettings, set: SetSetting) {
@@ -475,6 +479,11 @@ private fun LazyListScope.notebooks(settings: WorkbenchSettings, set: SetSetting
             set(WorkbenchSettings.JUPYTER_DEFAULT_KERNEL, null)
         }
     }
+    item {
+        SwitchRow(Icons.Outlined.Lightbulb, "Language intelligence in cells", "Problems under code cells, hover (Ctrl+K Ctrl+I) and go to definition (F12), from the Python language server", settings.notebookLanguageServer) {
+            set(WorkbenchSettings.NOTEBOOK_LANGUAGE_SERVER, it)
+        }
+    }
     item { SwitchRow(Icons.Outlined.AutoFixHigh, "Tab completes in notebooks", "After a name or a dot, Tab asks the kernel (as in Jupyter); Ctrl+Space always does", settings.notebookTabCompletion) { set(WorkbenchSettings.NOTEBOOK_TAB_COMPLETION, it) } }
     item { SwitchRow(Icons.Outlined.PushPin, "Sticky cell header", "A tall cell keeps its run button and actions at the top while it scrolls", settings.stickyCellHeader) { set(WorkbenchSettings.STICKY_CELL_HEADER, it) } }
     item { SwitchRow(Icons.Outlined.Speed, "Cell run statistics", "Run time and how the run ended (done, queued, running, failed) beside each code cell", settings.cellStatistics) { set(WorkbenchSettings.CELL_STATISTICS, it) } }
@@ -520,6 +529,22 @@ private fun LazyListScope.notebooks(settings: WorkbenchSettings, set: SetSetting
 private fun LazyListScope.terminal(settings: WorkbenchSettings, set: SetSetting) {
     item { Section("Terminal") }
     item { SliderRow(Icons.Outlined.FormatSize, "Terminal font size", settings.terminalFontSize, 8f..24f, "%.0f sp") { set(WorkbenchSettings.TERMINAL_FONT_SIZE, it.roundToInt()) } }
+    item {
+        ChoiceRow(
+            Icons.Outlined.Terminal,
+            "Default shell",
+            "What + starts; the arrow beside it offers the others. Add your own in settings.json (terminal.integrated.profiles.linux)",
+            settings.terminalProfiles.map { it.name to it.name },
+            settings.terminalDefaultProfile,
+            below = true,
+        ) { set(WorkbenchSettings.TERMINAL_DEFAULT_PROFILE, it) }
+    }
+    item {
+        SwitchRow(Icons.Outlined.History, "Shell integration", "bash and zsh mark each prompt and command: the tab shows the last exit status, Commands lists them, Ctrl+Up and Ctrl+Down move between them", settings.shellIntegration) {
+            set(WorkbenchSettings.SHELL_INTEGRATION, it)
+        }
+    }
+    item { SwitchRow(Icons.Outlined.ContentCopy, "Copy on selection", "Text selected in the terminal goes to the clipboard", settings.terminalCopyOnSelection) { set(WorkbenchSettings.TERMINAL_COPY_ON_SELECTION, it) } }
     item { Section("Ports") }
     item {
         SwitchRow(Icons.Outlined.Lan, "Announce new servers", "When a program in the guest starts listening on a port, the status bar says so (Ports lists them all)", settings.portNotifications) {

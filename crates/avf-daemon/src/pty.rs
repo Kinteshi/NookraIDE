@@ -1,5 +1,6 @@
 use avf_protocol::PtySessionInfo;
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
+use std::path::Path;
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     io::{self, Read, Write},
@@ -63,10 +64,28 @@ pub struct PtySubscription {
 }
 
 impl PtyManager {
+    #[cfg(test)]
     pub async fn spawn(
         &self,
         session_id: Uuid,
         shell: Option<String>,
+        cwd: Option<String>,
+        cols: u16,
+        rows: u16,
+    ) -> Result<(PtySessionInfo, u32), String> {
+        self.spawn_with(session_id, shell, Vec::new(), false, cwd, cols, rows)
+            .await
+    }
+
+    /// Spawns [shell] with [args]; with [integration], bash and zsh start with shell
+    /// integration (OSC 133 prompt/command/exit marks, see `shell/`).
+    #[allow(clippy::too_many_arguments)]
+    pub async fn spawn_with(
+        &self,
+        session_id: Uuid,
+        shell: Option<String>,
+        args: Vec<String>,
+        integration: bool,
         cwd: Option<String>,
         cols: u16,
         rows: u16,
@@ -83,8 +102,10 @@ impl PtyManager {
         }
 
         let created =
-            tokio::task::spawn_blocking(move || create_session(session_id, shell, cwd, cols, rows))
-                .await;
+            tokio::task::spawn_blocking(move || {
+                create_session(session_id, shell, args, integration, cwd, cols, rows)
+            })
+            .await;
 
         let (session, reader) = match created {
             Ok(Ok(created)) => created,
@@ -239,9 +260,37 @@ impl PtyManager {
     }
 }
 
+const BASH_INTEGRATION: &str = include_str!("shell/integration.bash");
+const ZSH_ENV: &str = include_str!("shell/zshenv.zsh");
+const ZSH_RC: &str = include_str!("shell/zshrc.zsh");
+
+/// Writes the shell integration scripts (once per daemon version) and returns their folder.
+fn integration_dir() -> Result<PathBuf, String> {
+    let base = std::env::var_os("HOME")
+        .map(|home| PathBuf::from(home).join(".cache"))
+        .unwrap_or_else(std::env::temp_dir);
+    let dir = base.join("avf-native").join("shell-integration");
+    let zsh = dir.join("zsh");
+    std::fs::create_dir_all(&zsh)
+        .map_err(|error| format!("could not create {}: {error}", zsh.display()))?;
+    for (path, content) in [
+        (dir.join("integration.bash"), BASH_INTEGRATION),
+        (zsh.join(".zshenv"), ZSH_ENV),
+        (zsh.join(".zshrc"), ZSH_RC),
+    ] {
+        if std::fs::read_to_string(&path).ok().as_deref() != Some(content) {
+            std::fs::write(&path, content)
+                .map_err(|error| format!("could not write {}: {error}", path.display()))?;
+        }
+    }
+    Ok(dir)
+}
+
 fn create_session(
     session_id: Uuid,
     shell: Option<String>,
+    args: Vec<String>,
+    integration: bool,
     cwd: Option<String>,
     cols: u16,
     rows: u16,
@@ -288,7 +337,36 @@ fn create_session(
         .take_writer()
         .map_err(|error| format!("could not open PTY writer: {error}"))?;
 
+    if args.iter().any(|arg| arg.contains('\0')) {
+        return Err("shell arguments contain a NUL byte".to_owned());
+    }
     let mut command = CommandBuilder::new(shell.clone());
+    let program = Path::new(&shell)
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    // Shell integration only for a plain interactive bash or zsh (a profile's own arguments,
+    // tmux say, start something else).
+    let integrated = integration && args.is_empty() && matches!(program.as_str(), "bash" | "zsh");
+    if integrated {
+        match integration_dir() {
+            Ok(dir) if program == "bash" => {
+                command.arg("--init-file");
+                command.arg(dir.join("integration.bash"));
+            }
+            Ok(dir) => {
+                let user = std::env::var("ZDOTDIR")
+                    .ok()
+                    .filter(|value| !value.is_empty())
+                    .or_else(|| std::env::var("HOME").ok())
+                    .unwrap_or_default();
+                command.env("__AVF_USER_ZDOTDIR", user);
+                command.env("ZDOTDIR", dir.join("zsh"));
+            }
+            Err(message) => debug!(%session_id, message, "no shell integration"),
+        }
+    }
+    command.args(&args);
     command.cwd(&cwd);
     command.env("TERM", "xterm-256color");
     command.env("COLORTERM", "truecolor");
@@ -557,6 +635,54 @@ mod tests {
         })
         .await
         .expect("PTY session did not exit after kill");
+    }
+
+    #[tokio::test]
+    async fn bash_integration_marks_prompts_commands_and_exit_status() {
+        if !Path::new("/bin/bash").exists() {
+            return;
+        }
+        let manager = PtyManager::default();
+        let session_id = Uuid::new_v4();
+        manager
+            .spawn_with(
+                session_id,
+                Some("/bin/bash".to_owned()),
+                Vec::new(),
+                true,
+                Some(std::env::temp_dir().to_string_lossy().into_owned()),
+                80,
+                24,
+            )
+            .await
+            .unwrap();
+        let mut subscription = manager.attach(session_id).await.unwrap();
+        manager
+            .input(session_id, b"false\nprintf 'marks-%s\\n' done\n".to_vec())
+            .await
+            .unwrap();
+        let mut output = Vec::new();
+        let contains = |output: &[u8], needle: &[u8]| output.windows(needle.len()).any(|w| w == needle);
+        timeout(Duration::from_secs(10), async {
+            loop {
+                match subscription.receiver.recv().await {
+                    Some(PtyEvent::Output(bytes)) => {
+                        output.extend(bytes);
+                        if contains(&output, b"marks-done") && contains(&output, b"\x1b]133;D;0\x07") {
+                            break;
+                        }
+                    }
+                    Some(PtyEvent::Exit(_)) | None => panic!("bash ended: {}", String::from_utf8_lossy(&output)),
+                    Some(PtyEvent::Error(message)) => panic!("PTY reader failed: {message}"),
+                }
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("no marks in: {}", String::from_utf8_lossy(&output)));
+        assert!(contains(&output, b"\x1b]133;A\x07"));
+        assert!(contains(&output, b"\x1b]133;C\x07\x1b]633;E;false\x07"));
+        assert!(contains(&output, b"\x1b]133;D;1\x07"));
+        manager.kill(session_id).await.unwrap();
     }
 
     #[tokio::test]

@@ -1023,7 +1023,13 @@ async fn process_packet(
                 cwd,
                 cols,
                 rows,
-            } => match state.pty.spawn(session_id, shell, cwd, cols, rows).await {
+                args,
+                integration,
+            } => match state
+                .pty
+                .spawn_with(session_id, shell, args, integration, cwd, cols, rows)
+                .await
+            {
                 Ok((_info, pid)) => {
                     send_pty_payload(outbound, session_id, PtyPayload::Spawned { pid }).await?;
                     attach_pty(session_id, state, outbound, pty_forwarders).await
@@ -3296,6 +3302,8 @@ mod tests {
                         cwd: Some(project.to_string_lossy().into_owned()),
                         cols: 80,
                         rows: 24,
+                        args: Vec::new(),
+                        integration: false,
                     },
                 })
                 .into(),

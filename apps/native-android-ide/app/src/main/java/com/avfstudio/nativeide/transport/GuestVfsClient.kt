@@ -353,8 +353,15 @@ class GuestVfsClient(
         ptyListeners.remove(sessionId)
     }
 
-    fun ptySpawn(sessionId: UUID, cwd: String?, cols: Int, rows: Int): Boolean =
-        sendFrame(MessagePackVfsCodec.ptySpawn(sessionId, cwd, cols, rows))
+    fun ptySpawn(
+        sessionId: UUID,
+        cwd: String?,
+        cols: Int,
+        rows: Int,
+        shell: String? = null,
+        args: List<String> = emptyList(),
+        integration: Boolean = false,
+    ): Boolean = sendFrame(MessagePackVfsCodec.ptySpawn(sessionId, cwd, cols, rows, shell, args, integration))
 
     fun ptyInput(sessionId: UUID, data: ByteArray): Boolean = sendFrame(MessagePackVfsCodec.ptyInput(sessionId, data))
 

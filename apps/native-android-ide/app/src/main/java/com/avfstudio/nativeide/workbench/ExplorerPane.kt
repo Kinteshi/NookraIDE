@@ -204,8 +204,25 @@ private fun ExplorerTree(controller: WorkbenchController, directory: String) {
                                 else -> Icons.AutoMirrored.Outlined.InsertDriveFile
                             },
                             row.label,
-                            leading = controller.fileIconTheme?.takeIf { !selecting && !entry.isDirectory }?.let { theme ->
-                                { FileIconView(entry.name, theme, dark, Icons.AutoMirrored.Outlined.InsertDriveFile) }
+                            leading = controller.fileIconTheme?.takeIf { !selecting && (!entry.isDirectory || it.hasFolderIcons) }?.let { theme ->
+                                {
+                                    if (entry.isDirectory) {
+                                        // A theme with folder icons (Material Icon Theme): its folder, after the chevron unless it hides them.
+                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                                            if (tree && !theme.hidesExplorerArrows) {
+                                                Icon(
+                                                    if (row.expanded) Icons.Outlined.KeyboardArrowDown else Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(16.dp),
+                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                )
+                                            }
+                                            FileIconView(entry.name, theme, dark, Icons.Outlined.Folder, folder = true, expanded = row.expanded)
+                                        }
+                                    } else {
+                                        FileIconView(entry.name, theme, dark, Icons.AutoMirrored.Outlined.InsertDriveFile)
+                                    }
+                                }
                             },
                             selected = picked || (entry.isDirectory && drag.target == entry.path) || (!selecting && entry.path == controller.activePath),
                             indent = row.depth,

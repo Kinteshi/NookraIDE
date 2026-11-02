@@ -227,6 +227,12 @@ pub enum PtyPayload {
         cwd: Option<String>,
         cols: u16,
         rows: u16,
+        /// Arguments for [shell] (a terminal profile's: `tmux new -A -s main`).
+        #[serde(default)]
+        args: Vec<String>,
+        /// Start bash or zsh with shell integration: OSC 133 marks and the command line.
+        #[serde(default)]
+        integration: bool,
     },
     Input(#[serde(with = "serde_bytes")] Vec<u8>),
     Resize {
@@ -815,6 +821,8 @@ mod tests {
                     cwd: Some("/workspace".into()),
                     cols: 80,
                     rows: 24,
+                    args: vec!["-l".into()],
+                    integration: true,
                 },
             },
             MultiplexedPacket::Pty {
@@ -824,6 +832,8 @@ mod tests {
                     cwd: None,
                     cols: 80,
                     rows: 24,
+                    args: Vec::new(),
+                    integration: false,
                 },
             },
             MultiplexedPacket::Pty {

@@ -20,6 +20,7 @@ enum class SidebarView(val title: String) {
     Outline("Outline"),
     Problems("Problems"),
     References("References"),
+    CallHierarchy("Call Hierarchy"),
 }
 
 enum class PanelTab(val title: String) {
@@ -90,6 +91,10 @@ sealed interface WorkbenchDialog {
     data object KeybindingsJson : WorkbenchDialog
     /** The language packs MaterialCode knows, to fetch one by hand. */
     data object LanguagePacks : WorkbenchDialog
+    /** Terminal: Rename… for terminal [id]. */
+    data class TerminalRename(val id: UUID, val name: String) : WorkbenchDialog
+    /** Terminal: Create New Terminal (With Profile)… */
+    data object TerminalProfiles : WorkbenchDialog
     /** Terminal: Open Detected Link…, newest first. */
     data class TerminalLinks(val links: List<TerminalLink>) : WorkbenchDialog
     /** Replace All in Search: [matches] occurrences in [files] files. */
@@ -141,6 +146,8 @@ enum class MarkdownPreviewMode { Side, Only }
 /** The preview resolves relative links and images against this host plus the file's folder. */
 const val MARKDOWN_BASE_HOST = "workspace.invalid"
 const val MAX_PREVIEW_IMAGE_BYTES = 16 * 1024 * 1024
+/** Files read for the peek and the References view's lines. */
+const val MAX_LOCATION_TEXT_BYTES = 4 * 1024 * 1024
 
 fun isMarkdownPath(path: String): Boolean =
     path.substringAfterLast('.', "").lowercase() in setOf("md", "markdown")
@@ -185,6 +192,17 @@ class TerminalSession(val id: UUID, val emulator: TerminalEmulator, title: Strin
     var title by mutableStateOf(title)
     var exitCode by mutableStateOf<Int?>(null)
     var exited by mutableStateOf(false)
+    /** The profile it started with (for a split's twin). */
+    var profile: TerminalProfile? = null
+    /** Bumped when shell integration reports a command starting or ending. */
+    var commandsRevision by mutableStateOf(0)
+    /** The last finished command's exit status (shell integration), for the tab's mark. */
+    var lastExitCode by mutableStateOf<Int?>(null)
+    /** The view's selection and scrolling, once it is shown. */
+    var selection: org.connectbot.terminal.SelectionController? = null
+    var scroll: TerminalScroll? = null
+    /** The command the previous/next command keys went to last (an index into the commands). */
+    var commandCursor: Int? = null
 }
 
 /** An open `.ipynb`: the parsed notebook, the raw document for saving, and its kernel. */
@@ -219,6 +237,14 @@ class NotebookSession(
     internal var cellCompletion by mutableStateOf<CellCompletion?>(null)
     /** Copilot's suggestion for the focused cell, drawn as ghost text there. */
     internal var cellSuggestion by mutableStateOf<CellSuggestion?>(null)
+    /** The selected cell's caret, for language features asked from the keyboard (hover, go to definition). */
+    var cellCaret = 0
+    /** A cell to put the caret in at an offset (go to definition, a problem); the cell takes it once shown. */
+    var cellCaretRequest by mutableStateOf<Pair<String, Int>?>(null)
+    /** Problems in code cells from the Python language server, by cell id. */
+    val cellProblems = androidx.compose.runtime.mutableStateMapOf<String, List<CellProblem>>()
+    /** The hover card in a cell: problems there and the server's hover. */
+    var cellHover by mutableStateOf<CellHover?>(null)
     /** The Variables view: the last list from the kernel, whether a look is under way, and why it failed. */
     var variables by mutableStateOf<com.avfstudio.nativeide.notebook.KernelVariables?>(null)
     var variablesLoading by mutableStateOf(false)
@@ -259,3 +285,51 @@ data class HoverCard(
     val problems: List<com.avfstudio.nativeide.language.LanguageDiagnostic>,
     val markdown: String?,
 )
+
+/** What a location request asks the language server for ([method] is `textDocument/<method>`). */
+enum class LocationKind(val method: String, val title: String) {
+    Definition("definition", "Definition"),
+    TypeDefinition("typeDefinition", "Type Definition"),
+    Implementation("implementation", "Implementations"),
+    Declaration("declaration", "Declaration"),
+    References("references", "References"),
+}
+
+/** The peek: [locations] found from [path] at [position], [selected] shown in its preview. */
+data class PeekView(
+    val kind: LocationKind,
+    val path: String,
+    val position: com.avfstudio.nativeide.editor.LspPosition,
+    val locations: List<LanguageLocation>,
+    val selected: Int,
+)
+
+/** The Call Hierarchy view: [root] at [path], its callers ([incoming]) or callees. */
+data class CallHierarchyView(val path: String, val root: CallHierarchyNode, val incoming: Boolean)
+
+/** A call hierarchy item (LSP `CallHierarchyItem`) and where the call happens ([fromRanges]). */
+data class CallHierarchyNode(val key: String, val item: com.google.gson.JsonObject, val fromRanges: List<com.google.gson.JsonObject>) {
+    val name: String get() = item.get("name")?.asString.orEmpty()
+    val detail: String get() = item.get("detail")?.takeIf { it.isJsonPrimitive }?.asString.orEmpty()
+    val uri: String get() = item.get("uri")?.asString.orEmpty()
+    val kind: Int get() = item.get("kind")?.takeIf { it.isJsonPrimitive }?.asInt ?: 12
+    val line: Int get() = item.getAsJsonObject("selectionRange")?.getAsJsonObject("start")?.get("line")?.asInt ?: 0
+}
+
+/** The hex view's pages are this long; device files up to [MAX_HEX_DEVICE_BYTES] are read whole. */
+const val HEX_PAGE_BYTES = 64 * 1024
+const val MAX_HEX_DEVICE_BYTES = 64 * 1024 * 1024
+
+/** A binary file in the hex view: its [size], the pages read so far, and the selected byte. */
+class HexFile(val path: String, val size: Long) {
+    val pages = androidx.compose.runtime.mutableStateMapOf<Int, ByteArray>()
+    var selected by mutableStateOf<Long?>(null)
+
+    fun byteAt(offset: Long): Byte? = pages[(offset / HEX_PAGE_BYTES).toInt()]?.getOrNull((offset % HEX_PAGE_BYTES).toInt())
+}
+
+/** A problem in a code cell: [start]..[end] of its source. */
+data class CellProblem(val cellId: String, val start: Int, val end: Int, val severity: Int?, val message: String, val origin: String)
+
+/** A hover card in cell [cellId] at [offset] of its source. */
+data class CellHover(val cellId: String, val offset: Int, val problems: List<CellProblem>, val markdown: String?)

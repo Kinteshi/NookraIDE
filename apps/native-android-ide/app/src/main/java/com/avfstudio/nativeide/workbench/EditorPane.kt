@@ -121,7 +121,7 @@ fun EditorArea(controller: WorkbenchController, modifier: Modifier = Modifier) {
                 paged != null -> LargeFileView(controller)
                 notebook != null -> NotebookEditor(controller, notebook)
                 activeDocument != null && activeDocument.binary -> key(activeDocument.path) {
-                    ImageViewer(controller, activeDocument.path)
+                    if (isImagePath(activeDocument.path)) ImageViewer(controller, activeDocument.path) else HexView(controller, activeDocument.path)
                 }
                 activeDocument != null && preview == MarkdownPreviewMode.Only -> key(activeDocument.path) {
                     if (isSvgPath(activeDocument.path)) {
@@ -196,6 +196,7 @@ private fun EditorOverlays(controller: WorkbenchController) {
     NextEditOverlay(controller)
     ParameterHints(controller)
     HoverCardOverlay(controller)
+    PeekOverlay(controller)
     if (controller.findVisible) {
         Box(Modifier.fillMaxSize()) { FindWidget(controller, Modifier.align(Alignment.TopEnd)) }
     }
@@ -545,11 +546,14 @@ private fun NativeEditorView(controller: WorkbenchController, document: Document
                 replaceComponent(io.github.rosemoe.sora.widget.component.EditorAutoCompletion::class.java, suggest)
                 val tooltipClass = io.github.rosemoe.sora.widget.component.EditorDiagnosticTooltipWindow::class.java
                 getComponent(tooltipClass).isEnabled = false
+                // It waits too while a next-edit card, the hover card or the peek shows (they're drawn
+                // under sora's popup windows, which would cover them).
                 val tooltip = object : io.github.rosemoe.sora.widget.component.EditorDiagnosticTooltipWindow(this) {
                     override fun show() {
-                        if (!suggest.isShowing) super.show()
+                        if (!suggest.isShowing && controller.shownNextEdit() == null && controller.hoverCard == null && controller.peek == null) super.show()
                     }
                 }
+                problemTooltip = tooltip
                 replaceComponent(tooltipClass, tooltip)
                 setEditorLanguage(SoraCompletionLanguage(language, controller.completionProvider(document)) { post { tooltip.dismiss() } })
                 props.symbolPairAutoCompletion = false
@@ -705,6 +709,7 @@ private fun HoverCardOverlay(controller: WorkbenchController) {
     controller.editorViewportTick
     val card = controller.hoverCard?.takeIf { it.path == controller.activePath } ?: return
     val view = controller.soraEditor() ?: return
+    LaunchedEffect(card) { view.problemTooltip?.dismiss() }
     val density = LocalDensity.current
     val colors = MaterialTheme.colorScheme
     val line = card.position.line
@@ -729,41 +734,15 @@ private fun HoverCardOverlay(controller: WorkbenchController) {
                 layout(constraints.maxWidth, constraints.maxHeight) { placeable.place(left, top) }
             },
     ) {
-        Column(
-            Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            card.problems.forEach { problem ->
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Icon(
-                        when (problem.severity) {
-                            1, null -> Icons.Outlined.ErrorOutline
-                            2 -> Icons.Outlined.WarningAmber
-                            else -> Icons.Outlined.Info
-                        },
-                        contentDescription = null,
-                        tint = colors.problemColor(problem.severity),
-                        modifier = Modifier.size(16.dp).padding(top = 2.dp),
-                    )
-                    val code = problem.code?.takeIf { it.isJsonPrimitive }?.asString
-                    // VS Code's "message  source(code)".
-                    val origin = when {
-                        problem.source != null && code != null -> "  ${problem.source}($code)"
-                        else -> listOfNotNull(problem.source, code).firstOrNull()?.let { "  $it" }.orEmpty()
-                    }
-                    Text(
-                        problem.message + origin,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = colors.onSurface,
-                    )
-                }
+        val problems = card.problems.map { problem ->
+            val code = problem.code?.takeIf { it.isJsonPrimitive }?.asString
+            val origin = when {
+                problem.source != null && code != null -> "${problem.source}($code)"
+                else -> listOfNotNull(problem.source, code).firstOrNull().orEmpty()
             }
-            if (card.problems.isNotEmpty() && card.markdown != null) androidx.compose.material3.HorizontalDivider(color = colors.outlineVariant)
-            card.markdown?.let { markdown ->
-                val source = remember(card.path) { controller.markdownSource(card.path, null) }
-                NotebookMarkdown(controller, markdown, source)
-            }
+            HoverProblem(problem.severity, problem.message, origin)
         }
+        HoverCardContent(controller, card.path, problems, card.markdown)
     }
 }
 
@@ -1034,6 +1013,7 @@ private fun NextEditOverlay(controller: WorkbenchController) {
     controller.cursorPosition
     val preview = controller.shownNextEdit() ?: return
     val view = controller.soraEditor() ?: return
+    LaunchedEffect(preview) { view.problemTooltip?.dismiss() }
     val density = LocalDensity.current
     val colors = MaterialTheme.colorScheme
     val content = view.text
@@ -1448,6 +1428,9 @@ internal class NativeCodeEditor(
         super.updateStyles(styles, range)
         onStylesPublished?.invoke()
     }
+
+    /** sora's problem tooltip at the cursor, closed when a card of ours opens over the same place. */
+    var problemTooltip: io.github.rosemoe.sora.widget.component.EditorDiagnosticTooltipWindow? = null
 
     /** While a Copilot suggestion is shown, Tab accepts it and Escape dismisses it. */
     var hasInlineSuggestion: Boolean = false

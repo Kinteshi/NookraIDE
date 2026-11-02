@@ -107,6 +107,15 @@ class LanguageClient(
         private set
     @Volatile var supportsReferences = false
         private set
+    /** Go to Type Definition, Implementation and Declaration, and the call hierarchy. */
+    @Volatile var supportsTypeDefinition = false
+        private set
+    @Volatile var supportsImplementation = false
+        private set
+    @Volatile var supportsDeclaration = false
+        private set
+    @Volatile var supportsCallHierarchy = false
+        private set
     /** `textDocument/foldingRange`; without it, folding follows indentation. */
     @Volatile var supportsFoldingRange = false
         private set
@@ -177,6 +186,10 @@ class LanguageClient(
                 supportsCodeLensResolve = capabilities?.get("codeLensProvider")?.takeIf { it.isJsonObject }?.asJsonObject
                     ?.get("resolveProvider")?.takeIf { it.isJsonPrimitive }?.asBoolean == true
                 supportsReferences = capabilities?.provides("referencesProvider") == true
+                supportsTypeDefinition = capabilities?.provides("typeDefinitionProvider") == true
+                supportsImplementation = capabilities?.provides("implementationProvider") == true
+                supportsDeclaration = capabilities?.provides("declarationProvider") == true
+                supportsCallHierarchy = capabilities?.provides("callHierarchyProvider") == true
                 supportsLinkedEditing = capabilities?.provides("linkedEditingRangeProvider") == true
                 supportsFoldingRange = capabilities?.provides("foldingRangeProvider") == true
                 notify("initialized", JsonObject())
@@ -315,6 +328,17 @@ class LanguageClient(
 
     fun definition(path: String, position: LspPosition): CompletableFuture<JsonElement> =
         request("textDocument/definition", positionParams(path, position))
+
+    /** `textDocument/typeDefinition`, `implementation` or `declaration` ([method]'s last part). */
+    fun locations(method: String, path: String, position: LspPosition): CompletableFuture<JsonElement> =
+        request("textDocument/$method", positionParams(path, position))
+
+    fun prepareCallHierarchy(path: String, position: LspPosition): CompletableFuture<JsonElement> =
+        request("textDocument/prepareCallHierarchy", positionParams(path, position))
+
+    /** `callHierarchy/incomingCalls` or `outgoingCalls` for an item from [prepareCallHierarchy]. */
+    fun calls(item: JsonObject, incoming: Boolean): CompletableFuture<JsonElement> =
+        request(if (incoming) "callHierarchy/incomingCalls" else "callHierarchy/outgoingCalls", JsonObject().apply { add("item", item) })
 
     fun references(path: String, position: LspPosition, includeDeclaration: Boolean = true): CompletableFuture<JsonElement> =
         request("textDocument/references", positionParams(path, position).apply {
@@ -543,7 +567,11 @@ class LanguageClient(
                 })
                 add("rangeFormatting", JsonObject().apply { addProperty("dynamicRegistration", false) })
                 add("inlayHint", JsonObject().apply { addProperty("dynamicRegistration", false) })
-                add("definition", JsonObject().apply { addProperty("dynamicRegistration", false) })
+                add("definition", JsonObject().apply { addProperty("dynamicRegistration", false); addProperty("linkSupport", true) })
+                add("typeDefinition", JsonObject().apply { addProperty("dynamicRegistration", false); addProperty("linkSupport", true) })
+                add("implementation", JsonObject().apply { addProperty("dynamicRegistration", false); addProperty("linkSupport", true) })
+                add("declaration", JsonObject().apply { addProperty("dynamicRegistration", false); addProperty("linkSupport", true) })
+                add("callHierarchy", JsonObject().apply { addProperty("dynamicRegistration", false) })
                 add("references", JsonObject().apply { addProperty("dynamicRegistration", false) })
                 add("rename", JsonObject().apply { addProperty("dynamicRegistration", false) })
                 add("formatting", JsonObject().apply { addProperty("dynamicRegistration", false) })

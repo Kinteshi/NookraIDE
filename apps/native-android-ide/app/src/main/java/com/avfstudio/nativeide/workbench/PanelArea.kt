@@ -56,7 +56,6 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import org.connectbot.terminal.Terminal
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -66,6 +65,15 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.material.icons.outlined.VerticalSplit
+import androidx.compose.material.icons.outlined.ArrowDropDown
+import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.Replay
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.foundation.layout.fillMaxHeight
 
 /** Bottom panel (Ctrl+J): terminals, problems and the output log, resizable by its top edge. */
 @Composable
@@ -130,7 +138,7 @@ fun TerminalView(controller: WorkbenchController, modifier: Modifier = Modifier)
     val colors = MaterialTheme.colorScheme
     val dark = LocalDarkTheme.current
     Column(modifier.fillMaxSize()) {
-        if (controller.terminals.size > 1 || controller.terminals.any { it.exited }) {
+        if (controller.terminals.size > 1 || controller.terminals.any { it.exited || it.lastExitCode != null }) {
             Row(
                 Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -140,7 +148,15 @@ fun TerminalView(controller: WorkbenchController, modifier: Modifier = Modifier)
                         selected = session.id == controller.activeTerminalId,
                         onClick = { controller.activeTerminalId = session.id },
                         label = { Text(if (session.exited) "${session.title} (exited)" else session.title) },
-                        leadingIcon = { Icon(Icons.Outlined.Terminal, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                        leadingIcon = {
+                            // Shell integration's last exit status, as VS Code's command decorations colour it.
+                            val code = session.lastExitCode
+                            if (code == null) {
+                                Icon(Icons.Outlined.Terminal, contentDescription = null, modifier = Modifier.size(16.dp))
+                            } else {
+                                Box(Modifier.size(10.dp).background(if (code == 0) colors.primary else colors.error, androidx.compose.foundation.shape.CircleShape))
+                            }
+                        },
                         trailingIcon = {
                             Icon(
                                 Icons.Outlined.Close,
@@ -165,6 +181,26 @@ fun TerminalView(controller: WorkbenchController, modifier: Modifier = Modifier)
             return
         }
         if (controller.terminalFindVisible) TerminalFindBar(controller, session)
+        val split = controller.splitTerminalId?.takeIf { it != session.id }?.let { id -> controller.terminals.firstOrNull { it.id == id } }
+        if (split == null) {
+            TerminalPane(controller, session, Modifier.weight(1f).fillMaxWidth())
+        } else {
+            // VS Code's split terminal: the two side by side; a tap makes one active.
+            Row(Modifier.weight(1f).fillMaxWidth()) {
+                TerminalPane(controller, session, Modifier.weight(1f).fillMaxHeight())
+                androidx.compose.material3.VerticalDivider(color = colors.outlineVariant)
+                TerminalPane(controller, split, Modifier.weight(1f).fillMaxHeight())
+            }
+        }
+    }
+}
+
+/** One terminal: the emulator's view, and a note with New terminal once it ended. */
+@Composable
+private fun TerminalPane(controller: WorkbenchController, session: TerminalSession, modifier: Modifier) {
+    val colors = MaterialTheme.colorScheme
+    val dark = LocalDarkTheme.current
+    Column(modifier) {
         val background = if (dark) colors.surfaceContainerLowest else colors.surface
         LaunchedEffect(session.id, dark, background) {
             session.emulator.applyColorScheme(terminalPalette(dark), colors.onSurface.toArgb(), background.toArgb())
@@ -179,22 +215,34 @@ fun TerminalView(controller: WorkbenchController, modifier: Modifier = Modifier)
                 .focusRequester(endedFocus)
                 .focusable(enabled = session.exited)
                 .pointerInput(session.id, session.exited) {
-                    if (!session.exited) return@pointerInput
                     awaitEachGesture {
                         awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-                        endedFocus.requestFocus()
+                        if (controller.splitTerminalId != null) controller.activeTerminalId = session.id
+                        if (session.exited) {
+                            endedFocus.requestFocus()
+                            return@awaitEachGesture
+                        }
+                        // Copy on selection: once the finger or mouse lifts from making one.
+                        do {
+                            val event = awaitPointerEvent(PointerEventPass.Final)
+                        } while (event.changes.any { it.pressed })
+                        controller.copyTerminalSelection(session)
                     }
                 },
         ) {
             key(session.id) {
-                Terminal(
+                ScrollableTerminal(
                     terminalEmulator = session.emulator,
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(horizontal = 6.dp)
                         .onFocusChanged { state ->
-                            if (state.hasFocus) controller.focusArea = FocusArea.Terminal
-                            else if (controller.focusArea == FocusArea.Terminal) controller.focusArea = FocusArea.Other
+                            if (state.hasFocus) {
+                                controller.focusArea = FocusArea.Terminal
+                                if (controller.splitTerminalId != null) controller.activeTerminalId = session.id
+                            } else if (controller.focusArea == FocusArea.Terminal) {
+                                controller.focusArea = FocusArea.Other
+                            }
                         },
                     initialFontSize = controller.settings.terminalFontSize.sp,
                     backgroundColor = background,
@@ -202,6 +250,8 @@ fun TerminalView(controller: WorkbenchController, modifier: Modifier = Modifier)
                     selectionBackgroundColor = colors.primary.copy(alpha = 0.35f),
                     keyboardEnabled = !session.exited,
                     onHyperlinkClick = controller::openLink,
+                    onSelectionControllerAvailable = { session.selection = it },
+                    onScrollAvailable = { session.scroll = it },
                     onInterceptKey = { event ->
                         event.type == KeyEventType.KeyDown && controller.handleKeyDown(event.nativeKeyEvent)
                     },
@@ -221,7 +271,7 @@ fun TerminalView(controller: WorkbenchController, modifier: Modifier = Modifier)
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.weight(1f).padding(vertical = 8.dp),
                     )
-                    FilledTonalButton(onClick = { controller.newTerminal() }) { Text("New terminal") }
+                    FilledTonalButton(onClick = { controller.newTerminal(profile = session.profile) }) { Text("New terminal") }
                 }
             }
         }
@@ -419,7 +469,105 @@ fun TerminalActions(controller: WorkbenchController) {
         Icon(Icons.Outlined.Search, contentDescription = "Find in terminal")
     } }
     Tooltip("Open a detected link") { IconButton(onClick = controller::showTerminalLinks) { Icon(Icons.Outlined.Link, contentDescription = "Open a detected link") } }
-    Tooltip("New terminal") { IconButton(onClick = { controller.newTerminal() }) { Icon(Icons.Outlined.Add, contentDescription = "New terminal") } }
+    TerminalCommandsButton(controller)
+    Tooltip("Split terminal", "workbench.action.terminal.split") {
+        IconButton(onClick = controller::splitTerminal) { Icon(Icons.Outlined.VerticalSplit, contentDescription = "Split terminal") }
+    }
+    Tooltip("New terminal", "workbench.action.terminal.new") { IconButton(onClick = { controller.newTerminal() }) { Icon(Icons.Outlined.Add, contentDescription = "New terminal") } }
+    var more by remember { mutableStateOf(false) }
+    Box {
+        Tooltip("More terminal actions") { IconButton(onClick = { more = true }) { Icon(Icons.Outlined.ArrowDropDown, contentDescription = "More terminal actions") } }
+        DropdownMenu(expanded = more, onDismissRequest = { more = false }) {
+            // VS Code's launch profile list under +, then the terminal's own actions.
+            controller.terminalProfiles.forEach { profile ->
+                DropdownMenuItem(
+                    text = { Text(profile.name + if (profile.name == controller.settings.terminalDefaultProfile) " (default)" else "") },
+                    leadingIcon = { Icon(Icons.Outlined.Terminal, contentDescription = null) },
+                    onClick = {
+                        more = false
+                        controller.newTerminal(profile = profile)
+                    },
+                )
+            }
+            androidx.compose.material3.HorizontalDivider()
+            controller.activeTerminal?.let { session ->
+                DropdownMenuItem(text = { Text("Rename…") }, onClick = {
+                    more = false
+                    controller.runCommand("workbench.action.terminal.rename")
+                })
+                if (controller.splitTerminalId != null) {
+                    DropdownMenuItem(text = { Text("Unsplit") }, onClick = {
+                        more = false
+                        controller.unsplitTerminal()
+                    })
+                }
+                DropdownMenuItem(text = { Text("Copy last command output") }, onClick = {
+                    more = false
+                    controller.runCommand("workbench.action.terminal.copyLastCommandOutput")
+                })
+                DropdownMenuItem(text = { Text("Kill terminal") }, onClick = {
+                    more = false
+                    controller.closeTerminal(session.id)
+                })
+            }
+        }
+    }
+}
+
+/**
+ * The commands shell integration marked in the active terminal, newest first, each with how it
+ * ended: a tap scrolls to it (Ctrl+Up / Ctrl+Down step through them); copy its output or run it again.
+ */
+@Composable
+private fun TerminalCommandsButton(controller: WorkbenchController) {
+    val session = controller.activeTerminal ?: return
+    val colors = MaterialTheme.colorScheme
+    var open by remember { mutableStateOf(false) }
+    Box {
+        Tooltip("Commands") { IconButton(onClick = { open = true }) { Icon(Icons.Outlined.History, contentDescription = "Commands") } }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            val commands = controller.terminalCommands(session).asReversed().take(20)
+            if (commands.isEmpty()) {
+                DropdownMenuItem(
+                    text = { Text(if (controller.settings.shellIntegration) "No commands yet (bash and zsh mark them)" else "Shell integration is off (Settings → Terminal)") },
+                    enabled = false,
+                    onClick = {},
+                )
+            }
+            commands.forEach { command ->
+                DropdownMenuItem(
+                    text = { Text(command.command.ifBlank { "(command)" }, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, maxLines = 1) },
+                    leadingIcon = {
+                        when (val code = command.exitCode) {
+                            null -> androidx.compose.material3.CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 1.5.dp)
+                            0 -> Icon(Icons.Outlined.CheckCircle, contentDescription = "Succeeded", tint = colors.primary)
+                            else -> Text("$code", color = colors.error, style = MaterialTheme.typography.labelLarge)
+                        }
+                    },
+                    trailingIcon = {
+                        Row {
+                            Tooltip("Copy output") {
+                                IconButton(onClick = {
+                                    open = false
+                                    controller.copyTerminalText(session.textLog.output(command), "Copied the output of ${command.command}")
+                                }) { Icon(Icons.Outlined.ContentCopy, contentDescription = "Copy output", modifier = Modifier.size(18.dp)) }
+                            }
+                            Tooltip("Run again") {
+                                IconButton(onClick = {
+                                    open = false
+                                    controller.rerunTerminalCommand(session, command)
+                                }, enabled = !session.exited) { Icon(Icons.Outlined.Replay, contentDescription = "Run again", modifier = Modifier.size(18.dp)) }
+                            }
+                        }
+                    },
+                    onClick = {
+                        open = false
+                        controller.revealTerminalCommand(session, command)
+                    },
+                )
+            }
+        }
+    }
 }
 
 /**

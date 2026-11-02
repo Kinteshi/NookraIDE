@@ -141,17 +141,31 @@ internal object MessagePackVfsCodec {
             stringField("bridge_id", bridgeId.toString())
         }
 
-    fun ptySpawn(sessionId: UUID, cwd: String?, cols: Int, rows: Int): ByteArray =
+    /** A shell ([shell] with [args], else the guest's login shell); [integration] asks for prompt and exit-status marks. */
+    fun ptySpawn(
+        sessionId: UUID,
+        cwd: String?,
+        cols: Int,
+        rows: Int,
+        shell: String? = null,
+        args: List<String> = emptyList(),
+        integration: Boolean = false,
+    ): ByteArray =
         ptyPacket(sessionId) {
             packMapHeader(1)
             packString("Spawn")
-            packMapHeader(4)
+            packMapHeader(6)
             packString("shell")
-            packNil()
+            shell?.let(::packString) ?: packNil()
             packString("cwd")
             cwd?.let(::packString) ?: packNil()
             stringField("cols", cols)
             stringField("rows", rows)
+            packString("args")
+            packArrayHeader(args.size)
+            args.forEach(::packString)
+            packString("integration")
+            packBoolean(integration)
         }
 
     fun ptyInput(sessionId: UUID, data: ByteArray): ByteArray =

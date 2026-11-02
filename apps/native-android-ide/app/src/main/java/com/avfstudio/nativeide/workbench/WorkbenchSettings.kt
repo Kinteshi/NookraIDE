@@ -61,6 +61,14 @@ data class WorkbenchSettings(
     val autoSaveDelayMs: Int = 1000,
     val semanticHighlighting: Boolean = true,
     val terminalFontSize: Float = 13f,
+    /** `terminal.integrated.defaultProfile.linux`: the shell a new terminal starts. */
+    val terminalDefaultProfile: String = "bash",
+    /** `terminal.integrated.profiles.linux`: the user's own shells, over the built-in ones (null hides one). */
+    val terminalProfiles: List<TerminalProfile> = BUILT_IN_TERMINAL_PROFILES,
+    /** `terminal.integrated.shellIntegration.enabled`: prompt and exit-status marks in bash and zsh. */
+    val shellIntegration: Boolean = true,
+    /** `terminal.integrated.copyOnSelection`: selected terminal text goes to the clipboard. */
+    val terminalCopyOnSelection: Boolean = false,
     val pythonLanguageServer: String = "ty",
     /** TypeScript 7's native server ("typescript") or vtsls (Node + tsserver). */
     val typescriptLanguageServer: String = "typescript",
@@ -84,6 +92,8 @@ data class WorkbenchSettings(
     /** Backspace in leading spaces goes back to the previous tab stop (one indentation level). */
     val useTabStops: Boolean = true,
     val notebookCopilot: Boolean = true,
+    /** `avf.notebook.languageServer`: problems, hover and go to definition in code cells, from the Python language server. */
+    val notebookLanguageServer: Boolean = true,
     /** Draw Plotly figures; needs plotly.js from cdn.plot.ly the first time. */
     val renderPlotly: Boolean = true,
     /** `text/latex` outputs (SymPy, IPython's Math) drawn with KaTeX; needs it from jsDelivr the first time. */
@@ -157,7 +167,7 @@ data class WorkbenchSettings(
     val explorerDragAndDrop: Boolean = true,
     /** Names Explorer and Quick Open hide (`files.exclude`, glob → true). */
     val filesExclude: List<String> = DEFAULT_FILES_EXCLUDE,
-    /** File icons in Explorer, tabs and Open Editors (`workbench.iconTheme`): VS Code's Seti, or "none" for plain ones. */
+    /** File icons in Explorer, tabs and Open Editors (`workbench.iconTheme`): VS Code's Seti, an imported theme's id, or "none" for plain ones. */
     val iconTheme: String = "vs-seti",
     /** Fold arrows beside the line numbers and the fold commands (`editor.folding`). */
     val folding: Boolean = true,
@@ -189,6 +199,7 @@ data class WorkbenchSettings(
         const val INLAY_HINTS = "editor.inlayHints.enabled"
         const val PINCH_TO_ZOOM = "avf.editor.pinchToZoom"
         const val MOUSE_WHEEL_ZOOM = "editor.mouseWheelZoom"
+        const val NOTEBOOK_LANGUAGE_SERVER = "avf.notebook.languageServer"
         const val TOOLTIPS = "avf.workbench.tooltips"
         const val EDITOR_HOVER = "editor.hover.enabled"
         const val EDITOR_HOVER_DELAY = "editor.hover.delay"
@@ -197,6 +208,10 @@ data class WorkbenchSettings(
         const val AUTO_SAVE_DELAY = "files.autoSaveDelay"
         const val SEMANTIC_HIGHLIGHTING = "editor.semanticHighlighting.enabled"
         const val TERMINAL_FONT_SIZE = "terminal.integrated.fontSize"
+        const val TERMINAL_DEFAULT_PROFILE = "terminal.integrated.defaultProfile.linux"
+        const val TERMINAL_PROFILES = "terminal.integrated.profiles.linux"
+        const val SHELL_INTEGRATION = "terminal.integrated.shellIntegration.enabled"
+        const val TERMINAL_COPY_ON_SELECTION = "terminal.integrated.copyOnSelection"
         const val PYTHON_LANGUAGE_SERVER = "avf.python.languageServer"
         const val TYPESCRIPT_LANGUAGE_SERVER = "avf.typescript.languageServer"
         const val LANGUAGE_SERVER_IDLE = "avf.languageServers.idleStopSeconds"
@@ -300,6 +315,10 @@ data class WorkbenchSettings(
                 autoSaveDelayMs = number(AUTO_SAVE_DELAY)?.toInt()?.coerceIn(200, 60_000) ?: defaults.autoSaveDelayMs,
                 semanticHighlighting = bool(SEMANTIC_HIGHLIGHTING, defaults.semanticHighlighting),
                 terminalFontSize = number(TERMINAL_FONT_SIZE)?.toFloat()?.coerceIn(6f, 30f) ?: defaults.terminalFontSize,
+                terminalDefaultProfile = string(TERMINAL_DEFAULT_PROFILE)?.takeIf { it.isNotBlank() } ?: defaults.terminalDefaultProfile,
+                terminalProfiles = terminalProfiles(settings.getPath(TERMINAL_PROFILES)?.takeIf { it.isJsonObject }?.asJsonObject),
+                shellIntegration = bool(SHELL_INTEGRATION, defaults.shellIntegration),
+                terminalCopyOnSelection = bool(TERMINAL_COPY_ON_SELECTION, defaults.terminalCopyOnSelection),
                 pythonLanguageServer = string(PYTHON_LANGUAGE_SERVER)?.takeIf { it in setOf("ty", "basedpyright") }
                     ?: defaults.pythonLanguageServer,
                 typescriptLanguageServer = string(TYPESCRIPT_LANGUAGE_SERVER)?.takeIf { it in setOf("typescript", "vtsls") }
@@ -320,6 +339,7 @@ data class WorkbenchSettings(
                 autoIndent = string(AUTO_INDENT)?.let { it != "none" } ?: defaults.autoIndent,
                 useTabStops = bool(USE_TAB_STOPS, defaults.useTabStops),
                 notebookCopilot = bool(NOTEBOOK_COPILOT, defaults.notebookCopilot),
+                notebookLanguageServer = bool(NOTEBOOK_LANGUAGE_SERVER, defaults.notebookLanguageServer),
                 renderPlotly = bool(RENDER_PLOTLY, defaults.renderPlotly),
                 renderLatex = bool(RENDER_LATEX, defaults.renderLatex),
                 keyBar = bool(KEY_BAR, defaults.keyBar),
@@ -367,7 +387,7 @@ data class WorkbenchSettings(
                 folding = bool(FOLDING, defaults.folding),
                 // VS Code writes null for no file icons.
                 iconTheme = settings.getPath(ICON_THEME)?.let { if (it.isJsonNull) "none" else it.takeIf { v -> v.isJsonPrimitive }?.asString }
-                    ?.takeIf { it in setOf("vs-seti", "none") } ?: defaults.iconTheme,
+                    ?.takeIf { it.isNotBlank() } ?: defaults.iconTheme,
             )
         }
     }
@@ -448,4 +468,45 @@ fun JsonObject.withPath(path: String, value: Any?): JsonObject {
         else -> error("Unsupported settings value: ${value::class.java.name}")
     }
     return copy
+}
+
+/** A shell a terminal can start (VS Code's terminal profile): [path] with [args]. */
+data class TerminalProfile(val name: String, val path: String, val args: List<String> = emptyList())
+
+/** The shells offered without settings; `terminal.integrated.profiles.linux` adds to them. */
+val BUILT_IN_TERMINAL_PROFILES = listOf(
+    TerminalProfile("bash", "bash"),
+    TerminalProfile("zsh", "zsh"),
+    TerminalProfile("fish", "fish"),
+    TerminalProfile("sh", "sh"),
+    TerminalProfile("tmux", "tmux", listOf("new-session", "-A", "-s", "main")),
+)
+
+/** VS Code's `terminal.integrated.profiles.linux`: `{"name": {"path": …, "args": [...]}}`, `null` hides a built-in. */
+internal fun terminalProfiles(settings: JsonObject?): List<TerminalProfile> {
+    if (settings == null) return BUILT_IN_TERMINAL_PROFILES
+    val profiles = BUILT_IN_TERMINAL_PROFILES.associateBy { it.name }.toMutableMap()
+    settings.entrySet().forEach { (name, value) ->
+        if (value.isJsonNull) {
+            profiles.remove(name)
+            return@forEach
+        }
+        val profile = value.takeIf { it.isJsonObject }?.asJsonObject ?: return@forEach
+        val path = profile.get("path")?.let { path ->
+            when {
+                path.isJsonPrimitive -> path.asString
+                path.isJsonArray -> path.asJsonArray.firstOrNull()?.takeIf { it.isJsonPrimitive }?.asString
+                else -> null
+            }
+        } ?: profiles[name]?.path ?: return@forEach
+        val args = profile.get("args")?.let { args ->
+            when {
+                args.isJsonArray -> args.asJsonArray.mapNotNull { it.takeIf { a -> a.isJsonPrimitive }?.asString }
+                args.isJsonPrimitive -> listOf(args.asString)
+                else -> null
+            }
+        } ?: emptyList()
+        profiles[name] = TerminalProfile(name, path, args)
+    }
+    return profiles.values.toList()
 }

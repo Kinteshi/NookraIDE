@@ -259,8 +259,48 @@ class WorkbenchController(private val context: Context) {
 
     private val setiIcons by lazy { FileIconTheme.load(context) }
 
+    private val assetPacksDirectory get() = File(context.filesDir, "asset-packs")
+
+    /** Icon themes to choose from: Seti, plain, and those imported VSIX packs contribute. */
+    var iconThemeChoices by mutableStateOf(emptyList<IconThemeChoice>())
+        private set
+
+    fun refreshIconThemeChoices() {
+        io.execute {
+            val installed = FileIconTheme.installed(assetPacksDirectory)
+            post { iconThemeChoices = installed }
+        }
+    }
+
+    /** An imported icon theme once loaded (off the main thread): its id and the theme, null if it failed. */
+    private var importedIconTheme by mutableStateOf<Pair<String, FileIconTheme?>?>(null)
+    private var iconThemeLoading: String? = null
+
     /** The file icon theme shown (`workbench.iconTheme`), or null for the plain icons. */
-    val fileIconTheme: FileIconTheme? get() = setiIcons.takeIf { settings.iconTheme == "vs-seti" }
+    val fileIconTheme: FileIconTheme?
+        get() = when (val id = settings.iconTheme) {
+            "none" -> null
+            FileIconTheme.SETI -> setiIcons
+            else -> {
+                val loaded = importedIconTheme
+                if (loaded?.first == id) {
+                    loaded.second ?: setiIcons
+                } else {
+                    if (iconThemeLoading != id) {
+                        iconThemeLoading = id
+                        io.execute {
+                            val theme = FileIconTheme.loadInstalled(assetPacksDirectory, id)
+                            post {
+                                iconThemeLoading = null
+                                importedIconTheme = id to theme
+                                if (theme == null) status = "Icon theme $id could not be loaded; showing Seti"
+                            }
+                        }
+                    }
+                    setiIcons
+                }
+            }
+        }
 
     /** The workbench's view, set while it is shown, for haptic feedback. */
     var hapticView: android.view.View? = null
@@ -566,6 +606,7 @@ class WorkbenchController(private val context: Context) {
                     languageClients.values.forEach(LanguageClient::onDisconnected)
                     copilot.language.onDisconnected()
                     notebookMirrors.clear()
+                    cellMirrors.clear()
                     notebooks.values.forEach { it.cellSuggestion = null }
                     chatAgent.onDisconnected()
                     notebooks.values.forEach { it.kernel.onDisconnected(); it.kernelState = "Disconnected" }
@@ -586,6 +627,11 @@ class WorkbenchController(private val context: Context) {
             client.diagnosticsListener = { uri, updates ->
                 lspLog { "diagnostics $uri: ${updates.size}" }
                 post {
+                    // A notebook's cells, mirrored as one file: their problems go to the cells.
+                    cellMirrorNotebook(uri)?.let { notebook ->
+                        showCellProblems(notebook, updates)
+                        return@post
+                    }
                     diagnosticsByClient.getOrPut(client) { mutableMapOf() }[uri] = updates
                     diagnostics.clear()
                     diagnostics.addAll(diagnosticsByClient.values.flatMap { it.values.flatten() })
@@ -2684,7 +2730,65 @@ class WorkbenchController(private val context: Context) {
         }
         busy = true
         status = "Opening $path"
-        repository.open(path).whenComplete { result, error -> post { showOpenResult(result, error) } }
+        repository.open(path).whenComplete { result, error ->
+            post {
+                if (generateSequence(error) { it.cause }.any { it is com.avfstudio.nativeide.document.BinaryFileException }) {
+                    busy = false
+                    openHex(path)
+                } else {
+                    showOpenResult(result, error)
+                }
+            }
+        }
+    }
+
+    // Hex view ----------------------------------------------------------------------------------
+
+    /** Binary files open in a read-only hex view (VS Code offers its Hex Editor for them). */
+    val hexFiles = mutableStateMapOf<String, HexFile>()
+    private val hexPageLoads = mutableSetOf<Pair<String, Int>>()
+
+    private fun openHex(path: String) {
+        if (isGuestPath(path) && vfs.isConnected()) rememberOfflineFile(path)
+        addTab(DocumentSession(path, "", null, dirty = false, binary = true), asPreview = previewRequests.remove(path))
+        selectDocument(path)
+        status = "${path.substringAfterLast('/')} is binary: shown in the hex view"
+        if (isDevicePath(path)) {
+            // Device files come whole (from their content provider), then split into pages.
+            repository.readBytes(path, MAX_HEX_DEVICE_BYTES).whenComplete { bytes, error ->
+                post {
+                    if (error != null || bytes == null) {
+                        status = "Hex view failed: ${error?.cause?.message ?: error?.message}"
+                        return@post
+                    }
+                    hexFiles[path] = HexFile(path, bytes.size.toLong()).also { file ->
+                        (0..(bytes.size - 1) / HEX_PAGE_BYTES).forEach { page ->
+                            file.pages[page] = bytes.copyOfRange(page * HEX_PAGE_BYTES, minOf(bytes.size, (page + 1) * HEX_PAGE_BYTES))
+                        }
+                    }
+                }
+            }
+            return
+        }
+        repository.fileSize(path).whenComplete { size, error ->
+            post {
+                if (error != null || size == null) status = "Hex view failed: ${error?.cause?.message ?: error?.message}"
+                else hexFiles[path] = HexFile(path, size)
+            }
+        }
+    }
+
+    /** Reads the page holding byte [offset] once it is about to show. */
+    fun loadHexPage(file: HexFile, page: Int) {
+        if (file.pages.containsKey(page) || !hexPageLoads.add(file.path to page)) return
+        val offset = page.toLong() * HEX_PAGE_BYTES
+        val length = minOf(HEX_PAGE_BYTES.toLong(), file.size - offset).toInt().coerceAtLeast(1)
+        repository.readRange(file.path, offset, length).whenComplete { bytes, _ ->
+            post {
+                hexPageLoads.remove(file.path to page)
+                if (bytes != null) file.pages[page] = bytes
+            }
+        }
     }
 
     private fun showOpenResult(result: OpenDocument?, error: Throwable?) {
@@ -2802,6 +2906,7 @@ class WorkbenchController(private val context: Context) {
         notifyDocumentClosed(path)
         notebooks.remove(path)?.kernel?.stop()
         markdownPreviews.remove(path)
+        hexFiles.remove(path)
         closeNotebookMirror(path)
         documents.removeAll { it.path == path }
         if (activePath == path) activePath = documents.lastOrNull()?.path
@@ -4106,20 +4211,44 @@ class WorkbenchController(private val context: Context) {
         }
     }
 
-    private fun goToDefinition() {
+    /**
+     * Go to (or Peek) a symbol's definition, type definition, implementations or declaration, as
+     * VS Code: one result opens it, several open the peek (VS Code's `multipleDefinitions: peek`).
+     */
+    private fun goToLocations(kind: LocationKind, peek: Boolean) {
         val (document, position) = activeLspPosition() ?: return
         val client = languageClientFor(document.path) ?: return
-        client.definition(document.path, position).whenComplete { response, error ->
+        val supported = when (kind) {
+            LocationKind.Definition -> true
+            LocationKind.TypeDefinition -> client.supportsTypeDefinition
+            LocationKind.Implementation -> client.supportsImplementation
+            LocationKind.Declaration -> client.supportsDeclaration
+            LocationKind.References -> client.supportsReferences
+        }
+        if (!supported) {
+            status = "${serverName(lspLanguageId(document.path) ?: "")} has no ${kind.title.lowercase()}"
+            return
+        }
+        val request = if (kind == LocationKind.References) client.references(document.path, position) else client.locations(kind.method, document.path, position)
+        request.whenComplete { response, error ->
             post {
                 if (error != null) {
-                    status = "Go to Definition failed: ${error.cause?.message ?: error.message}"
-                } else {
-                    response.toLocations().firstOrNull()?.let(::navigateToLocation) ?: run { status = "No definition found" }
+                    status = "${kind.title} failed: ${error.cause?.message ?: error.message}"
+                    return@post
+                }
+                val locations = response.toLocations()
+                when {
+                    locations.isEmpty() -> status = "No ${kind.title.lowercase()} found"
+                    peek || locations.size > 1 -> showPeek(kind, document.path, position, locations)
+                    else -> navigateToLocation(locations.first())
                 }
             }
         }
     }
 
+    private fun goToDefinition() = goToLocations(LocationKind.Definition, peek = false)
+
+    /** Find All References: the References view in the side bar. */
     private fun findReferences() {
         val (document, position) = activeLspPosition() ?: return
         val client = languageClientFor(document.path) ?: return
@@ -4129,11 +4258,135 @@ class WorkbenchController(private val context: Context) {
                     status = "Find References failed: ${error.cause?.message ?: error.message}"
                 } else {
                     referenceLocations = response.toLocations()
+                    referenceLocations.forEach { loadLocationText(it.uri) }
                     sidebar = SidebarView.References
                     status = "${referenceLocations.size} reference(s)"
                 }
             }
         }
+    }
+
+    // Peek --------------------------------------------------------------------------------------
+
+    /** The peek under the cursor's line: where the symbol is defined, referenced or implemented. */
+    var peek by mutableStateOf<PeekView?>(null)
+        private set
+
+    private fun showPeek(kind: LocationKind, path: String, position: LspPosition, locations: List<LanguageLocation>) {
+        hideHoverCard()
+        locations.forEach { loadLocationText(it.uri) }
+        peek = PeekView(kind, path, position, locations, 0)
+    }
+
+    fun selectPeekLocation(index: Int) {
+        peek = peek?.copy(selected = index)
+    }
+
+    fun closePeek() {
+        peek = null
+        editorSurface?.focus()
+    }
+
+    /** Open the peeked location in its editor (VS Code's double click or Enter in the list). */
+    fun openPeekLocation() {
+        val shown = peek ?: return
+        peek = null
+        shown.locations.getOrNull(shown.selected)?.let(::navigateToLocation)
+    }
+
+    /** Files' text for the peek and the References view: open documents', else read once from the guest. */
+    val locationTexts = mutableStateMapOf<String, List<String>>()
+    private val locationTextLoads = mutableSetOf<String>()
+
+    fun locationPath(uri: String): String = runCatching { java.net.URI(uri).path }.getOrNull()?.let(::documentPathFor) ?: uri
+
+    private fun loadLocationText(uri: String) {
+        val path = locationPath(uri)
+        documents.firstOrNull { it.path == path }?.let { document ->
+            locationTexts[uri] = document.text.split('\n')
+            return
+        }
+        if (uri in locationTexts || !locationTextLoads.add(uri)) return
+        repository.readBytes(path, MAX_LOCATION_TEXT_BYTES).whenComplete { bytes, error ->
+            post {
+                locationTextLoads.remove(uri)
+                if (error == null && bytes != null) locationTexts[uri] = String(bytes, Charsets.UTF_8).split('\n')
+            }
+        }
+    }
+
+    // Call hierarchy ----------------------------------------------------------------------------
+
+    /** The Call Hierarchy view: the symbol it started from, which way it looks, and the calls found so far. */
+    var callHierarchy by mutableStateOf<CallHierarchyView?>(null)
+        private set
+    /** Each shown item's calls, by its key ("0", "0/2", …); absent until expanded, null while asked for. */
+    val callChildren = mutableStateMapOf<String, List<CallHierarchyNode>?>()
+
+    private fun showCallHierarchy(incoming: Boolean) {
+        val (document, position) = activeLspPosition() ?: return
+        val client = languageClientFor(document.path) ?: return
+        if (!client.supportsCallHierarchy) {
+            status = "${serverName(lspLanguageId(document.path) ?: "")} has no call hierarchy"
+            return
+        }
+        client.prepareCallHierarchy(document.path, position).whenComplete { response, error ->
+            post {
+                val item = response?.takeIf { error == null && it.isJsonArray }?.asJsonArray?.firstOrNull()?.takeIf { it.isJsonObject }?.asJsonObject
+                if (item == null) {
+                    status = if (error != null) "Call hierarchy failed: ${error.cause?.message ?: error.message}" else "No call hierarchy here"
+                    return@post
+                }
+                callChildren.clear()
+                callHierarchy = CallHierarchyView(document.path, CallHierarchyNode("0", item, emptyList()), incoming)
+                sidebar = SidebarView.CallHierarchy
+                expandCalls(callHierarchy!!.root)
+            }
+        }
+    }
+
+    /** Show incoming or outgoing calls of the same symbol. */
+    fun setCallDirection(incoming: Boolean) {
+        val view = callHierarchy ?: return
+        if (view.incoming == incoming) return
+        callChildren.clear()
+        callHierarchy = view.copy(incoming = incoming)
+        expandCalls(view.root)
+    }
+
+    fun toggleCalls(node: CallHierarchyNode) {
+        if (callChildren.containsKey(node.key)) callChildren.remove(node.key) else expandCalls(node)
+    }
+
+    private fun expandCalls(node: CallHierarchyNode) {
+        val view = callHierarchy ?: return
+        val client = languageClientFor(view.path)?.takeIf { it.isReady } ?: return
+        callChildren[node.key] = null
+        client.calls(node.item, view.incoming).whenComplete { response, error ->
+            post {
+                if (callHierarchy?.incoming != view.incoming || !callChildren.containsKey(node.key)) return@post
+                val calls: List<com.google.gson.JsonElement> = response?.takeIf { error == null && it.isJsonArray }?.asJsonArray?.toList().orEmpty()
+                callChildren[node.key] = calls.mapIndexedNotNull { index, call ->
+                    val value = call.takeIf { it.isJsonObject }?.asJsonObject ?: return@mapIndexedNotNull null
+                    val item = value.getAsJsonObject(if (view.incoming) "from" else "to") ?: return@mapIndexedNotNull null
+                    val ranges = value.getAsJsonArray("fromRanges")?.mapNotNull { it.takeIf { r -> r.isJsonObject }?.asJsonObject }.orEmpty()
+                    CallHierarchyNode("${node.key}/$index", item, ranges)
+                }
+                if (error != null) status = "Call hierarchy failed: ${error.cause?.message ?: error.message}"
+            }
+        }
+    }
+
+    /** A tap on a call: where the call happens (incoming: in the caller), else the callee itself. */
+    fun openCall(node: CallHierarchyNode, parent: CallHierarchyNode?) {
+        val view = callHierarchy ?: return
+        val callSite = node.fromRanges.firstOrNull()
+        val location = when {
+            view.incoming && callSite != null -> LanguageLocation(node.uri, callSite)
+            !view.incoming && callSite != null && parent != null -> LanguageLocation(parent.uri, callSite)
+            else -> LanguageLocation(node.uri, node.item.getAsJsonObject("selectionRange") ?: node.item.getAsJsonObject("range") ?: return)
+        }
+        navigateToLocation(location)
     }
 
     private fun formatActiveDocument(onFormatted: (() -> Unit)? = null) {
@@ -4683,11 +4936,11 @@ class WorkbenchController(private val context: Context) {
         }
     }
 
-    /** A tap on a lens: its references in the References view, as VS Code's peek lists them. */
+    /** A tap on a lens: its references in the peek, as VS Code shows them. */
     fun openCodeLens(item: CodeLensItem) {
         val surface = editorSurface ?: return
         surface.moveCursor(item.position, reveal = false)
-        findReferences()
+        goToLocations(LocationKind.References, peek = true)
     }
 
     /** Language servers' running work (`$/progress`): token → "ty: Indexing 40%". */
@@ -6163,13 +6416,22 @@ class WorkbenchController(private val context: Context) {
         command: String? = null,
         onOutput: ((String) -> Unit)? = null,
         onExit: ((Int?) -> Unit)? = null,
+        profile: TerminalProfile? = null,
     ): UUID? {
         if (!vfs.isConnected()) {
             status = "Connect to a guest to open a terminal"
             return null
         }
         val id = UUID.randomUUID()
-        val session = createTerminalSession(id, "bash")
+        val shell = profile ?: defaultTerminalProfile
+        val session = createTerminalSession(id, shell.name)
+        session.profile = shell
+        session.textLog.onCommandsChanged = {
+            post {
+                session.commandsRevision++
+                session.lastExitCode = session.textLog.commands().lastOrNull()?.exitCode
+            }
+        }
         vfs.addPtyListener(id) { event ->
             onPtyEvent(session, event, command)
             when (event) {
@@ -6178,7 +6440,7 @@ class WorkbenchController(private val context: Context) {
                 else -> Unit
             }
         }
-        if (!vfs.ptySpawn(id, workspaceRoot, 120, 32)) {
+        if (!vfs.ptySpawn(id, workspaceRoot, 120, 32, shell.path, shell.args, settings.shellIntegration)) {
             status = "Could not start a terminal"
             vfs.removePtyListener(id)
             session.emulator.close()
@@ -6187,6 +6449,88 @@ class WorkbenchController(private val context: Context) {
         terminals.add(session)
         showTerminal(id)
         return id
+    }
+
+    /** Shells to start: the built-in ones and `terminal.integrated.profiles.linux`. */
+    val terminalProfiles: List<TerminalProfile> get() = settings.terminalProfiles
+
+    val defaultTerminalProfile: TerminalProfile
+        get() = terminalProfiles.firstOrNull { it.name == settings.terminalDefaultProfile } ?: terminalProfiles.firstOrNull() ?: TerminalProfile("bash", "bash")
+
+    /** The terminal shown beside the active one (VS Code's split terminal), if any. */
+    var splitTerminalId by mutableStateOf<UUID?>(null)
+        private set
+
+    /** Split: a second terminal of the same shell beside the active one (Ctrl+Shift+5). */
+    fun splitTerminal() {
+        val active = activeTerminal
+        val id = newTerminal(profile = active?.profile) ?: return
+        if (active != null) {
+            splitTerminalId = id
+            activeTerminalId = active.id
+        }
+    }
+
+    fun unsplitTerminal() {
+        splitTerminalId = null
+    }
+
+    fun renameTerminal(id: UUID, name: String) {
+        terminals.firstOrNull { it.id == id }?.title = name.trim().ifEmpty { return }
+        dialog = null
+    }
+
+    /** Shell integration's commands in [session], oldest first. */
+    fun terminalCommands(session: TerminalSession): List<ShellCommand> {
+        session.commandsRevision
+        return session.textLog.commands()
+    }
+
+    /**
+     * Scrolls the terminal so [command]'s prompt is at the top. The library can only scroll by
+     * rows, so the rows since it come from the text log (long lines wrapped at the width).
+     */
+    fun revealTerminalCommand(session: TerminalSession, command: ShellCommand) {
+        val scroll = session.scroll ?: return
+        val dimensions = session.emulator.dimensions
+        val rows = session.textLog.rowsSince(command.startLine, dimensions.columns)
+        val target = (rows - dimensions.rows).coerceIn(0, scroll.maxScrollback)
+        scroll.scrollBy(target - scroll.position)
+    }
+
+    /** Ctrl+Up / Ctrl+Down: the previous or next command's prompt, as VS Code's shell integration does. */
+    fun scrollToTerminalCommand(previous: Boolean) {
+        val session = activeTerminal ?: return
+        val commands = terminalCommands(session)
+        if (commands.isEmpty()) {
+            status = if (settings.shellIntegration) "No commands marked yet in this terminal" else "Turn on shell integration to move between commands"
+            return
+        }
+        val current = session.commandCursor ?: commands.size
+        val next = (if (previous) current - 1 else current + 1).coerceIn(0, commands.size)
+        session.commandCursor = next
+        if (next == commands.size) {
+            session.scroll?.scrollToBottom()
+            return
+        }
+        revealTerminalCommand(session, commands[next])
+    }
+
+    fun copyTerminalText(text: String, label: String) {
+        context.getSystemService(ClipboardManager::class.java)?.setPrimaryClip(ClipData.newPlainText("Terminal", text))
+        status = label
+    }
+
+    fun rerunTerminalCommand(session: TerminalSession, command: ShellCommand) {
+        if (session.exited || command.command.isBlank()) return
+        vfs.ptyInput(session.id, "${command.command}\r".toByteArray())
+    }
+
+    /** `terminal.integrated.copyOnSelection`: the finished selection goes to the clipboard. */
+    fun copyTerminalSelection(session: TerminalSession) {
+        if (!settings.terminalCopyOnSelection) return
+        val selection = session.selection?.takeIf { it.isSelectionActive } ?: return
+        selection.copySelection().takeIf { it.isNotEmpty() }?.let { copyTerminalText(it, "Copied the selection") }
     }
 
     private fun createTerminalSession(id: UUID, title: String): TerminalSession {
@@ -6397,6 +6741,7 @@ class WorkbenchController(private val context: Context) {
     }
 
     fun closeTerminal(id: UUID) {
+        if (splitTerminalId == id || (splitTerminalId != null && activeTerminalId == id)) splitTerminalId = null
         val session = terminals.firstOrNull { it.id == id } ?: return
         if (!session.exited) vfs.ptyKill(id)
         vfs.removePtyListener(id)
@@ -7262,6 +7607,167 @@ class WorkbenchController(private val context: Context) {
 
     private fun closeNotebookMirror(path: String) {
         if (notebookMirrors.remove(path) != null) copilot.language.didClose(mirrorPath(path))
+        if (cellMirrors.remove(path) != null) languageClients["python"]?.didClose(cellMirrorPath(path))
+    }
+
+    // Language intelligence in notebook cells -----------------------------------------------------
+    // The Python server (ty) sees a notebook as one file of its cells (magics as comments), as
+    // Copilot does; its problems, hover and definitions are mapped back to the cells.
+
+    /** Notebook path → the mirror's text, version and the cells' first lines. */
+    private val cellMirrors = mutableMapOf<String, Triple<String, Long, NotebookMirror>>()
+    private var scheduledCellMirrorSync: ScheduledFuture<*>? = null
+
+    private fun cellMirrorPath(notebookPath: String) = "$notebookPath.avf-cells.py"
+
+    private fun cellMirrorNotebook(uri: String): String? =
+        notebooks.keys.firstOrNull { diagnosticUri(cellMirrorPath(it)) == uri }
+
+    /** After typing (or cells added, moved, deleted): the server gets the cells again. */
+    fun scheduleCellMirrorSync(session: NotebookSession, delayMs: Long = 400) {
+        if (!settings.notebookLanguageServer) return
+        scheduledCellMirrorSync?.cancel(false)
+        scheduledCellMirrorSync = timer.schedule({ post { syncCellMirror(session) } }, delayMs, TimeUnit.MILLISECONDS)
+    }
+
+    /** Sends the cells to the Python server (starting it if needed); the mirror, or null while it starts. */
+    private fun syncCellMirror(session: NotebookSession): NotebookMirror? {
+        val path = session.document.path
+        if (!settings.notebookLanguageServer || notebooks[path] !== session || !vfs.isConnected()) return null
+        val client = languageClients["python"] ?: return null
+        if (!client.isStarted) {
+            startNotebookLanguageServer(session)
+            return null
+        }
+        if (!client.isReady) return null
+        val mirror = notebookMirror(session.notebook.cells, forLanguageServer = true)
+        val previous = cellMirrors[path]
+        val version = when {
+            previous == null -> 1L.also { client.didOpen(cellMirrorPath(path), "python", it, mirror.text) }
+            previous.first != mirror.text -> (previous.second + 1).also { client.didChange(cellMirrorPath(path), it, mirror.text) }
+            else -> previous.second
+        }
+        cellMirrors[path] = Triple(mirror.text, version, mirror)
+        return mirror
+    }
+
+    private fun startNotebookLanguageServer(session: NotebookSession) {
+        val workspace = workspaceRoot ?: return
+        val client = languageClients["python"] ?: return
+        if (client.isStarted) return
+        val tool = languageServerTool("python")
+        val env = if (tool == "ty") pythonEnvironmentVariables(settings.pythonInterpreter) else emptyList()
+        client.start(workspace, tool, env, initializationOptions("python", tool)).whenComplete { _, error ->
+            post {
+                reportLanguageServer("python", error)
+                if (error == null) {
+                    documents.filter { client in languageClientsFor(it.path) }.forEach(::notifyDocumentOpened)
+                    syncCellMirror(session)
+                }
+            }
+        }
+    }
+
+    private fun showCellProblems(notebookPath: String, updates: List<LanguageDiagnostic>) {
+        val session = notebooks[notebookPath] ?: return
+        val mirror = cellMirrors[notebookPath]?.third ?: return
+        val cells = session.notebook.cells
+        val byCell = mutableMapOf<String, MutableList<CellProblem>>()
+        updates.filterNot { isNotebookOnlyProblem(it.message) }.forEach { diagnostic ->
+            val range = diagnostic.range.toLspRange() ?: return@forEach
+            val cell = cells.lastOrNull { (mirror.startLines[it.id] ?: Int.MAX_VALUE) <= range.start.line } ?: return@forEach
+            if (cell.type != CellType.Code) return@forEach
+            val first = mirror.startLines[cell.id] ?: return@forEach
+            val start = cellOffset(cell.source, range.start.line - first, range.start.character) ?: return@forEach
+            val end = cellOffset(cell.source, range.end.line - first, range.end.character)?.coerceAtLeast(start) ?: cell.source.length
+            val code = diagnostic.code?.takeIf { it.isJsonPrimitive }?.asString
+            val origin = listOfNotNull(diagnostic.source, code?.let { "($it)" }).joinToString(separator = "")
+            byCell.getOrPut(cell.id) { mutableListOf() } += CellProblem(cell.id, start, end, diagnostic.severity, diagnostic.message, origin)
+        }
+        session.cellProblems.clear()
+        session.cellProblems.putAll(byCell.mapValues { (_, problems) -> problems.sortedBy { it.start } })
+    }
+
+    /** The mirror's position of [offset] in [cell], syncing first so the server has the text shown. */
+    private fun cellMirrorPosition(session: NotebookSession, cell: NotebookCell, offset: Int): LspPosition? {
+        val mirror = syncCellMirror(session) ?: return null
+        val first = mirror.startLines[cell.id] ?: return null
+        val (line, column) = cellPosition(cell.source, offset)
+        return LspPosition(first + line, column)
+    }
+
+    /** The hover card at [offset] in [cell]: its problems, and the server's hover (a resting pointer or Ctrl+K Ctrl+I). */
+    fun showCellHover(session: NotebookSession, cell: NotebookCell, offset: Int, fromPointer: Boolean) {
+        if (cell.type != CellType.Code) return
+        val problems = session.cellProblems[cell.id].orEmpty().filter { offset in it.start..maxOf(it.start, it.end) }
+        val client = languageClients["python"]?.takeIf { it.isReady && settings.notebookLanguageServer }
+        val position = client?.let { cellMirrorPosition(session, cell, offset) }
+        if (client == null || position == null) {
+            if (problems.isNotEmpty()) {
+                session.cellHover = CellHover(cell.id, offset, problems, null)
+            } else if (!fromPointer) {
+                status = "Language intelligence in cells needs the Python language server (Settings → Notebooks)"
+            }
+            return
+        }
+        val request = ++hoverRequest
+        client.hover(cellMirrorPath(session.document.path), position).whenComplete { response, error ->
+            post {
+                if (request != hoverRequest) return@post
+                val text = response?.takeIf { error == null && it.isJsonObject }?.asJsonObject?.get("contents")
+                    ?.let(::hoverContents)?.takeIf { it.isNotBlank() }
+                session.cellHover = if (text == null && problems.isEmpty()) null else CellHover(cell.id, offset, problems, text)
+                if (text == null && problems.isEmpty() && !fromPointer) status = "No hover information"
+            }
+        }
+    }
+
+    fun hideCellHover(session: NotebookSession) {
+        hoverRequest++
+        session.cellHover = null
+    }
+
+    /** F12 in a cell: the definition, in another cell (selected) or a file (opened). */
+    fun goToCellDefinition(session: NotebookSession, cell: NotebookCell, offset: Int) {
+        val client = languageClients["python"]?.takeIf { it.isReady && settings.notebookLanguageServer }
+        val position = client?.let { cellMirrorPosition(session, cell, offset) }
+        if (client == null || position == null) {
+            status = "Go to Definition in cells needs the Python language server (Settings → Notebooks)"
+            return
+        }
+        val mirrorUri = diagnosticUri(cellMirrorPath(session.document.path))
+        client.definition(cellMirrorPath(session.document.path), position).whenComplete { response, error ->
+            post {
+                val location = response?.takeIf { error == null }?.toLocations()?.firstOrNull()
+                if (location == null) {
+                    status = if (error != null) "Go to Definition failed: ${error.cause?.message ?: error.message}" else "No definition found"
+                    return@post
+                }
+                if (location.uri != mirrorUri) {
+                    navigateToLocation(location)
+                    return@post
+                }
+                val mirror = cellMirrors[session.document.path]?.third ?: return@post
+                val range = location.range.toLspRange() ?: return@post
+                val target = session.notebook.cells.lastOrNull { (mirror.startLines[it.id] ?: Int.MAX_VALUE) <= range.start.line } ?: return@post
+                val first = mirror.startLines[target.id] ?: return@post
+                val at = cellOffset(target.source, range.start.line - first, range.start.character) ?: return@post
+                revealCellOffset(session, target, at)
+            }
+        }
+    }
+
+    /** Selects [cell] with the caret at [offset] (a definition or a problem in it). */
+    fun revealCellOffset(session: NotebookSession, cell: NotebookCell, offset: Int) {
+        session.cellCaretRequest = cell.id to offset
+        session.selectedCell = cell.id
+    }
+
+    /** Ctrl+K Ctrl+I and F12 in the selected cell, at its caret. */
+    private fun selectedCodeCell(): Pair<NotebookSession, NotebookCell>? {
+        val session = activeNotebook ?: return null
+        val cell = session.notebook.cells.firstOrNull { it.id == session.selectedCell && it.type == CellType.Code } ?: return null
+        return session to cell
     }
 
     /** Every cell edit or caret move: drop a suggestion that no longer fits and ask again after typing. */
@@ -7295,7 +7801,10 @@ class WorkbenchController(private val context: Context) {
         ) {
             session.cellSuggestion = null
         }
+        session.cellCaret = value.selection.start
+        session.cellHover?.takeIf { it.cellId != cell.id || textChanged }?.let { session.cellHover = null }
         if (!textChanged) return
+        scheduleCellMirrorSync(session)
         scheduledCellRequest?.cancel(false)
         if (!copilotEnabled || !settings.notebookCopilot || !copilot.language.isReady || cell.type != CellType.Code ||
             !value.selection.collapsed
@@ -7526,6 +8035,7 @@ class WorkbenchController(private val context: Context) {
                     }
                 }
                 theme?.semanticTokenColors?.values?.forEach(::parseThemeColor)
+                val iconThemes = installed?.let { pack -> FileIconTheme.installed(assetPacksDirectory).filter { it.pack == pack.id } }.orEmpty()
                 post {
                     if (theme != null) {
                         saveImportedTheme(context, theme)
@@ -7534,8 +8044,14 @@ class WorkbenchController(private val context: Context) {
                         status = if (installed == null) "Applied syntax theme ${theme.name}" else {
                             "Installed ${installed.displayName} and applied syntax theme ${theme.name}"
                         }
-                    } else {
+                    } else if (installed == null || iconThemes.isEmpty()) {
                         status = "Installed ${installed?.displayName ?: "asset pack"}; no theme contribution was found"
+                    }
+                    // A pack with file icons: use them, as VS Code offers right after installing one.
+                    iconThemes.firstOrNull()?.let { choice ->
+                        refreshIconThemeChoices()
+                        updateSetting(WorkbenchSettings.ICON_THEME, choice.id)
+                        status = "Installed ${installed?.displayName}: file icons ${choice.label}"
                     }
                 }
             } catch (error: Exception) {
@@ -7831,6 +8347,16 @@ class WorkbenchController(private val context: Context) {
         if (event.action != AndroidKeyEvent.ACTION_DOWN) return false
         val identity = event.downTime to event.keyCode
         if (identity == lastHandledKey) return true
+        activeNotebook?.takeIf { it.cellHover != null && focusArea == FocusArea.Notebook && event.keyCode == AndroidKeyEvent.KEYCODE_ESCAPE && event.hasNoModifiers() }?.let { session ->
+            lastHandledKey = identity
+            hideCellHover(session)
+            return true
+        }
+        if (peek != null && focusArea == FocusArea.Editor && event.keyCode == AndroidKeyEvent.KEYCODE_ESCAPE && event.hasNoModifiers()) {
+            lastHandledKey = identity
+            closePeek()
+            return true
+        }
         if (hoverCard != null && focusArea == FocusArea.Editor && event.keyCode == AndroidKeyEvent.KEYCODE_ESCAPE && event.hasNoModifiers()) {
             lastHandledKey = identity
             hideHoverCard()
@@ -7946,6 +8472,20 @@ class WorkbenchController(private val context: Context) {
             "workbench.action.openGlobalKeybindingsFile" -> openKeybindingsJson()
             "jupyter.showVariables" -> showVariables()
             "workbench.action.terminal.focusFind" -> showTerminalFind()
+            "workbench.action.terminal.split" -> splitTerminal()
+            "workbench.action.terminal.unsplit" -> unsplitTerminal()
+            "workbench.action.terminal.rename" -> activeTerminal?.let { dialog = WorkbenchDialog.TerminalRename(it.id, it.title) }
+            "workbench.action.terminal.newWithProfile" -> {
+                commandFilter = ""
+                dialog = WorkbenchDialog.TerminalProfiles
+            }
+            "workbench.action.terminal.copyLastCommandOutput" -> activeTerminal?.let { session ->
+                val last = terminalCommands(session).lastOrNull { it.endLine != null }
+                if (last == null) status = "No finished command in this terminal (shell integration marks them)"
+                else copyTerminalText(session.textLog.output(last), "Copied the output of ${last.command.ifBlank { "the last command" }}")
+            }
+            "workbench.action.terminal.scrollToPreviousCommand" -> scrollToTerminalCommand(previous = true)
+            "workbench.action.terminal.scrollToNextCommand" -> scrollToTerminalCommand(previous = false)
             "workbench.action.terminal.openDetectedLink" -> showTerminalLinks()
             "merge-conflict.accept.current", "merge-conflict.accept.incoming", "merge-conflict.accept.both" -> {
                 val line = cursorPosition?.line ?: 0
@@ -8019,13 +8559,26 @@ class WorkbenchController(private val context: Context) {
             "editor.action.sortLinesDescending", "editor.action.removeDuplicateLines", "editor.action.trimTrailingWhitespace",
             in CASE_COMMANDS.keys,
             -> runTextTransform(commandId)
-            "editor.action.goToDefinition", "editor.action.peekDefinition" -> goToDefinition()
-            "editor.action.goToReferences" -> findReferences()
+            "editor.action.goToDefinition" -> goToDefinition()
+            "editor.action.peekDefinition" -> goToLocations(LocationKind.Definition, peek = true)
+            "editor.action.goToTypeDefinition" -> goToLocations(LocationKind.TypeDefinition, peek = false)
+            "editor.action.peekTypeDefinition" -> goToLocations(LocationKind.TypeDefinition, peek = true)
+            "editor.action.goToImplementation" -> goToLocations(LocationKind.Implementation, peek = false)
+            "editor.action.peekImplementation" -> goToLocations(LocationKind.Implementation, peek = true)
+            "editor.action.revealDeclaration" -> goToLocations(LocationKind.Declaration, peek = false)
+            "editor.action.peekDeclaration" -> goToLocations(LocationKind.Declaration, peek = true)
+            "editor.action.goToReferences" -> goToLocations(LocationKind.References, peek = true)
+            "references-view.findReferences" -> findReferences()
+            "editor.showCallHierarchy", "editor.showIncomingCalls" -> showCallHierarchy(incoming = true)
+            "editor.showOutgoingCalls" -> showCallHierarchy(incoming = false)
+            "closeReferenceSearch" -> closePeek()
             "editor.action.rename" -> beginRename()
             "editor.action.triggerSuggest" -> surface?.triggerSuggest()
             "editor.action.triggerParameterHints" -> activePath?.let { requestSignature(it, trigger = null, invoked = true) }
             "closeParameterHints" -> closeParameterHints()
             "editor.action.showHover" -> showHover()
+            "notebook.cell.showHover" -> selectedCodeCell()?.let { (session, cell) -> showCellHover(session, cell, session.cellCaret, fromPointer = false) }
+            "notebook.cell.goToDefinition" -> selectedCodeCell()?.let { (session, cell) -> goToCellDefinition(session, cell, session.cellCaret) }
             "editor.action.quickFix" -> showCodeActions()
             "editor.action.inlineSuggest.trigger" -> requestInlineSuggestion(invoked = true)
             "editor.action.inlineSuggest.commit" -> if (inlineSuggestion != null) acceptInlineSuggestion() else jumpOrAcceptNextEdit()

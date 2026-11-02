@@ -32,6 +32,9 @@ interface DocumentCache {
     fun contains(path: String): Boolean = load(path) != null
 }
 
+/** The file has NUL bytes, so it isn't text: the workbench shows it in the hex view. */
+class BinaryFileException : IOException("Binary files cannot be opened as text documents")
+
 sealed interface OpenDocument {
     data class Editable(val document: DocumentSession) : OpenDocument
     data class Paged(val document: PagedDocument) : OpenDocument
@@ -287,6 +290,12 @@ class DocumentRepository(
         }
     }
 
+    /** [length] bytes from [offset] of a guest file (the hex view's pages); fewer at its end. */
+    fun readRange(path: String, offset: Long, length: Int): CompletableFuture<ByteArray> =
+        vfs.read(path, offset, length).thenApply { it.content }
+
+    fun fileSize(path: String): CompletableFuture<Long> = vfs.stat(path).thenApply { it.size }
+
     private fun readDeviceBytes(path: String, limit: Int): CompletableFuture<ByteArray> {
         val store = deviceFiles ?: return CompletableFuture.failedFuture(IOException("Device files can't be read here"))
         val uri = deviceUri(path) ?: return CompletableFuture.failedFuture(IllegalArgumentException("Not a device file: $path"))
@@ -517,7 +526,7 @@ class DocumentRepository(
             else -> StandardCharsets.UTF_8 to "UTF-8"
         }
         if (encoding != "UTF-16LE" && encoding != "UTF-16BE" && bytes.any { it == 0.toByte() }) {
-            throw IOException("Binary files cannot be opened as text documents")
+            throw BinaryFileException()
         }
         val decoder = charset.newDecoder()
             .onMalformedInput(CodingErrorAction.REPORT)

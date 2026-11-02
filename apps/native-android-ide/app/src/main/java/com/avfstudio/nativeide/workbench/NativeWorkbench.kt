@@ -419,7 +419,7 @@ private fun CompactContent(controller: WorkbenchController) {
                     Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    listOf(SidebarView.Search, SidebarView.SourceControl, SidebarView.Problems, SidebarView.Outline, SidebarView.References).forEach {
+                    listOf(SidebarView.Search, SidebarView.SourceControl, SidebarView.Problems, SidebarView.Outline, SidebarView.References, SidebarView.CallHierarchy).forEach {
                         FilterChip(selected = view == it, onClick = { view = it }, label = { Text(it.title) })
                     }
                     FilterChip(selected = false, onClick = { controller.settingsVisible = true }, label = { Text("Settings") })

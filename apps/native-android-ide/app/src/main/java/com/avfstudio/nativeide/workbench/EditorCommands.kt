@@ -68,7 +68,17 @@ object EditorCommands {
         command("editor.action.selectHighlights", "Select All Occurrences", "Ctrl+Shift+L"),
         command("editor.action.goToDefinition", "Go to Definition", "F12"),
         command("editor.action.peekDefinition", "Peek Definition", "Alt+F12"),
-        command("editor.action.goToReferences", "Find All References", "Shift+F12"),
+        command("editor.action.goToTypeDefinition", "Go to Type Definition", ""),
+        command("editor.action.peekTypeDefinition", "Peek Type Definition", ""),
+        command("editor.action.goToImplementation", "Go to Implementations", "Ctrl+F12"),
+        command("editor.action.peekImplementation", "Peek Implementations", "Ctrl+Shift+F12"),
+        command("editor.action.revealDeclaration", "Go to Declaration", ""),
+        command("editor.action.peekDeclaration", "Peek Declaration", ""),
+        command("editor.action.goToReferences", "Go to References", "Shift+F12"),
+        command("references-view.findReferences", "Find All References", "Shift+Alt+F12"),
+        command("editor.showCallHierarchy", "Peek Call Hierarchy", "Shift+Alt+H"),
+        command("editor.showIncomingCalls", "Show Incoming Calls", ""),
+        command("editor.showOutgoingCalls", "Show Outgoing Calls", ""),
         command("editor.action.rename", "Rename Symbol", "F2"),
         command("editor.action.marker.next", "Next Problem", "F8"),
         command("editor.action.marker.prev", "Previous Problem", "Shift+F8"),
@@ -120,6 +130,11 @@ object EditorCommands {
         command("workbench.action.terminal.toggleTerminal", "Toggle Terminal", "Ctrl+`"),
         command("workbench.action.terminal.new", "New Terminal", "Ctrl+Shift+`"),
         command("workbench.action.terminal.openDetectedLink", "Terminal: Open Detected Link...", ""),
+        command("workbench.action.terminal.split", "Terminal: Split Terminal", "Ctrl+Shift+5"),
+        command("workbench.action.terminal.unsplit", "Terminal: Unsplit Terminal", ""),
+        command("workbench.action.terminal.rename", "Terminal: Rename...", ""),
+        command("workbench.action.terminal.newWithProfile", "Terminal: Create New Terminal (With Profile)...", ""),
+        command("workbench.action.terminal.copyLastCommandOutput", "Terminal: Copy Last Command Output", ""),
         command("workbench.action.toggleSidebarVisibility", "Toggle Primary Side Bar", "Ctrl+B"),
         command("workbench.action.togglePanel", "Toggle Panel", "Ctrl+J"),
         command("workbench.view.explorer", "Show Explorer", "Ctrl+Shift+E"),
@@ -195,6 +210,8 @@ object EditorCommands {
     /** Keys a terminal takes before the workbench (VS Code's terminal find); Ctrl+F reaches the shell elsewhere. */
     val terminal: List<EditorCommand> = listOf(
         command("workbench.action.terminal.focusFind", "Terminal: Find", "Ctrl+F"),
+        command("workbench.action.terminal.scrollToPreviousCommand", "Terminal: Scroll to Previous Command", "Ctrl+Up"),
+        command("workbench.action.terminal.scrollToNextCommand", "Terminal: Scroll to Next Command", "Ctrl+Down"),
     )
 
     /** Jupyter-style cell keys; honoured while a notebook is the active editor. */
@@ -210,6 +227,8 @@ object EditorCommands {
         command("notebook.cell.delete", "Notebook: Delete Cell", ""),
         command("notebook.undoDeleteCell", "Notebook: Undo Delete Cell", ""),
         command("notebook.outline", "Notebook: Show Outline", ""),
+        command("notebook.cell.showHover", "Notebook: Show Hover", "Ctrl+K Ctrl+I"),
+        command("notebook.cell.goToDefinition", "Notebook: Go to Definition", "F12"),
     )
 
     /** The editor's find keys, which a notebook takes too (its widget searches every cell). */

@@ -308,6 +308,40 @@ fun WorkbenchDialogHost(controller: WorkbenchController) {
             dismissButton = { TextButton(onClick = { controller.dialog = null }) { Text("Cancel") } },
         )
         WorkbenchDialog.Keybindings -> KeybindingsDialog(controller)
+        is WorkbenchDialog.TerminalRename -> {
+            var name by remember(dialog.id) { mutableStateOf(dialog.name) }
+            AlertDialog(
+                onDismissRequest = { controller.dialog = null },
+                title = { Text("Rename terminal") },
+                text = {
+                    OutlinedTextField(
+                        value = name,
+                        onValueChange = { name = it },
+                        label = { Text("Name") },
+                        singleLine = true,
+                        keyboardActions = KeyboardActions(onDone = { controller.renameTerminal(dialog.id, name) }),
+                    )
+                },
+                confirmButton = { TextButton(onClick = { controller.renameTerminal(dialog.id, name) }) { Text("Rename") } },
+                dismissButton = { TextButton(onClick = { controller.dialog = null }) { Text("Cancel") } },
+            )
+        }
+        WorkbenchDialog.TerminalProfiles -> PaletteDialog(
+            placeholder = "Select the terminal profile to create",
+            query = controller.commandFilter,
+            onQuery = { controller.commandFilter = it },
+            items = controller.terminalProfiles.filter { fuzzyMatch(controller.commandFilter, it.name) },
+            onDismiss = { controller.dialog = null },
+            onPick = { profile ->
+                controller.dialog = null
+                controller.newTerminal(profile = profile)
+            },
+        ) { profile ->
+            PaletteRow(
+                profile.name + if (profile.name == controller.settings.terminalDefaultProfile) "  (default)" else "",
+                (listOf(profile.path) + profile.args).joinToString(" "),
+            )
+        }
         is WorkbenchDialog.TerminalLinks -> PaletteDialog(
             placeholder = "Open a link from the terminal",
             query = controller.commandFilter,

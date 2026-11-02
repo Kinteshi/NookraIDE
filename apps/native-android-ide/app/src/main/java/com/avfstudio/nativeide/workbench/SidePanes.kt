@@ -112,6 +112,7 @@ fun SidebarContent(controller: WorkbenchController, view: SidebarView, modifier:
             SidebarView.Outline -> OutlineList(controller)
             SidebarView.Problems -> ProblemsList(controller)
             SidebarView.References -> ReferencesList(controller)
+            SidebarView.CallHierarchy -> CallHierarchyList(controller)
         }
     }
 }
@@ -282,14 +283,104 @@ private fun ProblemRow(icon: ImageVector, tint: androidx.compose.ui.graphics.Col
 private fun ReferencesList(controller: WorkbenchController) {
     val locations = controller.referenceLocations
     if (locations.isEmpty()) {
-        EmptyMessage("Run Find All References (Shift+F12) on a symbol.")
+        EmptyMessage("Run Find All References (Shift+Alt+F12) on a symbol.")
         return
     }
+    val colors = MaterialTheme.colorScheme
+    // By file, as VS Code's References view: the file, then each reference's line.
+    val byFile = remember(locations) { locations.groupBy { it.uri } }
     LazyColumn {
-        items(locations) { location ->
-            val line = location.range.getAsJsonObject("start")?.get("line")?.asInt?.plus(1) ?: 1
-            PaneRow(Icons.AutoMirrored.Outlined.InsertDriveFile, "${location.uri.substringAfterLast('/')}:$line") {
-                controller.navigateToLocation(location)
+        byFile.forEach { (uri, inFile) ->
+            item(key = "file:$uri") {
+                PaneRow(
+                    Icons.AutoMirrored.Outlined.InsertDriveFile,
+                    controller.locationPath(uri).substringAfterLast('/'),
+                    trailing = { Text("${inFile.size}", style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant, modifier = Modifier.padding(end = 12.dp)) },
+                ) { controller.navigateToLocation(inFile.first()) }
+            }
+            items(inFile) { location ->
+                val line = location.range.getAsJsonObject("start")?.get("line")?.asInt ?: 0
+                val text = controller.locationTexts[uri]?.getOrNull(line)?.trim().orEmpty()
+                Row(
+                    Modifier.fillMaxWidth().clickable { controller.navigateToLocation(location) }.padding(start = 40.dp, end = 12.dp, top = 3.dp, bottom = 3.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text.ifEmpty { "line ${line + 1}" },
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text("${line + 1}", style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant)
+                }
+            }
+        }
+    }
+}
+
+/** VS Code's Call Hierarchy view: who calls the symbol (or what it calls), expanded level by level. */
+@Composable
+private fun CallHierarchyList(controller: WorkbenchController) {
+    val view = controller.callHierarchy
+    if (view == null) {
+        EmptyMessage("Run Peek Call Hierarchy (Shift+Alt+H) on a function.")
+        return
+    }
+    val colors = MaterialTheme.colorScheme
+    Column(Modifier.fillMaxSize()) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            androidx.compose.material3.FilterChip(view.incoming, onClick = { controller.setCallDirection(true) }, label = { Text("Incoming calls") })
+            androidx.compose.material3.FilterChip(!view.incoming, onClick = { controller.setCallDirection(false) }, label = { Text("Outgoing calls") })
+        }
+        // The shown tree, flattened: each node with its depth and parent.
+        val rows = buildList {
+            fun add(node: CallHierarchyNode, depth: Int, parent: CallHierarchyNode?) {
+                add(Triple(node, depth, parent))
+                controller.callChildren[node.key]?.forEach { add(it, depth + 1, node) }
+            }
+            add(view.root, 0, null)
+        }
+        LazyColumn(Modifier.weight(1f)) {
+            items(rows, key = { it.first.key }) { (node, depth, parent) ->
+                val expanded = controller.callChildren.containsKey(node.key)
+                val loading = expanded && controller.callChildren[node.key] == null
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable { controller.openCall(node, parent) }
+                        .padding(start = (8 + depth * 16).dp, end = 12.dp, top = 2.dp, bottom = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    IconButton(onClick = { controller.toggleCalls(node) }, modifier = Modifier.size(28.dp)) {
+                        Icon(
+                            if (expanded) Icons.Outlined.ExpandMore else Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+                            contentDescription = if (expanded) "Collapse" else "Expand",
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                    Icon(Icons.Outlined.Functions, contentDescription = null, modifier = Modifier.size(16.dp), tint = colors.tertiary)
+                    Text(node.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        listOf(node.detail, "${controller.locationPath(node.uri).substringAfterLast('/')}:${node.line + 1}").filter(String::isNotBlank).joinToString(" · "),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = colors.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (loading) androidx.compose.material3.CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 1.5.dp)
+                }
+                if (expanded && !loading && controller.callChildren[node.key].isNullOrEmpty()) {
+                    Text(
+                        if (view.incoming) "No callers" else "No calls",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = colors.onSurfaceVariant,
+                        modifier = Modifier.padding(start = (48 + depth * 16).dp, bottom = 2.dp),
+                    )
+                }
             }
         }
     }

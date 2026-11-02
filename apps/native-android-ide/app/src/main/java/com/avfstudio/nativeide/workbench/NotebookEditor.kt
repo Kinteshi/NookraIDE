@@ -148,6 +148,8 @@ fun NotebookEditor(controller: WorkbenchController, session: NotebookSession) {
             ToolbarButton(Icons.Outlined.DataObject, "Variables") { controller.showVariables() }
             ToolbarButton(Icons.Outlined.Save, "Save") { controller.saveNotebook(session) }
         }
+        // Cells added, moved or deleted: the language server gets the notebook again.
+        LaunchedEffect(session, session.notebook.cells.map { it.id }) { controller.scheduleCellMirrorSync(session, delayMs = 200) }
         val listState = rememberLazyListState()
         // Keep the selected cell composed and on screen so it can take focus (Shift+Enter moves on).
         LaunchedEffect(session.selectedCell) {
@@ -264,6 +266,7 @@ private fun NotebookCellView(
                         CellSourceEditor(controller, session, cell, dark, selected)
                     }
                 }
+                CellProblemsList(controller, session, cell)
                 if (selected) {
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.noKeyFocus()) {
                         TextButton(modifier = Modifier.noKeyFocus(), onClick = {
@@ -523,6 +526,13 @@ private fun CellSourceEditor(
         }
         controller.onCellInput(session, cell, value, textChanged)
     }
+    // Go to definition or a problem's row: the caret lands there.
+    LaunchedEffect(session.cellCaretRequest) {
+        val (cellId, offset) = session.cellCaretRequest ?: return@LaunchedEffect
+        if (cellId != cell.id) return@LaunchedEffect
+        field = field.copy(selection = TextRange(offset.coerceIn(0, field.text.length)))
+        session.cellCaretRequest = null
+    }
     // Find's current match in this cell becomes its selection, so closing find leaves it selected.
     LaunchedEffect(session.findReveal) {
         val (cellId, range) = session.findCurrentMatch ?: return@LaunchedEffect
@@ -558,6 +568,8 @@ private fun CellSourceEditor(
                 .fillMaxWidth()
                 .heightIn(min = 40.dp)
                 .padding(12.dp)
+                .cellProblemSquiggles(session.cellProblems[cell.id].orEmpty(), layout?.takeIf { it.layoutInput.text.length == field.text.length })
+                .cellHover(controller, session, cell) { layout?.takeIf { it.layoutInput.text.length == field.text.length } }
                 .focusRequester(focus)
                 .onPreviewKeyEvent { event ->
                     if (event.type == KeyEventType.KeyDown && Log.isLoggable(NOTEBOOK_LOG_TAG, Log.DEBUG)) {
@@ -685,6 +697,11 @@ private fun CellSourceEditor(
                     }
                 },
         )
+        session.cellHover?.takeIf { it.cellId == cell.id }?.let { hover ->
+            layout?.takeIf { it.layoutInput.text.length == field.text.length }?.let { shown ->
+                CellHoverCard(controller, session, hover, shown)
+            }
+        }
         val completion = session.cellCompletion?.takeIf { it.cellId == cell.id }
         val items = completion?.visibleItems(field)
         if (completion != null && items != null) {
