@@ -1854,6 +1854,10 @@ day, L several days.
       the profile and the exit-status mark; keep them with the daemon's session. S.
   28. (Done in batch 33.) Zsh, fish and tmux aren't in the guest; offer to install a profile's program from the
       "isn't installed" message (as other guest tools are offered). S.
+  29. Terminal find lists the matching lines but can't scroll to them (batch 27); the scroll
+      bridge from batch 32 can now take a tap on a match to its row. S.
+  30. Find in selection (batch 29) works without the shaded area VS Code draws over the
+      selection it searches. S.
 * Still left out on purpose: multi-cursor, sticky scroll, minimap (Aardink switch; folding came in batch 31);
   split editor groups and the 3-way merge editor; tasks.json; MCP, other AI providers and the
   built-in chat agent (Copilot, Claude Code and Gemini through ACP instead); foldable postures
