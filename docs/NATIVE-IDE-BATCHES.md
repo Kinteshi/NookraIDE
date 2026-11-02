@@ -1734,7 +1734,7 @@ day, L several days.
       pointer on a symbol (`editor.hover.enabled`, `editor.hover.delay`), as Ctrl+K Ctrl+I shows
       it now. Check how the Book Cover touchpad's hover events arrive (a `hid` test mouse moved no
       pointer on 10-29). Setting for the editor hover. S-M.
-* Still left out on purpose: multi-cursor, folding, sticky scroll, minimap (Aardink switch);
+* Still left out on purpose: multi-cursor, sticky scroll, minimap (Aardink switch; folding came in batch 31);
   split editor groups and the 3-way merge editor; tasks.json; MCP, other AI providers and the
   built-in chat agent (Copilot, Claude Code and Gemini through ACP instead); foldable postures
   and S Pen hover (not on this tablet); remote kernels and localization (no need yet).
