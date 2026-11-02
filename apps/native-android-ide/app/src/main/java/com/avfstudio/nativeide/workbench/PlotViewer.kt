@@ -130,11 +130,11 @@ fun PlotViewerDialog(controller: WorkbenchController) {
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
-                    IconButton(onClick = { controller.savePlotToWorkspace(state.session, plot) }) { Icon(Icons.Outlined.SaveAlt, "Save beside the notebook") }
-                    IconButton(onClick = { controller.savePlotToPictures(plot) }) { Icon(Icons.Outlined.Image, "Save to Pictures") }
-                    IconButton(onClick = { controller.copyPlot(plot) }) { Icon(Icons.Outlined.ContentCopy, "Copy image") }
-                    IconButton(onClick = { controller.sharePlot(plot) }) { Icon(Icons.Outlined.Share, "Share") }
-                    IconButton(onClick = controller::closePlotViewer) { Icon(Icons.Outlined.Close, "Close (Escape)") }
+                    Tooltip("Save beside the notebook") { IconButton(onClick = { controller.savePlotToWorkspace(state.session, plot) }) { Icon(Icons.Outlined.SaveAlt, "Save beside the notebook") } }
+                    Tooltip("Save to Pictures") { IconButton(onClick = { controller.savePlotToPictures(plot) }) { Icon(Icons.Outlined.Image, "Save to Pictures") } }
+                    Tooltip("Copy image") { IconButton(onClick = { controller.copyPlot(plot) }) { Icon(Icons.Outlined.ContentCopy, "Copy image") } }
+                    Tooltip("Share") { IconButton(onClick = { controller.sharePlot(plot) }) { Icon(Icons.Outlined.Share, "Share") } }
+                    Tooltip("Close (Escape)") { IconButton(onClick = controller::closePlotViewer) { Icon(Icons.Outlined.Close, "Close (Escape)") } }
                 }
             }
             Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -148,14 +148,14 @@ fun PlotViewerDialog(controller: WorkbenchController) {
                 }
                 ViewerFrame(controller, key, loaded, Modifier.fillMaxSize())
                 if (index > 0) {
-                    FilledTonalIconButton(onClick = { go(-1) }, shape = CircleShape, modifier = Modifier.align(Alignment.CenterStart).padding(12.dp).size(48.dp)) {
+                    Tooltip("Previous plot (←)") { FilledTonalIconButton(onClick = { go(-1) }, shape = CircleShape, modifier = Modifier.align(Alignment.CenterStart).padding(12.dp).size(48.dp)) {
                         Icon(Icons.AutoMirrored.Outlined.KeyboardArrowLeft, "Previous plot (←)")
-                    }
+                    } }
                 }
                 if (index < plots.lastIndex) {
-                    FilledTonalIconButton(onClick = { go(1) }, shape = CircleShape, modifier = Modifier.align(Alignment.CenterEnd).padding(12.dp).size(48.dp)) {
+                    Tooltip("Next plot (→)") { FilledTonalIconButton(onClick = { go(1) }, shape = CircleShape, modifier = Modifier.align(Alignment.CenterEnd).padding(12.dp).size(48.dp)) {
                         Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, "Next plot (→)")
-                    }
+                    } }
                 }
             }
         }

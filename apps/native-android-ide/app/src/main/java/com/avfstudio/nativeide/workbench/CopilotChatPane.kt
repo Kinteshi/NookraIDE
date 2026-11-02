@@ -105,14 +105,14 @@ fun CopilotChatPane(controller: WorkbenchController, modifier: Modifier = Modifi
             } else {
                 Box(Modifier.weight(1f)) { ChatAgentPicker(controller) }
             }
-            IconButton(onClick = controller::newChat) { Icon(Icons.Outlined.Add, contentDescription = "New chat") }
-            IconButton(onClick = { if (controller.showChatHistory) controller.showChatHistory = false else controller.openChatHistory() }) {
+            Tooltip("New chat") { IconButton(onClick = controller::newChat) { Icon(Icons.Outlined.Add, contentDescription = "New chat") } }
+            Tooltip("Past chats") { IconButton(onClick = { if (controller.showChatHistory) controller.showChatHistory = false else controller.openChatHistory() }) {
                 Icon(Icons.Outlined.History, contentDescription = "Past chats", tint = if (controller.showChatHistory) colors.primary else colors.onSurfaceVariant)
-            }
+            } }
             if (controller.chatAgentRunning) {
-                IconButton(onClick = controller::endChatSession) { Icon(Icons.Outlined.Stop, contentDescription = "Stop the agent") }
+                Tooltip("Stop the agent") { IconButton(onClick = controller::endChatSession) { Icon(Icons.Outlined.Stop, contentDescription = "Stop the agent") } }
             }
-            onClose?.let { IconButton(onClick = it) { Icon(Icons.Outlined.Close, contentDescription = "Close chat") } }
+            onClose?.let { Tooltip("Close chat") { IconButton(onClick = it) { Icon(Icons.Outlined.Close, contentDescription = "Close chat") } } }
         }
         if (controller.chatAuthMethods.isNotEmpty() || controller.chatSignInNeeded) {
             val kind = controller.chatAgentKind
@@ -179,7 +179,7 @@ fun CopilotChatPane(controller: WorkbenchController, modifier: Modifier = Modifi
         ) {
             var attachMenu by remember { mutableStateOf(false) }
             Box {
-                IconButton(onClick = { attachMenu = true }) { Icon(Icons.Outlined.AttachFile, contentDescription = "Add context") }
+                Tooltip("Add context") { IconButton(onClick = { attachMenu = true }) { Icon(Icons.Outlined.AttachFile, contentDescription = "Add context") } }
                 DropdownMenu(expanded = attachMenu, onDismissRequest = { attachMenu = false }) {
                     DropdownMenuItem(
                         text = { Text("Active file") },
@@ -223,11 +223,11 @@ fun CopilotChatPane(controller: WorkbenchController, modifier: Modifier = Modifi
                 shape = RoundedCornerShape(20.dp),
             )
             if (controller.chatBusy) {
-                FilledIconButton(onClick = controller::cancelChat) { Icon(Icons.Outlined.Stop, contentDescription = "Stop") }
+                Tooltip("Stop") { FilledIconButton(onClick = controller::cancelChat) { Icon(Icons.Outlined.Stop, contentDescription = "Stop") } }
             } else {
-                FilledIconButton(onClick = ::send, enabled = draft.isNotBlank()) {
+                Tooltip("Send") { FilledIconButton(onClick = ::send, enabled = draft.isNotBlank()) {
                     Icon(Icons.AutoMirrored.Outlined.Send, contentDescription = "Send")
-                }
+                } }
             }
         }
     }
@@ -569,7 +569,7 @@ private fun ChatHistoryList(controller: WorkbenchController, modifier: Modifier 
                             Text(row.title, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                             Text(chatSessionAge(row.updatedAt), style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant)
                         }
-                        IconButton(onClick = { menu = true }) { Icon(Icons.Outlined.MoreVert, contentDescription = "More for ${row.title}") }
+                        Tooltip("More for ${row.title}") { IconButton(onClick = { menu = true }) { Icon(Icons.Outlined.MoreVert, contentDescription = "More for ${row.title}") } }
                     }
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                         DropdownMenuItem(

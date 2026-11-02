@@ -172,9 +172,9 @@ private fun ExplorerTree(controller: WorkbenchController, directory: String) {
                             selected = drag.target != null && drag.target == parent && !atRoot,
                             trailing = if (tree && rows.any { it.expanded }) {
                                 {
-                                    IconButton(onClick = controller::collapseFolders, modifier = Modifier.size(24.dp)) {
+                                    Tooltip("Collapse folders") { IconButton(onClick = controller::collapseFolders, modifier = Modifier.size(24.dp)) {
                                         Icon(Icons.Outlined.UnfoldLess, contentDescription = "Collapse folders", modifier = Modifier.size(18.dp))
-                                    }
+                                    } }
                                 }
                             } else {
                                 null
@@ -312,15 +312,15 @@ private fun SelectionBar(controller: WorkbenchController, selection: List<String
     Surface(color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 2.dp), shape = MaterialTheme.shapes.small) {
         Row(Modifier.padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("${selection.size} selected", style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
-            IconButton(onClick = { controller.beginMoveEntries(selection) }) {
+            Tooltip("Move to…") { IconButton(onClick = { controller.beginMoveEntries(selection) }) {
                 Icon(Icons.AutoMirrored.Outlined.DriveFileMove, contentDescription = "Move to…")
-            }
-            IconButton(onClick = { controller.beginDeleteEntries(selection) }) {
+            } }
+            Tooltip("Delete") { IconButton(onClick = { controller.beginDeleteEntries(selection) }) {
                 Icon(Icons.Outlined.Delete, contentDescription = "Delete")
-            }
-            IconButton(onClick = controller::clearExplorerSelection) {
+            } }
+            Tooltip("Clear selection") { IconButton(onClick = controller::clearExplorerSelection) {
                 Icon(Icons.Outlined.Close, contentDescription = "Clear selection")
-            }
+            } }
         }
     }
 }

@@ -89,20 +89,20 @@ fun SidebarContent(controller: WorkbenchController, view: SidebarView, modifier:
         ) {
             Text(view.title, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
             if (view == SidebarView.Explorer && controller.connected) {
-                IconButton(onClick = { controller.beginNewEntry(folder = false) }) {
+                Tooltip("New file") { IconButton(onClick = { controller.beginNewEntry(folder = false) }) {
                     Icon(Icons.AutoMirrored.Outlined.NoteAdd, contentDescription = "New file")
-                }
-                IconButton(onClick = { controller.beginNewEntry(folder = true) }) {
+                } }
+                Tooltip("New folder") { IconButton(onClick = { controller.beginNewEntry(folder = true) }) {
                     Icon(Icons.Outlined.CreateNewFolder, contentDescription = "New folder")
-                }
+                } }
             }
             if (view == SidebarView.Explorer) {
-                IconButton(onClick = {
+                Tooltip("Refresh") { IconButton(onClick = {
                     controller.currentDirectory.takeIf(String::isNotEmpty)?.let(controller::loadDirectory)
                     if (controller.settings.gitDecorations) controller.refreshGitStatus()
                 }) {
                     Icon(Icons.Outlined.Refresh, contentDescription = "Refresh")
-                }
+                } }
             }
         }
         when (view) {
@@ -442,12 +442,12 @@ private fun SearchView(controller: WorkbenchController) {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 // VS Code's chevron: shows the replace field under the search box.
-                IconButton(onClick = { controller.searchReplaceVisible = !controller.searchReplaceVisible }, modifier = Modifier.size(32.dp)) {
+                Tooltip("Toggle replace") { IconButton(onClick = { controller.searchReplaceVisible = !controller.searchReplaceVisible }, modifier = Modifier.size(32.dp)) {
                     Icon(
                         if (controller.searchReplaceVisible) Icons.Outlined.ExpandMore else Icons.AutoMirrored.Outlined.KeyboardArrowRight,
                         contentDescription = "Toggle replace",
                     )
-                }
+                } }
                 OutlinedTextField(
                     value = controller.searchText,
                     onValueChange = {
@@ -472,12 +472,12 @@ private fun SearchView(controller: WorkbenchController) {
                         keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
                         modifier = Modifier.weight(1f),
                     )
-                    IconButton(
+                    Tooltip("Replace all") { IconButton(
                         onClick = controller::confirmReplaceAll,
                         enabled = controller.searchResults.isNotEmpty() && !controller.replacing && !controller.searchRunning,
                     ) {
                         Icon(Icons.Outlined.FindReplace, contentDescription = "Replace all")
-                    }
+                    } }
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -494,9 +494,9 @@ private fun SearchView(controller: WorkbenchController) {
                     controller.runSearch()
                 }
                 Spacer(Modifier.weight(1f))
-                IconButton(onClick = { showGlobs = !showGlobs }) {
+                Tooltip("Files to include or exclude") { IconButton(onClick = { showGlobs = !showGlobs }) {
                     Icon(Icons.Outlined.FilterList, contentDescription = "Files to include or exclude")
-                }
+                } }
             }
             if (showGlobs) {
                 OutlinedTextField(

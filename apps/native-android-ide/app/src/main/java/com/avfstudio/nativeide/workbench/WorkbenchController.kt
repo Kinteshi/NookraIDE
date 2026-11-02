@@ -771,6 +771,9 @@ class WorkbenchController(private val context: Context) {
             showUnused = it.showUnused,
             showDeprecated = it.showDeprecated,
             pinchToZoom = it.pinchToZoom,
+            wheelZoom = it.mouseWheelZoom,
+            hover = it.editorHover,
+            hoverDelayMs = it.editorHoverDelay,
             folding = it.folding,
         )
     }
@@ -3551,6 +3554,8 @@ class WorkbenchController(private val context: Context) {
     private fun onEditorEvent(event: EditorEvent) {
         when (event) {
             is EditorEvent.SelectionChanged -> post {
+                // A click or a key moves the cursor; the card at the old place goes (not one just asked for there).
+                hoverCard?.let { card -> if (card.position != event.selection.active || event.selection.anchor != event.selection.active) hideHoverCard() }
                 if (event.uri == activePath) {
                     if (!restoringCursor && cursorPosition != null && cursorPosition != event.selection.active) {
                         cursorHistory.addLast(event.uri to cursorPosition)
@@ -3574,6 +3579,7 @@ class WorkbenchController(private val context: Context) {
             is EditorEvent.ContentChanged -> run {
                 notifyDocumentChanged(event.uri, event.version, event.text)
                 post {
+                    hideHoverCard()
                     if (activePath == event.uri) {
                         scheduleOutlineRefresh(event.uri)
                         scheduleInlineSuggestion()
@@ -3591,6 +3597,7 @@ class WorkbenchController(private val context: Context) {
             }
             is EditorEvent.ViewportChanged -> post {
                 editorViewportTick++
+                hideHoverCard()
                 // Hints are asked for around the visible lines; scrolling past them asks again.
                 val window = inlayHintWindow
                 if (event.uri == activePath && settings.inlayHints && (window == null ||
@@ -3602,6 +3609,7 @@ class WorkbenchController(private val context: Context) {
             is EditorEvent.FocusChanged -> post {
                 if (event.focused) focusArea = FocusArea.Editor else if (focusArea == FocusArea.Editor) focusArea = FocusArea.Other
             }
+            is EditorEvent.PointerRested -> post { onPointerRested(event.uri, event.position) }
             is EditorEvent.Zoomed -> post {
                 editorViewportTick++
                 // Saved once the fingers stop, rounded like the Settings slider.
@@ -3906,17 +3914,58 @@ class WorkbenchController(private val context: Context) {
         }
     }
 
+    /** The hover card in the editor: problems at [position] and the language server's hover there. */
+    var hoverCard by mutableStateOf<HoverCard?>(null)
+        private set
+    private var hoverRequest = 0
+
+    /** Ctrl+K Ctrl+I: the card at the cursor. */
     private fun showHover() {
-        val (document, position) = activeLspPosition() ?: return
-        val client = languageClientFor(document.path) ?: return
+        val document = activeDocument ?: return
+        val position = editorSurface?.selectionStart() ?: return
+        showHoverAt(document, position, fromPointer = false)
+    }
+
+    private fun onPointerRested(path: String, position: LspPosition?) {
+        if (path != activePath) return
+        if (position == null) {
+            hideHoverCard()
+            return
+        }
+        val document = activeDocument ?: return
+        showHoverAt(document, position, fromPointer = true)
+    }
+
+    fun hideHoverCard() {
+        hoverRequest++
+        if (hoverCard != null) {
+            hoverCard = null
+            soraEditor()?.resetPointerRest()
+        }
+    }
+
+    private fun showHoverAt(document: DocumentSession, position: LspPosition, fromPointer: Boolean) {
+        val request = ++hoverRequest
+        val uri = diagnosticUri(document.path)
+        val problems = diagnostics.filter { it.uri == uri && it.covers(position) }.sortedBy { it.severity ?: 4 }
+        val client = languageClientFor(document.path)?.takeIf { it.isReady }
+        if (client == null) {
+            if (problems.isNotEmpty()) hoverCard = HoverCard(document.path, position, problems, null)
+            else if (!fromPointer) status = "Language intelligence requires a connected Python or TypeScript language server"
+            return
+        }
         client.hover(document.path, position).whenComplete { response, error ->
             post {
-                if (error != null) {
-                    status = "Hover failed: ${error.cause?.message ?: error.message}"
+                if (request != hoverRequest || activePath != document.path) return@post
+                if (error != null && !fromPointer) status = "Hover failed: ${error.cause?.message ?: error.message}"
+                val text = response?.takeIf { error == null && it.isJsonObject }?.asJsonObject?.get("contents")
+                    ?.let(::hoverContents)?.takeIf { it.isNotBlank() }
+                if (text == null && problems.isEmpty()) {
+                    hoverCard = null
+                    if (!fromPointer && error == null) status = "No hover information"
                     return@post
                 }
-                val text = response.takeUnless { it.isJsonNull }?.asJsonObject?.get("contents")?.let(::hoverContents)
-                if (text == null) status = "No hover information" else dialog = WorkbenchDialog.Hover(text)
+                hoverCard = HoverCard(document.path, position, problems, text)
             }
         }
     }
@@ -5154,8 +5203,48 @@ class WorkbenchController(private val context: Context) {
         status = if (target.insertSpaces) "Converted indentation to spaces (${target.tabSize})" else "Converted indentation to tabs (width ${target.tabSize})"
     }
 
-    private fun zoomEditor(delta: Float) {
-        updateSetting(WorkbenchSettings.EDITOR_FONT_SIZE, (settings.editorFontSize + delta).coerceIn(8f, 40f))
+    fun zoomEditor(delta: Float) {
+        val size = (settings.editorFontSize + delta).coerceIn(8f, 40f)
+        updateSetting(WorkbenchSettings.EDITOR_FONT_SIZE, size.roundToInt())
+        status = "Editor font size ${size.roundToInt()}"
+    }
+
+    /** The font size while fingers pinch a notebook; saved as `editor.fontSize` when they lift. */
+    var pinchFontSize by mutableStateOf<Float?>(null)
+        private set
+
+    /** The editor font size shown now: the pinch in progress, else the setting. */
+    val shownFontSize: Float get() = pinchFontSize ?: settings.editorFontSize
+
+    fun pinchZoom(factor: Float) {
+        pinchFontSize = (shownFontSize * factor).coerceIn(8f, 40f)
+    }
+
+    /** Notebooks and the Interactive window, in window coordinates, where a touchpad pinch zooms the font. */
+    val fontZoomAreas = mutableMapOf<Any, androidx.compose.ui.geometry.Rect>()
+
+    /** A touchpad pinch, from the activity: the editor under the pointer zooms, or a notebook. */
+    fun onTouchpadPinch(event: android.view.MotionEvent): Boolean {
+        if (!settings.pinchToZoom || android.os.Build.VERSION.SDK_INT < 34) return false
+        soraEditor()?.takeIf { it.isShown }?.let { view ->
+            val origin = IntArray(2).also(view::getLocationInWindow)
+            if (event.x >= origin[0] && event.x < origin[0] + view.width && event.y >= origin[1] && event.y < origin[1] + view.height) {
+                return view.touchpadPinch(event)
+            }
+        }
+        if (fontZoomAreas.values.none { it.contains(androidx.compose.ui.geometry.Offset(event.x, event.y)) }) return false
+        touchpadPinchFactor(event)?.let(::pinchZoom)
+        if (event.actionMasked == android.view.MotionEvent.ACTION_UP || event.actionMasked == android.view.MotionEvent.ACTION_CANCEL) endPinchZoom()
+        return true
+    }
+
+    fun endPinchZoom() {
+        val size = pinchFontSize?.roundToInt() ?: return
+        pinchFontSize = null
+        if (size.toFloat() != settings.editorFontSize) {
+            updateSetting(WorkbenchSettings.EDITOR_FONT_SIZE, size)
+            status = "Editor font size $size"
+        }
     }
 
     // Copilot -----------------------------------------------------------------------------------
@@ -7742,6 +7831,11 @@ class WorkbenchController(private val context: Context) {
         if (event.action != AndroidKeyEvent.ACTION_DOWN) return false
         val identity = event.downTime to event.keyCode
         if (identity == lastHandledKey) return true
+        if (hoverCard != null && focusArea == FocusArea.Editor && event.keyCode == AndroidKeyEvent.KEYCODE_ESCAPE && event.hasNoModifiers()) {
+            lastHandledKey = identity
+            hideHoverCard()
+            return true
+        }
         // Escape in the editor closes the find widget first, as in VS Code.
         if (findVisible && focusArea in setOf(FocusArea.Editor, FocusArea.Notebook) && event.keyCode == AndroidKeyEvent.KEYCODE_ESCAPE && event.hasNoModifiers()) {
             lastHandledKey = identity

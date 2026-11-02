@@ -70,9 +70,9 @@ internal fun OpenFolderDialog(controller: WorkbenchController, dialog: Workbench
                             detail = path,
                             icon = { Icon(Icons.Outlined.History, contentDescription = null) },
                             trailing = {
-                                IconButton(onClick = { controller.forgetRecentWorkspace(path) }) {
+                                Tooltip("Remove from recent") { IconButton(onClick = { controller.forgetRecentWorkspace(path) }) {
                                     Icon(Icons.Outlined.Close, contentDescription = "Remove from recent")
-                                }
+                                } }
                             },
                         ) { controller.openWorkspace(path) }
                     }
@@ -89,9 +89,9 @@ internal fun OpenFolderDialog(controller: WorkbenchController, dialog: Workbench
                     }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = { controller.showOpenFolder(parent) }, enabled = canGoUp) {
+                    Tooltip("Up one folder") { IconButton(onClick = { controller.showOpenFolder(parent) }, enabled = canGoUp) {
                         Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Up one folder")
-                    }
+                    } }
                     Text(
                         dialog.path,
                         style = MaterialTheme.typography.bodyMedium,
@@ -99,9 +99,9 @@ internal fun OpenFolderDialog(controller: WorkbenchController, dialog: Workbench
                         overflow = TextOverflow.StartEllipsis,
                         modifier = Modifier.weight(1f),
                     )
-                    IconButton(onClick = { newName = "" }) {
+                    Tooltip("New folder") { IconButton(onClick = { newName = "" }) {
                         Icon(Icons.Outlined.CreateNewFolder, contentDescription = "New folder")
-                    }
+                    } }
                 }
                 newName?.let { name ->
                     Row(verticalAlignment = Alignment.CenterVertically) {

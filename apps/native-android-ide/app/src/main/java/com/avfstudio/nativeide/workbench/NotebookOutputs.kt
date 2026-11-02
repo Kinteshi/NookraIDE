@@ -132,14 +132,14 @@ internal fun CellOutputs(controller: WorkbenchController, session: NotebookSessi
 
 @Composable
 private fun OutputsFoldButton(cell: NotebookCell, hidden: Boolean, onClick: () -> Unit) {
-    IconButton(onClick = onClick, modifier = Modifier.size(28.dp).noKeyFocus()) {
+    Tooltip(if (hidden) "Show outputs" else "Hide outputs") { IconButton(onClick = onClick, modifier = Modifier.size(28.dp).noKeyFocus()) {
         Icon(
             if (hidden) Icons.Outlined.ExpandMore else Icons.Outlined.ExpandLess,
             contentDescription = if (hidden) "Show outputs" else "Hide outputs",
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.size(20.dp),
         )
-    }
+    } }
 }
 
 @Composable
@@ -156,9 +156,9 @@ private fun OutputMenuButton(
     val views = remember(output) { outputViews(output) }
     val shown = shownView(views, presentation, controller.settings, remember(output) { outputHtmlScripted(output) })
     Box {
-        IconButton(onClick = { onOpenChange(true) }, modifier = Modifier.size(28.dp).noKeyFocus()) {
+        Tooltip("Output actions") { IconButton(onClick = { onOpenChange(true) }, modifier = Modifier.size(28.dp).noKeyFocus()) {
             Icon(Icons.Outlined.MoreVert, contentDescription = "Output actions", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
-        }
+        } }
         DropdownMenu(expanded = open, onDismissRequest = { onOpenChange(false) }) {
             val text = outputCopyText(output, shown, presentation)
             DropdownMenuItem(

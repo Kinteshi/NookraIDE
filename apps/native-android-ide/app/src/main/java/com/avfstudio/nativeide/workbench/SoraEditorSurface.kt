@@ -197,6 +197,9 @@ internal class SoraEditorSurface(
             if (view.textSizePx != spToPx(config.fontSizeSp)) view.setTextSize(config.fontSizeSp)
         }
         if (view.isScalable != config.pinchToZoom) view.isScalable = config.pinchToZoom
+        view.wheelZoom = config.wheelZoom
+        view.pointerRestDelayMs = config.hoverDelayMs.toLong()
+        hoverEnabled = config.hover
         if (config.pinchToZoom && !scaleBoundsSet) {
             scaleBoundsSet = true
             view.setScaleTextSizes(spToPx(MIN_FONT_SP), spToPx(MAX_FONT_SP))
@@ -217,6 +220,7 @@ internal class SoraEditorSurface(
     override fun runFoldCommand(commandId: String): Boolean = editor.runFoldCommand(commandId)
 
     private var appliedFontSizeSp = Float.NaN
+    private var hoverEnabled = true
     private var scaleBoundsSet = false
 
     private fun spToPx(sp: Float): Float =
@@ -318,7 +322,11 @@ internal class SoraEditorSurface(
         val zoomReceipt = editor.subscribeAlways(TextSizeChangeEvent::class.java) { event ->
             if (event.newTextSize != spToPx(appliedFontSizeSp)) listener(EditorEvent.Zoomed("", pxToSp(event.newTextSize)))
         }
+        editor.onPointerRest = { line, column ->
+            if (hoverEnabled || line < 0) listener(EditorEvent.PointerRested("", if (line < 0) null else LspPosition(line, column)))
+        }
         return Closeable {
+            editor.onPointerRest = null
             contentReceipt.unsubscribe()
             selectionReceipt.unsubscribe()
             scrollReceipt.unsubscribe()

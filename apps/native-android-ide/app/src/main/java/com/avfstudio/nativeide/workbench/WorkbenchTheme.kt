@@ -42,7 +42,7 @@ private val FallbackLight = lightColorScheme(primary = Color(0xFF0061A4), second
  * dark variant for OLED panels, and a static baseline palette otherwise.
  */
 @Composable
-fun AvfTheme(settings: WorkbenchSettings, content: @Composable () -> Unit) {
+fun AvfTheme(settings: WorkbenchSettings, tooltips: Tooltips = Tooltips(settings.tooltips) { "" }, content: @Composable () -> Unit) {
     val dark = when (settings.themeMode) {
         ThemeMode.System -> isSystemInDarkTheme()
         ThemeMode.Light -> false
@@ -56,7 +56,7 @@ fun AvfTheme(settings: WorkbenchSettings, content: @Composable () -> Unit) {
         else -> FallbackLight
     }
     val scheme = if (dark && settings.pureBlack) base.pureBlack() else base
-    CompositionLocalProvider(LocalDarkTheme provides dark) {
+    CompositionLocalProvider(LocalDarkTheme provides dark, LocalTooltips provides tooltips) {
         MaterialTheme(colorScheme = scheme, content = content)
     }
 }

@@ -1543,6 +1543,36 @@ icons, and a default file icon theme in Explorer. 279 unit tests pass.
   which Android can't load, so it is converted to TTF (res/font/seti.ttf, 57 KB). Setting "File
   icons" (`workbench.iconTheme`: Seti or plain). Folders keep the tree's arrows, as in VS Code.
 
+## 32. Pinch fixes, tooltips and hover, go to type/implementation, hex view, notebook intelligence, icon themes, terminal, leftovers (11-02 10:00–; in progress)
+User's pick (11-02): backlog 1, 3, 5, 6, 8, 9, 17 of the 11-01 table (spec-review items 3, 7, 9,
+10, 14, 25, 24), and "pinch to zoom is not working".
+* Pinch to zoom. A touchscreen pinch did zoom the editor (checked with a virtual HID touchscreen:
+  14 → 39); what failed:
+  * The Book Cover's touchpad: Android 14+ sends a touchpad pinch as a mouse gesture
+    (`CLASSIFICATION_PINCH`, two fake fingers), and Compose doesn't hand it to the views inside
+    it, so sora never saw it. The activity now routes touchpad pinches to the editor or
+    notebook under the pointer. The pinch's scale axis reads 0 on this tablet (its touchpads
+    don't declare it), so the scale comes from the span between the two pointers.
+  * Notebooks and the Interactive window had no pinch at all; two fingers (screen or touchpad)
+    now zoom them, live, saved as `editor.fontSize` when the fingers lift.
+  * Ctrl + mouse wheel zooms the editor and notebooks (`editor.mouseWheelZoom`, on by default;
+    Settings → Editor).
+  * Checked with a virtual HID touchpad (same Android mapper as the Book Cover's): editor 16 →
+    25 and back; notebook 16 → 20; touchscreen pinch in the notebook 20 → 16.
+* (25 → backlog 9) Tooltips: Material plain tooltips on 80 icon buttons, the find widget, the
+  activity bar ("Explorer (Ctrl+Shift+E)") and the status bar ("Select Indentation"), with the
+  command's key where the button runs one. They show when a mouse, touchpad or stylus pointer
+  rests 0.5 s, and on a long press (which doesn't also press the button). The touchpad's pointer
+  arrives as a hovering finger, which Material's own tooltips ignore, so the hover is detected
+  for any pointer. Setting "Tooltips" (`avf.workbench.tooltips`, Keyboard and device). Checked:
+  long press on Run all shows "Run all" and runs nothing.
+* Editor hover: resting a mouse or touchpad pointer on code shows a card above the word with the
+  problems there (icon, message, source(code)) and the language server's hover as Markdown;
+  Ctrl+K Ctrl+I shows the same card at the cursor (it was a dialog). It stays while the pointer
+  moves within the word or onto the card, and closes on another word, a click, typing,
+  scrolling or Escape. Settings "Hover" (`editor.hover.enabled`) and "Hover delay"
+  (`editor.hover.delay`, 300 ms) under Code intelligence.
+
 ## Backlog
 To investigate (user, 10-28):
 * (Done in batch 16, with a notebook-side finding.) Plotly figures updating in place (the user's private-notebook-1.ipynb: `plot_handle =

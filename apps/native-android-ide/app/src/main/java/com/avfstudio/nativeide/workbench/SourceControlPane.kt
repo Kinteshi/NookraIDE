@@ -114,11 +114,11 @@ private fun RepositoryView(controller: WorkbenchController, status: com.avfstudi
             }
         }
         if (status.upstream == null) {
-            IconButton(onClick = controller::gitPush) { Icon(Icons.Outlined.CloudUpload, contentDescription = "Publish branch") }
+            Tooltip("Publish branch") { IconButton(onClick = controller::gitPush) { Icon(Icons.Outlined.CloudUpload, contentDescription = "Publish branch") } }
         }
-        IconButton(onClick = controller::refreshGitStatus) { Icon(Icons.Outlined.Refresh, contentDescription = "Refresh") }
+        Tooltip("Refresh") { IconButton(onClick = controller::refreshGitStatus) { Icon(Icons.Outlined.Refresh, contentDescription = "Refresh") } }
         Box {
-            IconButton(onClick = { menu = true }) { Icon(Icons.Outlined.MoreVert, contentDescription = "More Git actions") }
+            Tooltip("More Git actions") { IconButton(onClick = { menu = true }) { Icon(Icons.Outlined.MoreVert, contentDescription = "More Git actions") } }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                 DropdownMenuItem(text = { Text("Pull") }, leadingIcon = { Icon(Icons.Outlined.CloudDownload, null) }, onClick = { menu = false; controller.gitPull() })
                 DropdownMenuItem(text = { Text("Push") }, leadingIcon = { Icon(Icons.Outlined.CloudUpload, null) }, onClick = { menu = false; controller.gitPush() })
@@ -159,18 +159,18 @@ private fun RepositoryView(controller: WorkbenchController, status: com.avfstudi
     }
     LazyColumn(Modifier.fillMaxSize()) {
         if (staged.isNotEmpty()) {
-            item { SectionHeader("Staged changes", staged.size) { IconButton(onClick = { controller.unstageFiles(staged.map { it.path }) }) { Icon(Icons.Outlined.Remove, "Unstage all") } } }
+            item { SectionHeader("Staged changes", staged.size) { Tooltip("Unstage all") { IconButton(onClick = { controller.unstageFiles(staged.map { it.path }) }) { Icon(Icons.Outlined.Remove, "Unstage all") } } } }
             items(staged, key = { "staged:${it.path}" }) { entry ->
                 ChangeRow(entry, entry.indexStatus, onOpen = { controller.showGitDiff(entry, staged = true) }) {
-                    IconButton(onClick = { controller.unstageFiles(listOf(entry.path)) }) { Icon(Icons.Outlined.Remove, "Unstage") }
+                    Tooltip("Unstage") { IconButton(onClick = { controller.unstageFiles(listOf(entry.path)) }) { Icon(Icons.Outlined.Remove, "Unstage") } }
                 }
             }
         }
         item {
             SectionHeader("Changes", changes.size) {
                 if (changes.isNotEmpty()) {
-                    IconButton(onClick = { controller.requestDiscard(changes) }) { Icon(Icons.AutoMirrored.Outlined.Undo, "Discard all changes") }
-                    IconButton(onClick = { controller.stageFiles(changes.map { it.path }) }) { Icon(Icons.Outlined.Add, "Stage all changes") }
+                    Tooltip("Discard all changes") { IconButton(onClick = { controller.requestDiscard(changes) }) { Icon(Icons.AutoMirrored.Outlined.Undo, "Discard all changes") } }
+                    Tooltip("Stage all changes") { IconButton(onClick = { controller.stageFiles(changes.map { it.path }) }) { Icon(Icons.Outlined.Add, "Stage all changes") } }
                 }
             }
         }
@@ -182,8 +182,8 @@ private fun RepositoryView(controller: WorkbenchController, status: com.avfstudi
                 else -> entry.worktreeStatus
             }
             ChangeRow(entry, letter, onOpen = { controller.showGitDiff(entry, staged = false) }) {
-                IconButton(onClick = { controller.requestDiscard(listOf(entry)) }) { Icon(Icons.AutoMirrored.Outlined.Undo, "Discard changes") }
-                IconButton(onClick = { controller.stageFiles(listOf(entry.path)) }) { Icon(Icons.Outlined.Add, "Stage changes") }
+                Tooltip("Discard changes") { IconButton(onClick = { controller.requestDiscard(listOf(entry)) }) { Icon(Icons.AutoMirrored.Outlined.Undo, "Discard changes") } }
+                Tooltip("Stage changes") { IconButton(onClick = { controller.stageFiles(listOf(entry.path)) }) { Icon(Icons.Outlined.Add, "Stage changes") } }
             }
         }
     }

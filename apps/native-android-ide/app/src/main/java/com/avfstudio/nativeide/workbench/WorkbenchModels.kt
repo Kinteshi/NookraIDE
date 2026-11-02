@@ -95,7 +95,6 @@ sealed interface WorkbenchDialog {
     /** Replace All in Search: [matches] occurrences in [files] files. */
     data class ConfirmReplaceAll(val matches: Int, val files: Int) : WorkbenchDialog
     data class CodeActions(val choices: List<CodeActionChoice>) : WorkbenchDialog
-    data class Hover(val text: String) : WorkbenchDialog
     data class Conflict(val document: DocumentSession) : WorkbenchDialog
     /** Asks for a file or folder name; [error] explains why the last attempt failed. */
     data class PathPrompt(val action: PathAction, val initial: String, val error: String? = null) : WorkbenchDialog
@@ -252,3 +251,11 @@ data class WorkspaceSession(
 )
 
 internal fun workspaceSessionKey(workspace: String) = "session:$workspace"
+
+/** The editor's hover card: problems at [position] (worst first) and the language server's hover Markdown. */
+data class HoverCard(
+    val path: String,
+    val position: com.avfstudio.nativeide.editor.LspPosition,
+    val problems: List<com.avfstudio.nativeide.language.LanguageDiagnostic>,
+    val markdown: String?,
+)

@@ -89,6 +89,11 @@ import io.github.rosemoe.sora.lang.styling.Styles
 import io.github.rosemoe.sora.langs.textmate.TextMateLanguage
 import io.github.rosemoe.sora.widget.CodeEditor
 import kotlin.math.roundToInt
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.material.icons.outlined.WarningAmber
+import androidx.compose.material.icons.outlined.Info
 
 @Composable
 fun EditorArea(controller: WorkbenchController, modifier: Modifier = Modifier) {
@@ -190,6 +195,7 @@ private fun EditorOverlays(controller: WorkbenchController) {
     InlineGhostText(controller)
     NextEditOverlay(controller)
     ParameterHints(controller)
+    HoverCardOverlay(controller)
     if (controller.findVisible) {
         Box(Modifier.fillMaxSize()) { FindWidget(controller, Modifier.align(Alignment.TopEnd)) }
     }
@@ -482,12 +488,12 @@ private fun LargeFileView(controller: WorkbenchController) {
                 style = MaterialTheme.typography.labelLarge,
                 modifier = Modifier.weight(1f),
             )
-            IconButton(onClick = { controller.pageLargeFile(-1) }, enabled = paged.canGoPrevious) {
+            Tooltip("Previous page") { IconButton(onClick = { controller.pageLargeFile(-1) }, enabled = paged.canGoPrevious) {
                 Icon(Icons.Outlined.ChevronLeft, contentDescription = "Previous page")
-            }
-            IconButton(onClick = { controller.pageLargeFile(1) }, enabled = paged.canGoNext) {
+            } }
+            Tooltip("Next page") { IconButton(onClick = { controller.pageLargeFile(1) }, enabled = paged.canGoNext) {
                 Icon(Icons.Outlined.ChevronRight, contentDescription = "Next page")
-            }
+            } }
         }
         AndroidView(
             modifier = Modifier.fillMaxSize(),
@@ -684,6 +690,78 @@ private fun ParameterHints(controller: WorkbenchController) {
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(top = 2.dp),
                 )
+            }
+        }
+    }
+}
+
+/**
+ * VS Code's hover: problems at the pointer (or the cursor, Ctrl+K Ctrl+I) and the language
+ * server's Markdown, in a card above the word (below it near the top). It stays while the pointer
+ * moves onto it, and closes on another word, a click, typing, scrolling or Escape.
+ */
+@Composable
+private fun HoverCardOverlay(controller: WorkbenchController) {
+    controller.editorViewportTick
+    val card = controller.hoverCard?.takeIf { it.path == controller.activePath } ?: return
+    val view = controller.soraEditor() ?: return
+    val density = LocalDensity.current
+    val colors = MaterialTheme.colorScheme
+    val line = card.position.line
+    if (line >= view.text.lineCount || view.isLineHidden(line)) return
+    val column = card.position.character.coerceAtMost(view.text.getColumnCount(line))
+    val x = view.getCharOffsetX(line, column)
+    val lineTop = view.getCharOffsetY(line, column) - view.rowHeight
+    val gap = with(density) { 4.dp.roundToPx() }
+    Surface(
+        color = colors.surfaceContainerHigh,
+        shape = RoundedCornerShape(8.dp),
+        shadowElevation = 4.dp,
+        border = androidx.compose.foundation.BorderStroke(1.dp, colors.outlineVariant),
+        modifier = Modifier
+            .widthIn(max = 560.dp)
+            .heightIn(max = 320.dp)
+            .layout { measurable, constraints ->
+                val placeable = measurable.measure(constraints.copy(minWidth = 0, minHeight = 0))
+                val left = x.roundToInt().coerceIn(0, (constraints.maxWidth - placeable.width).coerceAtLeast(0))
+                val above = lineTop.roundToInt() - placeable.height - gap
+                val top = if (above >= 0) above else (lineTop + view.rowHeight).roundToInt() + gap
+                layout(constraints.maxWidth, constraints.maxHeight) { placeable.place(left, top) }
+            },
+    ) {
+        Column(
+            Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            card.problems.forEach { problem ->
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Icon(
+                        when (problem.severity) {
+                            1, null -> Icons.Outlined.ErrorOutline
+                            2 -> Icons.Outlined.WarningAmber
+                            else -> Icons.Outlined.Info
+                        },
+                        contentDescription = null,
+                        tint = colors.problemColor(problem.severity),
+                        modifier = Modifier.size(16.dp).padding(top = 2.dp),
+                    )
+                    val code = problem.code?.takeIf { it.isJsonPrimitive }?.asString
+                    // VS Code's "message  source(code)".
+                    val origin = when {
+                        problem.source != null && code != null -> "  ${problem.source}($code)"
+                        else -> listOfNotNull(problem.source, code).firstOrNull()?.let { "  $it" }.orEmpty()
+                    }
+                    Text(
+                        problem.message + origin,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.onSurface,
+                    )
+                }
+            }
+            if (card.problems.isNotEmpty() && card.markdown != null) androidx.compose.material3.HorizontalDivider(color = colors.outlineVariant)
+            card.markdown?.let { markdown ->
+                val source = remember(card.path) { controller.markdownSource(card.path, null) }
+                NotebookMarkdown(controller, markdown, source)
             }
         }
     }
@@ -1256,6 +1334,109 @@ internal class NativeCodeEditor(
             val opened = foldState.unfoldAround(cursor.leftLine) or foldState.unfoldAround(cursor.rightLine)
             if (opened) post { foldsChanged() }
         }
+    }
+
+    // Zoom by touchpad and wheel ----------------------------------------------------------------
+
+    /** `editor.mouseWheelZoom`: Ctrl and the mouse wheel change the font size. */
+    var wheelZoom = true
+
+    private fun spPx(sp: Float) = android.util.TypedValue.applyDimension(android.util.TypedValue.COMPLEX_UNIT_SP, sp, resources.displayMetrics)
+
+    private fun zoomTo(px: Float, live: Boolean) {
+        val size = px.coerceIn(spPx(8f), spPx(40f))
+        // Live steps only redraw; the last one lays the text out again (sora does the same after a pinch).
+        if (live) {
+            setTextSizePxDirect(size)
+            invalidate()
+        } else {
+            setTextSizePx(size)
+        }
+    }
+
+    /**
+     * A touchpad pinch (Android 14): its scale factor zooms as two fingers on the screen do. Compose
+     * doesn't hand these to the views inside it, so the activity routes them here ([TouchpadPinch]).
+     */
+    fun touchpadPinch(event: android.view.MotionEvent): Boolean {
+        if (!isScalable) return false
+        touchpadPinchFactor(event)?.takeIf { it != 1f }?.let { zoomTo(textSizePx * it, live = true) }
+        if (event.actionMasked == android.view.MotionEvent.ACTION_UP || event.actionMasked == android.view.MotionEvent.ACTION_CANCEL) {
+            zoomTo(textSizePx, live = false)
+        }
+        return true
+    }
+
+    // Pointer rest (the hover card) -------------------------------------------------------------
+
+    /** A mouse, touchpad or stylus pointer rested on text (line, column), or (-1, -1) once it moved off that word. */
+    var onPointerRest: ((Int, Int) -> Unit)? = null
+    /** `editor.hover.delay`. */
+    var pointerRestDelayMs = 300L
+    private var restAt: Pair<Int, Int>? = null
+    /** The word last reported (line, start, end); moving within it keeps the card. */
+    private var restedWord: Triple<Int, Int, Int>? = null
+    private val restRunnable = Runnable {
+        val (line, column) = restAt ?: return@Runnable
+        val lineText = text.getLineString(line)
+        var start = column
+        var end = column
+        while (start > 0 && isIdentifierCharacter(lineText[start - 1])) start--
+        while (end < lineText.length && isIdentifierCharacter(lineText[end])) end++
+        restedWord = Triple(line, start, maxOf(end, column + 1))
+        onPointerRest?.invoke(line, column)
+    }
+
+    /** The character under a pointer at ([x], [y]), or null over the gutter, past a line's end or below the text. */
+    private fun textPositionAt(x: Float, y: Float): Pair<Int, Int>? {
+        if (x < measureTextRegionOffset()) return null
+        val packed = getPointPositionOnScreen(x, y)
+        val line = io.github.rosemoe.sora.util.IntPair.getFirst(packed)
+        val column = io.github.rosemoe.sora.util.IntPair.getSecond(packed)
+        if (line !in 0 until text.lineCount || isLineHidden(line)) return null
+        val bottom = getCharOffsetY(line, column)
+        if (y > bottom || y < bottom - rowHeight) return null
+        val length = text.getColumnCount(line)
+        if (column >= length && x > getCharOffsetX(line, length)) return null
+        return line to column.coerceAtMost(maxOf(0, length - 1))
+    }
+
+    private fun trackPointer(event: android.view.MotionEvent) {
+        val callback = onPointerRest ?: return
+        when (event.actionMasked) {
+            android.view.MotionEvent.ACTION_HOVER_ENTER, android.view.MotionEvent.ACTION_HOVER_MOVE -> {
+                removeCallbacks(restRunnable)
+                val at = textPositionAt(event.x, event.y)
+                val word = restedWord
+                if (word != null && (at == null || at.first != word.first || at.second !in word.second until word.third)) {
+                    restedWord = null
+                    callback(-1, -1)
+                }
+                restAt = at
+                if (at != null && restedWord == null) postDelayed(restRunnable, pointerRestDelayMs)
+            }
+            // Leaving for the card itself keeps it; the next move over the text decides.
+            android.view.MotionEvent.ACTION_HOVER_EXIT -> {
+                removeCallbacks(restRunnable)
+                restAt = null
+            }
+        }
+    }
+
+    /** Forget the reported word (the card closed for another reason), so resting there again shows it. */
+    fun resetPointerRest() {
+        restedWord = null
+    }
+
+    /** Ctrl and the wheel: one size step per notch, as VS Code's `editor.mouseWheelZoom`. */
+    override fun onGenericMotionEvent(event: android.view.MotionEvent): Boolean {
+        if (event.isFromSource(android.view.InputDevice.SOURCE_CLASS_POINTER)) trackPointer(event)
+        if (wheelZoom && event.actionMasked == android.view.MotionEvent.ACTION_SCROLL && (event.metaState and android.view.KeyEvent.META_CTRL_ON) != 0) {
+            val notches = event.getAxisValue(android.view.MotionEvent.AXIS_VSCROLL)
+            if (notches != 0f) zoomTo(textSizePx + Math.signum(notches) * spPx(1f), live = false)
+            return true
+        }
+        return super.onGenericMotionEvent(event)
     }
 
     override fun setStyles(styles: Styles?) {

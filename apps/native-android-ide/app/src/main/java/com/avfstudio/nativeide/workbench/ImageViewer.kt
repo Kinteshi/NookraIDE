@@ -315,14 +315,14 @@ private fun ViewerToolbar(
     Surface(shape = RoundedCornerShape(20.dp), color = colors.surfaceContainerHigh, tonalElevation = 3.dp, modifier = modifier) {
         Row(Modifier.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(info, style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant, modifier = Modifier.padding(horizontal = 8.dp))
-            IconButton(onClick = onZoomOut) { Icon(Icons.Outlined.Remove, contentDescription = "Zoom out", modifier = Modifier.size(18.dp)) }
+            Tooltip("Zoom out") { IconButton(onClick = onZoomOut) { Icon(Icons.Outlined.Remove, contentDescription = "Zoom out", modifier = Modifier.size(18.dp)) } }
             Text(
                 "$percent%",
                 style = MaterialTheme.typography.labelLarge,
                 modifier = Modifier.clickable(onClick = onActual).padding(horizontal = 6.dp, vertical = 8.dp),
             )
-            IconButton(onClick = onZoomIn) { Icon(Icons.Outlined.Add, contentDescription = "Zoom in", modifier = Modifier.size(18.dp)) }
-            IconButton(onClick = onFit) { Icon(Icons.Outlined.FitScreen, contentDescription = "Fit to the pane", modifier = Modifier.size(18.dp)) }
+            Tooltip("Zoom in") { IconButton(onClick = onZoomIn) { Icon(Icons.Outlined.Add, contentDescription = "Zoom in", modifier = Modifier.size(18.dp)) } }
+            Tooltip("Fit to the pane") { IconButton(onClick = onFit) { Icon(Icons.Outlined.FitScreen, contentDescription = "Fit to the pane", modifier = Modifier.size(18.dp)) } }
         }
     }
 }

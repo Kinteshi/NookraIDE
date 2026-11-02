@@ -246,7 +246,7 @@ private fun FindField(
 @Composable
 private fun OptionToggle(label: String, description: String, on: Boolean, underline: Boolean = false, onClick: () -> Unit) {
     val colors = MaterialTheme.colorScheme
-    Box(
+    Tooltip(description) { Box(
         Modifier
             .padding(1.dp)
             .size(width = 30.dp, height = 26.dp)
@@ -265,13 +265,13 @@ private fun OptionToggle(label: String, description: String, on: Boolean, underl
             textDecoration = if (underline) TextDecoration.Underline else null,
             color = if (on) colors.onPrimaryContainer else colors.onSurfaceVariant,
         )
-    }
+    } }
 }
 
 @Composable
 private fun WidgetButton(icon: ImageVector, description: String, on: Boolean = false, enabled: Boolean = true, onClick: () -> Unit) {
     val colors = MaterialTheme.colorScheme
-    Box(
+    Tooltip(description) { Box(
         Modifier
             .size(34.dp)
             .clip(RoundedCornerShape(6.dp))
@@ -290,5 +290,5 @@ private fun WidgetButton(icon: ImageVector, description: String, on: Boolean = f
                 else -> colors.onSurfaceVariant
             },
         )
-    }
+    } }
 }

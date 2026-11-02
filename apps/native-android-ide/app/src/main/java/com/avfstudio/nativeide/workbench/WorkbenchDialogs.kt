@@ -386,20 +386,6 @@ fun WorkbenchDialogHost(controller: WorkbenchController) {
             onDismiss = { controller.dialog = null },
             onPick = controller::applyCodeAction,
         ) { choice -> PaletteRow(choice.title, null) }
-        is WorkbenchDialog.Hover -> AlertDialog(
-            onDismissRequest = { controller.dialog = null },
-            text = {
-                SelectionContainer {
-                    Text(
-                        dialog.text,
-                        fontFamily = FontFamily.Monospace,
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
-                    )
-                }
-            },
-            confirmButton = { TextButton(onClick = { controller.dialog = null }) { Text("Close") } },
-        )
         is WorkbenchDialog.Conflict -> AlertDialog(
             onDismissRequest = { controller.dialog = null },
             title = { Text("File changed on the guest") },
@@ -694,18 +680,18 @@ private fun DataViewerDialog(controller: WorkbenchController, dialog: WorkbenchD
                             )
                             val step = maxOf(pageSize, 1)
                             val lastPage = ((table.matched - 1).coerceAtLeast(0) / DATA_VIEWER_PAGE) * DATA_VIEWER_PAGE
-                            IconButton(enabled = table.offset > 0, onClick = { controller.loadDataViewer(dialog.copy(offset = 0)) }) {
+                            Tooltip("First page") { IconButton(enabled = table.offset > 0, onClick = { controller.loadDataViewer(dialog.copy(offset = 0)) }) {
                                 Icon(Icons.Outlined.FirstPage, contentDescription = "First page")
-                            }
-                            IconButton(enabled = table.offset > 0, onClick = { controller.loadDataViewer(dialog.copy(offset = (table.offset - DATA_VIEWER_PAGE).coerceAtLeast(0))) }) {
+                            } }
+                            Tooltip("Previous page") { IconButton(enabled = table.offset > 0, onClick = { controller.loadDataViewer(dialog.copy(offset = (table.offset - DATA_VIEWER_PAGE).coerceAtLeast(0))) }) {
                                 Icon(Icons.AutoMirrored.Outlined.KeyboardArrowLeft, contentDescription = "Previous page")
-                            }
-                            IconButton(enabled = table.offset + step < table.matched, onClick = { controller.loadDataViewer(dialog.copy(offset = table.offset + step)) }) {
+                            } }
+                            Tooltip("Next page") { IconButton(enabled = table.offset + step < table.matched, onClick = { controller.loadDataViewer(dialog.copy(offset = table.offset + step)) }) {
                                 Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = "Next page")
-                            }
-                            IconButton(enabled = table.offset < lastPage, onClick = { controller.loadDataViewer(dialog.copy(offset = lastPage)) }) {
+                            } }
+                            Tooltip("Last page") { IconButton(enabled = table.offset < lastPage, onClick = { controller.loadDataViewer(dialog.copy(offset = lastPage)) }) {
                                 Icon(Icons.Outlined.LastPage, contentDescription = "Last page")
-                            }
+                            } }
                         }
                     }
                 }
@@ -833,9 +819,9 @@ private fun ConnectDialog(controller: WorkbenchController) {
                                 supportingContent = { Text(profile.endpoint) },
                                 leadingContent = { RadioButton(selected = profile.id == controller.profileId, onClick = { controller.selectProfile(profile) }) },
                                 trailingContent = {
-                                    IconButton(onClick = { controller.deleteProfile(profile.id) }) {
+                                    Tooltip("Delete profile") { IconButton(onClick = { controller.deleteProfile(profile.id) }) {
                                         Icon(Icons.Outlined.Delete, contentDescription = "Delete profile")
-                                    }
+                                    } }
                                 },
                                 modifier = Modifier.clickable { controller.selectProfile(profile) },
                             )

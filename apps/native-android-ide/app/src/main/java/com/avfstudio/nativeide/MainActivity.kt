@@ -65,6 +65,16 @@ class MainActivity : ComponentActivity() {
         if (savedInstanceState == null) com.avfstudio.nativeide.workbench.IntentRouter.deliver(intent)
     }
 
+    /** Compose drops touchpad pinches before they reach the views inside it; they go to the workbench here. */
+    override fun dispatchTouchEvent(ev: android.view.MotionEvent): Boolean {
+        if (android.os.Build.VERSION.SDK_INT >= 34 && ev.classification == android.view.MotionEvent.CLASSIFICATION_PINCH &&
+            com.avfstudio.nativeide.workbench.TouchpadPinch.handler?.invoke(ev) == true
+        ) {
+            return true
+        }
+        return super.dispatchTouchEvent(ev)
+    }
+
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
         com.avfstudio.nativeide.workbench.IntentRouter.deliver(intent)

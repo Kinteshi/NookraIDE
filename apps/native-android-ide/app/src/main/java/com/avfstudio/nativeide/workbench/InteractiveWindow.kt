@@ -94,17 +94,17 @@ fun InteractiveView(controller: WorkbenchController) {
             Text(session.kernelState, style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant, modifier = Modifier.padding(horizontal = 10.dp))
             if (session.busy) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
             Spacer(Modifier.width(8.dp))
-            IconButton(onClick = { controller.interruptKernel(session) }, modifier = Modifier.noKeyFocus()) { Icon(Icons.Outlined.Stop, "Interrupt") }
-            IconButton(onClick = { controller.restartKernel(session) }, modifier = Modifier.noKeyFocus()) { Icon(Icons.Outlined.RestartAlt, "Restart kernel") }
-            IconButton(onClick = { controller.clearInteractive(session) }, modifier = Modifier.noKeyFocus()) { Icon(Icons.Outlined.DeleteSweep, "Clear all") }
-            IconButton(onClick = { controller.showVariables() }, modifier = Modifier.noKeyFocus()) { Icon(Icons.Outlined.DataObject, "Variables") }
-            IconButton(onClick = { controller.exportInteractive(session) }, modifier = Modifier.noKeyFocus()) { Icon(Icons.Outlined.SaveAlt, "Export as notebook") }
-            IconButton(onClick = { controller.closeInteractive(path) }, modifier = Modifier.noKeyFocus()) { Icon(Icons.Outlined.Close, "Close and stop the kernel") }
+            Tooltip("Interrupt") { IconButton(onClick = { controller.interruptKernel(session) }, modifier = Modifier.noKeyFocus()) { Icon(Icons.Outlined.Stop, "Interrupt") } }
+            Tooltip("Restart kernel") { IconButton(onClick = { controller.restartKernel(session) }, modifier = Modifier.noKeyFocus()) { Icon(Icons.Outlined.RestartAlt, "Restart kernel") } }
+            Tooltip("Clear all") { IconButton(onClick = { controller.clearInteractive(session) }, modifier = Modifier.noKeyFocus()) { Icon(Icons.Outlined.DeleteSweep, "Clear all") } }
+            Tooltip("Variables") { IconButton(onClick = { controller.showVariables() }, modifier = Modifier.noKeyFocus()) { Icon(Icons.Outlined.DataObject, "Variables") } }
+            Tooltip("Export as notebook") { IconButton(onClick = { controller.exportInteractive(session) }, modifier = Modifier.noKeyFocus()) { Icon(Icons.Outlined.SaveAlt, "Export as notebook") } }
+            Tooltip("Close and stop the kernel") { IconButton(onClick = { controller.closeInteractive(path) }, modifier = Modifier.noKeyFocus()) { Icon(Icons.Outlined.Close, "Close and stop the kernel") } }
         }
         val cells = session.notebook.cells
         val listState = rememberLazyListState()
         LaunchedEffect(cells.size) { if (cells.isNotEmpty()) listState.animateScrollToItem(cells.lastIndex) }
-        LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = listState) {
+        LazyColumn(Modifier.weight(1f).fillMaxWidth().editorFontZoom(controller), state = listState) {
             items(cells, key = { it.id }) { cell ->
                 Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
                     InteractiveRun(controller, session, cell)
@@ -157,7 +157,7 @@ private fun InteractiveRun(controller: WorkbenchController, session: NotebookSes
             Text(
                 highlighted,
                 fontFamily = FontFamily.Monospace,
-                fontSize = (controller.settings.editorFontSize * 0.9f).sp,
+                fontSize = (controller.shownFontSize * 0.9f).sp,
                 color = colors.onSurface,
                 softWrap = false,
                 overflow = TextOverflow.Clip,
@@ -185,7 +185,7 @@ private fun InteractiveInput(controller: WorkbenchController, path: String) {
         BasicTextField(
             value = code,
             onValueChange = { code = it },
-            textStyle = TextStyle(fontFamily = FontFamily.Monospace, fontSize = (controller.settings.editorFontSize * 0.9f).sp, color = colors.onSurface),
+            textStyle = TextStyle(fontFamily = FontFamily.Monospace, fontSize = (controller.shownFontSize * 0.9f).sp, color = colors.onSurface),
             cursorBrush = SolidColor(colors.primary),
             modifier = Modifier
                 .weight(1f)
@@ -208,6 +208,6 @@ private fun InteractiveInput(controller: WorkbenchController, path: String) {
                 field()
             },
         )
-        IconButton(onClick = ::run, modifier = Modifier.noKeyFocus()) { Icon(Icons.AutoMirrored.Outlined.Send, "Run") }
+        Tooltip("Run") { IconButton(onClick = ::run, modifier = Modifier.noKeyFocus()) { Icon(Icons.AutoMirrored.Outlined.Send, "Run") } }
     }
 }

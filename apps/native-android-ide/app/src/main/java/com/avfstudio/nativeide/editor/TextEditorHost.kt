@@ -21,6 +21,8 @@ sealed interface EditorEvent {
     data class FocusChanged(override val uri: String, val focused: Boolean) : EditorEvent
     /** The user pinched the editor to [fontSizeSp]. */
     data class Zoomed(override val uri: String, val fontSizeSp: Float) : EditorEvent
+    /** A mouse or touchpad pointer rested on [position] (null: it moved on or left the editor). */
+    data class PointerRested(override val uri: String, val position: LspPosition?) : EditorEvent
 }
 
 /**
@@ -137,6 +139,7 @@ class SoraTextEditorHost : TextEditorHost {
                 is EditorEvent.ViewportChanged -> event.copy(uri = document.path)
                 is EditorEvent.FocusChanged -> event.copy(uri = document.path)
                 is EditorEvent.Zoomed -> event.copy(uri = document.path)
+                is EditorEvent.PointerRested -> event.copy(uri = document.path)
             }
             when (normalized) {
                 is EditorEvent.ContentChanged -> {

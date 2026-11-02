@@ -159,7 +159,7 @@ fun NotebookEditor(controller: WorkbenchController, session: NotebookSession) {
         }
         Box(Modifier.fillMaxSize().clipToBounds()) {
         LazyColumn(
-            Modifier.fillMaxSize(),
+            Modifier.fillMaxSize().editorFontZoom(controller),
             state = listState,
             contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -197,7 +197,7 @@ fun NotebookEditor(controller: WorkbenchController, session: NotebookSession) {
 
 @Composable
 private fun ToolbarButton(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
-    IconButton(onClick = onClick, modifier = Modifier.noKeyFocus()) { Icon(icon, contentDescription = label) }
+    Tooltip(label) { IconButton(onClick = onClick, modifier = Modifier.noKeyFocus()) { Icon(icon, contentDescription = label) } }
 }
 
 /** The cursor's visual row (wrapped rows count); falls back to logical lines before the first layout. */
@@ -283,10 +283,10 @@ private fun NotebookCellView(
 /** Move, insert and delete: the selected cell's toolbar, and its sticky header. */
 @Composable
 private fun CellActions(controller: WorkbenchController, session: NotebookSession, cell: NotebookCell) {
-    IconButton(onClick = { controller.moveCell(session, cell, -1) }, modifier = Modifier.noKeyFocus()) { Icon(Icons.Outlined.ArrowUpward, "Move up") }
-    IconButton(onClick = { controller.moveCell(session, cell, 1) }, modifier = Modifier.noKeyFocus()) { Icon(Icons.Outlined.ArrowDownward, "Move down") }
-    IconButton(onClick = { controller.addCell(session, cell) }, modifier = Modifier.noKeyFocus()) { Icon(Icons.Outlined.Add, "Insert cell below") }
-    IconButton(onClick = { controller.deleteCell(session, cell) }, modifier = Modifier.noKeyFocus()) { Icon(Icons.Outlined.Delete, "Delete cell") }
+    Tooltip("Move up") { IconButton(onClick = { controller.moveCell(session, cell, -1) }, modifier = Modifier.noKeyFocus()) { Icon(Icons.Outlined.ArrowUpward, "Move up") } }
+    Tooltip("Move down") { IconButton(onClick = { controller.moveCell(session, cell, 1) }, modifier = Modifier.noKeyFocus()) { Icon(Icons.Outlined.ArrowDownward, "Move down") } }
+    Tooltip("Insert cell below") { IconButton(onClick = { controller.addCell(session, cell) }, modifier = Modifier.noKeyFocus()) { Icon(Icons.Outlined.Add, "Insert cell below") } }
+    Tooltip("Delete cell") { IconButton(onClick = { controller.deleteCell(session, cell) }, modifier = Modifier.noKeyFocus()) { Icon(Icons.Outlined.Delete, "Delete cell") } }
 }
 
 /** The gutter's top: a spinner while it runs, `[*]` while queued, Run when selected, else `[n]`. */
@@ -302,9 +302,9 @@ private fun CellRunButton(controller: WorkbenchController, session: NotebookSess
             style = MaterialTheme.typography.labelMedium,
             color = colors.primary,
         )
-        selected -> IconButton(onClick = { controller.runCell(session, cell) }, modifier = Modifier.size(32.dp).noKeyFocus()) {
+        selected -> Tooltip("Run cell") { IconButton(onClick = { controller.runCell(session, cell) }, modifier = Modifier.size(32.dp).noKeyFocus()) {
             Icon(Icons.Outlined.PlayArrow, contentDescription = "Run cell", tint = colors.primary)
-        }
+        } }
         else -> Text(
             "[${cell.executionCount ?: " "}]",
             fontFamily = FontFamily.Monospace,
@@ -548,7 +548,7 @@ private fun CellSourceEditor(
             onValueChange = ::apply,
             textStyle = TextStyle(
                 fontFamily = FontFamily.Monospace,
-                fontSize = controller.settings.editorFontSize.sp,
+                fontSize = controller.shownFontSize.sp,
                 color = colors.onSurface,
             ),
             cursorBrush = SolidColor(colors.primary),

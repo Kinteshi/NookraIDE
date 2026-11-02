@@ -93,6 +93,8 @@ import androidx.compose.material.icons.outlined.Vibration
 import androidx.compose.material.icons.outlined.ViewAgenda
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material.icons.outlined.Web
+import androidx.compose.material.icons.outlined.Mouse
+import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.ZoomIn
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
@@ -160,9 +162,9 @@ fun SettingsScreen(controller: WorkbenchController) {
                 TopAppBar(
                     title = { Text(if (!wide && shown != null) shown.title else "Settings") },
                     navigationIcon = {
-                        IconButton(onClick = { if (!wide && picked != null) picked = null else controller.settingsVisible = false }) {
+                        Tooltip("Back") { IconButton(onClick = { if (!wide && picked != null) picked = null else controller.settingsVisible = false }) {
                             Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back")
-                        }
+                        } }
                     },
                 )
                 if (wide) {
@@ -286,7 +288,8 @@ private fun LazyListScope.appearance(controller: WorkbenchController, settings: 
 private fun LazyListScope.editor(settings: WorkbenchSettings, set: SetSetting) {
     item { Section("Text") }
     item { SliderRow(Icons.Outlined.FormatSize, "Font size", settings.editorFontSize, 8f..32f, "%.0f sp") { set(WorkbenchSettings.EDITOR_FONT_SIZE, it.roundToInt()) } }
-    item { SwitchRow(Icons.Outlined.ZoomIn, "Pinch to zoom", "Two fingers change the editor's font size, kept as the font size above", settings.pinchToZoom) { set(WorkbenchSettings.PINCH_TO_ZOOM, it) } }
+    item { SwitchRow(Icons.Outlined.ZoomIn, "Pinch to zoom", "Two fingers on the screen or the touchpad change the font size of the editor and notebooks, kept as the font size above", settings.pinchToZoom) { set(WorkbenchSettings.PINCH_TO_ZOOM, it) } }
+    item { SwitchRow(Icons.Outlined.Mouse, "Ctrl + wheel zooms", "Ctrl and the mouse wheel change the font size (editor.mouseWheelZoom)", settings.mouseWheelZoom) { set(WorkbenchSettings.MOUSE_WHEEL_ZOOM, it) } }
     item { SwitchRow(Icons.AutoMirrored.Outlined.WrapText, "Word wrap", "Wrap long lines at the edge of the editor (folding needs it off)", settings.wordWrap) { set(WorkbenchSettings.WORD_WRAP, if (it) "on" else "off") } }
     item { SwitchRow(Icons.Outlined.FormatListNumbered, "Line numbers", null, settings.lineNumbers) { set(WorkbenchSettings.LINE_NUMBERS, if (it) "on" else "off") } }
     item { SwitchRow(Icons.Outlined.UnfoldLess, "Folding", "Arrows beside the line numbers fold functions, classes and blocks; Ctrl+Shift+[ and ] at the cursor", settings.folding) { set(WorkbenchSettings.FOLDING, it) } }
@@ -328,6 +331,10 @@ private fun LazyListScope.intelligence(settings: WorkbenchSettings, set: SetSett
     item { SwitchRow(Icons.Outlined.AutoFixHigh, "Suggestions while typing", "The language server's completions pop up as you type, with auto-imports (Ctrl+Space always shows them)", settings.quickSuggestions) { set(WorkbenchSettings.QUICK_SUGGESTIONS, it) } }
     item { SwitchRow(Icons.Outlined.Functions, "Parameter hints", "The signature and the current parameter while typing a call (Ctrl+Shift+Space shows them)", settings.parameterHints) { set(WorkbenchSettings.PARAMETER_HINTS, it) } }
     item { Section("In the code") }
+    item { SwitchRow(Icons.Outlined.Mouse, "Hover", "Resting a mouse or touchpad pointer on code shows its type, docs and problems (Ctrl+K Ctrl+I at the cursor)", settings.editorHover) { set(WorkbenchSettings.EDITOR_HOVER, it) } }
+    if (settings.editorHover) {
+        item { SliderRow(Icons.Outlined.Timer, "Hover delay", settings.editorHoverDelay.toFloat(), 0f..2000f, "%.0f ms", steps = 19) { set(WorkbenchSettings.EDITOR_HOVER_DELAY, it.roundToInt()) } }
+    }
     item { SwitchRow(Icons.Outlined.DataObject, "Inlay hints", "Inferred types and parameter names at the end of the line, from the language server", settings.inlayHints) { set(WorkbenchSettings.INLAY_HINTS, if (it) "on" else "off") } }
     item { SwitchRow(Icons.Outlined.Numbers, "Reference counts", "\"3 references\" after functions and classes (code lens); tap one to list them", settings.codeLens) { set(WorkbenchSettings.CODE_LENS, it) } }
     item { SwitchRow(Icons.Outlined.Highlight, "Highlight symbol uses", "Marks the other uses of the symbol under the cursor; assignments stronger", settings.occurrencesHighlight) { set(WorkbenchSettings.OCCURRENCES_HIGHLIGHT, if (it) "singleFile" else "off") } }
@@ -659,6 +666,7 @@ private fun LazyListScope.keyboard(controller: WorkbenchController, settings: Wo
         }
     }
     item { Section("Device") }
+    item { SwitchRow(Icons.Outlined.ChatBubbleOutline, "Tooltips", "A button's name and shortcut when a mouse or touchpad pointer rests on it, or on a long press", settings.tooltips) { set(WorkbenchSettings.TOOLTIPS, it) } }
     item { SwitchRow(Icons.Outlined.Vibration, "Haptic feedback", "A short buzz for breakpoints, latched Ctrl or Alt, picking up and dropping in Explorer, and Undo", settings.haptics) { set(WorkbenchSettings.HAPTICS, it) } }
     item { Section("Advanced") }
     item { ActionRow(Icons.Outlined.Settings, "Edit settings.json", "Every setting, in VS Code's format (editor.*, files.* as in VS Code; avf.* for this app's own)") { controller.openSettingsJson() } }

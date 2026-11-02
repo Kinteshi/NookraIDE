@@ -121,6 +121,11 @@ data class EditorConfig(
     val showDeprecated: Boolean = true,
     /** Pinching changes the font size; the editor reports it as [EditorEvent.Zoomed]. */
     val pinchToZoom: Boolean = true,
+    /** `editor.mouseWheelZoom`: Ctrl and the mouse wheel change the font size. */
+    val wheelZoom: Boolean = true,
+    /** `editor.hover.enabled` and `editor.hover.delay`: report a resting pointer after this many ms. */
+    val hover: Boolean = true,
+    val hoverDelayMs: Int = 300,
     /** `editor.folding`: fold controls beside the line numbers. */
     val folding: Boolean = true,
 )

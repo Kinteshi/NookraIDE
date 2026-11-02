@@ -107,9 +107,9 @@ fun PanelArea(controller: WorkbenchController, modifier: Modifier = Modifier) {
             }
             Spacer(Modifier.weight(1f))
             if (controller.panelTab == PanelTab.Terminal) TerminalActions(controller)
-            IconButton(onClick = { controller.panelVisible = false }) {
+            Tooltip("Hide panel") { IconButton(onClick = { controller.panelVisible = false }) {
                 Icon(Icons.Outlined.KeyboardArrowDown, contentDescription = "Hide panel")
-            }
+            } }
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when (controller.panelTab) {
@@ -278,12 +278,12 @@ fun PortsView(controller: WorkbenchController) {
                             color = colors.onSurfaceVariant,
                         )
                     }
-                    IconButton(onClick = { controller.copyPortAddress(port) }) {
+                    Tooltip("Copy address") { IconButton(onClick = { controller.copyPortAddress(port) }) {
                         Icon(Icons.Outlined.ContentCopy, contentDescription = "Copy address", modifier = Modifier.size(18.dp))
-                    }
-                    IconButton(onClick = { controller.openPort(port) }) {
+                    } }
+                    Tooltip("Open in browser") { IconButton(onClick = { controller.openPort(port) }) {
                         Icon(Icons.Outlined.OpenInBrowser, contentDescription = "Open in browser", modifier = Modifier.size(18.dp))
-                    }
+                    } }
                 }
             }
         }
@@ -351,9 +351,9 @@ fun VariablesView(controller: WorkbenchController) {
                     field()
                 },
             )
-            IconButton(onClick = { controller.refreshVariables(session) }, enabled = !session.variablesLoading) {
+            Tooltip("Refresh variables") { IconButton(onClick = { controller.refreshVariables(session) }, enabled = !session.variablesLoading) {
                 Icon(Icons.Outlined.Refresh, contentDescription = "Refresh variables", modifier = Modifier.size(18.dp))
-            }
+            } }
         }
         session.variablesError?.let {
             Text("Couldn't list the variables: $it", style = MaterialTheme.typography.bodySmall, color = colors.error, modifier = Modifier.padding(horizontal = 16.dp))
@@ -415,11 +415,11 @@ fun VariablesView(controller: WorkbenchController) {
 /** The terminal's own buttons: find in its output, links in it, a new terminal. */
 @Composable
 fun TerminalActions(controller: WorkbenchController) {
-    IconButton(onClick = { if (controller.terminalFindVisible) controller.terminalFindVisible = false else controller.showTerminalFind() }) {
+    Tooltip("Find in terminal") { IconButton(onClick = { if (controller.terminalFindVisible) controller.terminalFindVisible = false else controller.showTerminalFind() }) {
         Icon(Icons.Outlined.Search, contentDescription = "Find in terminal")
-    }
-    IconButton(onClick = controller::showTerminalLinks) { Icon(Icons.Outlined.Link, contentDescription = "Open a detected link") }
-    IconButton(onClick = { controller.newTerminal() }) { Icon(Icons.Outlined.Add, contentDescription = "New terminal") }
+    } }
+    Tooltip("Open a detected link") { IconButton(onClick = controller::showTerminalLinks) { Icon(Icons.Outlined.Link, contentDescription = "Open a detected link") } }
+    Tooltip("New terminal") { IconButton(onClick = { controller.newTerminal() }) { Icon(Icons.Outlined.Add, contentDescription = "New terminal") } }
 }
 
 /**
@@ -484,9 +484,9 @@ private fun TerminalFindBar(controller: WorkbenchController, session: TerminalSe
                 onClick = { controller.terminalFindCaseSensitive = !controller.terminalFindCaseSensitive },
                 label = { Text("Aa", fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace) },
             )
-            IconButton(onClick = { controller.terminalFindVisible = false }, modifier = Modifier.size(32.dp)) {
+            Tooltip("Close find") { IconButton(onClick = { controller.terminalFindVisible = false }, modifier = Modifier.size(32.dp)) {
                 Icon(Icons.Outlined.Close, contentDescription = "Close find", modifier = Modifier.size(18.dp))
-            }
+            } }
         }
         if (matches.isNotEmpty()) {
             val listState = androidx.compose.foundation.lazy.rememberLazyListState()

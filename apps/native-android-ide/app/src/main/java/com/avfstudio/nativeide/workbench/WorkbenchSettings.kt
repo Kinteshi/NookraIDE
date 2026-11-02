@@ -47,6 +47,14 @@ data class WorkbenchSettings(
     val inlayHints: Boolean = true,
     /** Pinching the editor changes `editor.fontSize`. */
     val pinchToZoom: Boolean = true,
+    /** `editor.mouseWheelZoom`: Ctrl and the mouse wheel (or touchpad scroll) change the font size. */
+    val mouseWheelZoom: Boolean = true,
+    /** `avf.workbench.tooltips`: a button's name (and key) when the pointer rests on it or on a long press. */
+    val tooltips: Boolean = true,
+    /** `editor.hover.enabled`: the language server's hover card when the pointer rests on code. */
+    val editorHover: Boolean = true,
+    /** `editor.hover.delay`: how long the pointer rests before the hover card shows, in ms. */
+    val editorHoverDelay: Int = 300,
     /** The Markdown preview follows the editor's scrolling (`markdown.preview.scrollPreviewWithEditor`). */
     val markdownScrollSync: Boolean = true,
     val autoSave: AutoSaveMode = AutoSaveMode.Off,
@@ -180,6 +188,10 @@ data class WorkbenchSettings(
         /** VS Code's enum (on/off/onUnlessPressed/offUnlessPressed); there is no key to press here, so off* is off. */
         const val INLAY_HINTS = "editor.inlayHints.enabled"
         const val PINCH_TO_ZOOM = "avf.editor.pinchToZoom"
+        const val MOUSE_WHEEL_ZOOM = "editor.mouseWheelZoom"
+        const val TOOLTIPS = "avf.workbench.tooltips"
+        const val EDITOR_HOVER = "editor.hover.enabled"
+        const val EDITOR_HOVER_DELAY = "editor.hover.delay"
         const val MARKDOWN_SCROLL_SYNC = "markdown.preview.scrollPreviewWithEditor"
         const val AUTO_SAVE = "files.autoSave"
         const val AUTO_SAVE_DELAY = "files.autoSaveDelay"
@@ -279,6 +291,10 @@ data class WorkbenchSettings(
                 occurrencesHighlight = string(OCCURRENCES_HIGHLIGHT)?.let { it != "off" && it != "false" } ?: defaults.occurrencesHighlight,
                 inlayHints = string(INLAY_HINTS)?.let { !it.startsWith("off") && it != "false" } ?: defaults.inlayHints,
                 pinchToZoom = bool(PINCH_TO_ZOOM, defaults.pinchToZoom),
+                mouseWheelZoom = bool(MOUSE_WHEEL_ZOOM, defaults.mouseWheelZoom),
+                tooltips = bool(TOOLTIPS, defaults.tooltips),
+                editorHover = bool(EDITOR_HOVER, defaults.editorHover),
+                editorHoverDelay = number(EDITOR_HOVER_DELAY)?.toInt()?.coerceIn(0, 5000) ?: defaults.editorHoverDelay,
                 markdownScrollSync = bool(MARKDOWN_SCROLL_SYNC, defaults.markdownScrollSync),
                 autoSave = AutoSaveMode.entries.firstOrNull { it.key == string(AUTO_SAVE) } ?: defaults.autoSave,
                 autoSaveDelayMs = number(AUTO_SAVE_DELAY)?.toInt()?.coerceIn(200, 60_000) ?: defaults.autoSaveDelayMs,

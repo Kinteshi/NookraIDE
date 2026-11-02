@@ -143,7 +143,8 @@ fun NativeWorkbench() {
             controller.dispose()
         }
     }
-    AvfTheme(controller.settings) {
+    val tooltips = remember(controller.settings.tooltips) { Tooltips(controller.settings.tooltips, controller::keybindingFor) }
+    AvfTheme(controller.settings, tooltips) {
         BackHandler(enabled = controller.dialog != null || controller.settingsVisible) {
             if (controller.dialog != null) controller.dialog = null else controller.settingsVisible = false
         }
@@ -157,6 +158,10 @@ fun NativeWorkbench() {
             DisposableEffect(activity) {
                 KeyBar.inject = { event -> activity?.dispatchKeyEvent(event) ?: false }
                 onDispose { KeyBar.inject = null }
+            }
+            DisposableEffect(controller) {
+                TouchpadPinch.handler = controller::onTouchpadPinch
+                onDispose { TouchpadPinch.handler = null }
             }
             Column(
                 Modifier
@@ -175,7 +180,7 @@ fun NativeWorkbench() {
                                 ) { Text("Undo") }
                             },
                             dismissAction = {
-                                IconButton(onClick = controller::dismissExplorerUndo) { Icon(Icons.Outlined.Close, contentDescription = "Dismiss") }
+                                Tooltip("Dismiss") { IconButton(onClick = controller::dismissExplorerUndo) { Icon(Icons.Outlined.Close, contentDescription = "Dismiss") } }
                             },
                             modifier = Modifier.align(Alignment.BottomCenter).padding(start = 16.dp, end = 16.dp, bottom = 40.dp).widthIn(max = 560.dp),
                         ) { Text(undo.message, maxLines = 1, overflow = TextOverflow.Ellipsis) }
@@ -238,9 +243,9 @@ private fun TopBar(controller: WorkbenchController, expanded: Boolean) {
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         if (expanded) {
-            IconButton(onClick = { controller.runCommand("workbench.action.toggleSidebarVisibility") }) {
+            Tooltip("Toggle side bar", "workbench.action.toggleSidebarVisibility") { IconButton(onClick = { controller.runCommand("workbench.action.toggleSidebarVisibility") }) {
                 Icon(Icons.Outlined.Menu, contentDescription = "Toggle side bar")
-            }
+            } }
         }
         // The workspace name opens Open Folder (switch to another or a recent one).
         Column(
@@ -290,15 +295,15 @@ private fun TopBar(controller: WorkbenchController, expanded: Boolean) {
             ),
         )
         if (expanded) {
-            IconButton(onClick = { controller.runCommand("workbench.action.terminal.toggleTerminal") }) {
+            Tooltip("Toggle terminal", "workbench.action.terminal.toggleTerminal") { IconButton(onClick = { controller.runCommand("workbench.action.terminal.toggleTerminal") }) {
                 Icon(Icons.Outlined.Terminal, contentDescription = "Toggle terminal")
-            }
-            IconButton(onClick = { controller.runCommand("workbench.action.chat.open") }) {
+            } }
+            Tooltip("Copilot chat", "workbench.action.chat.open") { IconButton(onClick = { controller.runCommand("workbench.action.chat.open") }) {
                 Icon(Icons.Outlined.AutoAwesome, contentDescription = "Copilot chat", tint = if (controller.chatVisible) colors.primary else colors.onSurfaceVariant)
-            }
+            } }
         }
         Box {
-            IconButton(onClick = { menu = true }) { Icon(Icons.Outlined.MoreVert, contentDescription = "More") }
+            Tooltip("More") { IconButton(onClick = { menu = true }) { Icon(Icons.Outlined.MoreVert, contentDescription = "More") } }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                 MenuItem("Command palette", "Ctrl+Shift+P", Icons.Outlined.Widgets) { menu = false; controller.runCommand("workbench.action.showCommands") }
                 MenuItem("Open folder…", "Ctrl+K Ctrl+O", Icons.Outlined.FolderOpen) { menu = false; controller.showOpenFolder() }
@@ -325,10 +330,10 @@ private fun MenuItem(label: String, shortcut: String, icon: ImageVector, onClick
 @Composable
 private fun WorkbenchRail(controller: WorkbenchController) {
     NavigationRail(containerColor = MaterialTheme.colorScheme.surfaceContainer) {
-        RailItem(Icons.Outlined.Folder, "Explorer", controller.sidebar == SidebarView.Explorer) {
+        RailItem(Icons.Outlined.Folder, "Explorer", "workbench.view.explorer", controller.sidebar == SidebarView.Explorer) {
             controller.runCommand("workbench.view.explorer")
         }
-        RailItem(Icons.Outlined.Search, "Search", controller.sidebar == SidebarView.Search) {
+        RailItem(Icons.Outlined.Search, "Search", "workbench.view.search", controller.sidebar == SidebarView.Search) {
             controller.runCommand("workbench.view.search")
         }
         NavigationRailItem(
@@ -336,40 +341,44 @@ private fun WorkbenchRail(controller: WorkbenchController) {
             onClick = { controller.runCommand("workbench.view.scm") },
             icon = {
                 val changes = controller.gitStatus?.entries?.size ?: 0
-                BadgedBox(badge = { if (changes > 0) Badge { Text("$changes") } }) {
-                    Icon(Icons.AutoMirrored.Outlined.CallSplit, contentDescription = null)
+                Tooltip("Source Control", "workbench.view.scm") {
+                    BadgedBox(badge = { if (changes > 0) Badge { Text("$changes") } }) {
+                        Icon(Icons.AutoMirrored.Outlined.CallSplit, contentDescription = null)
+                    }
                 }
             },
             label = { Text("Git") },
         )
-        RailItem(Icons.Outlined.AccountTree, "Outline", controller.sidebar == SidebarView.Outline) {
+        RailItem(Icons.Outlined.AccountTree, "Outline", "outline.focus", controller.sidebar == SidebarView.Outline) {
             controller.runCommand("outline.focus")
         }
         NavigationRailItem(
             selected = controller.sidebar == SidebarView.Problems,
             onClick = { controller.sidebar = if (controller.sidebar == SidebarView.Problems) null else SidebarView.Problems },
             icon = {
-                BadgedBox(badge = { if (controller.diagnostics.isNotEmpty()) Badge { Text("${controller.diagnostics.size}") } }) {
-                    Icon(Icons.Outlined.ErrorOutline, contentDescription = null)
+                Tooltip("Problems", "workbench.actions.view.problems") {
+                    BadgedBox(badge = { if (controller.diagnostics.isNotEmpty()) Badge { Text("${controller.diagnostics.size}") } }) {
+                        Icon(Icons.Outlined.ErrorOutline, contentDescription = null)
+                    }
                 }
             },
             label = { Text("Problems") },
         )
-        RailItem(Icons.Outlined.Terminal, "Terminal", controller.panelVisible && controller.panelTab == PanelTab.Terminal) {
+        RailItem(Icons.Outlined.Terminal, "Terminal", "workbench.action.terminal.toggleTerminal", controller.panelVisible && controller.panelTab == PanelTab.Terminal) {
             controller.runCommand("workbench.action.terminal.toggleTerminal")
         }
-        RailItem(Icons.Outlined.AutoAwesome, "Chat", controller.chatVisible) { controller.runCommand("workbench.action.chat.open") }
+        RailItem(Icons.Outlined.AutoAwesome, "Chat", "workbench.action.chat.open", controller.chatVisible) { controller.runCommand("workbench.action.chat.open") }
         Spacer(Modifier.weight(1f))
-        RailItem(Icons.Outlined.Settings, "Settings", false) { controller.settingsVisible = true }
+        RailItem(Icons.Outlined.Settings, "Settings", "workbench.action.openSettings", false) { controller.settingsVisible = true }
     }
 }
 
 @Composable
-private fun RailItem(icon: ImageVector, label: String, selected: Boolean, onClick: () -> Unit) {
+private fun RailItem(icon: ImageVector, label: String, command: String?, selected: Boolean, onClick: () -> Unit) {
     NavigationRailItem(
         selected = selected,
         onClick = onClick,
-        icon = { Icon(icon, contentDescription = null) },
+        icon = { Tooltip(label, command) { Icon(icon, contentDescription = null) } },
         label = { Text(label) },
     )
 }
@@ -505,23 +514,24 @@ private fun StatusBar(controller: WorkbenchController) {
             if (controller.copilotEnabled) "Copilot · ${controller.copilotStatus}" else "Copilot off",
             Icons.Outlined.AutoAwesome,
             onClick = controller::onCopilotStatusClick,
+            tooltip = "Copilot status",
         )
         // An image has no lines, encoding or language to show.
         if (document != null && controller.activeNotebook == null && !document.binary) {
-            controller.cursorPosition?.let { StatusItem("Ln ${it.line + 1}, Col ${it.character + 1}") { controller.showGoToLine() } }
-            StatusItem(controller.indentation(document).label) { controller.dialog = WorkbenchDialog.IndentationPicker }
-            StatusItem(document.encoding) { controller.dialog = WorkbenchDialog.Encoding }
-            StatusItem(if (document.eol == "\r\n") "CRLF" else "LF") { controller.dialog = WorkbenchDialog.LineEnding }
+            controller.cursorPosition?.let { StatusItem("Ln ${it.line + 1}, Col ${it.character + 1}", tooltip = "Go to Line/Column", command = "workbench.action.gotoLine") { controller.showGoToLine() } }
+            StatusItem(controller.indentation(document).label, tooltip = "Select Indentation") { controller.dialog = WorkbenchDialog.IndentationPicker }
+            StatusItem(document.encoding, tooltip = "Select Encoding") { controller.dialog = WorkbenchDialog.Encoding }
+            StatusItem(if (document.eol == "\r\n") "CRLF" else "LF", tooltip = "Select End of Line Sequence") { controller.dialog = WorkbenchDialog.LineEnding }
             if (controller.lspLanguageId(document.path) == "python") {
                 // VS Code's interpreter chip: the environment completion, lint and debugging use.
                 val environment = pythonEnvironmentName(controller.settings.pythonInterpreter)
-                StatusItem(if (controller.settings.pythonInterpreter.isBlank()) environment else "Python: $environment") {
+                StatusItem(if (controller.settings.pythonInterpreter.isBlank()) environment else "Python: $environment", tooltip = controller.settings.pythonInterpreter.ifBlank { "Select Interpreter" }) {
                     controller.chooseInterpreter()
                 }
             }
             val language = controller.lspLanguageId(document.path) ?: document.languageId.ifEmpty { "plain text" }
             // Untitled files take their language from here (saved ones from their name).
-            StatusItem(language, onClick = if (document.path.startsWith("scratch:")) {
+            StatusItem(language, tooltip = if (document.path.startsWith("scratch:")) "Select Language Mode" else "", onClick = if (document.path.startsWith("scratch:")) {
                 { controller.dialog = WorkbenchDialog.UntitledLanguage }
             } else {
                 null
@@ -531,15 +541,15 @@ private fun StatusBar(controller: WorkbenchController) {
 }
 
 @Composable
-private fun StatusItem(text: String, icon: ImageVector? = null, onClick: (() -> Unit)? = null) {
-    Row(
+private fun StatusItem(text: String, icon: ImageVector? = null, tooltip: String = "", command: String? = null, onClick: (() -> Unit)? = null) {
+    Tooltip(tooltip, command) { Row(
         Modifier.then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         icon?.let { Icon(it, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant) }
         Text(text, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
-    }
+    } }
 }
 
 /**

@@ -62,17 +62,17 @@ fun DebugPanel(controller: WorkbenchController) {
                     Text(" Start debugging  F5")
                 }
                 DebugState.Starting -> Text("Starting…", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(8.dp))
-                DebugState.Running -> IconButton(onClick = controller::pauseDebugging) { Icon(Icons.Outlined.Pause, "Pause (F6)") }
+                DebugState.Running -> Tooltip("Pause (F6)") { IconButton(onClick = controller::pauseDebugging) { Icon(Icons.Outlined.Pause, "Pause (F6)") } }
                 is DebugState.Stopped -> {
-                    IconButton(onClick = controller::startOrContinueDebugging) { Icon(Icons.Outlined.PlayArrow, "Continue (F5)") }
+                    Tooltip("Continue (F5)") { IconButton(onClick = controller::startOrContinueDebugging) { Icon(Icons.Outlined.PlayArrow, "Continue (F5)") } }
                     TextButton(onClick = { controller.debugStep("next") }) { Text("Over F10") }
                     TextButton(onClick = { controller.debugStep("stepIn") }) { Text("Into F11") }
                     TextButton(onClick = { controller.debugStep("stepOut") }) { Text("Out ⇧F11") }
                 }
             }
             if (state != DebugState.Idle) {
-                IconButton(onClick = controller::restartDebugging) { Icon(Icons.Outlined.RestartAlt, "Restart (Ctrl+Shift+F5)") }
-                IconButton(onClick = controller::stopDebugging) { Icon(Icons.Outlined.Stop, "Stop (Shift+F5)", tint = MaterialTheme.colorScheme.error) }
+                Tooltip("Restart (Ctrl+Shift+F5)") { IconButton(onClick = controller::restartDebugging) { Icon(Icons.Outlined.RestartAlt, "Restart (Ctrl+Shift+F5)") } }
+                Tooltip("Stop (Shift+F5)") { IconButton(onClick = controller::stopDebugging) { Icon(Icons.Outlined.Stop, "Stop (Shift+F5)", tint = MaterialTheme.colorScheme.error) } }
             }
             (state as? DebugState.Stopped)?.let {
                 Text(
