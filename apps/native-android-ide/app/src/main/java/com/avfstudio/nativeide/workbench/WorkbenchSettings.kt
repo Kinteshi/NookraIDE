@@ -149,6 +149,8 @@ data class WorkbenchSettings(
     val explorerDragAndDrop: Boolean = true,
     /** Names Explorer and Quick Open hide (`files.exclude`, glob → true). */
     val filesExclude: List<String> = DEFAULT_FILES_EXCLUDE,
+    /** File icons in Explorer, tabs and Open Editors (`workbench.iconTheme`): VS Code's Seti, or "none" for plain ones. */
+    val iconTheme: String = "vs-seti",
     /** Fold arrows beside the line numbers and the fold commands (`editor.folding`). */
     val folding: Boolean = true,
     /** A short buzz for a breakpoint, a latched modifier, a long-press drag (`avf.haptics`). */
@@ -243,6 +245,7 @@ data class WorkbenchSettings(
         const val FILES_EXCLUDE = "files.exclude"
         const val HAPTICS = "avf.haptics"
         const val FOLDING = "editor.folding"
+        const val ICON_THEME = "workbench.iconTheme"
         /** VS Code's defaults for `files.exclude`. */
         val DEFAULT_FILES_EXCLUDE = listOf("**/.git", "**/.svn", "**/.hg", "**/CVS", "**/.DS_Store", "**/Thumbs.db")
 
@@ -346,6 +349,9 @@ data class WorkbenchSettings(
                     ?.map { it.key } ?: defaults.filesExclude,
                 haptics = bool(HAPTICS, defaults.haptics),
                 folding = bool(FOLDING, defaults.folding),
+                // VS Code writes null for no file icons.
+                iconTheme = settings.getPath(ICON_THEME)?.let { if (it.isJsonNull) "none" else it.takeIf { v -> v.isJsonPrimitive }?.asString }
+                    ?.takeIf { it in setOf("vs-seti", "none") } ?: defaults.iconTheme,
             )
         }
     }

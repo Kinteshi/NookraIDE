@@ -1513,6 +1513,36 @@ jupyter bridge-5").
   deep/nested/inner/leaf.txt, target/, batch29-plot-20261101-201541.png). Untitled-1 holds the
   shared text, unsaved.
 
+## 31. Code folding, Settings by category with icons, Seti file icons (11-01 20:30–21:10; done, checked)
+User's pick (11-01): backlog 7 (folding, "go for it already"), Settings reorganized by sections with
+icons, and a default file icon theme in Explorer. 279 unit tests pass.
+* (7) Code folding on sora 0.23.6, which has none (still none up to 0.24.7, its newest): sora
+  draws, hit-tests and moves the cursor through its `Layout`, so `FoldingLayout` (the line-break
+  layout with folded lines left out of its rows, in sora's package to reach it) gives real
+  folding without a fork. A folded line answers with its fold's first row; Up/Down skip folds; a
+  cursor that lands in a fold (arrows, find, go to definition) opens it, as VS Code does; an edit
+  inside a fold or on its first line's line break opens it; folds below an edit move with it.
+  While anything is folded, sora's hardware line cache and indent guides (they assume a row per
+  line) rest. Regions: the language server's `textDocument/foldingRange` (one per first line,
+  the outermost), else indentation (VS Code's fallback; trailing blank lines and closing braces
+  stay out). Arrows beside the line numbers (down open, right folded; always shown, there's no
+  hover), "⋯" after a folded line (tap opens), commands Fold (Ctrl+Shift+[), Unfold
+  (Ctrl+Shift+]), Toggle Fold (Ctrl+K Ctrl+L), Fold All (Ctrl+K Ctrl+0), Unfold All (Ctrl+K
+  Ctrl+J). Setting "Folding" (`editor.folding`). Word wrap turns folding off (its layout is
+  sora's own). Checked on b30/indent.py: fold `def outer` (lines 2-6 hidden, numbers skip), "⋯"
+  opened it, Fold All folded nested regions, Down went 1 → 7 → 8 → 9.
+* Settings by category: Appearance, Editor, Code intelligence, Saving and formatting, Files and
+  Explorer, Languages, Notebooks, Terminal, Copilot and Chat, Guest, Keyboard and device, each
+  with its icon. On the tablet the list sits left of the page (title, summary, sections); in a
+  narrow window the list comes first and Back returns to it. Every row has an icon; the same
+  settings as before, regrouped (Find starts with and Linked editing under Editor, hints and
+  problems under Code intelligence, save clean-ups under Saving…).
+* File icons: VS Code's default theme, Seti (extensions/theme-seti, MIT; notices in
+  assets/icon-themes), in Explorer, Open Editors and the tabs: by file name, extension (longest
+  first), then language id, with the light theme's colours in light mode. Its font is WOFF,
+  which Android can't load, so it is converted to TTF (res/font/seti.ttf, 57 KB). Setting "File
+  icons" (`workbench.iconTheme`: Seti or plain). Folders keep the tree's arrows, as in VS Code.
+
 ## Backlog
 To investigate (user, 10-28):
 * (Done in batch 16, with a notebook-side finding.) Plotly figures updating in place (the user's private-notebook-1.ipynb: `plot_handle =
@@ -1611,7 +1641,7 @@ Not picked yet. Effort: S about half a day, M about a day, L several days.
   5. Snippets: VS Code snippet files from asset packs, and LSP snippet completions with tab
      stops. M-L.
   6. (Done in batch 23.) `files.trimTrailingWhitespace`, `files.insertFinalNewline`, `editor.formatOnPaste`. S.
-  7. Code folding (LSP folding ranges or indentation). M. Checked in batch 25: sora 0.23.6
+  7. (Done in batch 31, with a folding layout for sora.) Code folding (LSP folding ranges or indentation). M. Checked in batch 25: sora 0.23.6
      can't hide lines, so this waits for the Aardink switch.
   8. (Done in batch 24.) Markdown preview for `.md` files (toggle or side by side). M.
   9. (Done in batch 25.) Image viewer for image files (zoom, pan; SVG too). S-M.
@@ -1666,7 +1696,7 @@ day, L several days.
      the catalog. A generic LSP client per language, catalog entries, an install offer. L.
   9. Language intelligence in notebook cells (diagnostics, hover, go to definition) through ty
      over the concatenated cells, as the Copilot mirror already does. M-L.
-  10. File icon themes from imported VSIX packs (kept but not used today). S-M.
+  10. (Default Seti theme in batch 31; imported VSIX icon themes still open.) File icon themes from imported VSIX packs (kept but not used today). S-M.
 * Workbench:
   11. (Done in batch 30.) Undo after deleting a file (the daemon's trash can restore it; the spec asks for a 10 s
       Undo). S.

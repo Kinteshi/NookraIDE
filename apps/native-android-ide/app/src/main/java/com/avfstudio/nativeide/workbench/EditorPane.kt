@@ -309,14 +309,17 @@ private fun EditorTab(controller: WorkbenchController, document: DocumentSession
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                Icon(
-                    when {
-                        path.endsWith(".ipynb") -> Icons.Outlined.Code
-                        isImagePath(path) -> Icons.Outlined.Image
-                        else -> Icons.AutoMirrored.Outlined.InsertDriveFile
-                    },
-                    contentDescription = null,
-                    modifier = Modifier.size(15.dp),
+                val fallback = when {
+                    path.endsWith(".ipynb") -> Icons.Outlined.Code
+                    isImagePath(path) -> Icons.Outlined.Image
+                    else -> Icons.AutoMirrored.Outlined.InsertDriveFile
+                }
+                FileIconView(
+                    path.substringAfterLast('/'),
+                    controller.fileIconTheme,
+                    LocalDarkTheme.current,
+                    fallback,
+                    size = 15.dp,
                     tint = if (selected) colors.primary else colors.onSurfaceVariant,
                 )
                 Text(

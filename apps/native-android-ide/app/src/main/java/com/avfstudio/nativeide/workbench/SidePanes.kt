@@ -325,6 +325,8 @@ fun PaneRow(
     /** False when [dragModifier] handles the long press (Explorer's drag); a right-click still calls [onLongClick]. */
     longClick: Boolean = true,
     dragModifier: Modifier = Modifier,
+    /** Drawn instead of [icon] (a file icon theme's glyph). */
+    leading: (@Composable () -> Unit)? = null,
     onClick: () -> Unit,
 ) {
     val colors = MaterialTheme.colorScheme
@@ -341,12 +343,16 @@ fun PaneRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Icon(
-            icon,
-            contentDescription = null,
-            modifier = Modifier.size(18.dp),
-            tint = if (selected) colors.onSecondaryContainer else colors.onSurfaceVariant,
-        )
+        if (leading != null) {
+            leading()
+        } else {
+            Icon(
+                icon,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+                tint = if (selected) colors.onSecondaryContainer else colors.onSurfaceVariant,
+            )
+        }
         Text(
             label,
             style = MaterialTheme.typography.bodyMedium,

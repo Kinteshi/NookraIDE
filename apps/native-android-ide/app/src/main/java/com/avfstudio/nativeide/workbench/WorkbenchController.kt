@@ -257,6 +257,11 @@ class WorkbenchController(private val context: Context) {
     private val timer = Executors.newSingleThreadScheduledExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
 
+    private val setiIcons by lazy { FileIconTheme.load(context) }
+
+    /** The file icon theme shown (`workbench.iconTheme`), or null for the plain icons. */
+    val fileIconTheme: FileIconTheme? get() = setiIcons.takeIf { settings.iconTheme == "vs-seti" }
+
     /** The workbench's view, set while it is shown, for haptic feedback. */
     var hapticView: android.view.View? = null
 

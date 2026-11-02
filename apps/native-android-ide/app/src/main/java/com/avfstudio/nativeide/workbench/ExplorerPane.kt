@@ -204,6 +204,9 @@ private fun ExplorerTree(controller: WorkbenchController, directory: String) {
                                 else -> Icons.AutoMirrored.Outlined.InsertDriveFile
                             },
                             row.label,
+                            leading = controller.fileIconTheme?.takeIf { !selecting && !entry.isDirectory }?.let { theme ->
+                                { FileIconView(entry.name, theme, dark, Icons.AutoMirrored.Outlined.InsertDriveFile) }
+                            },
                             selected = picked || (entry.isDirectory && drag.target == entry.path) || (!selecting && entry.path == controller.activePath),
                             indent = row.depth,
                             onLongClick = { menu = true },
@@ -354,6 +357,9 @@ private fun OpenEditorRow(controller: WorkbenchController, document: com.avfstud
             else -> Icons.AutoMirrored.Outlined.InsertDriveFile
         },
         path.removePrefix("scratch:/").substringAfterLast('/') + if (folder.isNotEmpty() && !path.startsWith("scratch:")) "  ·  $folder" else "",
+        leading = controller.fileIconTheme?.let { theme ->
+            { FileIconView(path.substringAfterLast('/'), theme, LocalDarkTheme.current, Icons.AutoMirrored.Outlined.InsertDriveFile) }
+        },
         selected = path == controller.activePath,
         trailing = {
             Box(
