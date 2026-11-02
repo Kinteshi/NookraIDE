@@ -162,6 +162,11 @@ private const val SESSION_UNTITLED_KEY = "session-untitled"
 /** Device files open at the last stop, read again through their content URI. */
 private const val SESSION_DEVICE_KEY = "session-device"
 private const val KEYBINDINGS_KEY = "user-keybindings"
+/** Terminals the guest keeps running: their names and profiles, by session id (the guest knows only their folder). */
+private const val TERMINALS_KEY = "terminal-sessions"
+private const val KERNEL_PYTHONS_KEY = "kernel-pythons"
+/** Built-in terminal profiles whose program is a Debian package of the same name. */
+private val INSTALLABLE_SHELLS = setOf("zsh", "fish", "tmux")
 private const val LANGUAGES_DECLINED_KEY = "languages-declined"
 /** Built-in language packs are 10-60 KB; anything far bigger isn't one. */
 private const val MAX_LANGUAGE_PACK_BYTES = 4 * 1024 * 1024
@@ -607,6 +612,7 @@ class WorkbenchController(private val context: Context) {
                     copilot.language.onDisconnected()
                     notebookMirrors.clear()
                     cellMirrors.clear()
+                    notebookServer.onDisconnected()
                     notebooks.values.forEach { it.cellSuggestion = null }
                     chatAgent.onDisconnected()
                     notebooks.values.forEach { it.kernel.onDisconnected(); it.kernelState = "Disconnected" }
@@ -623,27 +629,7 @@ class WorkbenchController(private val context: Context) {
                 wasConnected = isConnected
             }
         }
-        languageClients.values.forEach { client ->
-            client.diagnosticsListener = { uri, updates ->
-                lspLog { "diagnostics $uri: ${updates.size}" }
-                post {
-                    // A notebook's cells, mirrored as one file: their problems go to the cells.
-                    cellMirrorNotebook(uri)?.let { notebook ->
-                        showCellProblems(notebook, updates)
-                        return@post
-                    }
-                    diagnosticsByClient.getOrPut(client) { mutableMapOf() }[uri] = updates
-                    diagnostics.clear()
-                    diagnostics.addAll(diagnosticsByClient.values.flatMap { it.values.flatten() })
-                    refreshEditorProblems()
-                }
-            }
-            client.messageListener = { message -> post { status = message } }
-            client.progressListener = { token, value -> post { onServerProgress(client, token, value) } }
-            client.inlayHintRefreshListener = {
-                post { activePath?.takeIf { languageClientFor(it) === client }?.let { scheduleInlayHints(it, delayMs = 100) } }
-            }
-        }
+        languageClients.values.forEach(::bindLanguageClient)
         copilot.language.messageListener = { message -> post { status = message } }
         copilot.language.showDocumentHandler = { uri -> openExternal(uri) }
         copilot.statusListener = { copilotState ->
@@ -661,6 +647,29 @@ class WorkbenchController(private val context: Context) {
             }
         }
         bindChatAgent()
+    }
+
+    /** A language server's problems, messages and progress reach the workbench. */
+    private fun bindLanguageClient(client: LanguageClient) {
+        client.diagnosticsListener = { uri, updates ->
+            lspLog { "diagnostics $uri: ${updates.size}" }
+            post {
+                // A notebook's cells, mirrored as one file: their problems go to the cells.
+                cellMirrorNotebook(uri)?.let { notebook ->
+                    showCellProblems(notebook, updates)
+                    return@post
+                }
+                diagnosticsByClient.getOrPut(client) { mutableMapOf() }[uri] = updates
+                diagnostics.clear()
+                diagnostics.addAll(diagnosticsByClient.values.flatMap { it.values.flatten() })
+                refreshEditorProblems()
+            }
+        }
+        client.messageListener = { message -> post { status = message } }
+        client.progressListener = { token, value -> post { onServerProgress(client, token, value) } }
+        client.inlayHintRefreshListener = {
+            post { activePath?.takeIf { languageClientFor(it) === client }?.let { scheduleInlayHints(it, delayMs = 100) } }
+        }
     }
 
     private fun bindChatAgent() {
@@ -1684,7 +1693,10 @@ class WorkbenchController(private val context: Context) {
     fun runGuestCommand(command: WorkbenchDialog.GuestCommand) {
         if (dialog == command) dialog = null
         newTerminal("${command.command} && exit", onExit = { code ->
-            post { status = if (code == 0) command.done else "The command didn't finish; the terminal shows why" }
+            post {
+                status = if (code == 0) command.done else "The command didn't finish; the terminal shows why"
+                if (code == 0) command.then?.invoke()
+            }
         })
     }
 
@@ -3874,7 +3886,8 @@ class WorkbenchController(private val context: Context) {
             {
                 post {
                     val needed = documents.filterNot { it.path in notebooks }
-                        .flatMap { languageClientsFor(it.path) }.toSet()
+                        .flatMap { languageClientsFor(it.path) }.toSet() +
+                        notebooks.values.filter { settings.notebookLanguageServer }.map(::cellServer)
                     languageClients.values.filter { it.isStarted && it !in needed }.forEach(LanguageClient::close)
                 }
             },
@@ -6443,12 +6456,7 @@ class WorkbenchController(private val context: Context) {
         val shell = profile ?: defaultTerminalProfile
         val session = createTerminalSession(id, shell.name)
         session.profile = shell
-        session.textLog.onCommandsChanged = {
-            post {
-                session.commandsRevision++
-                session.lastExitCode = session.textLog.commands().lastOrNull()?.exitCode
-            }
-        }
+        watchTerminalCommands(session)
         vfs.addPtyListener(id) { event ->
             onPtyEvent(session, event, command)
             when (event) {
@@ -6464,8 +6472,43 @@ class WorkbenchController(private val context: Context) {
             return null
         }
         terminals.add(session)
+        rememberTerminal(session)
         showTerminal(id)
         return id
+    }
+
+    /** Shell integration's marks update the session's commands and the tab's exit status. */
+    private fun watchTerminalCommands(session: TerminalSession) {
+        session.textLog.onCommandsChanged = {
+            post {
+                session.commandsRevision++
+                session.lastExitCode = session.textLog.commands().lastOrNull()?.exitCode
+            }
+        }
+    }
+
+    // The guest keeps a shell running when the app closes, but knows only its folder: its name
+    // and profile are kept here, by session id, for the app's next start.
+
+    private fun rememberedTerminals(): JsonObject =
+        runCatching { JsonParser.parseString(preferences.getString(TERMINALS_KEY, "{}")).asJsonObject }.getOrDefault(JsonObject())
+
+    private fun rememberTerminal(session: TerminalSession) {
+        val all = rememberedTerminals()
+        all.add(session.id.toString(), JsonObject().apply {
+            addProperty("title", session.title)
+            session.profile?.let { profile ->
+                addProperty("profile", profile.name)
+                addProperty("path", profile.path)
+                add("args", com.google.gson.JsonArray().apply { profile.args.forEach(::add) })
+            }
+        })
+        preferences.edit().putString(TERMINALS_KEY, all.toString()).apply()
+    }
+
+    private fun forgetTerminal(id: UUID) {
+        val all = rememberedTerminals()
+        if (all.remove(id.toString()) != null) preferences.edit().putString(TERMINALS_KEY, all.toString()).apply()
     }
 
     /** Shells to start: the built-in ones and `terminal.integrated.profiles.linux`. */
@@ -6490,7 +6533,9 @@ class WorkbenchController(private val context: Context) {
     }
 
     fun renameTerminal(id: UUID, name: String) {
-        terminals.firstOrNull { it.id == id }?.title = name.trim().ifEmpty { return }
+        val session = terminals.firstOrNull { it.id == id } ?: return
+        session.title = name.trim().ifEmpty { return }
+        rememberTerminal(session)
         dialog = null
     }
 
@@ -6599,6 +6644,20 @@ class WorkbenchController(private val context: Context) {
                     session.emulator.writeInput(
                         (if (missing) "[$program isn't installed in the guest: sudo apt install $program]\r\n" else "[${event.message}]\r\n").toByteArray(),
                     )
+                    // A built-in shell from Debian: offer to install it, then open it.
+                    val profile = session.profile
+                    if (missing && profile != null && program in INSTALLABLE_SHELLS && dialog == null) {
+                        dialog = WorkbenchDialog.GuestCommand(
+                            title = "Install $program?",
+                            text = "$program isn't installed in the guest. This installs it from Debian in a new terminal, then opens a $program terminal.",
+                            command = aptInstall(program),
+                            done = "Installed $program",
+                            then = {
+                                closeTerminal(session.id)
+                                newTerminal(profile = profile)
+                            },
+                        )
+                    }
                 }
             } else if (event.message == "unknown terminal session") {
                 // After the daemon restarts (an update, a guest reboot) its shells are gone. Every
@@ -6611,6 +6670,7 @@ class WorkbenchController(private val context: Context) {
     }
 
     private fun endLostTerminal(session: TerminalSession) {
+        forgetTerminal(session.id)
         if (session.exited) return
         session.exited = true
         session.emulator.writeInput("\r\n[this terminal ended when the guest daemon restarted; open a new one with +]\r\n".toByteArray())
@@ -6744,10 +6804,27 @@ class WorkbenchController(private val context: Context) {
 
     /** Reconnects the panel to shells the guest kept running, including ones from an earlier app session. */
     private fun reattachTerminals() {
+        val remembered = rememberedTerminals()
         vfs.guestPtySessions.forEach { info ->
             val session = terminals.firstOrNull { it.id == info.sessionId }
-                ?: createTerminalSession(info.sessionId, info.cwd.substringAfterLast('/').ifEmpty { "bash" })
-                    .also(terminals::add)
+                ?: run {
+                    // One from an earlier app session: its remembered name and profile, else its folder.
+                    val saved = remembered.getAsJsonObject(info.sessionId.toString())
+                    val title = saved?.get("title")?.asString ?: info.cwd.substringAfterLast('/').ifEmpty { "bash" }
+                    createTerminalSession(info.sessionId, title).also { session ->
+                        session.spawned = true
+                        session.profile = saved?.get("profile")?.asString?.let { name ->
+                            TerminalProfile(
+                                name,
+                                saved.get("path")?.asString ?: name,
+                                saved.getAsJsonArray("args")?.map { it.asString }.orEmpty(),
+                            )
+                        }
+                        // The replay brings shell integration's marks back with the output.
+                        watchTerminalCommands(session)
+                        terminals += session
+                    }
+                }
             session.emulator.clearScreen()
             // The replay sends the scrollback again; the text copy starts over with it.
             session.textLog.clear()
@@ -6770,6 +6847,7 @@ class WorkbenchController(private val context: Context) {
     fun closeTerminal(id: UUID) {
         if (terminalSplit?.let { id == it.first || id == it.second } == true) terminalSplit = null
         val session = terminals.firstOrNull { it.id == id } ?: return
+        forgetTerminal(id)
         if (!session.exited) vfs.ptyKill(id)
         vfs.removePtyListener(id)
         session.emulator.close()
@@ -6820,9 +6898,16 @@ class WorkbenchController(private val context: Context) {
         }
         // A restored draft has unsaved cells.
         notebook.dirty = document.dirty
-        notebooks[document.path] = notebookSession(document, notebook)
+        notebooks[document.path] = notebookSession(document, notebook).also { session ->
+            // Before its kernel runs, the cells resolve imports with the Python it ran last time.
+            session.kernelPython = notebook.kernelName?.let { kernelPythons()[it] }?.takeIf { it.isJsonPrimitive }?.asString
+        }
         return true
     }
+
+    /** Kernelspec name → the Python it runs, kept from kernels started before (the bridge knows it only once asked). */
+    private fun kernelPythons(): JsonObject =
+        runCatching { JsonParser.parseString(preferences.getString(KERNEL_PYTHONS_KEY, "{}")).asJsonObject }.getOrDefault(JsonObject())
 
     /** A notebook and its kernel client, with the kernel's messages wired to its cells. */
     private fun notebookSession(document: DocumentSession, notebook: NotebookDocument): NotebookSession {
@@ -6959,6 +7044,7 @@ class WorkbenchController(private val context: Context) {
                 } else {
                     session.kernelName = spec.displayName
                     session.kernelState = "Idle"
+                    onKernelPython(session, spec.name, spec.python)
                     session.variables = null
                     refreshVariablesIfShown(session)
                     session.focusRequest++
@@ -7635,15 +7721,36 @@ class WorkbenchController(private val context: Context) {
 
     private fun closeNotebookMirror(path: String) {
         if (notebookMirrors.remove(path) != null) copilot.language.didClose(mirrorPath(path))
-        if (cellMirrors.remove(path) != null) languageClients["python"]?.didClose(cellMirrorPath(path))
+        cellMirrors.remove(path)?.let { it.client.didClose(cellMirrorPath(path)) }
+        // The notebook server goes once no notebook uses it.
+        if (notebookServer.isStarted && notebooks.values.none { it.document.path != path && cellServer(it) === notebookServer }) {
+            notebookServer.close()
+            notebookServerPython = null
+        }
     }
 
     // Language intelligence in notebook cells -----------------------------------------------------
     // The Python server (ty) sees a notebook as one file of its cells (magics as comments), as
     // Copilot does; its problems, hover and definitions are mapped back to the cells.
 
-    /** Notebook path → the mirror's text, version and the cells' first lines. */
-    private val cellMirrors = mutableMapOf<String, Triple<String, Long, NotebookMirror>>()
+    /** A notebook's cells file as its server has it: the text, version, the cells' first lines, and which server. */
+    private class CellMirror(val text: String, val version: Long, val mirror: NotebookMirror, val client: LanguageClient)
+
+    /** Notebook path → its cells file. */
+    private val cellMirrors = mutableMapOf<String, CellMirror>()
+
+    /**
+     * A second Python server for notebooks whose kernel runs another Python than the workspace's
+     * interpreter, so imports resolve as the kernel sees them; one at a time ([notebookServerPython]).
+     */
+    private val notebookServer = LanguageClient(vfs).also(::bindLanguageClient)
+    private var notebookServerPython: String? = null
+
+    /** The server for [session]'s cells: the workspace's, or the notebook one for its kernel's Python. */
+    private fun cellServer(session: NotebookSession): LanguageClient {
+        val python = session.kernelPython?.takeIf { it.isNotBlank() && it != settings.pythonInterpreter }
+        return if (python == null) languageClients.getValue("python") else notebookServer
+    }
     private var scheduledCellMirrorSync: ScheduledFuture<*>? = null
 
     private fun cellMirrorPath(notebookPath: String) = "$notebookPath.avf-cells.py"
@@ -7662,43 +7769,68 @@ class WorkbenchController(private val context: Context) {
     private fun syncCellMirror(session: NotebookSession): NotebookMirror? {
         val path = session.document.path
         if (!settings.notebookLanguageServer || notebooks[path] !== session || !vfs.isConnected()) return null
-        val client = languageClients["python"] ?: return null
-        if (!client.isStarted) {
-            startNotebookLanguageServer(session)
+        val client = cellServer(session)
+        val python = if (client === notebookServer) session.kernelPython else null
+        if (!client.isStarted || (python != null && python != notebookServerPython)) {
+            startNotebookLanguageServer(session, client, python)
             return null
         }
         if (!client.isReady) return null
+        // The kernel changed servers: the file moves from the old one.
+        val previous = cellMirrors[path]?.takeIf { it.client === client }
+        if (previous == null) cellMirrors.remove(path)?.let { it.client.didClose(cellMirrorPath(path)) }
         val mirror = notebookMirror(session.notebook.cells, forLanguageServer = true)
-        val previous = cellMirrors[path]
         val version = when {
             previous == null -> 1L.also { client.didOpen(cellMirrorPath(path), "python", it, mirror.text) }
-            previous.first != mirror.text -> (previous.second + 1).also { client.didChange(cellMirrorPath(path), it, mirror.text) }
-            else -> previous.second
+            previous.text != mirror.text -> (previous.version + 1).also { client.didChange(cellMirrorPath(path), it, mirror.text) }
+            else -> previous.version
         }
-        cellMirrors[path] = Triple(mirror.text, version, mirror)
+        cellMirrors[path] = CellMirror(mirror.text, version, mirror, client)
         return mirror
     }
 
-    private fun startNotebookLanguageServer(session: NotebookSession) {
+    /** Starts [client] (the notebook server with [python]'s environment, else the workspace's Python server). */
+    private fun startNotebookLanguageServer(session: NotebookSession, client: LanguageClient, python: String?) {
         val workspace = workspaceRoot ?: return
-        val client = languageClients["python"] ?: return
-        if (client.isStarted) return
+        if (python != null && client.isStarted) {
+            // Another kernel's Python: the notebook server starts again with it; its files open again.
+            cellMirrors.entries.removeAll { it.value.client === client }
+            client.close()
+        } else if (client.isStarted) {
+            return
+        }
+        if (python != null) notebookServerPython = python
         val tool = languageServerTool("python")
-        val env = if (tool == "ty") pythonEnvironmentVariables(settings.pythonInterpreter) else emptyList()
+        val env = if (tool == "ty") pythonEnvironmentVariables(python ?: settings.pythonInterpreter) else emptyList()
         client.start(workspace, tool, env, initializationOptions("python", tool)).whenComplete { _, error ->
             post {
                 reportLanguageServer("python", error)
                 if (error == null) {
-                    documents.filter { client in languageClientsFor(it.path) }.forEach(::notifyDocumentOpened)
+                    if (client !== notebookServer) documents.filter { client in languageClientsFor(it.path) }.forEach(::notifyDocumentOpened)
                     syncCellMirror(session)
                 }
             }
         }
     }
 
+    /** The kernel's Python is known (it started): the cells move to the server that resolves imports like it. */
+    private fun onKernelPython(session: NotebookSession, spec: String, python: String?) {
+        if (python != null) {
+            val known = kernelPythons()
+            if (known.get(spec)?.asString != python) {
+                known.addProperty(spec, python)
+                preferences.edit().putString(KERNEL_PYTHONS_KEY, known.toString()).apply()
+            }
+        }
+        if (session.kernelPython == python) return
+        session.kernelPython = python
+        session.cellProblems.clear()
+        scheduleCellMirrorSync(session, delayMs = 0)
+    }
+
     private fun showCellProblems(notebookPath: String, updates: List<LanguageDiagnostic>) {
         val session = notebooks[notebookPath] ?: return
-        val mirror = cellMirrors[notebookPath]?.third ?: return
+        val mirror = cellMirrors[notebookPath]?.mirror ?: return
         val cells = session.notebook.cells
         val byCell = mutableMapOf<String, MutableList<CellProblem>>()
         updates.filterNot { isNotebookOnlyProblem(it.message) }.forEach { diagnostic ->
@@ -7728,7 +7860,7 @@ class WorkbenchController(private val context: Context) {
     fun showCellHover(session: NotebookSession, cell: NotebookCell, offset: Int, fromPointer: Boolean) {
         if (cell.type != CellType.Code) return
         val problems = session.cellProblems[cell.id].orEmpty().filter { offset in it.start..maxOf(it.start, it.end) }
-        val client = languageClients["python"]?.takeIf { it.isReady && settings.notebookLanguageServer }
+        val client = cellServer(session).takeIf { it.isReady && settings.notebookLanguageServer }
         val position = client?.let { cellMirrorPosition(session, cell, offset) }
         if (client == null || position == null) {
             if (problems.isNotEmpty()) {
@@ -7757,7 +7889,7 @@ class WorkbenchController(private val context: Context) {
 
     /** F12 in a cell: the definition, in another cell (selected) or a file (opened). */
     fun goToCellDefinition(session: NotebookSession, cell: NotebookCell, offset: Int) {
-        val client = languageClients["python"]?.takeIf { it.isReady && settings.notebookLanguageServer }
+        val client = cellServer(session).takeIf { it.isReady && settings.notebookLanguageServer }
         val position = client?.let { cellMirrorPosition(session, cell, offset) }
         if (client == null || position == null) {
             status = "Go to Definition in cells needs the Python language server (Settings → Notebooks)"
@@ -7775,7 +7907,7 @@ class WorkbenchController(private val context: Context) {
                     navigateToLocation(location)
                     return@post
                 }
-                val mirror = cellMirrors[session.document.path]?.third ?: return@post
+                val mirror = cellMirrors[session.document.path]?.mirror ?: return@post
                 val range = location.range.toLspRange() ?: return@post
                 val target = session.notebook.cells.lastOrNull { (mirror.startLines[it.id] ?: Int.MAX_VALUE) <= range.start.line } ?: return@post
                 val first = mirror.startLines[target.id] ?: return@post

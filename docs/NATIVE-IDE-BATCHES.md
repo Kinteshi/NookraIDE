@@ -1635,6 +1635,26 @@ User's pick (11-02): backlog 1, 3, 5, 6, 8, 9, 17 of the 11-01 table (spec-revie
   fix), cells-2.ipynb; in /sdcard/Download: avf-daemon-b32, b32.sh, b32-update.log,
   b32-cells.py, material-icon-theme-5.40.0.vsix.
 
+## 33. Notebook problems with the kernel's Python, terminals kept across restarts, installing a missing shell (11-02 11:15–11:35; done, checked)
+User's pick (11-02): backlog 26, 27, 28 (found in batch 32), "to round them up". 290 unit tests pass.
+* (26) A notebook's cells are checked with its kernel's Python: when that differs from the
+  workspace's interpreter, a second Python server (ty) starts with the kernel's environment for
+  the notebooks that need it (one at a time; it restarts for another Python, and stops when no
+  notebook uses it). The kernelspec's Python is remembered on the device when a kernel starts,
+  so after reopening, imports resolve before the kernel runs. The idle stop no longer closes the
+  Python server while only notebooks use it. Hovers ask for Markdown (ty sent plain text, which
+  drew a line over `---` as a heading); plain-text hovers show preformatted. Checked:
+  "Cannot resolve imported module `pandas`" (django) went away once the Python 3 kernel ran, and
+  stayed away after the app restarted with the kernel stopped; hover on `DataFrame` shows pandas'
+  docs with the signature as Python.
+* (27) Terminals the guest keeps running get their name and profile back after the app
+  restarts (kept on the device by session id; the guest knows only their folder), and their
+  exit-status mark from the replayed output. Checked: renamed one "build", force-stopped the
+  app, reopened: "build" with its mark.
+* (28) A built-in shell that isn't installed (zsh, fish, tmux) offers to install it from Debian
+  in a new terminal, then opens it. Checked the offer for zsh and dismissed it (nothing was
+  installed in the guest).
+
 ## Backlog
 To investigate (user, 10-28):
 * (Done in batch 16, with a notebook-side finding.) Plotly figures updating in place (the user's private-notebook-1.ipynb: `plot_handle =
@@ -1827,12 +1847,12 @@ day, L several days.
       it now. Check how the Book Cover touchpad's hover events arrive (a `hid` test mouse moved no
       pointer on 10-29). Setting for the editor hover. S-M.
 * Found in batch 32 (11-02):
-  26. Notebook language intelligence uses the workspace's interpreter (ty's environment), not the
+  26. (Done in batch 33.) Notebook language intelligence uses the workspace's interpreter (ty's environment), not the
       notebook's kernel: imports the kernel has (pandas) show as unresolved. Point ty at the
       kernel's Python for the hidden cells file, or a per-notebook environment. S-M.
-  27. Terminals reattached after an app restart are titled "Projects" (their folder) and lose
+  27. (Done in batch 33.) Terminals reattached after an app restart are titled "Projects" (their folder) and lose
       the profile and the exit-status mark; keep them with the daemon's session. S.
-  28. Zsh, fish and tmux aren't in the guest; offer to install a profile's program from the
+  28. (Done in batch 33.) Zsh, fish and tmux aren't in the guest; offer to install a profile's program from the
       "isn't installed" message (as other guest tools are offered). S.
 * Still left out on purpose: multi-cursor, sticky scroll, minimap (Aardink switch; folding came in batch 31);
   split editor groups and the 3-way merge editor; tasks.json; MCP, other AI providers and the

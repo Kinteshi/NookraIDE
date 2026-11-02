@@ -133,6 +133,9 @@ internal fun JsonElement.textEdits(): List<LspTextEdit> =
 
 internal fun hoverContents(value: JsonElement): String? = when {
     value.isJsonPrimitive -> value.asString
+    // Plain text drawn as Markdown turns a line over "---" into a heading: it shows as it is.
+    value.isJsonObject && value.asJsonObject.get("kind")?.asString == "plaintext" ->
+        value.asJsonObject.get("value")?.asString?.takeIf { it.isNotBlank() }?.let { "```\n$it\n```" }
     value.isJsonObject -> value.asJsonObject.get("value")?.asString
         ?: value.asJsonObject.get("language")?.asString?.let { language ->
             value.asJsonObject.get("value")?.asString?.let { "```$language\n$it\n```" }

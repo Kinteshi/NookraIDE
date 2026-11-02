@@ -8,7 +8,7 @@ private const val MINIFORGE_SHA256_AARCH64 = "89b786c8d2c8b0fda7553914c1314ae4dd
 private const val MINIFORGE_SHA256_X86_64 = "281b0ac7d550802efc81af633225a5e6116d29ae72f3ab4eae7168c3931a4c05"
 
 /** apt first from the cached lists, then again after refreshing them (a fresh guest has none). */
-private fun aptInstall(packages: String) =
+internal fun aptInstall(packages: String) =
     "{ sudo apt-get install -y $packages || { sudo apt-get update && sudo apt-get install -y $packages; }; }"
 
 /**

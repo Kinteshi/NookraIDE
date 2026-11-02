@@ -126,7 +126,14 @@ sealed interface WorkbenchDialog {
     /** Confirms a guest command that runs in a new terminal; [done] is the status when it exits 0. */
     /** Open Folder: the folder shown, its subfolders once listed, and a listing or create error. */
     data class OpenFolder(val path: String, val folders: List<com.avfstudio.nativeide.transport.FileEntry>? = null, val error: String? = null) : WorkbenchDialog
-    data class GuestCommand(val title: String, val text: String, val command: String, val done: String) : WorkbenchDialog
+    data class GuestCommand(
+        val title: String,
+        val text: String,
+        val command: String,
+        val done: String,
+        /** What follows once the command succeeded (open the shell just installed). */
+        val then: (() -> Unit)? = null,
+    ) : WorkbenchDialog
     data class CopilotSignInCode(val signIn: CopilotSignIn) : WorkbenchDialog
     data class KernelPicker(
         val path: String,
@@ -243,6 +250,8 @@ class NotebookSession(
     var cellCaret = 0
     /** A cell to put the caret in at an offset (go to definition, a problem); the cell takes it once shown. */
     var cellCaretRequest by mutableStateOf<Pair<String, Int>?>(null)
+    /** The running kernel's Python (from its kernelspec); the cells' language server resolves imports with it. */
+    var kernelPython: String? = null
     /** Problems in code cells from the Python language server, by cell id. */
     val cellProblems = androidx.compose.runtime.mutableStateMapOf<String, List<CellProblem>>()
     /** The hover card in a cell: problems there and the server's hover. */

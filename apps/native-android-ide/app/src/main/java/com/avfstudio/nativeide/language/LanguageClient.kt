@@ -547,7 +547,14 @@ class LanguageClient(
                         add("itemDefaults", JsonArray().apply { add("editRange"); add("insertTextFormat"); add("data") })
                     })
                 })
-                add("hover", JsonObject().apply { addProperty("dynamicRegistration", false) })
+                add("hover", JsonObject().apply {
+                    addProperty("dynamicRegistration", false)
+                    // The hover card draws Markdown; without this ty sends plain text.
+                    add("contentFormat", JsonArray().apply {
+                        add("markdown")
+                        add("plaintext")
+                    })
+                })
                 add("signatureHelp", JsonObject().apply {
                     addProperty("dynamicRegistration", false)
                     addProperty("contextSupport", true)
