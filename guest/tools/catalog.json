@@ -425,6 +425,19 @@
       "initializationOptions": {}
     },
     {
+      "name": "codelldb",
+      "version": "1.12.3",
+      "kind": "dap",
+      "languages": ["c", "cpp", "rust"],
+      "command": ["avf-codelldb"],
+      "install": {
+        "script": {"binary": "avf-codelldb", "asset": "avf-codelldb.py", "setup": ["setup"]}
+      },
+      "settingsSection": "lldb",
+      "env_allowlist": [],
+      "initializationOptions": {}
+    },
+    {
       "name": "uv",
       "version": "0.13.0",
       "kind": "cli",

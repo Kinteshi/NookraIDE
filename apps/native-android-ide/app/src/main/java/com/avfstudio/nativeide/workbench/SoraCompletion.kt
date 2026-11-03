@@ -20,6 +20,13 @@ import java.util.concurrent.TimeoutException
 /** Items the popup lists at most; the best ones come first. */
 private const val MAX_SHOWN = 300
 private const val REQUEST_TIMEOUT_MS = 15_000L
+/** Ranks of one group (the server's items, or the snippets) stay below this. */
+private const val RANK_GROUP = 1_000_000L
+
+/** An item's place in the popup when the snippets show before the server's items arrive. */
+private interface Ranked {
+    var rank: Long
+}
 
 /** `adb shell setprop log.tag.AVFSUG DEBUG` logs suggest requests and what came back. */
 private inline fun suggestLog(message: () -> String) {
@@ -78,6 +85,8 @@ internal class SoraCompletionLanguage(
             if (word.first().isDigit()) return
             if (inLineComment(before, provider.languageId)) return
         }
+        val snippets = snippetItems(word, wordStart, invoked)
+        var snippetsShown = false
         val list = if (cached != null && !cached.list.incomplete && !invoked) {
             cached.list
         } else {
@@ -85,24 +94,40 @@ internal class SoraCompletionLanguage(
             if (future == null) {
                 cache = null
                 // No server: the snippets, then the grammar's words.
-                snippetItems(word, wordStart, invoked).takeIf { it.isNotEmpty() }?.let { snippets ->
+                if (snippets.isNotEmpty()) {
                     onItems()
                     publisher.addItems(snippets.map { it.second })
                 }
                 base.requireAutoComplete(content, position, publisher, extraArguments)
                 return
             }
+            // The snippets show at once and the server's items join them when it answers, as in
+            // VS Code: a fresh server still indexing can take seconds.
+            if (snippets.isNotEmpty() && !future.isDone) {
+                publisher.setComparator(compareBy { (it as? Ranked)?.rank ?: Long.MAX_VALUE })
+                snippets.forEachIndexed { index, (score, item) -> (item as Ranked).rank = snippetRank(index, score) }
+                onItems()
+                publisher.addItems(snippets.map { it.second })
+                publisher.updateList(true)
+                snippetsShown = true
+            }
             await(future, publisher) ?: return.also { suggestLog { "no answer for '$word'" } }
         }
         cache = Cached(position.line, wordStart, before, list)
         val items = filterCompletions(list.items, word).take(MAX_SHOWN)
-        val snippets = snippetItems(word, wordStart, invoked)
-        suggestLog { "'$word': ${list.items.size} items, ${items.size} match, ${snippets.size} snippets" }
+        suggestLog { "'$word': ${list.items.size} items, ${items.size} match, ${snippets.size} snippets${if (snippetsShown) " (shown first)" else ""}" }
         if (items.isEmpty() && snippets.isEmpty()) return
         // A newer key may have replaced this request while the server answered; its items would be stale.
         publisher.checkCancelled()
+        val lspItems = items.mapIndexed { index, item ->
+            SoraLspItem(item, word.length, wordStart, provider).apply { rank = lspRank(index, completionScore(word, item.filterText) ?: 0) }
+        }
+        if (snippetsShown) {
+            // In their place among the snippets already shown.
+            publisher.addItems(lspItems)
+            return
+        }
         onItems()
-        val lspItems: List<CompletionItem> = items.map { SoraLspItem(it, word.length, wordStart, provider) }
         publisher.addItems(
             when (provider.snippetSuggestions) {
                 SnippetSuggestions.Top -> snippets.map { it.second } + lspItems
@@ -114,6 +139,19 @@ internal class SoraCompletionLanguage(
                 }
             },
         )
+    }
+
+    /** Where an item goes when snippets were shown first: the same order as when all arrive together. */
+    private fun snippetRank(index: Int, score: Int): Long = when (provider.snippetSuggestions) {
+        SnippetSuggestions.Top -> index.toLong()
+        SnippetSuggestions.Bottom, SnippetSuggestions.None -> RANK_GROUP + index
+        SnippetSuggestions.Inline -> -score * RANK_GROUP + RANK_GROUP / 2 + index
+    }
+
+    private fun lspRank(index: Int, score: Int): Long = when (provider.snippetSuggestions) {
+        SnippetSuggestions.Top -> RANK_GROUP + index
+        SnippetSuggestions.Bottom, SnippetSuggestions.None -> index.toLong()
+        SnippetSuggestions.Inline -> -score * RANK_GROUP + index
     }
 
     /** Snippets whose prefix matches the typed [word] (any with Ctrl+Space on nothing), with their match score. */
@@ -213,7 +251,9 @@ private class SoraLspItem(
     prefix: Int,
     private val wordStart: Int,
     private val provider: CompletionProvider,
-) : CompletionItem(item.label + item.labelDetail.orEmpty(), item.description?.take(48)) {
+) : CompletionItem(item.label + item.labelDetail.orEmpty(), item.description?.take(48)), Ranked {
+    override var rank = 0L
+
     init {
         prefixLength = prefix
         val itemKind = soraKind(item.kind)
@@ -263,7 +303,9 @@ private class SoraSnippetItem(
     typed: Int,
     private val wordStart: Int,
     private val provider: CompletionProvider,
-) : CompletionItem(prefix, snippet.name) {
+) : CompletionItem(prefix, snippet.name), Ranked {
+    override var rank = 0L
+
     init {
         prefixLength = typed
         kind = CompletionItemKind.Snippet

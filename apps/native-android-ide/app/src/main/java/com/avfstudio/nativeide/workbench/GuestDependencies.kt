@@ -5,10 +5,15 @@ import com.avfstudio.nativeide.ai.ChatAgentKind
 /** js-debug as guest/tools/avf-node-agent.sh pins it. */
 private const val JS_DEBUG_VERSION = "1.140.0"
 
+/** CodeLLDB as guest/tools/avf-codelldb.py pins it. */
+private const val CODELLDB_VERSION = "1.12.3"
+
 /** Miniforge pinned like the tool catalog: a release at least a few weeks old, checksum per architecture. */
 private const val MINIFORGE_VERSION = "26.7.2-0"
 private const val MINIFORGE_SHA256_AARCH64 = "89b786c8d2c8b0fda7553914c1314ae4ddaa094503802f279377b19ac4463cb2"
 private const val MINIFORGE_SHA256_X86_64 = "281b0ac7d550802efc81af633225a5e6116d29ae72f3ab4eae7168c3931a4c05"
+
+private const val CATALOG_INSTALL = "avf-native-daemon tools install "
 
 /** apt first from the cached lists, then again after refreshing them (a fresh guest has none). */
 internal fun aptInstall(packages: String) =
@@ -187,6 +192,13 @@ enum class GuestDependency(
         "VS Code's js-debug $JS_DEBUG_VERSION (GitHub release, checksum-verified; about 3 MB) on MaterialCode's Node.js 24.22.0, in ~/.local/share/materialcode",
         "avf-native-daemon tools install js-debug",
     ),
+    CodeLldb(
+        "C, C++ and Rust debugger (CodeLLDB)",
+        listOf("codelldb"),
+        "Debugging C, C++ and Rust (breakpoints, stepping, variables)",
+        "CodeLLDB $CODELLDB_VERSION (GitHub release, checksum-verified; about 55 MB, 170 MB unpacked, with its own LLDB) in ~/.local/share/materialcode",
+        "avf-native-daemon tools install codelldb",
+    ),
     // Toolchains some of those servers work through, offered when one runs without its toolchain.
     GoToolchain(
         "Go toolchain",
@@ -210,6 +222,14 @@ enum class GuestDependency(
         aptInstall("cargo"),
     ),
     ;
+
+    /**
+     * Remove in Settings → Guest tools: the tool catalog's own uninstall, which also drops the
+     * registry entry. Null for what came from elsewhere (apt packages, Miniforge): those stay the
+     * system's or the user's to remove.
+     */
+    val remove: String?
+        get() = install.takeIf { it.startsWith(CATALOG_INSTALL) }?.let { "avf-native-daemon tools remove " + it.removePrefix(CATALOG_INSTALL) }
 
     companion object {
         val allCommands: List<String> get() = entries.flatMap { it.commands }.distinct()
@@ -244,6 +264,9 @@ internal fun dependencyStates(paths: Map<String, String?>): Map<GuestDependency,
 /** The command a terminal runs for [dependency]; it closes its shell only when the install worked. */
 internal fun installCommand(dependency: GuestDependency): String = "${dependency.install} && exit"
 
+/** The debuggers offered for install when a session can't start without them. */
+internal val DEBUGGER_DEPENDENCIES = setOf(GuestDependency.JsDebug, GuestDependency.CodeLldb)
+
 /** Error text from the daemon that means [dependency]'s program could not be started at all. */
 internal fun missingDependencyIn(message: String): GuestDependency? {
     val lower = message.lowercase()
@@ -255,6 +278,7 @@ internal fun missingDependencyIn(message: String): GuestDependency? {
         "tool 'claude-code' is not installed" in lower -> GuestDependency.ClaudeCode
         "tool 'gemini' is not installed" in lower -> GuestDependency.Gemini
         "tool 'js-debug' is not installed" in lower || "js-debug is not set up" in lower -> GuestDependency.JsDebug
+        "tool 'codelldb' is not installed" in lower || "codelldb is not set up" in lower -> GuestDependency.CodeLldb
         "claude-code is not set up" in lower -> GuestDependency.ClaudeCode
         "gemini is not set up" in lower -> GuestDependency.Gemini
         "could not start ripgrep" in lower && notFound -> GuestDependency.Ripgrep

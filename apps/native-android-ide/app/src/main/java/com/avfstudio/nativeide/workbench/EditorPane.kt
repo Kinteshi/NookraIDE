@@ -155,8 +155,9 @@ fun EditorArea(controller: WorkbenchController, modifier: Modifier = Modifier) {
                 else -> EmptyEditor(controller)
             }
             val image = activeDocument?.binary == true
-            if (notebook == null && paged == null && preview == null && !image) EditorOverlays(controller)
+            // With every tab closed the welcome page shows; the last editor's lenses and hints go with it.
             if (notebook == null && paged == null && activeDocument != null && preview == null && !image) {
+                EditorOverlays(controller)
                 ProblemScrollMarks(controller, Modifier.align(Alignment.TopEnd))
             }
         }
@@ -620,6 +621,15 @@ private fun NativeEditorView(controller: WorkbenchController, document: Document
                             event.changeStart.index,
                             event.changedText.toString(),
                         )?.let(::deletePairedCloser)
+                    }
+                    if (event.action == ContentChangeEvent.ACTION_INSERT || event.action == ContentChangeEvent.ACTION_DELETE) {
+                        controller.moveBreakpoints(
+                            document.path,
+                            insertion = event.action == ContentChangeEvent.ACTION_INSERT,
+                            startLine = event.changeStart.line,
+                            startColumn = event.changeStart.column,
+                            endLine = event.changeEnd.line,
+                        )
                     }
                     document.updateText(text.toString())
                     controller.onDocumentEdited(document)

@@ -142,4 +142,68 @@ class DebugModelsTest {
         assertEquals(true, dapInitializeArguments("pwa-node", startDebugging = true).get("supportsStartDebuggingRequest").asBoolean)
         assertEquals(false, dapInitializeArguments().has("supportsStartDebuggingRequest"))
     }
+
+    @Test
+    fun breakpointsMoveWithTheText() {
+        // Enter on line 3 (0-based 2) after its code: lines below move, line 3 stays.
+        assertEquals(3, movedBreakpointLine(3, insertion = true, startLine = 2, startColumn = 8, endLine = 3))
+        assertEquals(6, movedBreakpointLine(5, insertion = true, startLine = 2, startColumn = 8, endLine = 3))
+        assertEquals(2, movedBreakpointLine(2, insertion = true, startLine = 2, startColumn = 8, endLine = 3))
+        // Two lines pasted at the start of line 3 push it down.
+        assertEquals(5, movedBreakpointLine(3, insertion = true, startLine = 2, startColumn = 0, endLine = 4))
+        // Typing on one line moves nothing.
+        assertEquals(3, movedBreakpointLine(3, insertion = true, startLine = 2, startColumn = 0, endLine = 2))
+        // Lines 2–3 deleted (from 0-based 1 to 3): line 6 moves up two, a breakpoint inside ends on the joined line.
+        assertEquals(4, movedBreakpointLine(6, insertion = false, startLine = 1, startColumn = 4, endLine = 3))
+        assertEquals(2, movedBreakpointLine(4, insertion = false, startLine = 1, startColumn = 4, endLine = 3))
+        assertEquals(2, movedBreakpointLine(2, insertion = false, startLine = 1, startColumn = 4, endLine = 3))
+        assertEquals(1, movedBreakpointLine(1, insertion = false, startLine = 1, startColumn = 4, endLine = 3))
+    }
+
+    @Test
+    fun codeLldbConfigurations() {
+        val rust = builtInDebugConfigurations().first { it.name == RUST_CARGO_PROJECT }.arguments
+        val launch = lldbDebugArguments(rust, "/home/droid/Projects")
+        assertEquals("console", launch.get("terminal").asString)
+        assertEquals("/home/droid/Projects", launch.get("cwd").asString)
+        assertEquals(false, launch.has("sourceLanguages"))
+        assertEquals("""{"evaluateForHovers":true,"commandCompletions":true,"sourceLanguages":["rust"]}""", lldbAdapterSettings(rust).toString())
+        assertEquals("gcc -g -O0 -Wall '/p/hello.c' -o '/p/hello'", cBuildCommand("/p/hello.c"))
+        assertEquals("g++ -g -O0 -Wall '/p/it'\\''s.cpp' -o '/p/it'\\''s'", cBuildCommand("/p/it's.cpp"))
+    }
+
+    @Test
+    fun cargoPackageNameReadsThePackageTable() {
+        val manifest = """
+            [workspace]
+            name = "not-this"
+
+            [package]
+            # the binary
+            name = "hello-rs"
+            version = "0.1.0"
+
+            [dependencies]
+            name = "nor-this"
+        """.trimIndent()
+        assertEquals("hello-rs", cargoPackageName(manifest))
+        assertEquals(null, cargoPackageName("[workspace]\nmembers = []\n"))
+    }
+
+    @Test
+    fun inlineValuesFindACFunctionsStart() {
+        val lines = listOf(
+            "int other(void) { return 1; }",
+            "int total = 9;",
+            "int main(void) {",
+            "    int n = 3;",
+            "    int total = n * 2;",
+            "    return total;",
+            "}",
+        )
+        assertEquals(
+            mapOf(3 to "n = 3", 4 to "total = 6, n = 3", 5 to "total = 6"),
+            inlineDebugValues(lines, 5, mapOf("n" to "3", "total" to "6")),
+        )
+    }
 }

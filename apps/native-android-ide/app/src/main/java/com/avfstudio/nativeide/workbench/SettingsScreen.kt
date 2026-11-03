@@ -869,7 +869,15 @@ private fun GuestToolRow(controller: WorkbenchController, dependency: GuestDepen
                 controller.settingsVisible = false
                 controller.offerInstall(dependency)
             }) { Text("Install") }
-            is DependencyState.Found -> Icon(Icons.Outlined.CheckCircle, contentDescription = "Installed", tint = MaterialTheme.colorScheme.primary)
+            is DependencyState.Found -> Row(verticalAlignment = Alignment.CenterVertically) {
+                if (dependency.remove != null) {
+                    TextButton(onClick = {
+                        controller.settingsVisible = false
+                        controller.offerRemove(dependency)
+                    }) { Text("Remove") }
+                }
+                Icon(Icons.Outlined.CheckCircle, contentDescription = "Installed", tint = MaterialTheme.colorScheme.primary)
+            }
             DependencyState.Unknown -> Unit
         }
     }

@@ -70,6 +70,15 @@ import com.avfstudio.nativeide.debug.nodeDebugArguments
 import com.avfstudio.nativeide.debug.builtInDebugConfigurations
 import com.avfstudio.nativeide.debug.debugVariables
 import com.avfstudio.nativeide.debug.inlineDebugValues
+import com.avfstudio.nativeide.debug.C_CURRENT_FILE
+import com.avfstudio.nativeide.debug.C_SOURCE_EXTENSIONS
+import com.avfstudio.nativeide.debug.LLDB_DEBUG_TYPES
+import com.avfstudio.nativeide.debug.RUST_CARGO_PROJECT
+import com.avfstudio.nativeide.debug.cBuildCommand
+import com.avfstudio.nativeide.debug.cargoPackageName
+import com.avfstudio.nativeide.debug.lldbAdapterSettings
+import com.avfstudio.nativeide.debug.lldbDebugArguments
+import com.avfstudio.nativeide.debug.movedBreakpointLine
 import com.avfstudio.nativeide.debug.parseLaunchConfigurations
 import com.avfstudio.nativeide.debug.pythonDebugArguments
 import com.avfstudio.nativeide.debug.resolveDebugVariables
@@ -1353,7 +1362,7 @@ class WorkbenchController(private val context: Context) {
         private set
     val debugVariables = mutableStateListOf<DebugVariable>()
     val debugConsole = mutableStateListOf<DebugConsoleLine>()
-    private var debugOutputOpen = false
+    private var debugOutputOpen: String? = null
     /** Where execution is paused (path, 1-based line), drawn in the editor. */
     var executionPoint by mutableStateOf<Pair<String, Int>?>(null)
         private set
@@ -1433,6 +1442,29 @@ class WorkbenchController(private val context: Context) {
     fun removeBreakpoint(path: String, line: Int) {
         dialog = null
         if (line in breakpoints[path].orEmpty()) toggleBreakpoint(path, line)
+    }
+
+    /** Files whose breakpoints moved with edits; the adapter hears of them on save, as in VS Code. */
+    private val movedBreakpointFiles = mutableSetOf<String>()
+
+    /** An edit of [path] (0-based positions): its breakpoints move with the text (see [movedBreakpointLine]). */
+    fun moveBreakpoints(path: String, insertion: Boolean, startLine: Int, startColumn: Int, endLine: Int) {
+        if (endLine == startLine) return
+        val lines = breakpoints[path]?.takeIf { it.isNotEmpty() } ?: return
+        fun move(line: Int) = movedBreakpointLine(line, insertion, startLine, startColumn, endLine)
+        val moved = lines.map(::move).toSet()
+        if (moved == lines) return
+        breakpoints[path] = moved
+        breakpointOptions[path]?.let { options ->
+            // Two breakpoints joined on one line keep the extras of the first.
+            val shifted = options.entries.sortedBy { it.key }.fold(mapOf<Int, BreakpointOptions>()) { kept, (line, extra) ->
+                val target = move(line)
+                if (target in kept) kept else kept + (target to extra)
+            }
+            breakpointOptions[path] = shifted
+        }
+        persistBreakpoints()
+        movedBreakpointFiles += path
     }
 
     private fun persistBreakpoints() {
@@ -1574,18 +1606,33 @@ class WorkbenchController(private val context: Context) {
         }
     }
 
-    private fun startDebugging(configuration: DebugConfiguration) {
+    /** [built]: the configuration's build (C/C++, Rust) already ran; start the session itself. */
+    private fun startDebugging(configuration: DebugConfiguration, built: Boolean = false) {
         val workspace = workspaceRoot
         if (workspace == null || !vfs.isConnected()) {
             status = "Connect to a guest to debug"
             return
         }
         val node = configuration.type in NODE_DEBUG_TYPES
-        if (!node && configuration.type !in PYTHON_DEBUG_TYPES) {
-            status = "\"${configuration.name}\" is a ${configuration.type.ifEmpty { "typeless" }} configuration; the debuggers here are Python's (debugpy) and Node.js's (js-debug)"
+        val lldb = configuration.type in LLDB_DEBUG_TYPES
+        if (!node && !lldb && configuration.type !in PYTHON_DEBUG_TYPES) {
+            status = "\"${configuration.name}\" is a ${configuration.type.ifEmpty { "typeless" }} configuration; the debuggers here are " +
+                "Python's (debugpy), Node.js's (js-debug) and CodeLLDB (lldb) for C, C++ and Rust"
             return
         }
         val document = activeDocument?.takeIf { isGuestPath(it.path) }
+        if (configuration.name == C_CURRENT_FILE && document?.languageId !in C_SOURCE_EXTENSIONS) {
+            status = "$C_CURRENT_FILE builds C and C++ files; open a .c or .cpp file in the workspace"
+            return
+        }
+        if (configuration.name == RUST_CARGO_PROJECT && !built && document == null) {
+            status = "$RUST_CARGO_PROJECT builds the crate of the active file; open a file of a Cargo project"
+            return
+        }
+        if (!built && (configuration.name == C_CURRENT_FILE || configuration.name == RUST_CARGO_PROJECT)) {
+            buildForDebugging(configuration, document ?: return)
+            return
+        }
         if (configuration.name == CURRENT_FILE_CONFIGURATION && document?.languageId != "py") {
             status = "Debugging runs saved Python files; open a .py file in the workspace"
             return
@@ -1600,7 +1647,7 @@ class WorkbenchController(private val context: Context) {
         }
         val attach = configuration.request == "attach"
         val python = settings.pythonInterpreter.ifEmpty {
-            if (!node && !attach && !configuration.arguments.has("python")) {
+            if (!node && !lldb && !attach && !configuration.arguments.has("python")) {
                 chooseInterpreter(then = ::startOrContinueDebugging)
                 return
             }
@@ -1612,24 +1659,39 @@ class WorkbenchController(private val context: Context) {
         }
         val variables = debugVariables(workspace, document?.path, editorSurface?.selectionStart()?.line?.plus(1), selection, python)
         val resolved = resolveDebugVariables(configuration.arguments, variables).asJsonObject
-        val arguments = if (node) nodeDebugArguments(resolved, workspace) else pythonDebugArguments(resolved, python, workspace)
+        val arguments = when {
+            node -> nodeDebugArguments(resolved, workspace)
+            lldb -> lldbDebugArguments(resolved, workspace)
+            else -> pythonDebugArguments(resolved, python, workspace)
+        }
         val cwd = arguments.get("cwd")?.takeIf { it.isJsonPrimitive }?.asString ?: workspace
         debugState = DebugState.Starting
         debugConsole.clear()
-        debugOutputOpen = false
+        debugOutputOpen = null
         val what = if (attach) {
             val connect = arguments.getAsJsonObject("connect")
             "Attaching to ${connect?.get("host")?.asString ?: "localhost"}:${connect?.get("port")?.asString ?: "?"}"
         } else {
             val program = arguments.get("program")?.asString?.substringAfterLast('/') ?: arguments.get("module")?.asString ?: configuration.name
-            if (node) "Launching $program with Node.js" else "Launching $program with $python"
+            when {
+                node -> "Launching $program with Node.js"
+                lldb -> "Launching $program with CodeLLDB"
+                else -> "Launching $program with $python"
+            }
         }
         debugConsole.add(DebugConsoleLine("${configuration.name}: $what", DebugConsoleLine.Kind.Info))
         panelVisible = true
         panelTab = PanelTab.Debug
         // The compact layout shows the panel's tabs under Terminal.
         compactDestination = CompactDestination.Terminal
-        val adapter = DapClient(vfs, if (node) DapClient.JS_DEBUG_TOOL else DapClient.DEBUGPY_TOOL)
+        val adapter = DapClient(
+            vfs,
+            when {
+                node -> DapClient.JS_DEBUG_TOOL
+                lldb -> DapClient.CODELLDB_TOOL
+                else -> DapClient.DEBUGPY_TOOL
+            },
+        )
         debugger = adapter
         childDebugger = null
         // js-debug is a server: this session starts the program, which then gets a session of its own on the same port.
@@ -1641,11 +1703,19 @@ class WorkbenchController(private val context: Context) {
         val connect = arguments.getAsJsonObject("connect")?.takeIf { !node && attach }
         val adapterArgs = when {
             node -> listOf("serve", port.toString())
+            lldb -> listOf("--settings", lldbAdapterSettings(resolved).toString())
             connect != null -> listOf("--connect", connect.get("host")?.asString ?: "localhost", connect.get("port")?.asString ?: "5678")
             else -> emptyList()
         }
         adapter.start(cwd, adapterArgs)
-            .thenCompose { adapter.request("initialize", dapInitializeArguments(if (node) "pwa-node" else "debugpy", startDebugging = node)) }
+            .thenCompose {
+                val adapterId = when {
+                    node -> "pwa-node"
+                    lldb -> "lldb"
+                    else -> "debugpy"
+                }
+                adapter.request("initialize", dapInitializeArguments(adapterId, startDebugging = node))
+            }
             .thenCompose { capabilities ->
                 debugCapabilities = capabilities
                 // debugpy answers `launch` (and `attach`) only after configurationDone, which `initialized` triggers.
@@ -1656,15 +1726,80 @@ class WorkbenchController(private val context: Context) {
                     if (error != null && debugState != DebugState.Idle) {
                         val message = generateSequence(error) { it.cause }.last().message.orEmpty()
                         endDebugSession("${if (attach) "Attach" else "Launch"} failed: $message")
-                        // js-debug isn't in the guest yet: offer it, then start again.
-                        missingDependencyIn(message)?.takeIf { it == GuestDependency.JsDebug && dialog == null }?.let { dependency ->
-                            offerInstall(dependency, "Debugging Node.js needs ${dependency.label}.") { startDebugging(configuration) }
+                        // js-debug or CodeLLDB isn't in the guest yet: offer it, then start again.
+                        missingDependencyIn(message)?.takeIf { it in DEBUGGER_DEPENDENCIES && dialog == null }?.let { dependency ->
+                            val language = if (dependency == GuestDependency.JsDebug) "Node.js" else "C, C++ and Rust"
+                            offerInstall(dependency, "Debugging $language needs ${dependency.label}.") { startDebugging(configuration, built) }
                         }
                     } else if (debugState == DebugState.Starting) {
                         debugState = DebugState.Running
                     }
                 }
             }
+    }
+
+    /**
+     * The build a C/C++ or Rust configuration runs first, in a terminal you can follow, as VS
+     * Code's pre-launch task: gcc/g++ on the active file, or `cargo build` in its crate. The
+     * session starts when it succeeds; the terminal stays open with the errors when it fails.
+     */
+    private fun buildForDebugging(configuration: DebugConfiguration, document: DocumentSession) {
+        if (document.dirty) saveActiveDocument()
+        if (configuration.name == C_CURRENT_FILE) {
+            runDebugBuild(configuration, cBuildCommand(document.path), configuration)
+            return
+        }
+        val root = workspaceRoot?.trimEnd('/') ?: return
+        status = "Looking for the crate's Cargo.toml"
+        findCargoManifest(document.path.substringBeforeLast('/'), root) { manifest ->
+            if (manifest == null) {
+                status = "No Cargo.toml above ${document.path.substringAfterLast('/')} in the workspace; $RUST_CARGO_PROJECT builds Cargo projects"
+                return@findCargoManifest
+            }
+            repository.readBytes(manifest, MAX_SNIPPET_FILE_BYTES).whenComplete { bytes, _ ->
+                post {
+                    val name = bytes?.let { cargoPackageName(String(it, Charsets.UTF_8)) }
+                    if (name == null) {
+                        status = "$manifest names no [package]; $RUST_CARGO_PROJECT debugs a package's binary"
+                        return@post
+                    }
+                    val crate = manifest.substringBeforeLast('/')
+                    val launch = configuration.arguments.deepCopy().apply {
+                        if (!has("program")) addProperty("program", "$crate/target/debug/$name")
+                        if (!has("cwd")) addProperty("cwd", crate)
+                    }
+                    val quoted = "'" + crate.replace("'", "'\\''") + "'"
+                    runDebugBuild(configuration, "cd $quoted && cargo build", configuration.copy(arguments = launch))
+                }
+            }
+        }
+    }
+
+    private fun runDebugBuild(configuration: DebugConfiguration, command: String, then: DebugConfiguration) {
+        status = "Building for ${configuration.name}…"
+        newTerminal("$command && exit", onExit = { code ->
+            post {
+                if (code == 0) {
+                    startDebugging(then, built = true)
+                } else {
+                    status = "The build failed; the terminal shows why"
+                }
+            }
+        })
+    }
+
+    /** The closest Cargo.toml from [directory] up to [root]. */
+    private fun findCargoManifest(directory: String, root: String, found: (String?) -> Unit) {
+        val candidate = "${directory.trimEnd('/')}/Cargo.toml"
+        vfs.stat(candidate).whenComplete { _, missing ->
+            post {
+                when {
+                    missing == null -> found(candidate)
+                    directory.trimEnd('/') == root || !directory.startsWith(root) -> found(null)
+                    else -> findCargoManifest(directory.substringBeforeLast('/'), root, found)
+                }
+            }
+        }
     }
 
     /** js-debug's `startDebugging`: the program's own session, on the server's [port]; true when it starts. */
@@ -1712,7 +1847,7 @@ class WorkbenchController(private val context: Context) {
                 if (category == "telemetry") return
                 val text = body.get("output")?.asString ?: return
                 val kind = if (category == "stderr") DebugConsoleLine.Kind.Error else DebugConsoleLine.Kind.Output
-                debugOutputOpen = appendDebugOutput(debugConsole, text, kind, debugOutputOpen)
+                debugOutputOpen = appendDebugOutput(debugConsole, text, kind, category, debugOutputOpen)
                 if (debugConsole.size > 2_000) debugConsole.removeRange(0, debugConsole.size - 2_000)
             }
             "exited" -> debugConsole.add(DebugConsoleLine("Process exited with code ${body.get("exitCode")?.asInt ?: "?"}", DebugConsoleLine.Kind.Info))
@@ -2031,6 +2166,27 @@ class WorkbenchController(private val context: Context) {
                 }
             }
         })
+    }
+
+    /** Asks before removing [dependency] with the catalog's uninstall (Settings → Guest tools → Remove). */
+    fun offerRemove(dependency: GuestDependency) {
+        val command = dependency.remove ?: return
+        dialog = WorkbenchDialog.GuestCommand(
+            title = "Remove ${dependency.label}?",
+            text = "This removes ${dependency.label} from the guest, with what it installed, and unregisters it. " +
+                "${dependency.usedFor} stops working until it is installed again; MaterialCode offers it then. " +
+                "It runs in a new terminal.",
+            command = command,
+            done = "${dependency.label} removed",
+            then = {
+                // Its server would keep running from deleted files; the next file of its language offers it again.
+                OtherLanguageServer.entries.filter { it.dependency == dependency }.forEach { server ->
+                    languageClients[server.id]?.takeIf { it.isStarted }?.stop()
+                }
+                offeredServerInstalls.remove(dependency)
+                checkGuestTools()
+            },
+        )
     }
 
     /** Where /tmp lives in the guest, when the daemon reports it. */
@@ -3743,6 +3899,7 @@ class WorkbenchController(private val context: Context) {
                         status = "Saved ${document.path}"
                         if (document.path.endsWith(".code-snippets")) workspaceRoot?.let(::reloadWorkspaceSnippets)
                         if (document.path.endsWith("/.vscode/launch.json")) workspaceRoot?.let(::reloadLaunchConfigurations)
+                        if (movedBreakpointFiles.remove(document.path)) sendBreakpoints(document.path)
                         if (settings.gitBlame && document.path == activePath) loadBlame(document.path)
                         refreshGitStatus()
                         closeIfPendingAfterSave(document.path)

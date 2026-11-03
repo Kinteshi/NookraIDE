@@ -48,25 +48,35 @@ data class DebugConsoleLine(val text: String, val kind: Kind) {
 }
 
 /**
- * Appends a DAP `output` chunk. Programs write partial lines (`print("a", b)` arrives as "a", " ",
- * "6\n"), so a chunk continues the last line until a newline ends it. [lastOpen] says whether the
- * last line is unfinished; returns the same for the next chunk.
+ * Appends a DAP `output` chunk of [category]. Programs write partial lines (`print("a", b)` arrives
+ * as "a", " ", "6\n"), so a stdout or stderr chunk continues the last line of the same category until
+ * a newline ends it. Other categories (logpoints, debugger messages) are whole messages, and nothing
+ * joins them: a logpoint once ended up in the middle of a half-printed line. [openCategory] is the
+ * category whose line is unfinished; returns the same for the next chunk.
  */
-fun appendDebugOutput(lines: MutableList<DebugConsoleLine>, chunk: String, kind: DebugConsoleLine.Kind, lastOpen: Boolean): Boolean {
-    if (chunk.isEmpty()) return lastOpen
+fun appendDebugOutput(
+    lines: MutableList<DebugConsoleLine>,
+    chunk: String,
+    kind: DebugConsoleLine.Kind,
+    category: String,
+    openCategory: String?,
+): String? {
+    if (chunk.isEmpty()) return openCategory
     val pieces = chunk.split('\n')
     pieces.forEachIndexed { index, piece ->
         val last = lines.lastOrNull()
         val isLastPiece = index == pieces.lastIndex
         if (isLastPiece && piece.isEmpty()) return@forEachIndexed
-        if (index == 0 && lastOpen && last != null && last.kind == kind) {
+        if (index == 0 && openCategory == category && last != null) {
             lines[lines.lastIndex] = last.copy(text = last.text + piece)
         } else {
             lines.add(DebugConsoleLine(piece, kind))
         }
     }
-    return !chunk.endsWith('\n')
+    return if (!chunk.endsWith('\n') && category in PROGRAM_OUTPUT) category else null
 }
+
+private val PROGRAM_OUTPUT = setOf("stdout", "stderr")
 
 /** debugpy `launch` arguments for running [program] with [python] in [cwd]. */
 fun pythonLaunchArguments(program: String, cwd: String, python: String, justMyCode: Boolean = true): JsonObject =
@@ -99,6 +109,28 @@ fun dapInitializeArguments(adapterId: String = "debugpy", startDebugging: Boolea
 data class BreakpointOptions(val condition: String = "", val hitCondition: String = "", val logMessage: String = "") {
     val isPlain: Boolean get() = condition.isBlank() && hitCondition.isBlank() && logMessage.isBlank()
     val isLogpoint: Boolean get() = logMessage.isNotBlank()
+}
+
+/**
+ * Where a breakpoint on 1-based [line] goes after an edit, as VS Code's editor moves it with the
+ * text. An insertion at 0-based ([startLine], [startColumn]) adds [lines] line breaks: lines below
+ * move down, and so does the breakpoint's own line when the insertion is at its first column (Enter
+ * there pushes the code down). A deletion from [startLine] to [endLine] (0-based) moves lines below
+ * it up; a breakpoint on a line it joins into [startLine] ends there.
+ */
+fun movedBreakpointLine(line: Int, insertion: Boolean, startLine: Int, startColumn: Int, endLine: Int): Int {
+    val index = line - 1
+    val lines = endLine - startLine
+    if (lines == 0) return line
+    return if (insertion) {
+        if (index > startLine || (index == startLine && startColumn == 0)) line + lines else line
+    } else {
+        when {
+            index > endLine -> line - lines
+            index > startLine -> startLine + 1
+            else -> line
+        }
+    }
 }
 
 fun setBreakpointsArguments(path: String, lines: Collection<Int>, options: Map<Int, BreakpointOptions> = emptyMap()): JsonObject = JsonObject().apply {
@@ -295,7 +327,8 @@ fun inlineDebugValues(lines: List<String>, pausedLine: Int, values: Map<String, 
 
 private fun String.indentation(): Int = takeWhile { it == ' ' || it == '\t' }.length
 private fun String.shortened(max: Int): String = if (length <= max) this else take(max - 1) + "…"
-private val FUNCTION_START = Regex("""^\s*(async\s+)?(def|function|fn|func)\b|=>\s*\{?\s*$""")
+// The last alternative is a C or C++ function definition: unindented, ending at its parameters.
+private val FUNCTION_START = Regex("""^\s*(async\s+)?(def|function|fn|func)\b|=>\s*\{?\s*$|^[A-Za-z_][^;=#(]*\([^;]*\)\s*(const\s*)?\{?\s*$""")
 private val IDENTIFIER = Regex("""[A-Za-z_][A-Za-z0-9_]*""")
 private val STRING_LITERAL = Regex(""""(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'""")
 
@@ -346,8 +379,59 @@ fun nodeDebugArguments(configuration: JsonObject, workspace: String): JsonObject
     if (get("request")?.asString != "attach" && !has("cwd")) addProperty("cwd", workspace)
 }
 
+/** CodeLLDB's type, for C, C++ and Rust. */
+val LLDB_DEBUG_TYPES = setOf("lldb")
+
+/**
+ * A CodeLLDB configuration ready to send: the program's output in the Debug console (the app has
+ * no terminal to hand it), the workspace as the working folder. `sourceLanguages` is the
+ * adapter's setting, not the launch's, as CodeLLDB's extension moves it ([lldbAdapterSettings]).
+ */
+fun lldbDebugArguments(configuration: JsonObject, workspace: String): JsonObject = configuration.deepCopy().apply {
+    addProperty("terminal", "console")
+    remove("sourceLanguages")
+    if (get("request")?.asString != "attach" && !has("cwd")) addProperty("cwd", workspace)
+}
+
+/** CodeLLDB's adapter settings (`--settings`) as its extension passes them by default. */
+fun lldbAdapterSettings(configuration: JsonObject): JsonObject = JsonObject().apply {
+    addProperty("evaluateForHovers", true)
+    addProperty("commandCompletions", true)
+    configuration.get("sourceLanguages")?.takeIf { it.isJsonArray }?.let { add("sourceLanguages", it.deepCopy()) }
+}
+
+/** The package's name in a Cargo.toml (its binary's name under target/debug). */
+fun cargoPackageName(manifest: String): String? {
+    var inPackage = false
+    manifest.lineSequence().forEach { raw ->
+        val line = raw.substringBefore('#').trim()
+        if (line.startsWith("[")) inPackage = line == "[package]"
+        if (inPackage) CARGO_NAME.matchEntire(line)?.let { return it.groupValues[1] }
+    }
+    return null
+}
+
+private val CARGO_NAME = Regex("""name\s*=\s*"([^"]+)"""")
+
+/** The files C/C++: Build and Debug Current File compiles: g++ for C++, gcc for C. */
+val C_SOURCE_EXTENSIONS = setOf("c", "cpp", "cc", "cxx", "c++")
+
+/**
+ * The build the C/C++ configuration runs first, as VS Code's "C/C++: gcc build active file" task
+ * does: [file] with debug information, beside it without its extension.
+ */
+fun cBuildCommand(file: String): String {
+    val compiler = if (file.substringAfterLast('.') == "c") "gcc" else "g++"
+    val output = file.substringBeforeLast('.')
+    return "$compiler -g -O0 -Wall ${shellQuote(file)} -o ${shellQuote(output)}"
+}
+
+private fun shellQuote(text: String): String = "'" + text.replace("'", "'\\''") + "'"
+
 const val CURRENT_FILE_CONFIGURATION = "Python: Current File"
 const val NODE_CURRENT_FILE = "Node.js: Current File"
+const val C_CURRENT_FILE = "C/C++: Build and Debug Current File"
+const val RUST_CARGO_PROJECT = "Rust: Build and Debug Cargo Project"
 
 /** VS Code's dynamic configurations, offered beside launch.json's. */
 fun builtInDebugConfigurations(): List<DebugConfiguration> = listOf(
@@ -358,6 +442,17 @@ fun builtInDebugConfigurations(): List<DebugConfiguration> = listOf(
     DebugConfiguration(
         NODE_CURRENT_FILE,
         JsonParser.parseString("""{"name":"$NODE_CURRENT_FILE","type":"pwa-node","request":"launch","program":"${'$'}{file}"}""").asJsonObject,
+    ),
+    DebugConfiguration(
+        C_CURRENT_FILE,
+        JsonParser.parseString(
+            """{"name":"$C_CURRENT_FILE","type":"lldb","request":"launch","program":"${'$'}{fileDirname}/${'$'}{fileBasenameNoExtension}","cwd":"${'$'}{fileDirname}"}""",
+        ).asJsonObject,
+    ),
+    // The program is the crate's binary, found once its Cargo.toml is read.
+    DebugConfiguration(
+        RUST_CARGO_PROJECT,
+        JsonParser.parseString("""{"name":"$RUST_CARGO_PROJECT","type":"lldb","request":"launch","sourceLanguages":["rust"]}""").asJsonObject,
     ),
     DebugConfiguration(
         "Python: Attach (port 5678)",

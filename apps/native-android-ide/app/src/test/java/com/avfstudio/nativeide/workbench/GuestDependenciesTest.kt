@@ -82,4 +82,14 @@ class GuestDependenciesTest {
         assertEquals(listOf("fourteen", ".venv", "system", "python3", "Select Python"),
             listOf("/home/droid/miniconda3/envs/fourteen/bin/python", "/home/droid/.venv/bin/python", "/usr/bin/python3", "python3", "").map(::pythonEnvironmentName))
     }
+
+    @Test
+    fun catalogToolsCanBeRemovedAndSystemPackagesAreLeftAlone() {
+        assertEquals("avf-native-daemon tools remove gopls", GuestDependency.Gopls.remove)
+        assertEquals("avf-native-daemon tools remove codelldb", GuestDependency.CodeLldb.remove)
+        assertEquals(null, GuestDependency.Git.remove)
+        assertEquals(null, GuestDependency.GoToolchain.remove)
+        assertEquals(null, GuestDependency.Conda.remove)
+        assertEquals(GuestDependency.CodeLldb, missingDependencyIn("tool 'codelldb' is not installed"))
+    }
 }

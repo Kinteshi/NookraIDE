@@ -1821,6 +1821,39 @@ daemon tests pass; the guest runs this daemon.
   (the app then saw them as installed but failing), removed too. avf-debugpy and avf-node-agent
   are the new versions. Tabs back to the user's four; no terminal open.
 
+## 36. Toolchains, snippets at once, removing guest tools, CodeLLDB, breakpoints that move, output apart, welcome page overlays (11-03 10:00–; in progress)
+User's pick (11-03): backlog 39, 40, 43–48.
+* (48) The welcome page (every tab closed) drew the last editor's code lenses, fold arrows and
+  inlay hints: the editor overlays were drawn whenever no notebook, preview or image was shown,
+  even with no editor. They are drawn only with a file open now.
+* (46) The Debug console keeps output categories apart: only the program's stdout and stderr
+  continue an unfinished line; a logpoint or debugger message is a whole line of its own.
+* (45) Breakpoints move with the text as VS Code moves them: lines added or removed above move
+  them; Enter at the first column of a breakpoint's line pushes it down with its code; a line
+  joined into the one above takes its breakpoint along. Conditions and log messages move too.
+  The adapter hears of the new lines when the file is saved (VS Code's behaviour: the running
+  program still has the old code).
+* (40) Snippets show at once: when the server hasn't answered, the matching snippets show first
+  and the server's items join them in the same order as when all arrive together
+  (`editor.snippetSuggestions`: top, bottom, inline).
+* (43) Removing a guest tool: `avf-native-daemon tools remove <name>` undoes the install (the
+  package manager's uninstall, the download's file, or the script's `remove`) and drops the
+  registry entry; a launcher shared by several tools (avf-node-agent) stays until the last of
+  them goes; avf-node-agent removes a server's folder (the shared vscode-langservers with the
+  last of JSON/HTML/CSS) and Node.js with the last tool. Settings → Guest tools has Remove beside
+  each installed catalog tool (confirmation, then a terminal); apt packages and Miniforge are left
+  to the user. A server of the removed tool is stopped, and the next file offers it again.
+* (44) C, C++ and Rust debugging with CodeLLDB 1.12.3 (GitHub release, checksum-verified, about
+  55 MB, 170 MB unpacked with its own LLDB), set up by a new bundled launcher avf-codelldb (the
+  adapter speaks DAP over TCP only; the launcher listens and has it `--connect`, as VS Code's
+  extension does, and joins stdio). Offered for install on the first C/C++/Rust debug. Built-in
+  configurations: "C/C++: Build and Debug Current File" (gcc/g++ `-g -O0` beside the file, in a
+  terminal first, as VS Code's pre-launch task) and "Rust: Build and Debug Cargo Project"
+  (`cargo build` in the active file's crate, then its `target/debug/<package>`; Rust's
+  formatters through `sourceLanguages`). launch.json's `lldb` configurations work too. Inline
+  values find C function starts.
+* (39) Toolchains: (to check on the tablet).
+
 ## Backlog
 To investigate (user, 10-28):
 * (Done in batch 16, with a notebook-side finding.) Plotly figures updating in place (the user's private-notebook-1.ipynb: `plot_handle =

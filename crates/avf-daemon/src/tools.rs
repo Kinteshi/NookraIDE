@@ -19,6 +19,10 @@ const BUNDLED_SCRIPTS: &[(&str, &str)] = &[
         "avf-node-agent.sh",
         include_str!("../../../guest/tools/avf-node-agent.sh"),
     ),
+    (
+        "avf-codelldb.py",
+        include_str!("../../../guest/tools/avf-codelldb.py"),
+    ),
 ];
 const UV_INSTALL_GUIDANCE: &str =
     "Install uv (https://docs.astral.sh/uv/getting-started/installation/) and rerun `avf-daemon tools install";
@@ -129,6 +133,7 @@ pub enum ToolCommand {
     List,
     Catalog,
     Install(String),
+    Remove(String),
 }
 
 pub fn parse_cli(args: &[String]) -> Result<ToolCommand, String> {
@@ -136,6 +141,7 @@ pub fn parse_cli(args: &[String]) -> Result<ToolCommand, String> {
         [action] if action == "list" => Ok(ToolCommand::List),
         [action] if action == "catalog" => Ok(ToolCommand::Catalog),
         [action, name] if action == "install" => Ok(ToolCommand::Install(name.clone())),
+        [action, name] if action == "remove" => Ok(ToolCommand::Remove(name.clone())),
         [action] if action == "--help" || action == "-h" || action == "help" => {
             Err(tool_usage().to_owned())
         }
@@ -166,12 +172,16 @@ pub fn run_cli(args: &[String]) -> Result<(), String> {
             let manifest = install_tool(&default_home()?, &name)?;
             println!("Installed {} {}.", manifest.name, manifest.version);
         }
+        ToolCommand::Remove(name) => {
+            let manifest = remove_tool(&default_home()?, &name)?;
+            println!("Removed {} {}.", manifest.name, manifest.version);
+        }
     }
     Ok(())
 }
 
 fn tool_usage() -> &'static str {
-    "Usage: avf-daemon tools <list|catalog|install <name>>"
+    "Usage: avf-daemon tools <list|catalog|install <name>|remove <name>>"
 }
 
 pub(crate) fn default_home() -> Result<PathBuf, String> {
@@ -414,6 +424,149 @@ fn install_tool_with(
         )
     })?;
     Ok(manifest)
+}
+
+/// Undoes [`install_tool`]: the tool's files go (what its package manager installed, its download
+/// or its script) and then its registry entry, so the app no longer offers it as installed. A
+/// launcher script other installed tools share stays until the last of them goes.
+pub fn remove_tool(home: &Path, name: &str) -> Result<ToolManifest, String> {
+    remove_tool_with(home, name, |manifest, others| {
+        uninstall_from_catalog(home, manifest, others)
+    })
+}
+
+fn remove_tool_with(
+    home: &Path,
+    name: &str,
+    uninstaller: impl FnOnce(&ToolManifest, &[ToolManifest]) -> Result<(), String>,
+) -> Result<ToolManifest, String> {
+    let manifest = catalog_lookup(name)?;
+    let installed = list_installed(home)?;
+    if !installed.iter().any(|tool| tool.name == manifest.name) {
+        return Err(format!("'{}' is not installed.", manifest.name));
+    }
+    let others = installed
+        .into_iter()
+        .filter(|tool| tool.name != manifest.name)
+        .collect::<Vec<_>>();
+    uninstaller(&manifest, &others)?;
+    let tool_dir = ensure_tools_root(home)?.join(&manifest.name);
+    ensure_directory(&tool_dir)?;
+    fs::remove_dir_all(&tool_dir).map_err(|error| {
+        format!(
+            "Removed '{}', but its registry entry {} could not be deleted: {error}",
+            manifest.name,
+            tool_dir.display()
+        )
+    })?;
+    Ok(manifest)
+}
+
+fn uninstall_from_catalog(
+    home: &Path,
+    manifest: &ToolManifest,
+    others: &[ToolManifest],
+) -> Result<(), String> {
+    let name = &manifest.name;
+    if let Some(download) = &manifest.install.download {
+        // A kept directory lives in the registry entry, which goes next.
+        return remove_from_local_bin(home, name, &download.binary);
+    }
+    if let Some(script) = &manifest.install.script {
+        let bin_dir = local_bin_directory(home)?;
+        if let Some((_, rest)) = script.setup.split_first() {
+            let mut command = Command::new(bin_dir.join(&script.binary));
+            command.arg("remove").args(rest);
+            run_uninstaller(name, command)?;
+        }
+        let shared = others.iter().any(|other| {
+            other
+                .install
+                .script
+                .as_ref()
+                .is_some_and(|theirs| theirs.binary == script.binary)
+        });
+        return if shared {
+            Ok(())
+        } else {
+            remove_from_local_bin(home, name, &script.binary)
+        };
+    }
+    let command = uninstall_command(manifest)?;
+    run_uninstaller(
+        name,
+        with_install_privileges(command, current_effective_uid()?),
+    )
+}
+
+fn run_uninstaller(name: &str, mut command: Command) -> Result<(), String> {
+    let program = command.get_program().to_string_lossy().into_owned();
+    command.stdin(Stdio::null());
+    let status = command
+        .status()
+        .map_err(|error| format!("Could not start {program} to remove '{name}': {error}."))?;
+    if !status.success() {
+        return Err(format!(
+            "Removing '{name}' with {program} failed with {status}."
+        ));
+    }
+    Ok(())
+}
+
+/// The package manager's own uninstall, for the packages [`install_command`] installed.
+fn uninstall_command(manifest: &ToolManifest) -> Result<Command, String> {
+    let (program, arguments, packages): (&str, &[&str], &Vec<String>) = match &manifest.install {
+        InstallSpec {
+            uv: Some(packages), ..
+        } => ("uv", &["tool", "uninstall"], packages),
+        InstallSpec {
+            apt: Some(packages),
+            ..
+        } => ("apt-get", &["remove", "--yes"], packages),
+        InstallSpec {
+            npm: Some(packages),
+            ..
+        } => ("npm", &["uninstall", "--global"], packages),
+        InstallSpec {
+            cargo: Some(packages),
+            ..
+        } => ("cargo", &["uninstall"], packages),
+        _ => {
+            return Err(format!(
+                "Tool '{}' has an invalid install method in the catalog.",
+                manifest.name
+            ))
+        }
+    };
+    let mut command = Command::new(program);
+    command
+        .args(arguments)
+        .args(packages.iter().map(|package| package_name(package)));
+    Ok(command)
+}
+
+/// A package without its version (`ruff==0.6`, `@scope/name@1.2`): uninstalls take bare names.
+fn package_name(package: &str) -> &str {
+    let end = package
+        .char_indices()
+        .skip(1)
+        .find(|&(_, c)| matches!(c, '@' | '=' | '<' | '>' | '~' | '!' | '[' | ' '))
+        .map_or(package.len(), |(index, _)| index);
+    &package[..end]
+}
+
+fn remove_from_local_bin(home: &Path, name: &str, binary: &str) -> Result<(), String> {
+    let path = local_bin_directory(home)?.join(binary);
+    match fs::symlink_metadata(&path) {
+        Ok(metadata) if metadata.is_file() => fs::remove_file(&path)
+            .map_err(|error| format!("Cannot remove '{name}' from {}: {error}", path.display())),
+        Ok(_) => Err(format!(
+            "Refusing to remove non-regular file {}.",
+            path.display()
+        )),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("Cannot inspect {}: {error}", path.display())),
+    }
 }
 
 fn supports_tool_installation_platform(os: &str, arch: &str) -> bool {
@@ -1233,6 +1386,84 @@ mod tests {
     }
 
     #[test]
+    fn removing_a_tool_unregisters_it_and_refuses_unknown_ones() {
+        let home = tempdir().unwrap();
+        install_tool_with(home.path(), "ruff", |_| Ok(())).unwrap();
+        let failed = remove_tool_with(home.path(), "ruff", |_, _| Err("simulated".into()));
+        assert_eq!(failed.unwrap_err(), "simulated");
+        assert_eq!(list_installed(home.path()).unwrap().len(), 1);
+        let removed = remove_tool_with(home.path(), "ruff", |manifest, others| {
+            assert_eq!(manifest.name, "ruff");
+            assert!(others.is_empty());
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(removed.name, "ruff");
+        assert!(list_installed(home.path()).unwrap().is_empty());
+        assert!(!home
+            .path()
+            .join(".local/share/avf-studio/tools/ruff")
+            .exists());
+        assert_eq!(
+            remove_tool_with(home.path(), "ruff", |_, _| Ok(())).unwrap_err(),
+            "'ruff' is not installed."
+        );
+        assert!(remove_tool_with(home.path(), "../ruff", |_, _| Ok(())).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_shared_launcher_script_stays_until_its_last_tool_goes() {
+        use std::os::unix::fs::PermissionsExt;
+        let home = tempdir().unwrap();
+        for name in ["yaml-language-server", "sql-language-server"] {
+            install_tool_with(home.path(), name, |_| Ok(())).unwrap();
+        }
+        let bin = home.path().join(".local/bin");
+        fs::create_dir_all(&bin).unwrap();
+        let log = home.path().join("calls.log");
+        let agent = bin.join("avf-node-agent");
+        fs::write(
+            &agent,
+            format!("#!/bin/sh\necho \"$@\" >> '{}'\n", log.display()),
+        )
+        .unwrap();
+        fs::set_permissions(&agent, fs::Permissions::from_mode(0o755)).unwrap();
+        remove_tool(home.path(), "yaml-language-server").unwrap();
+        assert!(agent.exists());
+        remove_tool(home.path(), "sql-language-server").unwrap();
+        assert!(!agent.exists());
+        assert_eq!(
+            fs::read_to_string(&log).unwrap(),
+            "remove yaml-language-server\nremove sql-language-server\n"
+        );
+        assert!(list_installed(home.path()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn uninstalls_use_each_package_managers_own_command() {
+        let program = |name: &str| {
+            let command = uninstall_command(&catalog_lookup(name).unwrap()).unwrap();
+            let mut words = vec![command.get_program().to_string_lossy().into_owned()];
+            words.extend(
+                command
+                    .get_args()
+                    .map(|arg| arg.to_string_lossy().into_owned()),
+            );
+            words
+        };
+        assert_eq!(program("ruff"), ["uv", "tool", "uninstall", "ruff"]);
+        assert_eq!(
+            program("vtsls"),
+            ["npm", "uninstall", "--global", "@vtsls/language-server"]
+        );
+        assert_eq!(program("gopls"), ["apt-get", "remove", "--yes", "gopls"]);
+        assert_eq!(package_name("ruff==0.6.1"), "ruff");
+        assert_eq!(package_name("@scope/name@1.2.3"), "@scope/name");
+        assert_eq!(package_name("basedpyright"), "basedpyright");
+    }
+
+    #[test]
     fn installer_failure_does_not_register_a_tool() {
         let home = tempdir().unwrap();
         let result = install_tool_with(home.path(), "basedpyright", |_| {
@@ -1550,6 +1781,10 @@ mod tests {
             ToolCommand::Install("basedpyright".into())
         );
         assert!(parse_cli(&["install".into(), "basedpyright".into(), "/bin/sh".into()]).is_err());
+        assert_eq!(
+            parse_cli(&["remove".into(), "ruff".into()]).unwrap(),
+            ToolCommand::Remove("ruff".into())
+        );
     }
 
     #[test]

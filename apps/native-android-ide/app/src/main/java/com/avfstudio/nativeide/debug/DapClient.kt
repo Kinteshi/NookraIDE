@@ -133,5 +133,7 @@ class DapClient(private val transport: GuestVfsClient, val tool: String = DEBUGP
         const val DEBUGPY_TOOL = "debugpy"
         /** VS Code's JavaScript debugger (Node.js), as its standalone DAP server. */
         const val JS_DEBUG_TOOL = "js-debug"
+        /** CodeLLDB, for C, C++ and Rust. */
+        const val CODELLDB_TOOL = "codelldb"
     }
 }

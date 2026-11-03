@@ -4,6 +4,7 @@
 # on npm (Bash, YAML, JSON, HTML, CSS, Dockerfile, SQL) and VS Code's JavaScript debugger.
 #
 #   avf-node-agent setup <name>     installs a pinned Node.js and the pinned npm package
+#   avf-node-agent remove <name>    removes it again (and Node.js with the last of them)
 #   avf-node-agent login <agent>    signs in, interactively (run it in a terminal)
 #   avf-node-agent <name> [args]    runs it (the app starts agents with ACP and servers with LSP on stdio)
 #   avf-node-agent js-debug serve|connect <port>
@@ -212,6 +213,49 @@ setup() {
     echo "$agent is ready."
 }
 
+# Takes back a wrapper setup wrote; one the user wrote stays.
+remove_wrapper() {
+    local target="$BIN/$1"
+    if grep -qF "$MARKER" "$target" 2>/dev/null; then rm -f "$target"; fi
+}
+
+remove() {
+    local agent=$1
+    case "$agent" in
+        js-debug)
+            remove_wrapper js-debug-adapter
+            rm -rf "$ROOT/debuggers"/js-debug-*
+            ;;
+        claude-code)
+            remove_wrapper claude-agent-acp
+            remove_wrapper claude
+            rm -rf "$(dir_of claude-code)"
+            ;;
+        json-language-server | html-language-server | css-language-server)
+            remove_wrapper "$agent"
+            # One package serves the three; it goes with the last of them.
+            local other
+            for other in json-language-server html-language-server css-language-server; do
+                if grep -qF "$MARKER" "$BIN/$other" 2>/dev/null; then
+                    echo "$agent is removed."
+                    return
+                fi
+            done
+            rm -rf "$(dir_of "$agent")"
+            ;;
+        *)
+            package_of "$agent" >/dev/null
+            remove_wrapper "$agent"
+            rm -rf "$(dir_of "$agent")"
+            ;;
+    esac
+    # Node.js goes when nothing is left to run on it. Sign-ins (~/.claude, ~/.gemini) stay.
+    local left
+    left=$(find "$ROOT/agents" "$ROOT/servers" "$ROOT/debuggers" -mindepth 1 -maxdepth 1 2>/dev/null | head -n 1 || true)
+    if [ -z "$left" ]; then rm -rf "$ROOT"/node-v*; fi
+    echo "$agent is removed."
+}
+
 run() {
     local agent=$1
     shift
@@ -259,9 +303,10 @@ login() {
 
 case "${1:-}" in
     setup) [ $# -eq 2 ] || fail "usage: avf-node-agent setup <agent>"; setup "$2" ;;
+    remove) [ $# -eq 2 ] || fail "usage: avf-node-agent remove <agent>"; remove "$2" ;;
     js-debug) shift; run_js_debug "$@" ;;
     login) [ $# -eq 2 ] || fail "usage: avf-node-agent login <agent>"; login "$2" ;;
     claude-code | gemini | bash-language-server | yaml-language-server | json-language-server | \
         html-language-server | css-language-server | docker-langserver | sql-language-server) run "$@" ;;
-    *) fail "usage: avf-node-agent setup|login <agent> | <agent> [args]" ;;
+    *) fail "usage: avf-node-agent setup|remove|login <agent> | <agent> [args]" ;;
 esac

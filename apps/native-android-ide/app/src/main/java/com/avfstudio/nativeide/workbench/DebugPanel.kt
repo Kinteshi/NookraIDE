@@ -97,7 +97,7 @@ fun DebugPanel(controller: WorkbenchController) {
                 )
             }
             Box(Modifier.weight(1f))
-            if (controller.selectedDebugConfiguration.type !in com.avfstudio.nativeide.debug.NODE_DEBUG_TYPES) {
+            if (controller.selectedDebugConfiguration.type in com.avfstudio.nativeide.debug.PYTHON_DEBUG_TYPES) {
                 TextButton(onClick = { controller.chooseInterpreter() }) {
                     Text(controller.settings.pythonInterpreter.ifEmpty { "Select interpreter" }.substringAfterLast("/bin/").let { "Python: $it" }, maxLines = 1)
                 }
