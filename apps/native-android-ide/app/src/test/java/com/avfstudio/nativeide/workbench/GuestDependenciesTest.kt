@@ -90,6 +90,9 @@ class GuestDependenciesTest {
         assertEquals(null, GuestDependency.Git.remove)
         assertEquals(null, GuestDependency.GoToolchain.remove)
         assertEquals(null, GuestDependency.Conda.remove)
+        assertEquals(null, GuestDependency.Uv.remove)
         assertEquals(GuestDependency.CodeLldb, missingDependencyIn("tool 'codelldb' is not installed"))
+        // A set built while the entries are still initializing would hold nulls.
+        assertTrue(GuestDependency.CodeLldb in GuestDependency.debuggers)
     }
 }

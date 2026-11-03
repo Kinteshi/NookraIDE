@@ -597,7 +597,11 @@ private fun NativeEditorView(controller: WorkbenchController, document: Document
                 startSelectionTracking()
                 var previousText = document.text
                 subscribeAlways(ContentChangeEvent::class.java) { event ->
-                    if (event.action == ContentChangeEvent.ACTION_SET_NEW_TEXT) return@subscribeAlways
+                    if (event.action == ContentChangeEvent.ACTION_SET_NEW_TEXT) {
+                        // A reload or a server's edit: what the pairing rules compare the next edit with.
+                        previousText = text.toString()
+                        return@subscribeAlways
+                    }
                     // Linked editing: a tag's name typed or deleted changes its partner's too.
                     if (!isApplyingAutoPair && controller.settings.linkedEditing && document.languageId in LINKED_EDITING_LANGUAGES &&
                         (event.action == ContentChangeEvent.ACTION_INSERT || event.action == ContentChangeEvent.ACTION_DELETE)

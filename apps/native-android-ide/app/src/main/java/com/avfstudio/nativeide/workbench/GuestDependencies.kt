@@ -226,13 +226,22 @@ enum class GuestDependency(
     /**
      * Remove in Settings → Guest tools: the tool catalog's own uninstall, which also drops the
      * registry entry. Null for what came from elsewhere (apt packages, Miniforge): those stay the
-     * system's or the user's to remove.
+     * system's or the user's to remove. And for uv, which the daemon's installer puts in place
+     * (outside the registry) and ty, ruff and the Jupyter bridge run on.
      */
     val remove: String?
-        get() = install.takeIf { it.startsWith(CATALOG_INSTALL) }?.let { "avf-native-daemon tools remove " + it.removePrefix(CATALOG_INSTALL) }
+        get() = install.takeIf { it.startsWith(CATALOG_INSTALL) && this != Uv }
+            ?.let { "avf-native-daemon tools remove " + it.removePrefix(CATALOG_INSTALL) }
 
     companion object {
         val allCommands: List<String> get() = entries.flatMap { it.commands }.distinct()
+
+        /**
+         * The debuggers offered for install when a session can't start without them. Here and not
+         * at the top of the file: the entries call aptInstall, which initializes the file's
+         * properties while the entries are still null.
+         */
+        val debuggers: Set<GuestDependency> = setOf(JsDebug, CodeLldb)
 
         /** What a chat agent needs installed; Copilot CLI comes with the daemon's installer. */
         fun forAgent(kind: ChatAgentKind): GuestDependency? = when (kind) {
@@ -263,9 +272,6 @@ internal fun dependencyStates(paths: Map<String, String?>): Map<GuestDependency,
 
 /** The command a terminal runs for [dependency]; it closes its shell only when the install worked. */
 internal fun installCommand(dependency: GuestDependency): String = "${dependency.install} && exit"
-
-/** The debuggers offered for install when a session can't start without them. */
-internal val DEBUGGER_DEPENDENCIES = setOf(GuestDependency.JsDebug, GuestDependency.CodeLldb)
 
 /** Error text from the daemon that means [dependency]'s program could not be started at all. */
 internal fun missingDependencyIn(message: String): GuestDependency? {

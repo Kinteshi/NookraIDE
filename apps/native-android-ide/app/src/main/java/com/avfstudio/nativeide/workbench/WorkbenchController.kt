@@ -1727,9 +1727,13 @@ class WorkbenchController(private val context: Context) {
                         val message = generateSequence(error) { it.cause }.last().message.orEmpty()
                         endDebugSession("${if (attach) "Attach" else "Launch"} failed: $message")
                         // js-debug or CodeLLDB isn't in the guest yet: offer it, then start again.
-                        missingDependencyIn(message)?.takeIf { it in DEBUGGER_DEPENDENCIES && dialog == null }?.let { dependency ->
-                            val language = if (dependency == GuestDependency.JsDebug) "Node.js" else "C, C++ and Rust"
-                            offerInstall(dependency, "Debugging $language needs ${dependency.label}.") { startDebugging(configuration, built) }
+                        missingDependencyIn(message)?.takeIf { it in GuestDependency.debuggers && dialog == null }?.let { dependency ->
+                            val reason = if (dependency == GuestDependency.JsDebug) {
+                                "Debugging Node.js needs ${dependency.label}."
+                            } else {
+                                "Debugging C, C++ and Rust needs CodeLLDB, which isn't in the guest yet."
+                            }
+                            offerInstall(dependency, reason) { startDebugging(configuration, built) }
                         }
                     } else if (debugState == DebugState.Starting) {
                         debugState = DebugState.Running
@@ -1850,7 +1854,11 @@ class WorkbenchController(private val context: Context) {
                 debugOutputOpen = appendDebugOutput(debugConsole, text, kind, category, debugOutputOpen)
                 if (debugConsole.size > 2_000) debugConsole.removeRange(0, debugConsole.size - 2_000)
             }
-            "exited" -> debugConsole.add(DebugConsoleLine("Process exited with code ${body.get("exitCode")?.asInt ?: "?"}", DebugConsoleLine.Kind.Info))
+            "exited" -> {
+                // CodeLLDB says so itself ("Process exited with code 0."); debugpy and js-debug don't.
+                val said = debugConsole.takeLast(3).any { it.text.startsWith("Process exited with code") }
+                if (!said) debugConsole.add(DebugConsoleLine("Process exited with code ${body.get("exitCode")?.asInt ?: "?"}", DebugConsoleLine.Kind.Info))
+            }
             "terminated" -> endDebugSession(null)
         }
     }
@@ -3738,6 +3746,11 @@ class WorkbenchController(private val context: Context) {
         requestCloseDocuments(documents.map { it.path }.filter { it != path && it !in pinnedTabs })
     }
 
+    /** Close All Editors; pinned tabs stay, as in VS Code. */
+    fun closeAllTabs() {
+        requestCloseDocuments(documents.map { it.path }.filter { it !in pinnedTabs })
+    }
+
     fun copyPath(path: String) {
         val clipboard = context.getSystemService(android.content.ClipboardManager::class.java) ?: return
         clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Path", path))
@@ -4670,7 +4683,9 @@ class WorkbenchController(private val context: Context) {
     private fun refreshSemanticTokens(document: DocumentSession) {
         if (!settings.semanticHighlighting) return
         val client = languageClientFor(document.path)
-        if (client?.isReady != true) return
+        // A server that just started gets the file once its start completes, which refreshes again;
+        // asking before that fails ("trying to get AST for non-added document", clangd).
+        if (client?.isReady != true || !client.isOpen(document.path)) return
         client.semanticTokens(document.path).whenComplete { decorations, error ->
             post {
                 if (activePath != document.path || editorHost.selection(document.path) == null) return@post
@@ -9520,6 +9535,7 @@ class WorkbenchController(private val context: Context) {
             "outline.focus" -> toggleSidebar(SidebarView.Outline)
             "workbench.action.closeActiveEditor" -> activePath?.let(::requestCloseDocument)
             "workbench.action.closeOtherEditors" -> activePath?.let(::closeOtherTabs)
+            "workbench.action.closeAllEditors" -> closeAllTabs()
             "workbench.action.keepEditor" -> activePath?.let(::keepTab)
             "workbench.action.pinEditor" -> activePath?.let { if (it in pinnedTabs) unpinTab(it) else pinTab(it) }
             "workbench.action.unpinEditor" -> activePath?.let(::unpinTab)

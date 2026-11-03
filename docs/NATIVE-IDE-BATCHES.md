@@ -1821,38 +1821,70 @@ daemon tests pass; the guest runs this daemon.
   (the app then saw them as installed but failing), removed too. avf-debugpy and avf-node-agent
   are the new versions. Tabs back to the user's four; no terminal open.
 
-## 36. Toolchains, snippets at once, removing guest tools, CodeLLDB, breakpoints that move, output apart, welcome page overlays (11-03 10:00–; in progress)
-User's pick (11-03): backlog 39, 40, 43–48.
-* (48) The welcome page (every tab closed) drew the last editor's code lenses, fold arrows and
-  inlay hints: the editor overlays were drawn whenever no notebook, preview or image was shown,
-  even with no editor. They are drawn only with a file open now.
-* (46) The Debug console keeps output categories apart: only the program's stdout and stderr
-  continue an unfinished line; a logpoint or debugger message is a whole line of its own.
-* (45) Breakpoints move with the text as VS Code moves them: lines added or removed above move
-  them; Enter at the first column of a breakpoint's line pushes it down with its code; a line
-  joined into the one above takes its breakpoint along. Conditions and log messages move too.
-  The adapter hears of the new lines when the file is saved (VS Code's behaviour: the running
-  program still has the old code).
+## 36. Toolchains, snippets at once, removing guest tools, CodeLLDB, breakpoints that move, output apart, welcome page overlays (11-03 10:00–11:30; done, checked)
+User's pick (11-03): backlog 39, 40, 43–48. 313 app unit tests and 126 daemon tests pass; the
+guest runs this daemon.
+* (39) Go, C/C++ and Rust with their toolchains, through the app's own offers: opening main.go
+  offered gopls, then the Go toolchain (golang-go also brought gcc and g++, so C needed no
+  toolchain offer); hello.c offered clangd; main.rs offered rust-analyzer, then cargo. Checked:
+  gopls completes `strings.Rep` (Repeat, Replace…) and marks errors; clangd has no error on
+  `#include <stdio.h>`, shows references and inlay hints; rust-analyzer shows types (`q: Point`).
+  rust-analyzer only finds a Cargo.toml in the workspace root or a folder one level down: a crate
+  at b36/rs gave "Failed to discover workspace" (VS Code says the same; see backlog 49). Everything
+  was removed afterwards (85 packages, about 1.5 GB; the package list matches the morning's).
 * (40) Snippets show at once: when the server hasn't answered, the matching snippets show first
   and the server's items join them in the same order as when all arrive together
-  (`editor.snippetSuggestions`: top, bottom, inline).
+  (`editor.snippetSuggestions`: top, bottom, inline). Checked: right after a restart a workspace
+  snippet (`ptotal`) showed within 0.3 s while ty still hadn't answered 11 s later.
 * (43) Removing a guest tool: `avf-native-daemon tools remove <name>` undoes the install (the
   package manager's uninstall, the download's file, or the script's `remove`) and drops the
   registry entry; a launcher shared by several tools (avf-node-agent) stays until the last of
   them goes; avf-node-agent removes a server's folder (the shared vscode-langservers with the
   last of JSON/HTML/CSS) and Node.js with the last tool. Settings → Guest tools has Remove beside
-  each installed catalog tool (confirmation, then a terminal); apt packages and Miniforge are left
-  to the user. A server of the removed tool is stopped, and the next file offers it again.
+  each installed catalog tool (confirmation, then a terminal); apt packages, Miniforge and uv (the
+  daemon's installer puts it in place, outside the registry, and ty, ruff and the Jupyter bridge
+  run on it) are left out. A server of the removed tool is stopped, and the next file offers it
+  again. Checked: CodeLLDB (a script tool) and gopls (apt) removed from Settings, the rows went
+  back to Install.
 * (44) C, C++ and Rust debugging with CodeLLDB 1.12.3 (GitHub release, checksum-verified, about
   55 MB, 170 MB unpacked with its own LLDB), set up by a new bundled launcher avf-codelldb (the
   adapter speaks DAP over TCP only; the launcher listens and has it `--connect`, as VS Code's
-  extension does, and joins stdio). Offered for install on the first C/C++/Rust debug. Built-in
-  configurations: "C/C++: Build and Debug Current File" (gcc/g++ `-g -O0` beside the file, in a
-  terminal first, as VS Code's pre-launch task) and "Rust: Build and Debug Cargo Project"
-  (`cargo build` in the active file's crate, then its `target/debug/<package>`; Rust's
-  formatters through `sourceLanguages`). launch.json's `lldb` configurations work too. Inline
-  values find C function starts.
-* (39) Toolchains: (to check on the tablet).
+  extension does, and joins stdio; `sourceLanguages` goes in the adapter's `--settings`). Offered
+  for install on the first C/C++/Rust debug. Built-in configurations: "C/C++: Build and Debug
+  Current File" (gcc/g++ `-g -O0` beside the file, in a terminal first, as VS Code's pre-launch
+  task) and "Rust: Build and Debug Cargo Project" (`cargo build` in the active file's crate, then
+  its `target/debug/<package>`). launch.json's `lldb` configurations work too. Inline values find
+  C function starts. Checked: hello.c paused in `square` (x = 1), the call stack down to `_start`,
+  the loop's output and exit; the Rust crate built, paused in `scale` (p = {x:1, y:2}, k = 1), and
+  printed its lines. With Debian's rustc CodeLLDB warns "Could not find LLDB data formatters in
+  your Rust toolchain" (Vec and String show raw), as VS Code would with that toolchain.
+* (45) Breakpoints move with the text as VS Code moves them: lines added or removed above move
+  them; Enter at the first column of a breakpoint's line pushes it down with its code; a line
+  joined into the one above takes its breakpoint along. Conditions and log messages move too.
+  The adapter hears of the new lines when the file is saved (VS Code's behaviour: the running
+  program still has the old code). Checked: all three on the tablet.
+* (46) The Debug console keeps output categories apart: only the program's stdout and stderr
+  continue an unfinished line; a logpoint or debugger message is a whole line of its own.
+  Checked: "n is 1", "n is 2" on lines of their own (debugpy delivers them after the program's
+  own prints of the same iterations).
+* (47) Checked on the tablet: hit count 3 stopped at n = 3; Debug: Add to Watch on a selection;
+  an existing breakpoint's dialog (it opens on the log message for a logpoint) and its Remove;
+  Settings → Languages → Inline values off shows none; Stop prints "Debug session ended" once.
+* (48) The welcome page (every tab closed) no longer shows the last editor's code lenses, fold
+  arrows and inlay hints: the editor overlays are drawn only with a file open. Checked.
+* Found and fixed on the tablet:
+  * Enter at the end of an unindented line followed by another did nothing but move the cursor
+    (an old bug): the "type over a closer" rule took the inserted line break for a closer to skip,
+    because the character already there was a line break too. It applies to closing brackets and quotes only now;
+    the pairing rules also compare with the text after a full replacement (reload, server edit).
+  * The CodeLLDB install offer never came: the set of offered debuggers was a top-level property
+    in the file whose enum entries call a top-level function, so it was built while the entries
+    were still null. It lives in the enum's companion now.
+  * "Semantic highlighting failed: trying to get AST for non-added document" (clangd) after a
+    restart: semantic tokens are asked for only once the server has the file open.
+  * "Process exited with code 0" twice with CodeLLDB (it says so itself).
+  * Close All Editors (Ctrl+K Ctrl+W; pinned tabs stay) was missing from the palette; added (not
+    tried on the tablet).
 
 ## Backlog
 To investigate (user, 10-28):
@@ -2084,10 +2116,10 @@ day, L several days.
 * Left from batch 34's second round (11-02):
   38. (Done: the user confirmed it.) Confirm with the user's touchpad that the hover card can be reached and scrolled (the
       hiding delay). S.
-  39. Go, C/C++ and Rust with their toolchains: accept the offer (or install `golang-go`,
+  39. (Done in batch 36.) Go, C/C++ and Rust with their toolchains: accept the offer (or install `golang-go`,
       `build-essential`, `cargo`) and check gopls, clangd and rust-analyzer on a module, a file
       with `#include <stdio.h>` and a cargo project. S.
-  40. Snippets wait for the language server's answer: while a fresh server is still indexing
+  40. (Done in batch 36.) Snippets wait for the language server's answer: while a fresh server is still indexing
       (ty with a large environment takes seconds), typing a prefix shows nothing. VS Code shows
       snippets at once and merges the server's items when they come. S-M.
   41. (Done in batch 35.) Restored tabs come back in the order their files finished loading, with the active one
@@ -2095,24 +2127,32 @@ day, L several days.
   42. (Done in batch 35.) sqlint (inside sql-language-server) reports its style rules ("A linebreak is required
       after SELECT") as errors; consider a default `.sqlintrc` or lowering them to warnings. S.
 * Left from batch 35 (11-02):
-  43. Remove a guest tool: the daemon has no uninstall, so deleting a tool's files leaves its
+  43. (Done in batch 36.) Remove a guest tool: the daemon has no uninstall, so deleting a tool's files leaves its
       registry entry (the app then sees it installed but failing). `avf-native-daemon tools
       remove <name>` and a Remove button in Settings → Guest tools. S-M.
-  44. C, C++ and Rust debugging with codelldb (needs the toolchains of backlog 39 to try). M.
-  45. Breakpoints stay on their line numbers when lines are added or removed above them; VS Code
+  44. (Done in batch 36.) C, C++ and Rust debugging with codelldb (needs the toolchains of backlog 39 to try). M.
+  45. (Done in batch 36.) Breakpoints stay on their line numbers when lines are added or removed above them; VS Code
       moves them with the text. S-M.
-  46. The Debug console can join a logpoint's line with a half-printed stdout line (seen once:
+  46. (Done in batch 36.) The Debug console can join a logpoint's line with a half-printed stdout line (seen once:
       "n is 7" followed by " 4 total = 104"); keep output categories apart. S.
-  47. Not tried on the tablet: hit counts, Debug: Add to Watch, editing an existing breakpoint
+  47. (Done in batch 36.) Not tried on the tablet: hit counts, Debug: Add to Watch, editing an existing breakpoint
       and Remove, the inline values setting, the single "Debug session ended". S.
 * To investigate (user, 11-03):
-  48. Graphics left behind when every editor tab is closed: the welcome page shows the last
+  48. (Done in batch 36.) Graphics left behind when every editor tab is closed: the welcome page shows the last
       file's editor overlays at their old places: code lenses ("2 references", "1 reference"),
       two fold chevrons at the left edge, and inlay hints ("data: list[int]", "total: int",
       "values=data", "factor=3", "factor=10") over the welcome title and shortcut list. The
       overlays in EditorPane (CodeLens, fold arrows, InlayHintsOverlay) probably keep their last
       state when no editor is shown; clear them (or skip drawing) when there's no active
       document. S.
+* Left from batch 36 (11-03):
+  49. rust-analyzer finds a Cargo.toml only in the workspace root or one folder down; a deeper
+      crate gets "Failed to discover workspace" (VS Code too). Pass `linkedProjects` with the
+      active file's crate when the user hasn't set it. S-M.
+  50. The suggest popup stays open with the previous list (False, None…) after the typed word is
+      deleted with Backspace; VS Code closes it. S.
+  51. Restart commands for the language servers (Python: Restart Language Server, rust-analyzer:
+      Restart Server, Go: Restart Language Server…); today only an app restart does it. S.
 * Still left out on purpose: multi-cursor, sticky scroll, minimap (Aardink switch; folding came in batch 31);
   split editor groups and the 3-way merge editor; tasks.json; MCP, other AI providers and the
   built-in chat agent (Copilot, Claude Code and Gemini through ACP instead); foldable postures

@@ -67,6 +67,8 @@ fun autoPairAfterInsertion(
     )
 }
 
+private const val CLOSERS = ")]}\"'`"
+
 fun skipExistingCloserAfterInsertion(
     previousText: String,
     currentText: String,
@@ -75,7 +77,8 @@ fun skipExistingCloserAfterInsertion(
 ): AutoPairReplacement? {
     if (insertedText.length != 1 || insertionOffset !in previousText.indices) return null
     val closer = insertedText.single()
-    if (previousText[insertionOffset] != closer) return null
+    // Only closers are typed over: Enter before a line break is a new line, not a skip.
+    if (closer !in CLOSERS || previousText[insertionOffset] != closer) return null
     if (currentText != previousText.replaceRange(insertionOffset, insertionOffset, insertedText)) return null
     return AutoPairReplacement(
         previousText,

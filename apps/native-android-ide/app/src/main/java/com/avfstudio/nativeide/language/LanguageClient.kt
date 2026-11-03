@@ -208,6 +208,9 @@ class LanguageClient(
         }
     }
 
+    /** Whether the server has [path] open (its didOpen went out); requests about it need that. */
+    fun isOpen(path: String): Boolean = path in openedDocuments
+
     fun didOpen(path: String, languageId: String, version: Long, text: String) {
         if (!isReady || !openedDocuments.add(path)) return
         notify("textDocument/didOpen", JsonObject().apply {

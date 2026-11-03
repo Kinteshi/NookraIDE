@@ -73,4 +73,11 @@ class AutoPairingTest {
         assertNull(autoPairAfterInsertion("", "x", 0, "x", null))
         assertNull(autoPairAfterInsertion("abc", "ab(", 1, "(", null))
     }
+
+    @Test
+    fun enterBeforeALineBreakIsNotTypedOver() {
+        // Enter at the end of an unindented line inserts exactly "\n", the character already there.
+        assertNull(skipExistingCloserAfterInsertion("a = 0\nb\n", "a = 0\n\nb\n", 5, "\n"))
+        assertNull(skipExistingCloserAfterInsertion("ab", "aab", 0, "a"))
+    }
 }
