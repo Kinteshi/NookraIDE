@@ -522,6 +522,11 @@ private fun LazyListScope.notebooks(settings: WorkbenchSettings, set: SetSetting
     }
     item { Section("Outputs") }
     item { SwitchRow(Icons.Outlined.TableChart, "Native tables", "pandas and polars DataFrames as sortable tables in the app's colours; off shows their HTML", settings.nativeTables) { set(WorkbenchSettings.NATIVE_TABLES, it) } }
+    item {
+        SwitchRow(Icons.Outlined.Tune, "Interactive widgets", "ipywidgets (sliders, dropdowns, buttons, interact()) drawn live and connected to the kernel; off shows their text", settings.liveWidgets) {
+            set(WorkbenchSettings.LIVE_WIDGETS, it)
+        }
+    }
     item { SwitchRow(Icons.Outlined.InsertChart, "Draw Plotly figures", "Interactive charts in cell outputs; loads plotly.js from cdn.plot.ly the first time", settings.renderPlotly) { set(WorkbenchSettings.RENDER_PLOTLY, it) } }
     item {
         SwitchRow(Icons.Outlined.Refresh, "Plotly figures update in place", "display(fig, display_id=True) and its update() redraw one figure; applies to kernels started from now on", settings.plotlyDisplayIds) {

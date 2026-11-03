@@ -250,6 +250,8 @@ class NotebookSession(
 ) {
     /** Display ids and pending clear_output(wait=True) of the running kernel's outputs. */
     val displays = com.avfstudio.nativeide.notebook.NotebookDisplays()
+    /** The kernel's live ipywidgets, drawn where an output names them. */
+    val widgets = com.avfstudio.nativeide.notebook.NotebookWidgets()
     /** Cells sent to the kernel and not answered yet, oldest first (the bridge runs them in this order). */
     val executing = ArrayDeque<com.avfstudio.nativeide.notebook.NotebookCell>()
     var kernelName by mutableStateOf<String?>(null)

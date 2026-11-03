@@ -812,6 +812,19 @@ class WorkbenchController(private val context: Context) {
      * (starting earlier found it still running and did nothing). Its old problems are dropped;
      * the new server reports again.
      */
+    /** A palette restart: a running server stops and starts again; one not running starts for the active file. */
+    private fun restartServerCommand(language: String) {
+        val tool = languageServerTool(language)
+        val client = languageClients.getValue(language)
+        if (client.isStarted) {
+            status = "Restarting $tool"
+            restartLanguageServer(language)
+        } else {
+            status = "$tool isn't running; it starts with a file it works on"
+            activePath?.let(::ensureLanguageServers)
+        }
+    }
+
     private fun restartLanguageServer(language: String) {
         val client = languageClients.getValue(language)
         if (!client.isStarted) return
@@ -864,6 +877,33 @@ class WorkbenchController(private val context: Context) {
         )
     }
 
+    /** The Cargo.toml of each open Rust file's crate, for rust-analyzer's `linkedProjects`. */
+    private val rustManifests = mutableMapOf<String, String>()
+
+    /** An open Rust file: its crate joins rust-analyzer's projects when discovery wouldn't find it. */
+    private fun trackRustCrate(path: String) {
+        val root = workspaceRoot?.trimEnd('/') ?: return
+        if (!path.endsWith(".rs") || !path.startsWith("$root/") || !settings.otherLanguageServers) return
+        findCargoManifest(path.substringBeforeLast('/'), root) { manifest ->
+            if (manifest == null || rustManifests[path] == manifest || documents.none { it.path == path }) return@findCargoManifest
+            val before = rustLinkedProjects(root, rustManifests.values)
+            rustManifests[path] = manifest
+            if (rustLinkedProjects(root, rustManifests.values) != before) updateRustSettings()
+        }
+    }
+
+    private fun untrackRustCrate(path: String) {
+        val root = workspaceRoot ?: return
+        val before = rustLinkedProjects(root, rustManifests.values)
+        if (rustManifests.remove(path) != null && rustLinkedProjects(root, rustManifests.values) != before) updateRustSettings()
+    }
+
+    /** rust-analyzer reloads its projects when `linkedProjects` changes (it asks for its settings again). */
+    private fun updateRustSettings() {
+        val id = OtherLanguageServer.Rust.id
+        languageClients[id]?.updateSettings(SettingsResolver.sections(serverSettings(id)))
+    }
+
     private fun updateLanguageSettings() {
         languageClients.forEach { (language, client) ->
             client.updateSettings(SettingsResolver.sections(serverSettings(language)))
@@ -901,6 +941,11 @@ class WorkbenchController(private val context: Context) {
             fill("yaml.validate", true)
             fill("yaml.hover", true)
             fill("yaml.completion", true)
+        }
+        if (language == OtherLanguageServer.Rust.id) {
+            workspaceRoot?.let { root -> rustLinkedProjects(root, rustManifests.values) }?.let { projects ->
+                fill("rust-analyzer.linkedProjects", com.google.gson.JsonArray().apply { projects.forEach(::add) })
+            }
         }
         if (language == "python-format" && settings.pythonLintRules.extendSelect.isNotEmpty()) {
             fill("ruff.lint.extendSelect", com.google.gson.JsonArray().apply { settings.pythonLintRules.extendSelect.forEach(::add) })
@@ -3533,6 +3578,7 @@ class WorkbenchController(private val context: Context) {
                 status = if (session.conflict != null) "Remote changes detected; choose how to resolve" else "Opened ${session.path.substringAfterLast('/')}"
                 fetchLanguagePackIfWanted(session.path)
                 notifyDocumentOpened(session)
+                trackRustCrate(session.path)
                 if (!background) ensureLanguageServers(session.path)
                 if (lspLanguageId(session.path) != null) refreshOutline(session)
                 if (session.conflict != null) dialog = WorkbenchDialog.Conflict(session)
@@ -4556,6 +4602,7 @@ class WorkbenchController(private val context: Context) {
     }
 
     private fun notifyDocumentClosed(path: String) {
+        untrackRustCrate(path)
         if (isDevicePath(path) || isImagePath(path)) return
         languageClientsFor(path).forEach { it.didClose(path) }
         copilot.language.didClose(path)
@@ -7856,10 +7903,12 @@ class WorkbenchController(private val context: Context) {
                 }
             }
         }
+        kernel.widgetListener = { message -> post { session.widgets.apply(message) } }
         kernel.exitListener = { message ->
             post {
                 session.kernelState = message
                 session.kernelName = null
+                session.widgets.models.clear()
                 val now = System.currentTimeMillis()
                 notebook.cells.forEach { cell ->
                     if (cell.running) cell.lastRun = CellRun(failed = true, millis = cell.runStartedAt?.let { now - it }, finishedAt = now)
@@ -7871,6 +7920,26 @@ class WorkbenchController(private val context: Context) {
             }
         }
         return session
+    }
+
+    /** A widget the user changed (a slider moved, text typed): shown at once and sent to the kernel. */
+    fun changeWidget(session: NotebookSession, model: com.avfstudio.nativeide.notebook.WidgetModel, change: JsonObject) {
+        sendToWidget(session, model, session.widgets.change(model, change))
+    }
+
+    /** A widget event: "click" for a button, "submit" for Enter in a text box. */
+    fun widgetEvent(session: NotebookSession, model: com.avfstudio.nativeide.notebook.WidgetModel, event: String) {
+        sendToWidget(session, model, com.avfstudio.nativeide.notebook.NotebookWidgets.event(event))
+    }
+
+    private fun sendToWidget(session: NotebookSession, model: com.avfstudio.nativeide.notebook.WidgetModel, data: JsonObject) {
+        if (!session.kernel.isStarted) {
+            status = "The widget's kernel isn't running; run the cell again"
+            return
+        }
+        session.kernel.commMessage(model.id, data).whenComplete { _, error ->
+            if (error != null) post { status = "Widget: ${error.cause?.message ?: error.message}" }
+        }
     }
 
     private fun appendCellOutput(session: NotebookSession, cellId: String, output: JsonObject, displayId: String? = null) {
@@ -9510,6 +9579,17 @@ class WorkbenchController(private val context: Context) {
                 status = "Pick a configuration in the Debug panel, then Start (F5)"
             }
             "python.setInterpreter" -> chooseInterpreter()
+            "python.analysis.restartLanguageServer" -> restartServerCommand("python")
+            "ruff.restart" -> restartServerCommand("python-format")
+            "typescript.restartTsServer" -> restartServerCommand("typescript")
+            "go.languageserver.restart" -> restartServerCommand(OtherLanguageServer.Go.id)
+            "clangd.restart" -> restartServerCommand(OtherLanguageServer.C.id)
+            "rust-analyzer.restartServer" -> restartServerCommand(OtherLanguageServer.Rust.id)
+            "materialcode.restartLanguageServers" -> activePath?.let { path ->
+                val languages = languageClientsFor(path).mapNotNull { client -> languageClients.entries.firstOrNull { it.value === client }?.key }
+                if (languages.isEmpty()) status = "No language server works on ${path.substringAfterLast('/')}"
+                languages.forEach(::restartServerCommand)
+            }
             "workbench.view.scm" -> {
                 sidebar = if (sidebar == SidebarView.SourceControl) null else SidebarView.SourceControl
                 if (sidebar == SidebarView.SourceControl) refreshGitStatus()

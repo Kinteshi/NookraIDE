@@ -10,10 +10,20 @@ single kernel through jupyter_client. Kernels come from the user's own environme
 venvs, system Python with ipykernel), so nothing is installed into them.
 
 Requests:  kernelspecs, start {name, cwd, plotly_display_ids}, execute {code, cell_id}, complete {code, cursor_pos},
-           interrupt, restart, shutdown
+           comm_msg {comm_id, data}, interrupt, restart, shutdown
 Notifications to the client: output {cell_id, output, display_id}, clear_output {cell_id, wait},
-           update_display {display_id, output}, status {state}
+           update_display {display_id, output}, status {state},
+           comm_open {comm_id, target_name, data, buffers}, comm_msg {comm_id, data, buffers},
+           comm_close {comm_id}, comms_reset, widget_output {comm_id, output},
+           widget_clear_output {comm_id, wait}
+
+ipywidgets: the kernel's widget models arrive as comms (target "jupyter.widget") and the client
+sends their changes back with comm_msg. One reader takes every iopub message: a cell's own go
+to its execute; outputs an Output widget is capturing (its `msg_id` is their parent's, as in
+JupyterLab) go to that widget instead, also those of callbacks run after the cell finished.
 """
+
+import base64
 
 import glob
 import json
@@ -320,6 +330,9 @@ def to_nbformat_output(message):
     return None
 
 
+IGNORED_IOPUB = ("status", "execute_input", "shutdown_reply")
+
+
 class Bridge:
     def __init__(self):
         self.specs = None
@@ -327,7 +340,94 @@ class Bridge:
         self.client = None
         self.work = queue.Queue()
         self.handlers = []
+        # The running execute: its message id and the queue its iopub messages go to.
+        self.current = None
+        # Widget comms: model names by comm id, and the Output widgets capturing (msg_id -> comm id).
+        self.widget_models = {}
+        self.capturing = {}
+        self.reader = None
         threading.Thread(target=self._run_work, daemon=True).start()
+
+    def _start_reader(self):
+        client = self.client
+        self.reader = threading.Thread(target=self._read_iopub, args=(client,), daemon=True)
+        self.reader.start()
+
+    def _read_iopub(self, client):
+        while self.client is client:
+            try:
+                message = client.get_iopub_msg(timeout=0.5)
+            except queue.Empty:
+                continue
+            except Exception:  # noqa: BLE001 - channels closing at shutdown
+                if self.client is not client:
+                    return
+                continue
+            try:
+                self._dispatch(message)
+            except Exception:  # noqa: BLE001 - one bad message must not stop the reader
+                traceback.print_exc(file=sys.stderr)
+
+    def _dispatch(self, message):
+        kind = message["header"]["msg_type"]
+        content = message.get("content", {})
+        parent = message.get("parent_header", {}).get("msg_id")
+        if kind in ("comm_open", "comm_msg", "comm_close"):
+            self._comm(kind, content, message.get("buffers") or [])
+            return
+        comm_id = self.capturing.get(parent) if parent else None
+        if comm_id is not None and kind not in IGNORED_IOPUB:
+            if kind == "clear_output":
+                notify("widget_clear_output", {"comm_id": comm_id, "wait": content.get("wait", False)})
+            else:
+                output = to_nbformat_output(message)
+                if output is not None:
+                    notify("widget_output", {"comm_id": comm_id, "output": output})
+            return
+        current = self.current
+        if current is not None and parent == current[0]:
+            current[1].put(message)
+
+    def _comm(self, kind, content, buffers):
+        comm_id = content.get("comm_id")
+        data = content.get("data", {})
+        encoded = [base64.b64encode(bytes(buffer)).decode("ascii") for buffer in buffers]
+        if kind == "comm_open":
+            if content.get("target_name") == "jupyter.widget":
+                self.widget_models[comm_id] = data.get("state", {}).get("_model_name")
+                self._track_capture(comm_id, data.get("state", {}))
+            notify("comm_open", {
+                "comm_id": comm_id, "target_name": content.get("target_name"), "data": data, "buffers": encoded,
+            })
+        elif kind == "comm_msg":
+            if data.get("method") in ("update", "echo_update"):
+                self._track_capture(comm_id, data.get("state", {}))
+            notify("comm_msg", {"comm_id": comm_id, "data": data, "buffers": encoded})
+        else:
+            self.widget_models.pop(comm_id, None)
+            self.capturing = {msg: comm for msg, comm in self.capturing.items() if comm != comm_id}
+            notify("comm_close", {"comm_id": comm_id})
+
+    def _track_capture(self, comm_id, state):
+        """An Output widget's `msg_id` says whose outputs it takes (empty: none)."""
+        if self.widget_models.get(comm_id) != "OutputModel" or "msg_id" not in state:
+            return
+        self.capturing = {msg: comm for msg, comm in self.capturing.items() if comm != comm_id}
+        if state["msg_id"]:
+            self.capturing[state["msg_id"]] = comm_id
+
+    def comm_msg(self, params):
+        """A widget change from the client (a slider moved, a button clicked)."""
+        if self.client is None:
+            raise RuntimeError("Start a kernel first")
+        message = self.client.session.msg("comm_msg", {"comm_id": params["comm_id"], "data": params.get("data", {})})
+        self.client.shell_channel.send(message)
+        return {"msg_id": message["header"]["msg_id"]}
+
+    def _reset_comms(self):
+        self.widget_models = {}
+        self.capturing = {}
+        notify("comms_reset", {})
 
     def kernelspecs(self, _params):
         missing = []
@@ -370,6 +470,7 @@ class Bridge:
         client.start_channels()
         client.wait_for_ready(timeout=120)
         self.kernel, self.client = manager, client
+        self._start_reader()
         spec = self.specs.get_kernel_spec(params["name"])
         self.plotly_display_ids = bool(params.get("plotly_display_ids")) and spec.language == "python"
         self.language = spec.language
@@ -389,12 +490,18 @@ class Bridge:
         if self.client is None:
             raise RuntimeError("Start a kernel first")
         cell_id = params.get("cell_id")
-        msg_id = self.client.execute(params["code"], allow_stdin=False, stop_on_error=True)
+        # Built here so the reader knows its id before the kernel's first reply can arrive.
+        request = self.client.session.msg("execute_request", {
+            "code": params["code"], "silent": False, "store_history": True, "user_expressions": {},
+            "allow_stdin": False, "stop_on_error": True,
+        })
+        msg_id = request["header"]["msg_id"]
+        messages = queue.Queue()
+        self.current = (msg_id, messages)
+        self.client.shell_channel.send(request)
         notify("status", {"state": "busy"})
         while True:
-            message = self.client.get_iopub_msg(timeout=None)
-            if message.get("parent_header", {}).get("msg_id") != msg_id:
-                continue
+            message = messages.get()
             kind = message["header"]["msg_type"]
             if kind == "status" and message["content"].get("execution_state") == "idle":
                 break
@@ -412,6 +519,7 @@ class Bridge:
                     notify("update_display", {"display_id": display_id, "output": output})
                 continue
             notify("output", {"cell_id": cell_id, "output": output, "display_id": display_id})
+        self.current = None
         reply = self.client.get_shell_msg(timeout=30)
         while reply.get("parent_header", {}).get("msg_id") != msg_id:
             reply = self.client.get_shell_msg(timeout=30)
@@ -475,6 +583,8 @@ class Bridge:
             raise RuntimeError("No kernel is running")
         self.kernel.restart_kernel(now=True)
         self.client.wait_for_ready(timeout=120)
+        # The old kernel's widgets are gone with it.
+        self._reset_comms()
         self._prepare_kernel()
         return None
 
@@ -503,7 +613,8 @@ class Bridge:
         method = message.get("method")
         request_id = message.get("id")
         params = message.get("params") or {}
-        if method in ("execute", "variables", "table"):
+        # comm_msg too: the shell socket is the work thread's, and the kernel handles it after the cell anyway.
+        if method in ("execute", "variables", "table", "comm_msg"):
             self.work.put((method, request_id, params))
             return
         handler = {

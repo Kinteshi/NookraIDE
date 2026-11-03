@@ -76,3 +76,17 @@ fun sqlLintRules(level: SqlStyleRules): Map<String, Any> = listOf(
     "align-where-clause-to-the-first",
     "require-as-to-rename-column",
 ).associateWith { rule -> if (rule == "reserved-word-case") listOf(level.key, "upper") else level.key }
+
+/**
+ * rust-analyzer's `linkedProjects` for the crates of the open Rust files ([manifests], their
+ * Cargo.toml paths), or null to leave it to rust-analyzer's own discovery. That discovery looks
+ * at [root] and its folders one level down only, so a deeper crate needs linking; and as linking
+ * turns discovery off, every open crate is linked then.
+ */
+fun rustLinkedProjects(root: String, manifests: Collection<String>): List<String>? {
+    val base = root.trimEnd('/') + "/"
+    val deep = manifests.any { manifest ->
+        manifest.startsWith(base) && manifest.removePrefix(base).count { it == '/' } >= 2
+    }
+    return if (deep) manifests.distinct().sorted() else null
+}

@@ -108,6 +108,8 @@ data class WorkbenchSettings(
     val notebookLanguageServer: Boolean = true,
     /** Draw Plotly figures; needs plotly.js from cdn.plot.ly the first time. */
     val renderPlotly: Boolean = true,
+    /** ipywidgets drawn live (sliders, dropdowns, interact()); off shows their text form. */
+    val liveWidgets: Boolean = true,
     /** `text/latex` outputs (SymPy, IPython's Math) drawn with KaTeX; needs it from jsDelivr the first time. */
     val renderLatex: Boolean = true,
     /** Python kernels let `display(fig, display_id=True)` update Plotly figures in place. */
@@ -250,6 +252,7 @@ data class WorkbenchSettings(
         const val USE_TAB_STOPS = "editor.useTabStops"
         const val NOTEBOOK_COPILOT = "avf.copilot.notebooks"
         const val RENDER_PLOTLY = "avf.notebook.plotly"
+        const val LIVE_WIDGETS = "avf.notebook.widgets"
         const val RENDER_LATEX = "avf.notebook.latex"
         const val KEY_BAR = "avf.keyBar.enabled"
         const val NEXT_EDIT_SUGGESTIONS = "github.copilot.nextEditSuggestions.enabled"
@@ -367,6 +370,7 @@ data class WorkbenchSettings(
                 notebookCopilot = bool(NOTEBOOK_COPILOT, defaults.notebookCopilot),
                 notebookLanguageServer = bool(NOTEBOOK_LANGUAGE_SERVER, defaults.notebookLanguageServer),
                 renderPlotly = bool(RENDER_PLOTLY, defaults.renderPlotly),
+                liveWidgets = bool(LIVE_WIDGETS, defaults.liveWidgets),
                 renderLatex = bool(RENDER_LATEX, defaults.renderLatex),
                 keyBar = bool(KEY_BAR, defaults.keyBar),
                 nextEditSuggestions = bool(NEXT_EDIT_SUGGESTIONS, defaults.nextEditSuggestions),

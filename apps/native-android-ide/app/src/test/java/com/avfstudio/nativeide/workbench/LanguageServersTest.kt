@@ -31,4 +31,17 @@ class LanguageServersTest {
         assertEquals(listOf("warning", "upper"), rules["reserved-word-case"])
         assertEquals(setOf("off"), sqlLintRules(SqlStyleRules.Off).values.map { (it as? List<*>)?.first() ?: it }.toSet())
     }
+
+    @Test
+    fun deepCratesAreLinkedForRustAnalyzer() {
+        val root = "/home/droid/Projects"
+        // The root and one level down are rust-analyzer's own discovery.
+        assertEquals(null, rustLinkedProjects(root, listOf("$root/Cargo.toml", "$root/app/Cargo.toml")))
+        // A deeper crate turns discovery off, so every open crate is linked.
+        assertEquals(
+            listOf("$root/app/Cargo.toml", "$root/b36/rs/Cargo.toml"),
+            rustLinkedProjects(root, listOf("$root/b36/rs/Cargo.toml", "$root/app/Cargo.toml", "$root/b36/rs/Cargo.toml")),
+        )
+        assertEquals(null, rustLinkedProjects(root, emptyList()))
+    }
 }

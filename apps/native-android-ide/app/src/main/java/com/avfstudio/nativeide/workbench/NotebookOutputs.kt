@@ -268,7 +268,7 @@ private fun errorText(output: JsonObject): String = buildString {
 }.trimEnd()
 
 @Composable
-private fun CellOutput(
+internal fun CellOutput(
     controller: WorkbenchController,
     session: NotebookSession,
     cell: NotebookCell,
@@ -328,11 +328,17 @@ private fun CellOutput(
                 Modifier
             }
             if (data.has(WIDGET_VIEW_MIME)) {
-                // ipywidgets: their text form, and why the widget itself isn't drawn.
+                val modelId = data.get(WIDGET_VIEW_MIME)?.takeIf { it.isJsonObject }?.asJsonObject?.get("model_id")?.asString
+                val model = modelId?.let { session.widgets.models[it] }
+                if (model != null && settings.liveWidgets) {
+                    WidgetView(controller, session, model, modifier)
+                    return
+                }
+                // Not live: the kernel that made it is gone (a reopened notebook), or Settings say text.
                 Column(modifier) {
                     if (data.has("text/plain")) OutputText(mime("text/plain").stripAnsi(), colors.onSurface, Modifier)
                     Text(
-                        "Interactive widget (ipywidgets): drawing it needs the kernel's widget messages, which MaterialCode doesn't support yet",
+                        if (settings.liveWidgets) "Interactive widget (ipywidgets): run the cell to use it" else "Interactive widget (ipywidgets): drawn live when Settings → Notebooks → Interactive widgets is on",
                         style = MaterialTheme.typography.labelSmall,
                         color = colors.onSurfaceVariant,
                         modifier = Modifier.padding(start = 8.dp, top = 2.dp),

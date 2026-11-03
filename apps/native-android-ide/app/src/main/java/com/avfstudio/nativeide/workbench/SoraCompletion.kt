@@ -79,9 +79,11 @@ internal class SoraCompletionLanguage(
         val trigger = if (word.isEmpty()) provider.triggerCharacters.firstOrNull { before.endsWith(it) } else null
         val cached = cache?.takeIf { it.line == position.line && it.wordStart == wordStart && it.before == before }
         suggestLog { "request ${position.line}:$column word='$word' invoked=$invoked cached=${cached != null}" }
+        // Nothing typed (the word deleted with Backspace) closes the list, as in VS Code, unless
+        // Ctrl+Space asked or a trigger character ("os.") is right before.
+        if (!invoked && word.isEmpty() && trigger == null) return
         if (!invoked && cached == null) {
             if (!provider.quickSuggestions) return
-            if (word.isEmpty() && trigger == null) return
             if (word.first().isDigit()) return
             if (inLineComment(before, provider.languageId)) return
         }

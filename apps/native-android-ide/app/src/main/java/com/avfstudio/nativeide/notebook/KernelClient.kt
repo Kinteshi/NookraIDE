@@ -34,6 +34,8 @@ class KernelClient(transport: GuestVfsClient) {
     @Volatile var clearListener: ((String, Boolean) -> Unit)? = null
     @Volatile var busyListener: ((Boolean) -> Unit)? = null
     @Volatile var exitListener: ((String) -> Unit)? = null
+    /** ipywidgets' messages ([WidgetMessage]), from the bridge's reader. */
+    @Volatile var widgetListener: ((WidgetMessage) -> Unit)? = null
     val isStarted: Boolean get() = connection.bridgeId != null
 
     init {
@@ -56,6 +58,7 @@ class KernelClient(transport: GuestVfsClient) {
                     params.get("wait")?.asBoolean ?: false,
                 )
                 "status" -> busyListener?.invoke(params.get("state")?.asString == "busy")
+                else -> parseWidgetMessage(method, params)?.let { widgetListener?.invoke(it) }
             }
         }
         connection.exitListener = { code -> exitListener?.invoke("Kernel bridge exited (${code ?: "unknown"})") }
@@ -138,6 +141,13 @@ class KernelClient(transport: GuestVfsClient) {
             sort?.let { addProperty("sort", it) }
             addProperty("ascending", ascending)
         }, timeoutSeconds = null).thenApply(::parseVariableTable)
+
+    /** A widget change for the kernel: `{"method": "update", "state": …}` or `{"method": "custom", "content": …}`. */
+    fun commMessage(commId: String, data: JsonObject): CompletableFuture<Unit> =
+        connection.request("comm_msg", JsonObject().apply {
+            addProperty("comm_id", commId)
+            add("data", data)
+        }, timeoutSeconds = null).thenApply { }
 
     fun interrupt(): CompletableFuture<Unit> = connection.request("interrupt", JsonNull.INSTANCE).thenApply { }
 
