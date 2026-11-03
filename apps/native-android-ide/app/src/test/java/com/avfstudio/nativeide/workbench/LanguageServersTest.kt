@@ -44,4 +44,11 @@ class LanguageServersTest {
         )
         assertEquals(null, rustLinkedProjects(root, emptyList()))
     }
+
+    @Test
+    fun aSecondInitializeIsRecognized() {
+        assertEquals(true, alreadyInitialized("Unknown request: initialize"))
+        assertEquals(true, alreadyInitialized("Server already initialized"))
+        assertEquals(false, alreadyInitialized("could not start language server ty"))
+    }
 }

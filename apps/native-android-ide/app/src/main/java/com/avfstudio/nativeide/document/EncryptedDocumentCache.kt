@@ -78,15 +78,20 @@ class EncryptedDocumentCache(context: Context) : DocumentCache {
             )
             .toString()
         val target = cacheFile(snapshot.path)
-        val temporary = File(directory, "${target.name}.tmp")
-        // Flush before the rename, or a power loss can leave the new name with empty contents.
-        java.io.FileOutputStream(temporary).use { stream ->
-            stream.write(envelope.toByteArray(StandardCharsets.UTF_8))
-            stream.fd.sync()
-        }
-        if (!temporary.renameTo(target)) {
-            temporary.delete()
-            error("Could not atomically persist the document cache")
+        // A draft and a save of the same file can run at once on different threads: each writes
+        // its own temporary file, and the renames take turns (the later snapshot wins).
+        val temporary = File.createTempFile("${target.name}.", ".tmp", directory)
+        try {
+            // Flush before the rename, or a power loss can leave the new name with empty contents.
+            java.io.FileOutputStream(temporary).use { stream ->
+                stream.write(envelope.toByteArray(StandardCharsets.UTF_8))
+                stream.fd.sync()
+            }
+            synchronized(this) {
+                if (!temporary.renameTo(target)) error("Could not atomically persist the document cache")
+            }
+        } finally {
+            if (temporary.exists()) temporary.delete()
         }
     }
 

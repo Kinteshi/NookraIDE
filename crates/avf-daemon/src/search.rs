@@ -162,6 +162,11 @@ fn validate_globs(kind: &str, globs: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+/// ripgrep's threads. Its default (one per CPU) collapses in the AVF guest: on the reference
+/// tablet's 8 vCPUs, 1 000 small files took 5.7 s and 45 s of kernel time with 8 threads, 0.015 s
+/// with 1; 100 000 files take 0.5 s with 2 threads and minutes with 8.
+const RIPGREP_THREADS: usize = 2;
+
 fn make_command(config: &SearchConfig) -> Command {
     let mut command = Command::new("rg");
     command
@@ -172,7 +177,8 @@ fn make_command(config: &SearchConfig) -> Command {
         .arg("--color=never")
         .arg("--no-follow")
         .arg(format!("--max-columns={MAX_RIPGREP_COLUMNS}"))
-        .arg("--max-columns-preview");
+        .arg("--max-columns-preview")
+        .arg(format!("--threads={RIPGREP_THREADS}"));
 
     if config.regex {
         command.arg("--regexp");

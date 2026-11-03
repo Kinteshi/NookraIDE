@@ -90,3 +90,9 @@ fun rustLinkedProjects(root: String, manifests: Collection<String>): List<String
     }
     return if (deep) manifests.distinct().sorted() else null
 }
+
+/** A server's answer to `initialize` when it was initialized already (a session another client started). */
+fun alreadyInitialized(message: String): Boolean {
+    val lower = message.lowercase()
+    return "unknown request: initialize" in lower || "already initialized" in lower || "initialize request sent twice" in lower
+}

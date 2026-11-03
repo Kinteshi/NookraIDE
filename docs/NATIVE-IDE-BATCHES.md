@@ -1886,6 +1886,74 @@ guest runs this daemon.
   * Close All Editors (Ctrl+K Ctrl+W; pinned tabs stay) was missing from the palette; added (not
     tried on the tablet).
 
+## 37. Deep Rust crates, suggestions close, server restarts, live ipywidgets, the spec's budgets measured (11-03 16:00–17:05; done, checked except 49 on the tablet)
+User's pick (11-03): backlog 49, 50, 51, live ipywidgets, 10-29 #24 (budgets). 318 app unit tests
+and 124 daemon tests pass; the guest runs this daemon and jupyter bridge-6.
+* (49) rust-analyzer links crates its discovery misses: an open .rs file's Cargo.toml (the closest
+  up to the workspace root) joins `rust-analyzer.linkedProjects` when it is two or more folders
+  down, with every other open crate (linking turns discovery off); sent with the server's
+  settings, so rust-analyzer reloads its projects. The user's own `linkedProjects` wins. Unit
+  tested; not checked on the tablet (the Rust toolchain and rust-analyzer, about 1 GB, were
+  removed after batch 36).
+* (50) The suggest list closes when the typed word is deleted (VS Code's behaviour), unless
+  Ctrl+Space asked or a trigger character is right before. Checked: `imp` listed 127 items,
+  Backspace three times closed it.
+* (51) Restart commands, named as the VS Code extensions name them: Python: Restart Language
+  Server, Ruff: Restart Server, TypeScript: Restart TS Server, Go: Restart Language Server,
+  clangd: Restart language server, rust-analyzer: Restart server, and Restart Language Servers of
+  the Active File. A server not running starts for the active file. Checked: "Restarting ty",
+  then "ty ready".
+* Live ipywidgets (setting Notebooks → Interactive widgets, `avf.notebook.widgets`, on; off shows
+  the text form): the bridge (bridge-6) reads every iopub message in one thread and forwards the
+  kernel's widget comms (comm_open, comm_msg, comm_close, with binary buffers as base64); a
+  widget's change goes back as comm_msg. Outputs an Output widget captures (its `msg_id`, as
+  JupyterLab does) go to the widget, also those of callbacks after the cell finished (interact()
+  reruns, button clicks). The app keeps the models per notebook and draws them natively:
+  Int/Float/FloatLog sliders, range sliders, Dropdown, Select, RadioButtons, ToggleButtons,
+  Checkbox, ToggleButton, Button (styles), Text, Password, Textarea, Combobox, Int/Float text,
+  Label, HTML, progress bars, Valid, VBox, HBox, Box, GridBox, Tab, Accordion, Stack and Output
+  (drawn as a cell's outputs); others show "[name widget: not drawn here yet]". Checked with
+  ipywidgets 8.1.9: `@interact(n=(1, 10))` drew a slider and "3 squared is 9", dragging to 8
+  gave "8 squared is 64"; a Dropdown set to blue and a Button printing into an Output widget
+  ("clicked with blue"), `pick.value` then 'blue'; a checkbox ticked, text typed, a progress bar.
+  Setting off: the text form and a note. Not done: widgets with binary data (ipycanvas, bqplot),
+  third-party widget libraries, and widgets drawn from a saved notebook's `metadata.widgets`
+  before its kernel runs.
+* (10-29 #24) The spec's budgets (section 11) measured on the tablet, with a probe (`adb shell
+  setprop log.tag.AVFPERF DEBUG`: cold start, file open, search, key to frame in logcat):
+  | Budget | Measured | |
+  |---|---|---|
+  | Cold start to editable file ≤ 1.5 s | 1.49–1.71 s (3 runs; Android's launch 0.87–1.1 s, then connecting and restoring 3 tabs) | borderline |
+  | RSS ≤ 250 MB (5 files, 2 terminals, LSP) | 420–504 MB RSS, 308–393 MB PSS | over |
+  | Keystroke to frame ≤ 16 ms p95 | median 18.7 ms, p95 24.3 ms (61 injected keys; key event time to the end of its frame) | over |
+  | 120 Hz scrolling, 15 000-line file | 4 094 frames, 0 late, 0 missed vsync (after the fix below) | met |
+  | 50 MB log, first screen ≤ 1 s | 225 ms (3.6 s the first time, while the guest started servers) | met |
+  | Search, 100 000 files, first results ≤ 300 ms | 71 ms first result, 386 ms done (after the fix below) | met |
+  | 200 cells, 50 images: open ≤ 2 s, smooth scroll | 0.4 s to content at startup, 2.7 s from Quick Open (see backlog 54); 1 late frame in 2 438 | open over from Quick Open; scroll met |
+  | APK ≤ 60 MB | 52.8 MB (debug) | met |
+* Found and fixed on the tablet:
+  * Search over 100 000 files ran for minutes with all 8 vCPUs in the kernel: ripgrep's default
+    of a thread per CPU collapses in the AVF guest (1 000 files: 5.7 s and 45 s of kernel time
+    with 8 threads, 0.015 s with 1; 100 000 files: 0.5 s with 2). The daemon runs it with 2.
+  * ty stopped answering ("input queue is full") while indexing that workspace, for the same
+    reason: the daemon now starts its tools with `TY_MAX_PARALLELISM=2` and
+    `RAYON_NUM_THREADS=2` (unless set in its own environment). ty then answered in 1.8 s.
+  * Scrolling a large Python file dropped a third of its frames (p95 150 ms): the `# %%` cell
+    overlay and the merge-conflict overlay parsed the whole text on every frame. Both are cached
+    per text now.
+  * The app crashed ("Could not atomically persist the document cache") when a draft and a save
+    of one file ran at once: both wrote the same temporary file. Each write has its own now and
+    the renames take turns; a failed draft write is logged instead of crashing.
+  * After that crash the restarted app joined the ty the dead connection still held, already
+    initialized ("ty: Unknown request: initialize"), and the restart command couldn't free it.
+    The app pings every 20 s (OkHttp's WebSocket pings), the daemon drops a pinging client after
+    60 s of silence, and the app tries again a minute later when a server says it is initialized.
+  * The probe logged a "cold start" for the first editor of an old process; it logs only within
+    30 s of the process start.
+* Test files (~/Projects/b37: a 15 000-line Python file, a 50 MB log, a 200-cell notebook, 100 000
+  small files, a uv venv with ipywidgets and its kernel spec) were removed; the guest's package
+  list is unchanged. uv's cache keeps the ipywidgets wheels.
+
 ## Backlog
 To investigate (user, 10-28):
 * (Done in batch 16, with a notebook-side finding.) Plotly figures updating in place (the user's private-notebook-1.ipynb: `plot_handle =
@@ -2007,7 +2075,7 @@ Not picked yet. Effort: S about half a day, M about a day, L several days.
 * Device and quality (spec 10, 11):
   22. (Done in batch 27.) Launcher shortcuts for recent folders, and "Open with" for code files from other apps. S-M.
   23. (Done in batch 28.) Touch modifier bar (Ctrl, Alt, Tab, Esc, arrows) above the soft keyboard. M.
-  24. Measure the spec's budgets on the tablet (cold start, RSS, keystroke latency, a
+  24. (Done in batch 37: measured; see 52, 53, 54.) Measure the spec's budgets on the tablet (cold start, RSS, keystroke latency, a
       200-cell notebook). S-M.
   25. (Done in batch 35.) Debugging extras: conditional and log breakpoints, watch expressions, `launch.json`. M.
 * Left out on purpose: multi-cursor (sora is single-cursor; comes with the Aardink switch),
@@ -2146,13 +2214,28 @@ day, L several days.
       state when no editor is shown; clear them (or skip drawing) when there's no active
       document. S.
 * Left from batch 36 (11-03):
-  49. rust-analyzer finds a Cargo.toml only in the workspace root or one folder down; a deeper
+  49. (Done in batch 37; not checked on the tablet.) rust-analyzer finds a Cargo.toml only in the workspace root or one folder down; a deeper
       crate gets "Failed to discover workspace" (VS Code too). Pass `linkedProjects` with the
       active file's crate when the user hasn't set it. S-M.
-  50. The suggest popup stays open with the previous list (False, None…) after the typed word is
+  50. (Done in batch 37.) The suggest popup stays open with the previous list (False, None…) after the typed word is
       deleted with Backspace; VS Code closes it. S.
-  51. Restart commands for the language servers (Python: Restart Language Server, rust-analyzer:
+  51. (Done in batch 37.) Restart commands for the language servers (Python: Restart Language Server, rust-analyzer:
       Restart Server, Go: Restart Language Server…); today only an app restart does it. S.
+* Left from batch 37 (11-03):
+  52. Memory: 420–504 MB RSS with five files, two terminals and the servers (budget 250 MB; the
+      single-editor prototype was already 257 MB). Find what holds it (Java heap 66–123 MB,
+      native 57–88 MB, "private other" 87–90 MB: WebViews?). M-L.
+  53. Keystroke to frame: median 18.7 ms, p95 24.3 ms (budget 16 ms p95, i.e. one frame at
+      120 Hz). Profile a key press (sora's layout, the overlays, LSP didChange on the main
+      thread?). M.
+  54. Quick Open's index walk of a 100 000-file workspace slows other guest reads (a 484 KB
+      notebook: 0.4 s at startup, 2.7 s from Quick Open; a 50 MB log's first page 3.6 s once),
+      and keys typed while "Indexing workspace…" are lost. Give file reads priority or stream the
+      index. S-M.
+  55. Check 49 on the tablet (needs rust-analyzer and cargo, about 1 GB, installed again). S.
+  56. ipywidgets not drawn yet: binary-data widgets (ipycanvas, bqplot), media (Image, Video,
+      Audio), pickers (ColorPicker, DatePicker), Play, and third-party widget libraries; saved
+      `metadata.widgets` drawn before the kernel runs. M-L.
 * Still left out on purpose: multi-cursor, sticky scroll, minimap (Aardink switch; folding came in batch 31);
   split editor groups and the 3-way merge editor; tasks.json; MCP, other AI providers and the
   built-in chat agent (Copilot, Claude Code and Gemini through ACP instead); foldable postures
@@ -2186,7 +2269,7 @@ Bugs (user, 10-28): both fixed and checked in batch 15.
   retries three times and the daemon logs exits with stderr. Look in
   `journalctl --user -u avf-native` if it happens again.
 * (Done in batch 22, except live widgets.) Notebook gap: script-based outputs (widgets, bokeh, altair) still show their text form.
-* Live ipywidgets (registered 10-29): sliders, dropdowns and interact() need the kernel's comm
+* (Done in batch 37, natively instead of html-manager.) Live ipywidgets (registered 10-29): sliders, dropdowns and interact() need the kernel's comm
   messages (comm_open/comm_msg/comm_close) both ways. Work: the bridge forwards them, and one
   widget manager per notebook (@jupyter-widgets/html-manager in a WebView) is shared by its
   widget outputs. Saved widget state (`metadata.widgets`) could draw static widgets first. L.

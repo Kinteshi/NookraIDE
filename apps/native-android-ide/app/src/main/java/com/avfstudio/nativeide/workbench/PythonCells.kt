@@ -46,3 +46,22 @@ fun cellsToRun(cells: List<PythonCell>, line: Int, range: CellRange): List<Pytho
         CellRange.All -> cells
     }.filterNot { it.markdown }
 }
+
+/**
+ * The last result computed from a text, recomputed only when another text comes: an edit
+ * replaces the document's String, so the same instance means the same content.
+ */
+internal class TextCache<T> {
+    private var text: String? = null
+    private var value: T? = null
+
+    @Synchronized
+    fun of(current: String, compute: (String) -> T): T {
+        @Suppress("UNCHECKED_CAST")
+        if (current === text) return value as T
+        return compute(current).also {
+            text = current
+            value = it
+        }
+    }
+}

@@ -1151,10 +1151,13 @@ class WorkbenchController(private val context: Context) {
         val files = HashMap<String, SearchFileResult>()
         searchRunning = true
         searchSummary = "Searching…"
+        val searchStarted = android.os.SystemClock.uptimeMillis()
         var requestId: Long? = null
         requestId = vfs.search(query) { event ->
             post {
                 if (activeSearch != requestId) return@post
+                if (searchResults.isEmpty() && event is SearchEvent.Match) Perf.afterNextFrame("search first result", searchStarted)
+                if (event is SearchEvent.Done) Perf.log { "search done ${android.os.SystemClock.uptimeMillis() - searchStarted} ms, ${event.total} results" }
                 when (event) {
                     is SearchEvent.Match -> files.getOrPut(event.path) {
                         SearchFileResult(event.path).also(searchResults::add)
@@ -2374,9 +2377,12 @@ class WorkbenchController(private val context: Context) {
     fun activeConflicts(): List<MergeConflict> {
         documentRevision
         val document = activeDocument?.takeUnless { it.binary } ?: return emptyList()
-        if ("<<<<<<<" !in document.text) return emptyList()
-        return findConflicts(document.text)
+        return conflictsCache.of(document.text) { text -> if ("<<<<<<<" !in text) emptyList() else findConflicts(text) }
     }
+
+    // The overlays ask on every frame while the editor scrolls; the text changes far less often.
+    private val conflictsCache = TextCache<List<MergeConflict>>()
+    private val pythonCellsCache = TextCache<List<PythonCell>>()
 
     /** Accept Current, Incoming or Both for one conflict (VS Code's actions above it). */
     fun resolveConflict(conflict: MergeConflict, choice: ConflictChoice) = resolveConflicts(listOf(conflict), choice)
@@ -3495,8 +3501,11 @@ class WorkbenchController(private val context: Context) {
         }
         busy = true
         status = "Opening $path"
+        val openStarted = now
         repository.open(path).whenComplete { result, error ->
             post {
+                Perf.log { "open ${path.substringAfterLast('/')}: content after ${android.os.SystemClock.uptimeMillis() - openStarted} ms" }
+                Perf.afterNextFrame("open ${path.substringAfterLast('/')}", openStarted)
                 if (generateSequence(error) { it.cause }.any { it is com.avfstudio.nativeide.document.BinaryFileException }) {
                     busy = false
                     openHex(path)
@@ -3889,7 +3898,10 @@ class WorkbenchController(private val context: Context) {
             scheduledDraftWrites[document.path] = timer.schedule(
                 {
                     io.execute {
-                        repository.persistDraft(document)
+                        // The draft is a crash copy; failing to write one (a full disk) must not crash the app.
+                        runCatching { repository.persistDraft(document) }.onFailure { error ->
+                            android.util.Log.w("MaterialCode", "Draft of ${document.path} not saved", error)
+                        }
                         synchronized(scheduledDraftWrites) { scheduledDraftWrites.remove(document.path) }
                     }
                 },
@@ -4387,6 +4399,7 @@ class WorkbenchController(private val context: Context) {
     // Editor binding ----------------------------------------------------------------------------
 
     fun editorReady(surface: EditorSurface) {
+        Perf.editorShown()
         val newlyBound = editorSurface !== surface
         editorSurface = surface
         val target = pendingNavigation
@@ -4638,6 +4651,13 @@ class WorkbenchController(private val context: Context) {
                     if (error != null) {
                         val message = error.cause?.message ?: error.message.orEmpty()
                         status = "$tool: $message"
+                        // Joined a server an earlier connection still holds (the app crashed and
+                        // restarted): the daemon drops that connection within a minute of silence.
+                        if (alreadyInitialized(message)) {
+                            status = "$tool is still held by an earlier connection; starting it again in a minute"
+                            timer.schedule({ post { activePath?.let(::ensureLanguageServers) } }, 65, TimeUnit.SECONDS)
+                            return@post
+                        }
                         // A server the guest doesn't have yet (TypeScript 7, gopls…): offer it once a session, then start it.
                         (missingDependencyIn(message) ?: OtherLanguageServer.missingIn(message)?.dependency)
                             ?.takeIf { dialog == null && offeredServerInstalls.add(it) }
@@ -8167,7 +8187,7 @@ class WorkbenchController(private val context: Context) {
     fun activePythonCells(): List<PythonCell> {
         documentRevision
         val document = activeDocument?.takeIf { !it.binary && activeNotebook == null && it.languageId == "py" } ?: return emptyList()
-        return pythonCells(document.text)
+        return pythonCellsCache.of(document.text, ::pythonCells)
     }
 
     /** The .py file and the 0-based line of the first code line a run of the Interactive window came from. */

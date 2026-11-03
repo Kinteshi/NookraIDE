@@ -23,6 +23,13 @@ const MAX_MESSAGE_SIZE: usize = 16 * 1024 * 1024;
 const MAX_HISTORY_SIZE: usize = 1024 * 1024;
 const OUTPUT_CAPACITY: usize = 128;
 const INPUT_CAPACITY: usize = 32;
+/// Thread limits for the tools the daemon starts, unless its own environment sets them: in the
+/// AVF guest, many threads reading files at once spend nearly all their time in the kernel (8
+/// threads were ~400x slower than 1 for ripgrep), and ty indexing a large workspace that way
+/// stopped reading its input. ty reads `TY_MAX_PARALLELISM`, ruff and other rayon-based tools
+/// `RAYON_NUM_THREADS`.
+const TOOL_THREAD_LIMITS: [(&str, &str); 2] =
+    [("TY_MAX_PARALLELISM", "2"), ("RAYON_NUM_THREADS", "2")];
 
 #[derive(Clone, PartialEq, Eq)]
 struct ServerCommand {
@@ -181,6 +188,11 @@ impl LspRouter {
                 .kill_on_drop(true);
             if let Some(cwd) = &launch.cwd {
                 command_builder.current_dir(cwd);
+            }
+            for (name, value) in TOOL_THREAD_LIMITS {
+                if std::env::var_os(name).is_none() {
+                    command_builder.env(name, value);
+                }
             }
             command_builder.envs(launch.env.iter().map(|(name, value)| (name, value)));
             let mut child = command_builder.spawn().map_err(|error| {

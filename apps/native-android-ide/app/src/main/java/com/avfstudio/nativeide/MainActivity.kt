@@ -56,11 +56,14 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         val root = object : FrameLayout(this) {
-            override fun dispatchKeyEventPreIme(event: KeyEvent): Boolean =
-                KeyRouter.route(event) || super.dispatchKeyEventPreIme(event.asPlainKeyboardArrow())
+            override fun dispatchKeyEventPreIme(event: KeyEvent): Boolean {
+                com.avfstudio.nativeide.workbench.Perf.keyDown(event)
+                return KeyRouter.route(event) || super.dispatchKeyEventPreIme(event.asPlainKeyboardArrow())
+            }
         }
         root.addView(ComposeView(this).apply { setContent { NativeWorkbench() } })
         setContentView(root)
+        com.avfstudio.nativeide.workbench.Perf.watchFrames(window)
         // A restored activity already handled the intent it started with.
         if (savedInstanceState == null) com.avfstudio.nativeide.workbench.IntentRouter.deliver(intent)
     }

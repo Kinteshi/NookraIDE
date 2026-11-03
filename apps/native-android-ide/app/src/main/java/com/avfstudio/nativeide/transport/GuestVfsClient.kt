@@ -46,6 +46,9 @@ const val PROBE_COMMANDS_FEATURE = "probe_commands"
 class GuestVfsClient(
     private val http: OkHttpClient = OkHttpClient.Builder()
         .readTimeout(0, TimeUnit.MILLISECONDS)
+        // The daemon drops a client that pinged and went silent (a crashed app behind Linux
+        // Terminal's forwarder); a missing pong fails the socket here, and the app reconnects.
+        .pingInterval(20, TimeUnit.SECONDS)
         .build(),
     private val scheduler: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor(),
 ) : GuestVfs, Closeable {

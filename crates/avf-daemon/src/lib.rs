@@ -70,6 +70,8 @@ use tokio::{
 use tracing::{debug, error, info, warn};
 use vfs::{Vfs, VfsFailure};
 
+/// How long a client that pings may stay silent before the daemon drops its connection.
+const SILENT_CLIENT_TIMEOUT: Duration = Duration::from_secs(60);
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 const OUTBOUND_CAPACITY: usize = 128;
 const WATCH_EVENT_CAPACITY: usize = 128;
@@ -567,7 +569,13 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
             break;
         }
     }
+    // A client that pings (the app does, every 20 s) and then goes silent is gone: its process
+    // died behind a forwarder that kept the TCP connection open. Dropping it releases what it
+    // held, so a language server it shared isn't handed, already initialized, to the next client.
+    let mut pinging = false;
+    let mut last_heard = tokio::time::Instant::now();
     loop {
+        let silence_deadline = last_heard + SILENT_CLIENT_TIMEOUT;
         tokio::select! {
             result = &mut writer => {
                 if let Err(error) = result {
@@ -575,8 +583,13 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                 }
                 break;
             }
+            _ = tokio::time::sleep_until(silence_deadline), if pinging => {
+                debug!("closing a client that stopped pinging");
+                break;
+            }
             incoming = receiver.next() => {
                 let Some(incoming) = incoming else { break };
+                last_heard = tokio::time::Instant::now();
                 let message = match incoming {
                     Ok(message) => message,
                     Err(error) => {
@@ -628,6 +641,7 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                         break;
                     }
                     Message::Ping(payload) => {
+                        pinging = true;
                         if outbound.send(OutboundFrame::Control(Message::Pong(payload))).await.is_err() {
                             break;
                         }
