@@ -54,3 +54,25 @@ enum class OtherLanguageServer(
         }
     }
 }
+
+/** `avf.sql.styleRules`: sqlint's level for all its rules, which are about layout rather than mistakes. */
+enum class SqlStyleRules(val key: String, val label: String) {
+    Warning("warning", "Warnings"),
+    Error("error", "Errors"),
+    Off("off", "Off"),
+}
+
+/**
+ * sqlint's rules (inside sql-language-server), all at [level]. Given rules, sqlint runs only
+ * those; `reserved-word-case` keeps its default option, upper case.
+ */
+fun sqlLintRules(level: SqlStyleRules): Map<String, Any> = listOf(
+    "align-column-to-the-first",
+    "column-new-line",
+    "linebreak-after-clause-keyword",
+    "reserved-word-case",
+    "space-surrounding-operators",
+    "where-clause-new-line",
+    "align-where-clause-to-the-first",
+    "require-as-to-rename-column",
+).associateWith { rule -> if (rule == "reserved-word-case") listOf(level.key, "upper") else level.key }

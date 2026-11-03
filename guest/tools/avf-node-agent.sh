@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
 # MaterialCode's launcher for what runs on Node.js: the chat agents Claude Code (through its ACP
-# adapter, which carries the Claude Code CLI) and Gemini CLI, and the language servers published
-# on npm (Bash, YAML, JSON, HTML, CSS, Dockerfile, SQL).
+# adapter, which carries the Claude Code CLI) and Gemini CLI, the language servers published
+# on npm (Bash, YAML, JSON, HTML, CSS, Dockerfile, SQL) and VS Code's JavaScript debugger.
 #
 #   avf-node-agent setup <name>     installs a pinned Node.js and the pinned npm package
 #   avf-node-agent login <agent>    signs in, interactively (run it in a terminal)
 #   avf-node-agent <name> [args]    runs it (the app starts agents with ACP and servers with LSP on stdio)
+#   avf-node-agent js-debug serve|connect <port>
+#                                   js-debug's DAP server on stdio: `serve` starts the server on
+#                                   127.0.0.1:<port> and is its first session; `connect` is another
+#                                   session on it (each program it debugs gets one)
 #
 # Everything lives under ~/.local/share/materialcode; nothing is installed globally, and the
 # system's own Node.js (if any) is left alone. <agent> is claude-code or gemini; a server is one
@@ -15,6 +19,8 @@ set -euo pipefail
 NODE_VERSION=24.22.0
 NODE_SHA256_ARM64=b7e7991d5407815adfa74a2a9cd4db683552c8ce32ff4a295c22e972849c3f5d
 NODE_SHA256_X64=28ea0a438de9a13bd7891fd758eee6c7819ee8af5442dfd8d45bd65e56d4228c
+JS_DEBUG_VERSION=1.140.0
+JS_DEBUG_SHA256=27dab92937ec1ab35821ae955aac867544fe06a1b6307229049f2d789af10968
 ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/materialcode"
 NODE_DIR="$ROOT/node-v$NODE_VERSION"
 BIN="$HOME/.local/bin"
@@ -106,8 +112,74 @@ write_wrapper() {
     mv "$target.tmp" "$target"
 }
 
+JS_DEBUG_DIR="$ROOT/debuggers/js-debug-$JS_DEBUG_VERSION"
+
+# js-debug isn't on npm: its DAP server comes from the GitHub release, checksum-verified.
+setup_js_debug() {
+    install_node
+    if [ ! -f "$JS_DEBUG_DIR/js-debug/src/dapDebugServer.js" ]; then
+        local name="js-debug-dap-v$JS_DEBUG_VERSION.tar.gz" staging
+        mkdir -p "$ROOT/debuggers"
+        staging=$(mktemp -d "$ROOT/debuggers/.js-debug.XXXXXX")
+        echo "Downloading js-debug $JS_DEBUG_VERSION…"
+        curl -fL --proto '=https' --proto-redir '=https' -o "$staging/$name" \
+            "https://github.com/microsoft/vscode-js-debug/releases/download/v$JS_DEBUG_VERSION/$name"
+        echo "$JS_DEBUG_SHA256  $staging/$name" | sha256sum -c - >/dev/null || { rm -rf "$staging"; fail "js-debug checksum mismatch"; }
+        mkdir "$staging/out"
+        tar -xzf "$staging/$name" -C "$staging/out"
+        [ -f "$staging/out/js-debug/src/dapDebugServer.js" ] || { rm -rf "$staging"; fail "js-debug's archive has no dapDebugServer.js"; }
+        rm -rf "$JS_DEBUG_DIR"
+        mv "$staging/out" "$JS_DEBUG_DIR"
+        rm -rf "$staging"
+    fi
+    # The app checks for this command; in a terminal it runs a server on a port of your choice.
+    # shellcheck disable=SC2016
+    write_wrapper js-debug-adapter 'exec "$HOME/.local/bin/avf-node-agent" js-debug serve "${1:-8123}"'
+    echo "js-debug is ready."
+}
+
+# Stdio <-> js-debug's TCP server. `serve` starts the server (its own stdout stays out of the
+# protocol) and waits for it to listen; the server stops with this session.
+JS_DEBUG_BRIDGE='
+const net = require("net");
+const { spawn } = require("child_process");
+const [mode, port, script] = process.argv.slice(1);
+let server = null;
+let connected = false;
+const finish = (code) => { if (server) server.kill(); process.exit(code); };
+if (mode === "serve") {
+  server = spawn(process.execPath, [script, port, "127.0.0.1"], { stdio: ["ignore", "ignore", "inherit"] });
+  server.on("exit", (code) => { if (!connected) process.stderr.write("js-debug: the server exited (" + code + ")\n"); process.exit(code ?? 1); });
+}
+const connect = (attempt) => {
+  const socket = net.connect(Number(port), "127.0.0.1");
+  socket.on("connect", () => { connected = true; process.stdin.pipe(socket); socket.pipe(process.stdout); });
+  socket.on("error", (error) => {
+    if (!connected && mode === "serve" && attempt < 100) setTimeout(() => connect(attempt + 1), 100);
+    else if (!connected) { process.stderr.write("js-debug: " + error.message + "\n"); finish(1); }
+  });
+  socket.on("close", () => { if (connected) finish(0); });
+};
+process.stdin.on("end", () => finish(0));
+connect(0);
+'
+
+run_js_debug() {
+    local mode=${1:-} port=${2:-}
+    case "$mode" in serve | connect) ;; *) fail "usage: avf-node-agent js-debug serve|connect <port>" ;; esac
+    case "$port" in '' | *[!0-9]*) fail "js-debug needs a port number" ;; esac
+    [ -x "$NODE_DIR/bin/node" ] && [ -f "$JS_DEBUG_DIR/js-debug/src/dapDebugServer.js" ] ||
+        fail "js-debug is not set up; run: avf-native-daemon tools install js-debug"
+    # The programs it starts find the user's own node first, MaterialCode's otherwise.
+    PATH="$PATH:$NODE_DIR/bin" exec "$NODE_DIR/bin/node" -e "$JS_DEBUG_BRIDGE" "$mode" "$port" "$JS_DEBUG_DIR/js-debug/src/dapDebugServer.js"
+}
+
 setup() {
     local agent=$1 package directory overrides
+    if [ "$agent" = js-debug ]; then
+        setup_js_debug
+        return
+    fi
     package=$(package_of "$agent")
     directory=$(dir_of "$agent")
     install_node
@@ -187,6 +259,7 @@ login() {
 
 case "${1:-}" in
     setup) [ $# -eq 2 ] || fail "usage: avf-node-agent setup <agent>"; setup "$2" ;;
+    js-debug) shift; run_js_debug "$@" ;;
     login) [ $# -eq 2 ] || fail "usage: avf-node-agent login <agent>"; login "$2" ;;
     claude-code | gemini | bash-language-server | yaml-language-server | json-language-server | \
         html-language-server | css-language-server | docker-langserver | sql-language-server) run "$@" ;;

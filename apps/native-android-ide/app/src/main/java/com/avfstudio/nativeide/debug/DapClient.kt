@@ -20,7 +20,7 @@ class DapException(val command: String, message: String) : IOException(message)
  * by the daemon). DAP isn't JSON-RPC: requests carry `seq`, responses `request_seq`, and the
  * adapter also sends events and, rarely, reverse requests.
  */
-class DapClient(private val transport: GuestVfsClient, private val tool: String = DEBUGPY_TOOL) {
+class DapClient(private val transport: GuestVfsClient, val tool: String = DEBUGPY_TOOL) {
     private val gson = Gson()
     private val seq = AtomicInteger(0)
     private val pending = ConcurrentHashMap<Int, Pair<String, CompletableFuture<JsonObject>>>()
@@ -31,8 +31,14 @@ class DapClient(private val transport: GuestVfsClient, private val tool: String 
 
     val isStarted: Boolean get() = bridgeId != null
 
-    fun start(cwd: String): CompletableFuture<Unit> =
-        transport.startRpc(tool, cwd, "Dap").thenApply { id ->
+    /**
+     * Reverse requests the app takes (js-debug's `startDebugging`, offered in `initialize`): true
+     * answers success. Others, and any it declines, are answered as unsupported.
+     */
+    @Volatile var reverseRequestHandler: ((String, JsonObject) -> Boolean)? = null
+
+    fun start(cwd: String, args: List<String> = emptyList()): CompletableFuture<Unit> =
+        transport.startRpc(tool, cwd, "Dap", args).thenApply { id ->
             bridgeId = id
             transport.addRpcEventListener(id, ::onRpcEvent)
         }
@@ -101,25 +107,31 @@ class DapClient(private val transport: GuestVfsClient, private val tool: String 
                 }
             }
             "event" -> eventListener?.invoke(message.get("event")?.asString ?: return, payload)
-            "request" -> answerUnsupported(message)
+            "request" -> {
+                val command = message.get("command")?.asString.orEmpty()
+                val arguments = message.get("arguments")?.takeIf { it.isJsonObject }?.asJsonObject ?: JsonObject()
+                answer(message, reverseRequestHandler?.invoke(command, arguments) == true)
+            }
         }
     }
 
-    /** Reverse requests (runInTerminal, startDebugging) aren't offered in `initialize`; refuse politely. */
-    private fun answerUnsupported(request: JsonObject) {
+    /** Answers a reverse request; runInTerminal isn't offered in `initialize`, so refused ones are refused politely. */
+    private fun answer(request: JsonObject, success: Boolean) {
         val id = bridgeId ?: return
         val response = JsonObject().apply {
             addProperty("seq", seq.incrementAndGet())
             addProperty("type", "response")
             addProperty("request_seq", request.get("seq")?.asInt ?: 0)
-            addProperty("success", false)
+            addProperty("success", success)
             addProperty("command", request.get("command")?.asString ?: "")
-            addProperty("message", "Not supported by MaterialCode")
+            if (success) add("body", JsonObject()) else addProperty("message", "Not supported by MaterialCode")
         }
         transport.sendRpcMessage(id, gson.toJson(response))
     }
 
     companion object {
         const val DEBUGPY_TOOL = "debugpy"
+        /** VS Code's JavaScript debugger (Node.js), as its standalone DAP server. */
+        const val JS_DEBUG_TOOL = "js-debug"
     }
 }

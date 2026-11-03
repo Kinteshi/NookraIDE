@@ -99,6 +99,9 @@ fun problemMarks(problems: List<EditorProblem>, lineCount: Int): List<ProblemMar
 /** What the line-number margin shows, all by 0-based line: breakpoints, the paused line, and each line's worst problem. */
 data class LineMarks(
     val breakpoints: Set<Int> = emptySet(),
+    /** Of [breakpoints], those with a condition or hit count, and the logpoints (drawn apart, as VS Code does). */
+    val conditionalBreakpoints: Set<Int> = emptySet(),
+    val logpoints: Set<Int> = emptySet(),
     val pausedLine: Int? = null,
     val problems: Map<Int, Int> = emptyMap(),
 )

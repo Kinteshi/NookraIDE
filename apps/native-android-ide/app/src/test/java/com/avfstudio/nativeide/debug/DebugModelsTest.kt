@@ -42,4 +42,104 @@ class DebugModelsTest {
         val breakpoints = setBreakpointsArguments("/w/a.py", setOf(9, 3))
         assertEquals(listOf(3, 9), breakpoints.getAsJsonArray("breakpoints").map { it.asJsonObject.get("line").asInt })
     }
+
+    @Test
+    fun breakpointRequestCarriesConditionsHitCountsAndLogMessages() {
+        val request = setBreakpointsArguments(
+            "/w/a.py",
+            setOf(4, 2, 7),
+            mapOf(2 to BreakpointOptions(condition = " i > 3 "), 7 to BreakpointOptions(hitCondition = ">5", logMessage = "i is {i}")),
+        )
+        val breakpoints = request.getAsJsonArray("breakpoints").map { it.asJsonObject }
+        assertEquals(listOf(2, 4, 7), breakpoints.map { it.get("line").asInt })
+        assertEquals("i > 3", breakpoints[0].get("condition").asString)
+        assertEquals(false, breakpoints[1].has("condition"))
+        assertEquals(">5", breakpoints[2].get("hitCondition").asString)
+        assertEquals("i is {i}", breakpoints[2].get("logMessage").asString)
+        assertEquals(true, BreakpointOptions(logMessage = "x").isLogpoint)
+        assertEquals(true, BreakpointOptions(condition = "  ").isPlain)
+    }
+
+    @Test
+    fun readsLaunchJsonWithCommentsAndTrailingCommas() {
+        val text = """{
+            // a comment, with a comma,
+            "version": "0.2.0",
+            "configurations": [
+                { "name": "Run, then stop", "type": "debugpy", "request": "launch", "program": "${'$'}{file}", /* x, */ },
+                { "name": "Attach", "type": "debugpy", "request": "attach", "connect": { "host": "localhost", "port": 5678, }, },
+                { "type": "debugpy" },
+            ],
+        }"""
+        val configurations = parseLaunchConfigurations(text)
+        assertEquals(listOf("Run, then stop", "Attach"), configurations.map { it.name })
+        assertEquals("attach", configurations[1].request)
+        assertEquals(5678, configurations[1].arguments.getAsJsonObject("connect").get("port").asInt)
+        assertEquals(listOf("Python Debugger: Current File", "Python Debugger: Current File with Arguments", "Node.js: Current File", "Python Debugger: Attach (port 5678)"),
+            parseLaunchConfigurations(LAUNCH_JSON_TEMPLATE).map { it.name })
+        assertEquals("""{"a": "x,}" }""", withoutTrailingCommas("""{"a": "x,}",}"""))
+    }
+
+    @Test
+    fun resolvesVsCodeVariables() {
+        val variables = debugVariables("/home/d/Projects", "/home/d/Projects/app/main.py", 12, null, "/usr/bin/python3")
+        val configuration = JsonParser.parseString(
+            """{"program":"${'$'}{file}","cwd":"${'$'}{fileDirname}","args":["${'$'}{relativeFile}","${'$'}{fileBasenameNoExtension}${'$'}{fileExtname}","${'$'}{env:HOME}"],
+                "python":"${'$'}{command:python.interpreterPath}","n":5}""",
+        )
+        val resolved = resolveDebugVariables(configuration, variables).asJsonObject
+        assertEquals("/home/d/Projects/app/main.py", resolved.get("program").asString)
+        assertEquals("/home/d/Projects/app", resolved.get("cwd").asString)
+        assertEquals(listOf("app/main.py", "main.py", "${'$'}{env:HOME}"), resolved.getAsJsonArray("args").map { it.asString })
+        assertEquals("/usr/bin/python3", resolved.get("python").asString)
+        assertEquals(5, resolved.get("n").asInt)
+        assertEquals("app", variables["relativeFileDirname"])
+    }
+
+    @Test
+    fun pythonArgumentsKeepTheConfigurationAndUseTheDebugConsole() {
+        val launch = pythonDebugArguments(
+            JsonParser.parseString("""{"type":"debugpy","request":"launch","program":"/w/a.py","console":"integratedTerminal"}""").asJsonObject,
+            "/opt/py/bin/python",
+            "/w",
+        )
+        assertEquals("internalConsole", launch.get("console").asString)
+        assertEquals("/opt/py/bin/python", launch.get("python").asString)
+        assertEquals("/w", launch.get("cwd").asString)
+        val attach = pythonDebugArguments(JsonParser.parseString("""{"request":"attach","python":"/x"}""").asJsonObject, "/opt/py/bin/python", "/w")
+        assertEquals("/x", attach.get("python").asString)
+        assertEquals(false, attach.has("cwd"))
+    }
+
+    @Test
+    fun inlineValuesCoverThePausedFunction() {
+        val lines = """
+            |total = 0
+            |def scale(values, factor):
+            |    out = []  # factor here is a comment
+            |    for v in values:
+            |        out.append(v * factor)
+            |    label = "values"
+            |    return out
+        """.trimMargin().lines()
+        val values = mapOf("values" to "[1, 2]", "factor" to "3", "out" to "[3, 6]", "v" to "2", "total" to "0", "label" to "'values'")
+        val inline = inlineDebugValues(lines, pausedLine = 5, values = values)
+        assertEquals(setOf(1, 2, 3, 4, 5), inline.keys)
+        assertEquals("values = [1, 2], factor = 3", inline[1])
+        assertEquals("out = [3, 6]", inline[2])
+        assertEquals("v = 2, values = [1, 2]", inline[3])
+        assertEquals("label = 'values'", inline[5])
+        assertEquals(emptyMap<Int, String>(), inlineDebugValues(lines, 9, values))
+    }
+
+    @Test
+    fun nodeArgumentsUseJsDebugsTypeAndTheDebugConsole() {
+        val launch = nodeDebugArguments(JsonParser.parseString("""{"type":"node","request":"launch","program":"/w/a.js"}""").asJsonObject, "/w")
+        assertEquals("pwa-node", launch.get("type").asString)
+        assertEquals("internalConsole", launch.get("console").asString)
+        assertEquals("std", launch.get("outputCapture").asString)
+        assertEquals("/w", launch.get("cwd").asString)
+        assertEquals(true, dapInitializeArguments("pwa-node", startDebugging = true).get("supportsStartDebuggingRequest").asBoolean)
+        assertEquals(false, dapInitializeArguments().has("supportsStartDebuggingRequest"))
+    }
 }

@@ -1762,6 +1762,65 @@ daemon (it carries the new avf-node-agent).
   (gopls, clangd, rust-analyzer and what they pulled in) were removed; the AVFSUG and AVFCOP
   log properties cleared; tabs back to the user's four. Taplo stays from earlier.
 
+## 35. Restored tab order, SQL style rules as warnings, debugging: conditional breakpoints, logpoints, watch, launch.json, Set Value, inline values, attach, Node.js (11-02 22:25–23:05; done, checked)
+User's pick (11-02): backlog 41, 42 and the two debugging items (10-29 #25, 11-01 #20); 38 was
+confirmed by the user (the hover card can be reached and scrolled). 306 app unit tests and 95
+daemon tests pass; the guest runs this daemon.
+* (41) Restored tabs keep the saved order: each takes its place as its file loads (they load in
+  any order), and the active one is still the one shown. Checked across restarts.
+* (42) sqlint's layout rules (a line break after SELECT, upper-case keywords, aligned columns)
+  report as warnings: the app sends `sqlLanguageServer.lint.rules` with all eight rules at the
+  chosen level. Setting: Guest → SQL style rules (`avf.sql.styleRules`: Warnings, Errors, Off);
+  the user's own `sqlLanguageServer.lint` wins. Checked: a lower-case query shows warnings.
+* Debugging (10-29 #25):
+  * Conditional breakpoints, hit counts and logpoints: a long press on the gutter (or Debug: Add
+    Conditional Breakpoint… / Add Logpoint… / Edit Breakpoint) opens a dialog with the
+    expression, hit count and log message, plus Remove. Marks as VS Code draws them: a dot with
+    "=" for a condition or hit count, a diamond for a logpoint. Kept with the breakpoints.
+    Checked: `n == 4` stopped once with n = 4; a logpoint wrote "n is 1…3" without stopping.
+    Hit counts not tried on the tablet.
+  * Watch: a Watch section above Variables (+, remove per row, errors in red), evaluated in the
+    selected frame on each pause; kept across sessions; Debug: Add to Watch takes the selection
+    or the name at the cursor (the command wasn't tried on the tablet). Checked: `total * 2` = 12,
+    a NameError in red in another program.
+  * launch.json: the Debug panel picks a configuration (launch.json's, then the built-in Python:
+    Current File, Node.js: Current File and Python: Attach (port 5678)); kept per workspace.
+    Add Configuration… writes `.vscode/launch.json` from a template; it is read at connect and on
+    save (comments and trailing commas allowed). VS Code's variables (`${file}`,
+    `${workspaceFolder}`, `${fileDirname}`, `${relativeFile}`, `${command:python.interpreterPath}`…)
+    are resolved; output always goes to the Debug console (no terminal to hand programs to).
+    Checked: the template's configurations listed, "Current File with Arguments" ran.
+* Debugging (11-01 #20):
+  * Set Value: a long press or double click on a variable (setVariable). Checked: `total` set to
+    100, the watch and the program followed (the loop went on from 104).
+  * Inline values (`debug.inlineValues`, Settings → Debugging): the paused function's locals at
+    the end of its lines, up to the paused one. Checked in Python and JavaScript.
+  * Attach: a program started with `python -m debugpy --listen 5678 --wait-for-client` runs its
+    own adapter as a DAP server, so attaching connects to it directly (VS Code's way); avf-debugpy
+    gained `--connect host port`, a stdio bridge. Stop disconnects and leaves an attached program
+    running. Checked: attached, paused in `tick`, disconnected, the ticks went on. Attaching to a
+    process id (debugpy needs gdb) isn't offered.
+  * Node.js: VS Code's js-debug 1.140.0 (its DAP server, a GitHub release, checksum-verified,
+    about 3 MB) on MaterialCode's Node.js, set up by avf-node-agent and offered for install on the
+    first Node.js debug. js-debug is a TCP server that gives each program a session of its own
+    (`startDebugging`): the app picks a port, the first session runs `js-debug serve PORT`, the
+    program's runs `js-debug connect PORT`. Checked: install offer, breakpoint in `greet`, step
+    over, the return value, console.log output in the Debug console.
+* Found on the tablet and fixed:
+  * Android's regex engine (ICU) rejected an unescaped `}` the JVM accepted: the Debug panel
+    crashed the app on opening.
+  * A first gutter mark (a breakpoint, a problem dot) widens the gutter and moves the text, but
+    the overlays (inlay hints, ghost text) stayed: they now follow when the marks change.
+  * Files without a grammar had no styles, so breakpoints and problem dots weren't drawn there.
+  * "Paused on Paused on breakpoint" (js-debug's description already says Paused); saved watch
+    expressions only listed after the first pause; "Debug session ended" twice after Stop
+    (built, not rechecked); inline values were dark on a dark chip (now the tertiary colour).
+* Left on the device: nothing from this batch. The test folder, the launch.json it made (and its
+  `.vscode` folder), the attach test program, js-debug and the SQL server were removed, with
+  their tool registry entries; batch 34's cleanup had left the removed servers' registry entries
+  (the app then saw them as installed but failing), removed too. avf-debugpy and avf-node-agent
+  are the new versions. Tabs back to the user's four; no terminal open.
+
 ## Backlog
 To investigate (user, 10-28):
 * (Done in batch 16, with a notebook-side finding.) Plotly figures updating in place (the user's private-notebook-1.ipynb: `plot_handle =
@@ -1885,7 +1944,7 @@ Not picked yet. Effort: S about half a day, M about a day, L several days.
   23. (Done in batch 28.) Touch modifier bar (Ctrl, Alt, Tab, Esc, arrows) above the soft keyboard. M.
   24. Measure the spec's budgets on the tablet (cold start, RSS, keystroke latency, a
       200-cell notebook). S-M.
-  25. Debugging extras: conditional and log breakpoints, watch expressions, `launch.json`. M.
+  25. (Done in batch 35.) Debugging extras: conditional and log breakpoints, watch expressions, `launch.json`. M.
 * Left out on purpose: multi-cursor (sora is single-cursor; comes with the Aardink switch),
   split editor groups and the 3-way merge editor (L, little use on a tablet), tasks.json
   (L, the terminal covers it), MCP and other AI providers (Copilot only, by the user's choice).
@@ -1934,7 +1993,7 @@ day, L several days.
   18. (Done in batch 29.) Plot viewer: an image output full screen with pinch zoom, save and share. S-M.
   19. (Done in batch 30.) Data viewer: filter rows and page past the first rows. M.
 * Debugging:
-  20. Set a variable's value, inline values in the editor, attach to a process, more adapters
+  20. (Done in batch 35: Set Value, inline values, attach to debugpy --listen, Node.js; codelldb and attaching by process id left.) Set a variable's value, inline values in the editor, attach to a process, more adapters
       (codelldb, js-debug). M-L.
 * Device and quality:
   21. (Done in batch 30.) Share-sheet target (text or files into the workspace), a Quick Settings tile, haptics for
@@ -1990,7 +2049,7 @@ day, L several days.
       needs sudo), the npm ones (Bash, YAML, JSON, HTML, CSS, Dockerfile, SQL) and Marksman. S-M.
   37. (Done in batch 34.) The next-edit off-screen chip, still unchecked (from batch 28). S.
 * Left from batch 34's second round (11-02):
-  38. Confirm with the user's touchpad that the hover card can be reached and scrolled (the
+  38. (Done: the user confirmed it.) Confirm with the user's touchpad that the hover card can be reached and scrolled (the
       hiding delay). S.
   39. Go, C/C++ and Rust with their toolchains: accept the offer (or install `golang-go`,
       `build-essential`, `cargo`) and check gopls, clangd and rust-analyzer on a module, a file
@@ -1998,10 +2057,21 @@ day, L several days.
   40. Snippets wait for the language server's answer: while a fresh server is still indexing
       (ty with a large environment takes seconds), typing a prefix shows nothing. VS Code shows
       snippets at once and merges the server's items when they come. S-M.
-  41. Restored tabs come back in the order their files finished loading, with the active one
+  41. (Done in batch 35.) Restored tabs come back in the order their files finished loading, with the active one
       last; keep the saved order. S.
-  42. sqlint (inside sql-language-server) reports its style rules ("A linebreak is required
+  42. (Done in batch 35.) sqlint (inside sql-language-server) reports its style rules ("A linebreak is required
       after SELECT") as errors; consider a default `.sqlintrc` or lowering them to warnings. S.
+* Left from batch 35 (11-02):
+  43. Remove a guest tool: the daemon has no uninstall, so deleting a tool's files leaves its
+      registry entry (the app then sees it installed but failing). `avf-native-daemon tools
+      remove <name>` and a Remove button in Settings → Guest tools. S-M.
+  44. C, C++ and Rust debugging with codelldb (needs the toolchains of backlog 39 to try). M.
+  45. Breakpoints stay on their line numbers when lines are added or removed above them; VS Code
+      moves them with the text. S-M.
+  46. The Debug console can join a logpoint's line with a half-printed stdout line (seen once:
+      "n is 7" followed by " 4 total = 104"); keep output categories apart. S.
+  47. Not tried on the tablet: hit counts, Debug: Add to Watch, editing an existing breakpoint
+      and Remove, the inline values setting, the single "Debug session ended". S.
 * Still left out on purpose: multi-cursor, sticky scroll, minimap (Aardink switch; folding came in batch 31);
   split editor groups and the 3-way merge editor; tasks.json; MCP, other AI providers and the
   built-in chat agent (Copilot, Claude Code and Gemini through ACP instead); foldable postures

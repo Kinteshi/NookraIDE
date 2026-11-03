@@ -138,6 +138,19 @@ sealed interface WorkbenchDialog {
     data class GuestSetup(val reason: String? = null) : WorkbenchDialog
     /** Offers to install a missing guest tool; [then] continues what needed it. */
     data class InstallDependency(val dependency: GuestDependency, val reason: String?, val then: (() -> Unit)?) : WorkbenchDialog
+    /**
+     * Edit Breakpoint (also Add Conditional Breakpoint and Add Logpoint) on [line] of [path]:
+     * its condition, hit count and log message; [exists] offers Remove, [focus] is the field to start in.
+     */
+    data class EditBreakpoint(
+        val path: String,
+        val line: Int,
+        val options: com.avfstudio.nativeide.debug.BreakpointOptions,
+        val exists: Boolean,
+        val focus: BreakpointField,
+    ) : WorkbenchDialog
+    /** Set Value of a variable in the paused frame. */
+    data class SetVariable(val variable: com.avfstudio.nativeide.debug.DebugVariable) : WorkbenchDialog
     /** Confirms a guest command that runs in a new terminal; [done] is the status when it exits 0. */
     /** Open Folder: the folder shown, its subfolders once listed, and a listing or create error. */
     data class OpenFolder(val path: String, val folders: List<com.avfstudio.nativeide.transport.FileEntry>? = null, val error: String? = null) : WorkbenchDialog
@@ -359,3 +372,6 @@ data class CellProblem(val cellId: String, val start: Int, val end: Int, val sev
 
 /** A hover card in cell [cellId] at [offset] of its source. */
 data class CellHover(val cellId: String, val offset: Int, val problems: List<CellProblem>, val markdown: String?)
+
+/** The field Edit Breakpoint starts in. */
+enum class BreakpointField { Condition, HitCount, LogMessage }

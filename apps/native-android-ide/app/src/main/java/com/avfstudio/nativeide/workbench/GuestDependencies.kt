@@ -2,6 +2,9 @@ package com.avfstudio.nativeide.workbench
 
 import com.avfstudio.nativeide.ai.ChatAgentKind
 
+/** js-debug as guest/tools/avf-node-agent.sh pins it. */
+private const val JS_DEBUG_VERSION = "1.140.0"
+
 /** Miniforge pinned like the tool catalog: a release at least a few weeks old, checksum per architecture. */
 private const val MINIFORGE_VERSION = "26.7.2-0"
 private const val MINIFORGE_SHA256_AARCH64 = "89b786c8d2c8b0fda7553914c1314ae4ddaa094503802f279377b19ac4463cb2"
@@ -177,6 +180,13 @@ enum class GuestDependency(
         "the MaterialCode tool catalog (Marksman 2026-02-08, pinned, checksum-verified; about 22 MB)",
         "avf-native-daemon tools install marksman",
     ),
+    JsDebug(
+        "Node.js debugger (js-debug)",
+        listOf("js-debug-adapter"),
+        "Debugging JavaScript on Node.js (breakpoints, stepping, variables)",
+        "VS Code's js-debug $JS_DEBUG_VERSION (GitHub release, checksum-verified; about 3 MB) on MaterialCode's Node.js 24.22.0, in ~/.local/share/materialcode",
+        "avf-native-daemon tools install js-debug",
+    ),
     // Toolchains some of those servers work through, offered when one runs without its toolchain.
     GoToolchain(
         "Go toolchain",
@@ -244,6 +254,7 @@ internal fun missingDependencyIn(message: String): GuestDependency? {
         "tool 'typescript' is not installed" in lower -> GuestDependency.TypeScript
         "tool 'claude-code' is not installed" in lower -> GuestDependency.ClaudeCode
         "tool 'gemini' is not installed" in lower -> GuestDependency.Gemini
+        "tool 'js-debug' is not installed" in lower || "js-debug is not set up" in lower -> GuestDependency.JsDebug
         "claude-code is not set up" in lower -> GuestDependency.ClaudeCode
         "gemini is not set up" in lower -> GuestDependency.Gemini
         "could not start ripgrep" in lower && notFound -> GuestDependency.Ripgrep

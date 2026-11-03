@@ -127,13 +127,21 @@ internal class SoraEditorSurface(
      * pane calls this again then. A breakpoint wins over a problem dot on the same line.
      */
     fun drawLineMarks() {
-        val styles = editor.styles ?: return
+        // A file with no grammar gets no styles from its analyzer; the marks need somewhere to live.
+        val styles = editor.styles ?: io.github.rosemoe.sora.lang.styling.Styles().also(editor::setStyles)
         styles.eraseAllLineStyles()
         val marks = buildList<LineAnchorStyle> {
             lineMarks.problems.forEach { (line, severity) ->
                 if (line !in lineMarks.breakpoints) add(LineSideIcon(line, problemIcon(severity)))
             }
-            lineMarks.breakpoints.forEach { line -> add(LineSideIcon(line, breakpointIcon)) }
+            lineMarks.breakpoints.forEach { line ->
+                val icon = when (line) {
+                    in lineMarks.logpoints -> logpointIcon
+                    in lineMarks.conditionalBreakpoints -> conditionalBreakpointIcon
+                    else -> breakpointIcon
+                }
+                add(LineSideIcon(line, icon))
+            }
             lineMarks.pausedLine?.let { line -> add(LineBackground(line, ConstColor(0x40FFCC00))) }
         }
         // sora keeps line styles in the order added and looks them up by line, so add them in line order.
@@ -348,7 +356,50 @@ internal class SoraEditorSurface(
                 setSize(24, 24)
             }
         }
+        val conditionalBreakpointIcon by lazy { BreakpointMark(conditional = true) }
+        val logpointIcon by lazy { BreakpointMark(conditional = false) }
     }
+}
+
+/** VS Code's other breakpoint marks: a dot with "=" (a condition or hit count), or a diamond (a logpoint). */
+private class BreakpointMark(private val conditional: Boolean) : android.graphics.drawable.Drawable() {
+    private val fill = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFE51400.toInt() }
+    private val bars = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { color = android.graphics.Color.WHITE }
+
+    override fun draw(canvas: android.graphics.Canvas) {
+        val centerX = bounds.exactCenterX()
+        val centerY = bounds.exactCenterY()
+        val radius = minOf(bounds.width(), bounds.height()) / 2f
+        if (conditional) {
+            canvas.drawCircle(centerX, centerY, radius, fill)
+            val half = radius * 0.5f
+            val thickness = radius * 0.22f
+            for (offset in listOf(-radius * 0.28f, radius * 0.28f)) {
+                canvas.drawRect(centerX - half, centerY + offset - thickness / 2, centerX + half, centerY + offset + thickness / 2, bars)
+            }
+        } else {
+            val diamond = android.graphics.Path().apply {
+                moveTo(centerX, centerY - radius)
+                lineTo(centerX + radius, centerY)
+                lineTo(centerX, centerY + radius)
+                lineTo(centerX - radius, centerY)
+                close()
+            }
+            canvas.drawPath(diamond, fill)
+        }
+    }
+
+    override fun getIntrinsicWidth() = 24
+    override fun getIntrinsicHeight() = 24
+    override fun setAlpha(alpha: Int) {
+        fill.alpha = alpha
+        bars.alpha = alpha
+    }
+    override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) {
+        fill.colorFilter = colorFilter
+    }
+    @Deprecated("Deprecated in Java")
+    override fun getOpacity() = android.graphics.PixelFormat.TRANSLUCENT
 }
 
 /** sora's squiggle for a severity; hints get none (they only fade or strike code through). */

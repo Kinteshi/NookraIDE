@@ -381,6 +381,91 @@ fun WorkbenchDialogHost(controller: WorkbenchController) {
                 dismissButton = { TextButton(onClick = { controller.dialog = null }) { Text("Cancel") } },
             )
         }
+        is WorkbenchDialog.EditBreakpoint -> {
+            // VS Code's breakpoint widget, as three fields: any of them may be set together.
+            var condition by remember(dialog) { mutableStateOf(dialog.options.condition) }
+            var hitCount by remember(dialog) { mutableStateOf(dialog.options.hitCondition) }
+            var message by remember(dialog) { mutableStateOf(dialog.options.logMessage) }
+            val focus = remember(dialog) { androidx.compose.ui.focus.FocusRequester() }
+            LaunchedEffect(dialog) { focus.requestFocus() }
+            fun save() = controller.saveBreakpoint(dialog.path, dialog.line, com.avfstudio.nativeide.debug.BreakpointOptions(condition, hitCount, message))
+            fun Modifier.focusedFor(field: BreakpointField) = if (field == dialog.focus) focusRequester(focus) else this
+            AlertDialog(
+                onDismissRequest = { controller.dialog = null },
+                title = { Text(if (dialog.exists) "Breakpoint on line ${dialog.line}" else "Add breakpoint on line ${dialog.line}") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = condition,
+                            onValueChange = { condition = it },
+                            label = { Text("Expression") },
+                            placeholder = { Text("Break when it is true, e.g. i > 3") },
+                            singleLine = true,
+                            textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+                            keyboardActions = KeyboardActions(onDone = { save() }),
+                            modifier = Modifier.fillMaxWidth().focusedFor(BreakpointField.Condition),
+                        )
+                        OutlinedTextField(
+                            value = hitCount,
+                            onValueChange = { hitCount = it },
+                            label = { Text("Hit count") },
+                            placeholder = { Text("Break after so many hits: 5, >5, %2") },
+                            singleLine = true,
+                            textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+                            keyboardActions = KeyboardActions(onDone = { save() }),
+                            modifier = Modifier.fillMaxWidth().focusedFor(BreakpointField.HitCount),
+                        )
+                        OutlinedTextField(
+                            value = message,
+                            onValueChange = { message = it },
+                            label = { Text("Log message") },
+                            placeholder = { Text("Log instead of breaking: i is {i}") },
+                            singleLine = true,
+                            textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+                            keyboardActions = KeyboardActions(onDone = { save() }),
+                            modifier = Modifier.fillMaxWidth().focusedFor(BreakpointField.LogMessage),
+                        )
+                        Text(
+                            "A log message makes it a logpoint: it writes to the Debug console, {expressions} filled in, and doesn't stop.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                },
+                confirmButton = { TextButton(onClick = { save() }) { Text("Save") } },
+                dismissButton = {
+                    Row {
+                        if (dialog.exists) TextButton(onClick = { controller.removeBreakpoint(dialog.path, dialog.line) }) { Text("Remove") }
+                        TextButton(onClick = { controller.dialog = null }) { Text("Cancel") }
+                    }
+                },
+            )
+        }
+        is WorkbenchDialog.SetVariable -> {
+            val variable = dialog.variable
+            var value by remember(dialog) {
+                mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(variable.value, androidx.compose.ui.text.TextRange(0, variable.value.length)))
+            }
+            val focus = remember(dialog) { androidx.compose.ui.focus.FocusRequester() }
+            LaunchedEffect(dialog) { focus.requestFocus() }
+            AlertDialog(
+                onDismissRequest = { controller.dialog = null },
+                title = { Text("Set value of ${variable.name}") },
+                text = {
+                    OutlinedTextField(
+                        value = value,
+                        onValueChange = { value = it },
+                        label = { Text("New value (an expression)") },
+                        singleLine = true,
+                        textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+                        keyboardActions = KeyboardActions(onDone = { controller.setVariableValue(variable, value.text) }),
+                        modifier = Modifier.fillMaxWidth().focusRequester(focus),
+                    )
+                },
+                confirmButton = { TextButton(onClick = { controller.setVariableValue(variable, value.text) }) { Text("Set") } },
+                dismissButton = { TextButton(onClick = { controller.dialog = null }) { Text("Cancel") } },
+            )
+        }
         WorkbenchDialog.TerminalProfiles -> PaletteDialog(
             placeholder = "Select the terminal profile to create",
             query = controller.commandFilter,

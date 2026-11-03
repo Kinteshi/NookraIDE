@@ -481,6 +481,15 @@ private fun LazyListScope.languages(controller: WorkbenchController, settings: W
             set(WorkbenchSettings.LANGUAGE_SERVER_IDLE, it.roundToInt())
         }
     }
+    item { Section("Debugging") }
+    item {
+        SwitchRow(
+            Icons.Outlined.BugReport,
+            "Inline values",
+            "While paused, the paused function's variables at the end of its lines, as VS Code shows them",
+            settings.debugInlineValues,
+        ) { set(WorkbenchSettings.DEBUG_INLINE_VALUES, it) }
+    }
 }
 
 private fun LazyListScope.notebooks(settings: WorkbenchSettings, set: SetSetting) {
@@ -646,6 +655,15 @@ private fun LazyListScope.guest(controller: WorkbenchController, settings: Workb
     }
     if (settings.otherLanguageServers) {
         items(OtherLanguageServer.entries) { server -> GuestToolRow(controller, server.dependency) }
+        item {
+            ChoiceRow(
+                Icons.Outlined.Rule,
+                "SQL style rules",
+                "How sqlint's layout rules (a line break after SELECT, upper-case keywords, aligned columns) show in Problems; sqlLanguageServer.lint in settings.json wins",
+                SqlStyleRules.entries.map { it.key to it.label },
+                settings.sqlStyleRules.key,
+            ) { set(WorkbenchSettings.SQL_STYLE_RULES, it) }
+        }
     }
     controller.forwarderFix?.let { fix ->
         item {

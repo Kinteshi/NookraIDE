@@ -2,6 +2,7 @@ package com.avfstudio.nativeide.workbench
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -20,11 +22,16 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.ArrowDropDown
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.RestartAlt
 import androidx.compose.material.icons.outlined.Stop
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -41,6 +48,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -57,9 +65,12 @@ fun DebugPanel(controller: WorkbenchController) {
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             when (state) {
-                DebugState.Idle -> TextButton(onClick = controller::startOrContinueDebugging) {
-                    Icon(Icons.Outlined.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Text(" Start debugging  F5")
+                DebugState.Idle -> {
+                    TextButton(onClick = controller::startOrContinueDebugging) {
+                        Icon(Icons.Outlined.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Text(" Start debugging  F5")
+                    }
+                    ConfigurationPicker(controller)
                 }
                 DebugState.Starting -> Text("Starting…", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(8.dp))
                 DebugState.Running -> Tooltip("Pause (F6)") { IconButton(onClick = controller::pauseDebugging) { Icon(Icons.Outlined.Pause, "Pause (F6)") } }
@@ -76,7 +87,8 @@ fun DebugPanel(controller: WorkbenchController) {
             }
             (state as? DebugState.Stopped)?.let {
                 Text(
-                    "Paused on ${it.description ?: it.reason}",
+                    // debugpy describes the reason ("breakpoint"), js-debug the whole state ("Paused on breakpoint").
+                    (it.description ?: it.reason).let { reason -> if (reason.startsWith("Paused")) reason else "Paused on $reason" },
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(start = 8.dp),
@@ -85,8 +97,10 @@ fun DebugPanel(controller: WorkbenchController) {
                 )
             }
             Box(Modifier.weight(1f))
-            TextButton(onClick = { controller.chooseInterpreter() }) {
-                Text(controller.settings.pythonInterpreter.ifEmpty { "Select interpreter" }.substringAfterLast("/bin/").let { "Python: $it" }, maxLines = 1)
+            if (controller.selectedDebugConfiguration.type !in com.avfstudio.nativeide.debug.NODE_DEBUG_TYPES) {
+                TextButton(onClick = { controller.chooseInterpreter() }) {
+                    Text(controller.settings.pythonInterpreter.ifEmpty { "Select interpreter" }.substringAfterLast("/bin/").let { "Python: $it" }, maxLines = 1)
+                }
             }
         }
         HorizontalDivider()
@@ -116,10 +130,36 @@ fun DebugPanel(controller: WorkbenchController) {
             }
             VerticalDivider()
             Column(Modifier.weight(1.2f).fillMaxHeight()) {
-                PaneTitle("Variables")
+                var adding by remember { mutableStateOf(false) }
+                fun flatten(nodes: List<DebugVariable>): List<DebugVariable> =
+                    nodes.flatMap { node -> listOf(node) + if (node.expanded) flatten(node.children) else emptyList() }
                 LazyColumn(Modifier.fillMaxSize()) {
-                    fun flatten(nodes: List<DebugVariable>): List<DebugVariable> =
-                        nodes.flatMap { node -> listOf(node) + if (node.expanded) flatten(node.children) else emptyList() }
+                    item {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            PaneTitle("Watch")
+                            Box(Modifier.weight(1f))
+                            Tooltip("Add Expression") {
+                                IconButton(onClick = { adding = true }, modifier = Modifier.size(28.dp)) {
+                                    Icon(Icons.Outlined.Add, "Add Expression", modifier = Modifier.size(16.dp))
+                                }
+                            }
+                        }
+                    }
+                    if (adding) item { WatchInput(onDone = { expression -> controller.addWatch(expression); adding = false }) }
+                    if (controller.watchResults.isEmpty() && !adding) {
+                        item {
+                            Text(
+                                "Expressions to follow while paused (+, or Debug: Add to Watch on a selection)",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 2.dp),
+                            )
+                        }
+                    }
+                    items(flatten(controller.watchResults)) { variable ->
+                        VariableRow(controller, variable, onRemove = if (variable.depth == 1) ({ controller.removeWatch(variable.name) }) else null)
+                    }
+                    item { PaneTitle("Variables") }
                     items(flatten(controller.debugVariables)) { variable -> VariableRow(controller, variable) }
                 }
             }
@@ -139,12 +179,66 @@ private fun PaneTitle(title: String) {
     )
 }
 
+/** The Debug panel's configuration: launch.json's and the built-in ones, plus Add Configuration. */
 @Composable
-private fun VariableRow(controller: WorkbenchController, variable: DebugVariable) {
+private fun ConfigurationPicker(controller: WorkbenchController) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        TextButton(onClick = { open = true }) {
+            Text(controller.selectedDebugConfiguration.name, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 260.dp))
+            Icon(Icons.Outlined.ArrowDropDown, contentDescription = "Choose a configuration")
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            controller.debugConfigurations.forEach { configuration ->
+                DropdownMenuItem(
+                    text = { Text(configuration.name) },
+                    onClick = {
+                        open = false
+                        controller.selectDebugConfiguration(configuration.name)
+                    },
+                )
+            }
+            HorizontalDivider()
+            DropdownMenuItem(
+                text = { Text(if (controller.launchConfigurations.isEmpty()) "Add Configuration… (create launch.json)" else "Open launch.json") },
+                onClick = {
+                    open = false
+                    controller.openLaunchJson()
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun WatchInput(onDone: (String) -> Unit) {
+    var text by remember { mutableStateOf("") }
+    val focus = remember { androidx.compose.ui.focus.FocusRequester() }
+    LaunchedEffect(Unit) { focus.requestFocus() }
+    OutlinedTextField(
+        value = text,
+        onValueChange = { text = it },
+        placeholder = { Text("Expression to watch") },
+        singleLine = true,
+        textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+        keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, imeAction = ImeAction.Done),
+        keyboardActions = KeyboardActions(onDone = { onDone(text) }),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp).focusRequester(focus),
+    )
+}
+
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+private fun VariableRow(controller: WorkbenchController, variable: DebugVariable, onRemove: (() -> Unit)? = null) {
     Row(
         Modifier
             .fillMaxWidth()
-            .clickable(enabled = variable.reference > 0) { controller.toggleVariable(variable) }
+            // A tap opens it; a long press or a double click sets its value (VS Code's Set Value).
+            .combinedClickable(
+                onClick = { controller.toggleVariable(variable) },
+                onLongClick = { controller.editVariable(variable) }.takeIf { variable.parentReference > 0 },
+                onDoubleClick = { controller.editVariable(variable) }.takeIf { variable.parentReference > 0 },
+            )
             .padding(start = (6 + variable.depth * 12).dp, end = 8.dp, top = 2.dp, bottom = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -166,7 +260,23 @@ private fun VariableRow(controller: WorkbenchController, variable: DebugVariable
             fontFamily = if (isScope) null else FontFamily.Monospace,
         )
         if (!isScope) {
-            Text(variable.value, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                variable.value,
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace,
+                color = if (variable.failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+        }
+        onRemove?.let { remove ->
+            Box(Modifier.weight(1f))
+            Tooltip("Remove Expression") {
+                IconButton(onClick = remove, modifier = Modifier.size(24.dp)) {
+                    Icon(Icons.Outlined.Close, "Remove Expression", modifier = Modifier.size(14.dp))
+                }
+            }
         }
     }
 }

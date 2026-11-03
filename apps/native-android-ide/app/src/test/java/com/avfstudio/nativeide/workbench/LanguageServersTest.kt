@@ -22,4 +22,13 @@ class LanguageServersTest {
         assertEquals(OtherLanguageServer.Bash, OtherLanguageServer.missingIn("avf-node-agent: bash-language-server is not set up; run: …"))
         assertNull(OtherLanguageServer.missingIn("tool 'typescript' is not installed in the guest registry"))
     }
+
+    @Test
+    fun sqlStyleRulesSetEveryRuleAndKeepUpperCaseKeywords() {
+        val rules = sqlLintRules(SqlStyleRules.Warning)
+        assertEquals(8, rules.size)
+        assertEquals("warning", rules["linebreak-after-clause-keyword"])
+        assertEquals(listOf("warning", "upper"), rules["reserved-word-case"])
+        assertEquals(setOf("off"), sqlLintRules(SqlStyleRules.Off).values.map { (it as? List<*>)?.first() ?: it }.toSet())
+    }
 }

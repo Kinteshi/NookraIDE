@@ -395,6 +395,23 @@
       "initializationOptions": {}
     },
     {
+      "name": "js-debug",
+      "version": "1.140.0",
+      "kind": "dap",
+      "languages": ["javascript"],
+      "command": ["avf-node-agent", "js-debug"],
+      "install": {
+        "script": {
+          "binary": "avf-node-agent",
+          "asset": "avf-node-agent.sh",
+          "setup": ["setup", "js-debug"]
+        }
+      },
+      "settingsSection": "debug",
+      "env_allowlist": [],
+      "initializationOptions": {}
+    },
+    {
       "name": "debugpy",
       "version": "1.8.22",
       "kind": "dap",

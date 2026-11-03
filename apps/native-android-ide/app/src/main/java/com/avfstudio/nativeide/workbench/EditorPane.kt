@@ -582,6 +582,15 @@ private fun NativeEditorView(controller: WorkbenchController, document: Document
                         controller.toggleBreakpoint(document.path, event.line + 1)
                     }
                 }
+                // A long press there edits the line's breakpoint: its condition, hit count or log message.
+                subscribeAlways(io.github.rosemoe.sora.event.LongPressEvent::class.java) { event ->
+                    if (event.motionRegion == io.github.rosemoe.sora.event.EditorMotionEvent.REGION_LINE_NUMBER ||
+                        event.motionRegion == io.github.rosemoe.sora.event.EditorMotionEvent.REGION_SIDE_ICON
+                    ) {
+                        event.intercept()
+                        controller.editBreakpoint(document.path, event.line + 1)
+                    }
+                }
                 setText(document.text)
                 controller.editorHost.open(document, editorSurface)
                 startSelectionTracking()
@@ -857,7 +866,9 @@ private fun InlayHintsOverlay(controller: WorkbenchController) {
     // Git blame for the cursor's line, while the file is as saved (unsaved edits move lines).
     val blameLine = controller.cursorPosition?.line?.takeIf { controller.settings.gitBlame && controller.activeDocument?.dirty == false }
     val blame = blameLine?.let { controller.blameLines[it] }
-    if (lines.isEmpty() && lenses.isEmpty() && folds?.isEmpty != false && blame == null) return
+    // While paused: the frame's values beside its function's lines (VS Code's inline values).
+    val inlineValues = controller.debugInlineValues?.takeIf { it.first == controller.activePath }?.second.orEmpty()
+    if (lines.isEmpty() && lenses.isEmpty() && folds?.isEmpty != false && blame == null && inlineValues.isEmpty()) return
     val density = LocalDensity.current
     val colors = MaterialTheme.colorScheme
     val fontSize = with(density) { (view.textSizePx * 0.86f).toSp() }
@@ -872,7 +883,8 @@ private fun InlayHintsOverlay(controller: WorkbenchController) {
             val lineLenses = lenses[line].orEmpty()
             val folded = folds?.isFolded(line) == true
             val lineBlame = blame?.takeIf { line == blameLine }
-            if (hints.isEmpty() && lineLenses.isEmpty() && !folded && lineBlame == null) continue
+            val lineValues = inlineValues[line]
+            if (hints.isEmpty() && lineLenses.isEmpty() && !folded && lineBlame == null && lineValues == null) continue
             if (line == ghostLine || line >= content.lineCount) continue
             val column = content.getColumnCount(line)
             val x = view.getCharOffsetX(line, column) + gap
@@ -908,6 +920,20 @@ private fun InlayHintsOverlay(controller: WorkbenchController) {
                         softWrap = false,
                         modifier = Modifier
                             .background(colors.surfaceContainerHighest.copy(alpha = 0.7f), RoundedCornerShape(4.dp))
+                            .padding(horizontal = 4.dp),
+                    )
+                }
+                lineValues?.let { values ->
+                    Text(
+                        values,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = fontSize,
+                        fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                        color = colors.tertiary,
+                        maxLines = 1,
+                        softWrap = false,
+                        modifier = Modifier
+                            .background(colors.tertiary.copy(alpha = 0.12f), RoundedCornerShape(4.dp))
                             .padding(horizontal = 4.dp),
                     )
                 }

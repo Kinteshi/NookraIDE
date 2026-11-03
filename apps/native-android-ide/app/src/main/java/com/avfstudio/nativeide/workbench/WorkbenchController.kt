@@ -59,7 +59,20 @@ import com.avfstudio.nativeide.debug.dapInitializeArguments
 import com.avfstudio.nativeide.debug.parseScopes
 import com.avfstudio.nativeide.debug.parseStackFrames
 import com.avfstudio.nativeide.debug.parseVariables
-import com.avfstudio.nativeide.debug.pythonLaunchArguments
+import com.avfstudio.nativeide.debug.BreakpointOptions
+import com.avfstudio.nativeide.debug.CURRENT_FILE_CONFIGURATION
+import com.avfstudio.nativeide.debug.DebugConfiguration
+import com.avfstudio.nativeide.debug.LAUNCH_JSON_TEMPLATE
+import com.avfstudio.nativeide.debug.NODE_CURRENT_FILE
+import com.avfstudio.nativeide.debug.NODE_DEBUG_TYPES
+import com.avfstudio.nativeide.debug.PYTHON_DEBUG_TYPES
+import com.avfstudio.nativeide.debug.nodeDebugArguments
+import com.avfstudio.nativeide.debug.builtInDebugConfigurations
+import com.avfstudio.nativeide.debug.debugVariables
+import com.avfstudio.nativeide.debug.inlineDebugValues
+import com.avfstudio.nativeide.debug.parseLaunchConfigurations
+import com.avfstudio.nativeide.debug.pythonDebugArguments
+import com.avfstudio.nativeide.debug.resolveDebugVariables
 import com.avfstudio.nativeide.debug.setBreakpointsArguments
 import androidx.compose.runtime.mutableStateMapOf
 import com.avfstudio.nativeide.document.DocumentRepository
@@ -871,6 +884,10 @@ class WorkbenchController(private val context: Context) {
             fill("json.validate.enable", true)
             fill("json.format.enable", true)
         }
+        // sqlint reports its layout rules as errors unless told otherwise (the user's own `lint` wins).
+        if (language == OtherLanguageServer.Sql.id && merged.getPath("sqlLanguageServer.lint") == null) {
+            fill("sqlLanguageServer.lint.rules", com.google.gson.Gson().toJsonTree(sqlLintRules(settings.sqlStyleRules)))
+        }
         if (language == OtherLanguageServer.Yaml.id) {
             fill("yaml.validate", true)
             fill("yaml.hover", true)
@@ -1286,7 +1303,7 @@ class WorkbenchController(private val context: Context) {
             if (copilot.language.isStarted) add("Copilot language server (~280 MB)")
             if (chatAgent.isStarted) add("${chatAgentKind.label} chat agent (${chatAgentKind.memoryNote})")
             notebooks.values.count { it.kernel.isStarted }.takeIf { it > 0 }?.let { add("$it Jupyter kernel${if (it == 1) "" else "s"}") }
-            if (debugger.isStarted) add("Python debugger")
+            if (debugger.isStarted) add(if (debugger.tool == DapClient.JS_DEBUG_TOOL) "Node.js debugger (js-debug)" else "Python debugger")
             terminals.count { !it.exited }.takeIf { it > 0 }?.let { add("$it terminal${if (it == 1) "" else "s"}") }
         }
 
@@ -1302,12 +1319,31 @@ class WorkbenchController(private val context: Context) {
 
     // Debugging ---------------------------------------------------------------------------------
 
-    private val debugger = DapClient(vfs)
+    /** The session's adapter: debugpy, or js-debug's server for Node.js. */
+    private var debugger = DapClient(vfs)
+    /** js-debug's session for the program itself (the first one only starts it); requests about the paused program go there. */
+    @Volatile private var childDebugger: DapClient? = null
+    private val session: DapClient get() = childDebugger ?: debugger
+    /** What the adapter said it supports (`initialize`'s answer): setVariable and the like. */
+    private var debugCapabilities: JsonObject? = null
     /** 1-based breakpoint lines per guest file, kept across launches. */
     val breakpoints = mutableStateMapOf<String, Set<Int>>().apply {
         runCatching {
             val saved = com.google.gson.JsonParser.parseString(preferences.getString("breakpoints", "{}")).asJsonObject
             saved.entrySet().forEach { (path, lines) -> put(path, lines.asJsonArray.map { it.asInt }.toSet()) }
+        }
+    }
+    /** Conditions, hit counts and log messages of those breakpoints (VS Code's conditional breakpoints and logpoints). */
+    val breakpointOptions = mutableStateMapOf<String, Map<Int, BreakpointOptions>>().apply {
+        runCatching {
+            val saved = com.google.gson.JsonParser.parseString(preferences.getString("breakpoint-options", "{}")).asJsonObject
+            saved.entrySet().forEach { (path, lines) ->
+                put(path, lines.asJsonObject.entrySet().associate { (line, value) ->
+                    val extra = value.asJsonObject
+                    fun field(name: String) = extra.get(name)?.takeIf { it.isJsonPrimitive }?.asString.orEmpty()
+                    line.toInt() to BreakpointOptions(field("condition"), field("hitCondition"), field("logMessage"))
+                })
+            }
         }
     }
     var debugState by mutableStateOf<DebugState>(DebugState.Idle)
@@ -1321,67 +1357,309 @@ class WorkbenchController(private val context: Context) {
     /** Where execution is paused (path, 1-based line), drawn in the editor. */
     var executionPoint by mutableStateOf<Pair<String, Int>?>(null)
         private set
+    /** Values at the end of the paused function's lines (`debug.inlineValues`): the file and 0-based line → text. */
+    var debugInlineValues by mutableStateOf<Pair<String, Map<Int, String>>?>(null)
+        private set
+    /** Watch expressions, kept across sessions; [watchResults] holds their values for the selected frame. */
+    val watchExpressions = mutableStateListOf<String>().apply {
+        runCatching {
+            com.google.gson.JsonParser.parseString(preferences.getString("debug-watch", "[]")).asJsonArray.forEach { add(it.asString) }
+        }
+    }
+    val watchResults = mutableStateListOf<DebugVariable>().apply {
+        watchExpressions.forEach { add(DebugVariable(it, "not available", null, 0, depth = 1)) }
+    }
+    /** launch.json's configurations (read at connect and when it is saved). */
+    var launchConfigurations by mutableStateOf<List<DebugConfiguration>>(emptyList())
+        private set
+    /** The Debug panel's pick, by name; the first of [debugConfigurations] when unset or gone. */
+    var selectedDebugConfigurationName by mutableStateOf<String?>(null)
+        private set
+
+    /** What the picker offers: launch.json's, then VS Code's dynamic ones it doesn't redefine. */
+    val debugConfigurations: List<DebugConfiguration>
+        get() = launchConfigurations + builtInDebugConfigurations().filter { builtIn -> launchConfigurations.none { it.name == builtIn.name } }
+
+    val selectedDebugConfiguration: DebugConfiguration
+        get() = debugConfigurations.let { all -> all.firstOrNull { it.name == selectedDebugConfigurationName } ?: all.first() }
 
     fun toggleBreakpoint(path: String? = activePath, line: Int? = editorSurface?.selectionStart()?.line?.plus(1)) {
         if (path == null || line == null || !isGuestPath(path)) return
         val lines = breakpoints[path].orEmpty()
-        val updated = if (line in lines) lines - line else lines + line
+        val removing = line in lines
+        val updated = if (removing) lines - line else lines + line
         haptic(HapticFeedbackConstants.CONTEXT_CLICK)
         if (updated.isEmpty()) breakpoints.remove(path) else breakpoints[path] = updated
-        preferences.edit().putString(
-            "breakpoints",
-            com.google.gson.Gson().toJson(breakpoints.mapValues { it.value.sorted() }),
-        ).apply()
-        if (debugger.isStarted) debugger.request("setBreakpoints", setBreakpointsArguments(path, updated))
+        if (removing) {
+            val others = breakpointOptions[path].orEmpty() - line
+            if (others.isEmpty()) breakpointOptions.remove(path) else breakpointOptions[path] = others
+        }
+        persistBreakpoints()
+        sendBreakpoints(path)
     }
 
-    /** F5: continue when paused, otherwise launch the active Python file under debugpy. */
+    /** Edit Breakpoint, Add Conditional Breakpoint or Add Logpoint at [line] of [path] (the cursor's by default). */
+    fun editBreakpoint(
+        path: String? = activePath,
+        line: Int? = editorSurface?.selectionStart()?.line?.plus(1),
+        focus: BreakpointField = BreakpointField.Condition,
+    ) {
+        if (path == null || line == null || !isGuestPath(path)) {
+            status = "Breakpoints go in files of the workspace"
+            return
+        }
+        val exists = line in breakpoints[path].orEmpty()
+        val options = breakpointOptions[path]?.get(line) ?: BreakpointOptions()
+        // An existing logpoint opens on its message, as VS Code's editor does.
+        val start = if (exists && focus == BreakpointField.Condition && options.isLogpoint) BreakpointField.LogMessage else focus
+        dialog = WorkbenchDialog.EditBreakpoint(path, line, options, exists, start)
+    }
+
+    fun saveBreakpoint(path: String, line: Int, options: BreakpointOptions) {
+        dialog = null
+        breakpoints[path] = breakpoints[path].orEmpty() + line
+        val others = breakpointOptions[path].orEmpty() - line
+        val updated = if (options.isPlain) others else others + (line to options)
+        if (updated.isEmpty()) breakpointOptions.remove(path) else breakpointOptions[path] = updated
+        persistBreakpoints()
+        sendBreakpoints(path)
+        status = when {
+            options.isLogpoint -> "Logpoint on line $line"
+            !options.isPlain -> "Conditional breakpoint on line $line"
+            else -> "Breakpoint on line $line"
+        }
+    }
+
+    fun removeBreakpoint(path: String, line: Int) {
+        dialog = null
+        if (line in breakpoints[path].orEmpty()) toggleBreakpoint(path, line)
+    }
+
+    private fun persistBreakpoints() {
+        val gson = com.google.gson.Gson()
+        preferences.edit()
+            .putString("breakpoints", gson.toJson(breakpoints.mapValues { it.value.sorted() }))
+            .putString("breakpoint-options", gson.toJson(breakpointOptions.mapValues { (_, lines) -> lines.mapKeys { it.key.toString() } }))
+            .apply()
+    }
+
+    private fun sendBreakpoints(path: String, client: DapClient = session): CompletableFuture<JsonObject> =
+        if (!client.isStarted) CompletableFuture.completedFuture(JsonObject())
+        else client.request("setBreakpoints", setBreakpointsArguments(path, breakpoints[path].orEmpty(), breakpointOptions[path].orEmpty()))
+
+    // Watch expressions -------------------------------------------------------------------------
+
+    fun addWatch(expression: String) {
+        val text = expression.trim()
+        if (text.isEmpty() || text in watchExpressions) return
+        watchExpressions.add(text)
+        persistWatches()
+        refreshWatches()
+    }
+
+    fun removeWatch(expression: String) {
+        watchExpressions.remove(expression)
+        persistWatches()
+        refreshWatches()
+    }
+
+    /** Debug: Add to Watch: the selection, else the name at the cursor. */
+    fun addSelectionToWatch() {
+        val surface = editorSurface ?: return
+        val text = surface.text
+        val range = surface.selectionOffsets
+        val selected = if (range.first < range.last) text.substring(range.first, range.last) else {
+            val at = range.first.coerceIn(0, text.length)
+            var from = at
+            var to = at
+            while (from > 0 && (text[from - 1].isLetterOrDigit() || text[from - 1] in "_.")) from--
+            while (to < text.length && (text[to].isLetterOrDigit() || text[to] == '_')) to++
+            text.substring(from, to).trim('.')
+        }
+        if (selected.isBlank()) {
+            status = "Select an expression to watch"
+            return
+        }
+        addWatch(selected)
+        panelVisible = true
+        panelTab = PanelTab.Debug
+    }
+
+    private fun persistWatches() {
+        preferences.edit().putString("debug-watch", com.google.gson.Gson().toJson(watchExpressions.toList())).apply()
+    }
+
+    /** Evaluates each watch in the selected frame (VS Code's `watch` context); "not available" while running. */
+    private fun refreshWatches() {
+        val frame = selectedFrameId
+        val results = watchExpressions.map { expression -> DebugVariable(expression, if (frame == null) "not available" else "…", null, 0, depth = 1) }
+        watchResults.clear()
+        watchResults.addAll(results)
+        if (frame == null || !session.isStarted) return
+        results.forEach { item ->
+            session.request("evaluate", JsonObject().apply {
+                addProperty("expression", item.name)
+                addProperty("frameId", frame)
+                addProperty("context", "watch")
+            }).whenComplete { body, error ->
+                post {
+                    if (error != null) {
+                        item.failed = true
+                        item.value = (error.cause ?: error).message?.lineSequence()?.lastOrNull { it.isNotBlank() } ?: "error"
+                    } else {
+                        item.value = body.get("result")?.asString.orEmpty()
+                        item.reference = body.get("variablesReference")?.asInt ?: 0
+                    }
+                }
+            }
+        }
+    }
+
+    // Debug configurations (launch.json) ---------------------------------------------------------
+
+    /** Reads `.vscode/launch.json` (at connect, and when it is saved). */
+    private fun reloadLaunchConfigurations(root: String) {
+        val path = "${root.trimEnd('/')}/.vscode/launch.json"
+        selectedDebugConfigurationName = preferences.getString("debug-configuration:$root", null)
+        repository.readBytes(path, MAX_SNIPPET_FILE_BYTES).whenComplete { bytes, _ ->
+            post { launchConfigurations = bytes?.let { parseLaunchConfigurations(String(it, Charsets.UTF_8)) }.orEmpty() }
+        }
+    }
+
+    fun selectDebugConfiguration(name: String) {
+        selectedDebugConfigurationName = name
+        workspaceRoot?.let { root -> preferences.edit().putString("debug-configuration:$root", name).apply() }
+    }
+
+    /** Debug: Add Configuration… / Open launch.json: `.vscode/launch.json`, made from a template if missing. */
+    fun openLaunchJson() {
+        val root = workspaceRoot ?: run {
+            status = "Open a folder first"
+            return
+        }
+        val path = "${root.trimEnd('/')}/.vscode/launch.json"
+        vfs.stat(path).whenComplete { _, missing ->
+            post {
+                if (missing == null) {
+                    openPath(path)
+                    return@post
+                }
+                vfs.create("${root.trimEnd('/')}/.vscode", directory = true).handle { _, _ -> null }
+                    .thenCompose { vfs.create(path, directory = false) }
+                    .thenCompose { repository.writeAll(path, LAUNCH_JSON_TEMPLATE.toByteArray(), null) }.whenComplete { _, error ->
+                        post {
+                            if (error != null) {
+                                status = "Couldn't create $path: ${error.cause?.message ?: error.message}"
+                            } else {
+                                reloadLaunchConfigurations(root)
+                                openPath(path)
+                            }
+                        }
+                    }
+            }
+        }
+    }
+
+    // Sessions ----------------------------------------------------------------------------------
+
+    /** F5: continue when paused, otherwise start the Debug panel's configuration. */
     fun startOrContinueDebugging() {
         when (val state = debugState) {
             is DebugState.Stopped -> {
-                debugger.request("continue", JsonObject().apply { addProperty("threadId", state.threadId) })
+                session.request("continue", JsonObject().apply { addProperty("threadId", state.threadId) })
                 return
             }
             DebugState.Running, DebugState.Starting -> return
-            DebugState.Idle -> Unit
+            DebugState.Idle -> startDebugging(selectedDebugConfiguration)
         }
-        val document = activeDocument
+    }
+
+    private fun startDebugging(configuration: DebugConfiguration) {
         val workspace = workspaceRoot
-        if (document == null || workspace == null || !vfs.isConnected()) {
-            status = "Connect to a guest and open a Python file to debug"
+        if (workspace == null || !vfs.isConnected()) {
+            status = "Connect to a guest to debug"
             return
         }
-        if (!isGuestPath(document.path) || document.languageId != "py") {
+        val node = configuration.type in NODE_DEBUG_TYPES
+        if (!node && configuration.type !in PYTHON_DEBUG_TYPES) {
+            status = "\"${configuration.name}\" is a ${configuration.type.ifEmpty { "typeless" }} configuration; the debuggers here are Python's (debugpy) and Node.js's (js-debug)"
+            return
+        }
+        val document = activeDocument?.takeIf { isGuestPath(it.path) }
+        if (configuration.name == CURRENT_FILE_CONFIGURATION && document?.languageId != "py") {
             status = "Debugging runs saved Python files; open a .py file in the workspace"
             return
         }
-        val python = settings.pythonInterpreter.ifEmpty {
-            chooseInterpreter(then = ::startOrContinueDebugging)
+        if (node && configuration.name == NODE_CURRENT_FILE && document?.languageId !in setOf("js", "mjs", "cjs")) {
+            status = "Node.js: Current File runs JavaScript files; open a .js file in the workspace"
             return
         }
-        if (document.dirty) saveActiveDocument()
-        val program = document.path
-        val cwd = program.substringBeforeLast('/')
+        if ("\${file" in configuration.arguments.toString() && document == null) {
+            status = "\"${configuration.name}\" debugs the active file; open a file in the workspace"
+            return
+        }
+        val attach = configuration.request == "attach"
+        val python = settings.pythonInterpreter.ifEmpty {
+            if (!node && !attach && !configuration.arguments.has("python")) {
+                chooseInterpreter(then = ::startOrContinueDebugging)
+                return
+            }
+            "python3"
+        }
+        if (document?.dirty == true) saveActiveDocument()
+        val selection = editorSurface?.let { surface ->
+            surface.selectionOffsets.takeIf { it.first < it.last }?.let { surface.text.substring(it.first, it.last) }
+        }
+        val variables = debugVariables(workspace, document?.path, editorSurface?.selectionStart()?.line?.plus(1), selection, python)
+        val resolved = resolveDebugVariables(configuration.arguments, variables).asJsonObject
+        val arguments = if (node) nodeDebugArguments(resolved, workspace) else pythonDebugArguments(resolved, python, workspace)
+        val cwd = arguments.get("cwd")?.takeIf { it.isJsonPrimitive }?.asString ?: workspace
         debugState = DebugState.Starting
         debugConsole.clear()
         debugOutputOpen = false
-        debugConsole.add(DebugConsoleLine("Launching ${program.substringAfterLast('/')} with $python", DebugConsoleLine.Kind.Info))
+        val what = if (attach) {
+            val connect = arguments.getAsJsonObject("connect")
+            "Attaching to ${connect?.get("host")?.asString ?: "localhost"}:${connect?.get("port")?.asString ?: "?"}"
+        } else {
+            val program = arguments.get("program")?.asString?.substringAfterLast('/') ?: arguments.get("module")?.asString ?: configuration.name
+            if (node) "Launching $program with Node.js" else "Launching $program with $python"
+        }
+        debugConsole.add(DebugConsoleLine("${configuration.name}: $what", DebugConsoleLine.Kind.Info))
         panelVisible = true
         panelTab = PanelTab.Debug
         // The compact layout shows the panel's tabs under Terminal.
         compactDestination = CompactDestination.Terminal
-        debugger.eventListener = { event, body -> post { onDebugEvent(event, body) } }
-        debugger.exitListener = { message -> post { if (debugState != DebugState.Idle) endDebugSession(message) } }
-        debugger.start(cwd)
-            .thenCompose { debugger.request("initialize", dapInitializeArguments()) }
-            .thenCompose {
-                // debugpy answers `launch` only after configurationDone, which `initialized` triggers.
-                debugger.request("launch", pythonLaunchArguments(program, cwd, python), timeoutSeconds = null)
+        val adapter = DapClient(vfs, if (node) DapClient.JS_DEBUG_TOOL else DapClient.DEBUGPY_TOOL)
+        debugger = adapter
+        childDebugger = null
+        // js-debug is a server: this session starts the program, which then gets a session of its own on the same port.
+        val port = (41_000..48_999).random()
+        adapter.reverseRequestHandler = if (node) { command, request -> command == "startDebugging" && startProgramSession(port, cwd, request) } else null
+        adapter.eventListener = { event, body -> post { onDebugEvent(adapter, event, body) } }
+        adapter.exitListener = { message -> post { if (debugState != DebugState.Idle && debugger === adapter) endDebugSession(message) } }
+        // Attaching to `debugpy --listen`: the program's own adapter is the server; avf-debugpy joins the app to it.
+        val connect = arguments.getAsJsonObject("connect")?.takeIf { !node && attach }
+        val adapterArgs = when {
+            node -> listOf("serve", port.toString())
+            connect != null -> listOf("--connect", connect.get("host")?.asString ?: "localhost", connect.get("port")?.asString ?: "5678")
+            else -> emptyList()
+        }
+        adapter.start(cwd, adapterArgs)
+            .thenCompose { adapter.request("initialize", dapInitializeArguments(if (node) "pwa-node" else "debugpy", startDebugging = node)) }
+            .thenCompose { capabilities ->
+                debugCapabilities = capabilities
+                // debugpy answers `launch` (and `attach`) only after configurationDone, which `initialized` triggers.
+                adapter.request(configuration.request, arguments, timeoutSeconds = null)
             }
             .whenComplete { _, error ->
                 post {
                     if (error != null && debugState != DebugState.Idle) {
-                        endDebugSession("Launch failed: ${generateSequence(error) { it.cause }.last().message}")
+                        val message = generateSequence(error) { it.cause }.last().message.orEmpty()
+                        endDebugSession("${if (attach) "Attach" else "Launch"} failed: $message")
+                        // js-debug isn't in the guest yet: offer it, then start again.
+                        missingDependencyIn(message)?.takeIf { it == GuestDependency.JsDebug && dialog == null }?.let { dependency ->
+                            offerInstall(dependency, "Debugging Node.js needs ${dependency.label}.") { startDebugging(configuration) }
+                        }
                     } else if (debugState == DebugState.Starting) {
                         debugState = DebugState.Running
                     }
@@ -1389,17 +1667,38 @@ class WorkbenchController(private val context: Context) {
             }
     }
 
-    private fun onDebugEvent(event: String, body: JsonObject) {
+    /** js-debug's `startDebugging`: the program's own session, on the server's [port]; true when it starts. */
+    private fun startProgramSession(port: Int, cwd: String, request: JsonObject): Boolean {
+        val configuration = request.getAsJsonObject("configuration") ?: return false
+        if (childDebugger != null) return false
+        val child = DapClient(vfs, DapClient.JS_DEBUG_TOOL)
+        childDebugger = child
+        val kind = request.get("request")?.asString ?: "launch"
+        child.eventListener = { event, body -> post { onDebugEvent(child, event, body) } }
+        child.exitListener = { message -> post { if (childDebugger === child && debugState != DebugState.Idle) endDebugSession(message) } }
+        child.start(cwd, listOf("connect", port.toString()))
+            .thenCompose { child.request("initialize", dapInitializeArguments("pwa-node", startDebugging = true)) }
+            .thenCompose { capabilities ->
+                debugCapabilities = capabilities
+                child.request(kind, configuration, timeoutSeconds = null)
+            }
+            .whenComplete { _, error ->
+                if (error != null) post { if (childDebugger === child) endDebugSession("The program's session failed: ${generateSequence(error) { it.cause }.last().message}") }
+            }
+        return true
+    }
+
+    private fun onDebugEvent(client: DapClient, event: String, body: JsonObject) {
+        if (client !== debugger && client !== childDebugger) return
         when (event) {
             "initialized" -> {
-                val files = breakpoints.toMap()
-                CompletableFuture.allOf(*files.map { (path, lines) -> debugger.request("setBreakpoints", setBreakpointsArguments(path, lines)) }.toTypedArray())
+                CompletableFuture.allOf(*breakpoints.keys.toList().map { sendBreakpoints(it, client) }.toTypedArray())
                     .thenCompose {
-                        debugger.request("setExceptionBreakpoints", JsonObject().apply {
+                        client.request("setExceptionBreakpoints", JsonObject().apply {
                             add("filters", com.google.gson.JsonArray().apply { add("uncaught") })
                         })
                     }
-                    .thenCompose { debugger.request("configurationDone") }
+                    .thenCompose { client.request("configurationDone") }
                     .whenComplete { _, error -> if (error != null) post { endDebugSession("Debugger setup failed: ${error.message}") } }
             }
             "stopped" -> {
@@ -1415,7 +1714,6 @@ class WorkbenchController(private val context: Context) {
                 val kind = if (category == "stderr") DebugConsoleLine.Kind.Error else DebugConsoleLine.Kind.Output
                 debugOutputOpen = appendDebugOutput(debugConsole, text, kind, debugOutputOpen)
                 if (debugConsole.size > 2_000) debugConsole.removeRange(0, debugConsole.size - 2_000)
-                if (debugConsole.size > 2_000) debugConsole.removeRange(0, debugConsole.size - 2_000)
             }
             "exited" -> debugConsole.add(DebugConsoleLine("Process exited with code ${body.get("exitCode")?.asInt ?: "?"}", DebugConsoleLine.Kind.Info))
             "terminated" -> endDebugSession(null)
@@ -1423,7 +1721,7 @@ class WorkbenchController(private val context: Context) {
     }
 
     private fun loadStack(threadId: Int) {
-        debugger.request("stackTrace", JsonObject().apply {
+        session.request("stackTrace", JsonObject().apply {
             addProperty("threadId", threadId)
             addProperty("startFrame", 0)
             addProperty("levels", 50)
@@ -1442,18 +1740,23 @@ class WorkbenchController(private val context: Context) {
 
     fun selectFrame(frame: DebugFrame) {
         selectedFrameId = frame.id
+        debugInlineValues = null
         frame.path?.let { path ->
             executionPoint = path to frame.line
             navigateToLocation(LanguageLocation(java.net.URI("file", "", path, null).toASCIIString(), lspRange(frame.line - 1, (frame.column - 1).coerceAtLeast(0))))
         }
-        debugger.request("scopes", JsonObject().apply { addProperty("frameId", frame.id) }).whenComplete { body, error ->
+        refreshWatches()
+        session.request("scopes", JsonObject().apply { addProperty("frameId", frame.id) }).whenComplete { body, error ->
             post {
                 debugVariables.clear()
-                if (error != null) return@post
+                if (error != null || selectedFrameId != frame.id) return@post
                 val scopes = parseScopes(body)
                 debugVariables.addAll(scopes)
-                // Locals open by default, as in VS Code.
-                scopes.firstOrNull()?.let(::toggleVariable)
+                // Locals open by default, as in VS Code; their values go into the editor too.
+                scopes.firstOrNull()?.let { locals ->
+                    locals.expanded = true
+                    loadChildren(locals) { if (selectedFrameId == frame.id) showInlineValues(frame, locals.children) }
+                }
             }
         }
     }
@@ -1462,9 +1765,65 @@ class WorkbenchController(private val context: Context) {
     fun toggleVariable(variable: DebugVariable) {
         if (variable.reference <= 0) return
         variable.expanded = !variable.expanded
-        if (!variable.expanded || variable.children.isNotEmpty()) return
-        debugger.request("variables", JsonObject().apply { addProperty("variablesReference", variable.reference) }).whenComplete { body, error ->
-            post { if (error == null) variable.children.addAll(parseVariables(body, variable.depth + 1)) }
+        if (variable.expanded && variable.children.isEmpty()) loadChildren(variable)
+    }
+
+    private fun loadChildren(variable: DebugVariable, then: (() -> Unit)? = null) {
+        val reference = variable.reference
+        session.request("variables", JsonObject().apply { addProperty("variablesReference", reference) }).whenComplete { body, error ->
+            post {
+                if (error != null) return@post
+                variable.children.clear()
+                variable.children.addAll(parseVariables(body, variable.depth + 1, reference))
+                then?.invoke()
+            }
+        }
+    }
+
+    /** `debug.inlineValues`: the frame's locals beside the lines of its function, up to the paused one. */
+    private fun showInlineValues(frame: DebugFrame, locals: List<DebugVariable>) {
+        val path = frame.path
+        if (!settings.debugInlineValues || path == null) {
+            debugInlineValues = null
+            return
+        }
+        val lines = documents.firstOrNull { it.path == path }?.text?.lines() ?: return
+        debugInlineValues = path to inlineDebugValues(lines, frame.line - 1, locals.associate { it.name to it.value })
+    }
+
+    /** Set Value on a variable in the paused frame (the adapter must support setVariable). */
+    fun editVariable(variable: DebugVariable) {
+        if (variable.parentReference <= 0 || debugState !is DebugState.Stopped) return
+        if (debugCapabilities?.get("supportsSetVariable")?.asBoolean != true) {
+            status = "This debugger can't change values"
+            return
+        }
+        dialog = WorkbenchDialog.SetVariable(variable)
+    }
+
+    fun setVariableValue(variable: DebugVariable, value: String) {
+        dialog = null
+        session.request("setVariable", JsonObject().apply {
+            addProperty("variablesReference", variable.parentReference)
+            addProperty("name", variable.name)
+            addProperty("value", value)
+        }).whenComplete { body, error ->
+            post {
+                if (error != null) {
+                    status = "Couldn't set ${variable.name}: ${(error.cause ?: error).message}"
+                    return@post
+                }
+                variable.value = body.get("value")?.asString ?: value
+                variable.reference = body.get("variablesReference")?.asInt ?: 0
+                variable.children.clear()
+                variable.expanded = false
+                status = "${variable.name} = ${variable.value}"
+                // Other names may show the same object; watches and inline values read it again.
+                refreshWatches()
+                val frame = debugFrames.firstOrNull { it.id == selectedFrameId }
+                val locals = debugVariables.firstOrNull()
+                if (frame != null && locals != null) showInlineValues(frame, locals.children)
+            }
         }
     }
 
@@ -1472,11 +1831,11 @@ class WorkbenchController(private val context: Context) {
     fun evaluateInDebugConsole(expression: String) {
         if (expression.isBlank()) return
         debugConsole.add(DebugConsoleLine("> $expression", DebugConsoleLine.Kind.Input))
-        if (!debugger.isStarted) {
+        if (!session.isStarted) {
             debugConsole.add(DebugConsoleLine("Start debugging (F5) to evaluate expressions", DebugConsoleLine.Kind.Info))
             return
         }
-        debugger.request("evaluate", JsonObject().apply {
+        session.request("evaluate", JsonObject().apply {
             addProperty("expression", expression)
             selectedFrameId?.let { addProperty("frameId", it) }
             addProperty("context", "repl")
@@ -1489,23 +1848,27 @@ class WorkbenchController(private val context: Context) {
                         DebugConsoleLine(body.get("result")?.asString.orEmpty(), DebugConsoleLine.Kind.Result)
                     },
                 )
+                // An assignment in the console can change what the watches show.
+                if (error == null) refreshWatches()
             }
         }
     }
 
     fun debugStep(command: String) {
         val stopped = debugState as? DebugState.Stopped ?: return
-        debugger.request(command, JsonObject().apply { addProperty("threadId", stopped.threadId) })
+        session.request(command, JsonObject().apply { addProperty("threadId", stopped.threadId) })
     }
 
     fun pauseDebugging() {
         if (debugState != DebugState.Running) return
-        debugger.request("pause", JsonObject().apply { addProperty("threadId", 0) })
+        session.request("pause", JsonObject().apply { addProperty("threadId", 0) })
     }
 
     fun stopDebugging() {
         if (debugState == DebugState.Idle) return
-        debugger.request("disconnect", JsonObject().apply { addProperty("terminateDebuggee", true) }, timeoutSeconds = 5)
+        // An attached program keeps running when the session ends (VS Code's Disconnect).
+        val attached = debugConsole.firstOrNull()?.text?.contains(": Attaching to ") == true
+        session.request("disconnect", JsonObject().apply { addProperty("terminateDebuggee", !attached) }, timeoutSeconds = 5)
             .whenComplete { _, _ -> post { endDebugSession(null) } }
     }
 
@@ -1514,7 +1877,7 @@ class WorkbenchController(private val context: Context) {
             startOrContinueDebugging()
             return
         }
-        debugger.request("disconnect", JsonObject().apply { addProperty("terminateDebuggee", true) }, timeoutSeconds = 5)
+        session.request("disconnect", JsonObject().apply { addProperty("terminateDebuggee", true) }, timeoutSeconds = 5)
             .whenComplete { _, _ ->
                 post {
                     endDebugSession(null)
@@ -1529,12 +1892,19 @@ class WorkbenchController(private val context: Context) {
         debugVariables.clear()
         selectedFrameId = null
         executionPoint = null
+        debugInlineValues = null
+        refreshWatches()
     }
 
     private fun endDebugSession(message: String?) {
+        // Stop ends it, then the adapter's own `terminated` arrives: the session ends once.
+        if (debugState == DebugState.Idle && !debugger.isStarted && childDebugger == null) return
         message?.let { debugConsole.add(DebugConsoleLine(it, DebugConsoleLine.Kind.Error)) }
         clearPausedState(DebugState.Idle)
+        childDebugger?.stop()
+        childDebugger = null
         debugger.stop()
+        debugCapabilities = null
         debugConsole.add(DebugConsoleLine("Debug session ended", DebugConsoleLine.Kind.Info))
     }
 
@@ -1594,15 +1964,23 @@ class WorkbenchController(private val context: Context) {
     }
 
     /** Breakpoints, the paused line and problem dots beside the line numbers of [path]'s editor. */
+    private var shownLineMarks: LineMarks? = null
+
     fun refreshLineMarks(path: String? = activePath) {
         if (path == null || path != activePath) return
-        editorSurface?.setLineMarks(
-            LineMarks(
-                breakpoints = breakpoints[path].orEmpty().map { it - 1 }.toSet(),
-                pausedLine = executionPoint?.takeIf { it.first == path }?.second?.minus(1),
-                problems = if (settings.problemUnderlines) editorProblemLines else emptyMap(),
-            ),
+        val surface = editorSurface ?: return
+        val marks = LineMarks(
+            breakpoints = breakpoints[path].orEmpty().map { it - 1 }.toSet(),
+            conditionalBreakpoints = breakpointOptions[path].orEmpty().filterValues { !it.isPlain && !it.isLogpoint }.keys.map { it - 1 }.toSet(),
+            logpoints = breakpointOptions[path].orEmpty().filterValues { it.isLogpoint }.keys.map { it - 1 }.toSet(),
+            pausedLine = executionPoint?.takeIf { it.first == path }?.second?.minus(1),
+            problems = if (settings.problemUnderlines) editorProblemLines else emptyMap(),
         )
+        val changed = marks != shownLineMarks
+        shownLineMarks = marks
+        surface.setLineMarks(marks)
+        // A first mark widens the gutter, which moves the text: the overlays drawn at text positions follow.
+        if (changed) mainHandler.postDelayed({ editorViewportTick++ }, 50)
     }
 
     private fun lspRange(line: Int, character: Int) = JsonObject().apply {
@@ -2326,6 +2704,9 @@ class WorkbenchController(private val context: Context) {
 
     /** Tabs reopening in the background from the last session. */
     private val restoringTabs = mutableSetOf<String>()
+    /** The last session's tab order: its files load in any order, each takes its place. */
+    private val restoreOrder = mutableMapOf<String, Int>()
+    private val restorePending = mutableSetOf<String>()
 
     private fun restoreSession(workspace: String) {
         if (sessionRestored) return
@@ -2339,6 +2720,10 @@ class WorkbenchController(private val context: Context) {
         pinnedTabs.addAll(saved.pinned.orEmpty().filter { it in open && it !in pinnedTabs })
         // Only the active tab is shown (and starts its language servers); the rest wait to be shown.
         val active = saved.active?.takeIf { it in open } ?: open.lastOrNull()
+        restoreOrder.clear()
+        open.forEachIndexed { index, path -> restoreOrder[path] = index }
+        restorePending.clear()
+        restorePending.addAll(open)
         open.sortedBy { it == active }.forEach { openPath(it, preview = it == saved.preview, background = it != active) }
         // Offline there is no folder to list; Explorer shows the files this device has instead.
         if (!vfs.isConnected()) return
@@ -2747,6 +3132,7 @@ class WorkbenchController(private val context: Context) {
                 }
                 workspaceRoot = workspace
                 reloadWorkspaceSnippets(workspace)
+                reloadLaunchConfigurations(workspace)
                 refreshGitStatus()
                 // Only the shown file's servers: restored tabs start theirs when shown (VS Code
                 // loads them then too), so a dozen tabs don't start a dozen servers at once.
@@ -3154,8 +3540,14 @@ class WorkbenchController(private val context: Context) {
                 closeDocument(oldPreview.path)
                 documents.add(index.coerceIn(0, documents.size), document)
             }
-            else -> documents.add(document)
+            else -> {
+                // A restored tab goes before the first restored tab that came after it.
+                val place = restoreOrder[document.path]
+                val before = if (place == null) -1 else documents.indexOfFirst { (restoreOrder[it.path] ?: -1) > place }
+                if (before >= 0) documents.add(before, document) else documents.add(document)
+            }
         }
+        if (restorePending.remove(document.path) && restorePending.isEmpty()) restoreOrder.clear()
         if (asPreview) previewTab = document.path
     }
 
@@ -3350,6 +3742,7 @@ class WorkbenchController(private val context: Context) {
                     is SaveResult.Saved -> {
                         status = "Saved ${document.path}"
                         if (document.path.endsWith(".code-snippets")) workspaceRoot?.let(::reloadWorkspaceSnippets)
+                        if (document.path.endsWith("/.vscode/launch.json")) workspaceRoot?.let(::reloadLaunchConfigurations)
                         if (settings.gitBlame && document.path == activePath) loadBlame(document.path)
                         refreshGitStatus()
                         closeIfPendingAfterSave(document.path)
@@ -8934,6 +9327,16 @@ class WorkbenchController(private val context: Context) {
             "workbench.action.debug.stepInto" -> debugStep("stepIn")
             "workbench.action.debug.stepOut" -> debugStep("stepOut")
             "editor.debug.action.toggleBreakpoint" -> toggleBreakpoint()
+            "editor.debug.action.conditionalBreakpoint" -> editBreakpoint(focus = BreakpointField.Condition)
+            "editor.debug.action.addLogPoint" -> editBreakpoint(focus = BreakpointField.LogMessage)
+            "editor.debug.action.editBreakpoint" -> editBreakpoint()
+            "editor.debug.action.selectionToWatch" -> addSelectionToWatch()
+            "debug.addConfiguration", "workbench.action.debug.configure" -> openLaunchJson()
+            "workbench.action.debug.selectandstart" -> {
+                panelVisible = true
+                panelTab = PanelTab.Debug
+                status = "Pick a configuration in the Debug panel, then Start (F5)"
+            }
             "python.setInterpreter" -> chooseInterpreter()
             "workbench.view.scm" -> {
                 sidebar = if (sidebar == SidebarView.SourceControl) null else SidebarView.SourceControl

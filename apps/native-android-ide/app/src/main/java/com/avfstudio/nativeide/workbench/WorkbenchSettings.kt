@@ -43,6 +43,10 @@ data class WorkbenchSettings(
     val gitBlame: Boolean = false,
     /** Language servers for Go, C/C++, Rust, Bash, YAML, JSON, HTML, CSS, Dockerfile, SQL, TOML and Markdown (`avf.languageServers.others`). */
     val otherLanguageServers: Boolean = true,
+    /** How the SQL server's layout rules (sqlint: a line break after SELECT, upper-case keywords…) report (`avf.sql.styleRules`). */
+    val sqlStyleRules: SqlStyleRules = SqlStyleRules.Warning,
+    /** The paused function's variables at the end of its lines (`debug.inlineValues`). */
+    val debugInlineValues: Boolean = true,
     /** Where snippets go among the suggestions (`editor.snippetSuggestions`). */
     val snippetSuggestions: SnippetSuggestions = SnippetSuggestions.Inline,
     /** What Find starts with (`editor.find.seedSearchStringFromSelection`): "always" (the word at the cursor), "selection" or "never". */
@@ -204,6 +208,8 @@ data class WorkbenchSettings(
         const val GIT_BLAME = "git.blame.editorDecoration.enabled"
         const val OTHER_LANGUAGE_SERVERS = "avf.languageServers.others"
         const val SNIPPET_SUGGESTIONS = "editor.snippetSuggestions"
+        const val SQL_STYLE_RULES = "avf.sql.styleRules"
+        const val DEBUG_INLINE_VALUES = "debug.inlineValues"
         const val FIND_SEED = "editor.find.seedSearchStringFromSelection"
         const val PLOT_VIEWER_ON_TAP = "avf.notebook.plotViewerOnTap"
         /** VS Code's enum (on/off/onUnlessPressed/offUnlessPressed); there is no key to press here, so off* is off. */
@@ -316,6 +322,10 @@ data class WorkbenchSettings(
                 gitBlame = bool(GIT_BLAME, defaults.gitBlame),
                 otherLanguageServers = bool(OTHER_LANGUAGE_SERVERS, defaults.otherLanguageServers),
                 snippetSuggestions = SnippetSuggestions.entries.firstOrNull { it.key == string(SNIPPET_SUGGESTIONS) } ?: defaults.snippetSuggestions,
+                sqlStyleRules = SqlStyleRules.entries.firstOrNull { it.key == string(SQL_STYLE_RULES) } ?: defaults.sqlStyleRules,
+                // VS Code's values are "on", "off" and "auto"; the app has a provider for every language, so auto is on.
+                debugInlineValues = settings.getPath(DEBUG_INLINE_VALUES)?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isString }
+                    ?.asString?.let { it != "off" } ?: bool(DEBUG_INLINE_VALUES, defaults.debugInlineValues),
                 findSeed = string(FIND_SEED)?.takeIf { it in setOf("always", "selection", "never") } ?: defaults.findSeed,
                 plotViewerOnTap = bool(PLOT_VIEWER_ON_TAP, defaults.plotViewerOnTap),
                 occurrencesHighlight = string(OCCURRENCES_HIGHLIGHT)?.let { it != "off" && it != "false" } ?: defaults.occurrencesHighlight,
