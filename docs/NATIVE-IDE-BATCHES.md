@@ -2072,6 +2072,14 @@ day, L several days.
       "n is 7" followed by " 4 total = 104"); keep output categories apart. S.
   47. Not tried on the tablet: hit counts, Debug: Add to Watch, editing an existing breakpoint
       and Remove, the inline values setting, the single "Debug session ended". S.
+* To investigate (user, 11-03):
+  48. Graphics left behind when every editor tab is closed: the welcome page shows the last
+      file's editor overlays at their old places: code lenses ("2 references", "1 reference"),
+      two fold chevrons at the left edge, and inlay hints ("data: list[int]", "total: int",
+      "values=data", "factor=3", "factor=10") over the welcome title and shortcut list. The
+      overlays in EditorPane (CodeLens, fold arrows, InlayHintsOverlay) probably keep their last
+      state when no editor is shown; clear them (or skip drawing) when there's no active
+      document. S.
 * Still left out on purpose: multi-cursor, sticky scroll, minimap (Aardink switch; folding came in batch 31);
   split editor groups and the 3-way merge editor; tasks.json; MCP, other AI providers and the
   built-in chat agent (Copilot, Claude Code and Gemini through ACP instead); foldable postures
