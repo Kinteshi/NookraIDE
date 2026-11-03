@@ -61,6 +61,8 @@ data class WorkbenchSettings(
     val editorHover: Boolean = true,
     /** `editor.hover.delay`: how long the pointer rests before the hover card shows, in ms. */
     val editorHoverDelay: Int = 300,
+    /** `editor.hover.hidingDelay`: how long the card stays once the pointer leaves its word, to reach it, in ms. */
+    val editorHoverHidingDelay: Int = 300,
     /** The Markdown preview follows the editor's scrolling (`markdown.preview.scrollPreviewWithEditor`). */
     val markdownScrollSync: Boolean = true,
     val autoSave: AutoSaveMode = AutoSaveMode.Off,
@@ -212,6 +214,7 @@ data class WorkbenchSettings(
         const val TOOLTIPS = "avf.workbench.tooltips"
         const val EDITOR_HOVER = "editor.hover.enabled"
         const val EDITOR_HOVER_DELAY = "editor.hover.delay"
+        const val EDITOR_HOVER_HIDING_DELAY = "editor.hover.hidingDelay"
         const val MARKDOWN_SCROLL_SYNC = "markdown.preview.scrollPreviewWithEditor"
         const val AUTO_SAVE = "files.autoSave"
         const val AUTO_SAVE_DELAY = "files.autoSaveDelay"
@@ -322,6 +325,7 @@ data class WorkbenchSettings(
                 tooltips = bool(TOOLTIPS, defaults.tooltips),
                 editorHover = bool(EDITOR_HOVER, defaults.editorHover),
                 editorHoverDelay = number(EDITOR_HOVER_DELAY)?.toInt()?.coerceIn(0, 5000) ?: defaults.editorHoverDelay,
+                editorHoverHidingDelay = number(EDITOR_HOVER_HIDING_DELAY)?.toInt()?.coerceIn(0, 5000) ?: defaults.editorHoverHidingDelay,
                 markdownScrollSync = bool(MARKDOWN_SCROLL_SYNC, defaults.markdownScrollSync),
                 autoSave = AutoSaveMode.entries.firstOrNull { it.key == string(AUTO_SAVE) } ?: defaults.autoSave,
                 autoSaveDelayMs = number(AUTO_SAVE_DELAY)?.toInt()?.coerceIn(200, 60_000) ?: defaults.autoSaveDelayMs,

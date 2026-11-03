@@ -177,6 +177,28 @@ enum class GuestDependency(
         "the MaterialCode tool catalog (Marksman 2026-02-08, pinned, checksum-verified; about 22 MB)",
         "avf-native-daemon tools install marksman",
     ),
+    // Toolchains some of those servers work through, offered when one runs without its toolchain.
+    GoToolchain(
+        "Go toolchain",
+        listOf("go"),
+        "Go: gopls reads packages with the go command (and building and running Go)",
+        "Debian packages (apt, needs sudo; golang-go 1.24 with GCC for cgo, about 530 MB)",
+        aptInstall("golang-go"),
+    ),
+    CToolchain(
+        "C/C++ compiler and headers",
+        listOf("cc"),
+        "C and C++: clangd finds the standard headers (stdio.h, <vector>) through them (and building)",
+        "Debian packages (apt, needs sudo; build-essential: GCC, G++, make and the C library headers, about 290 MB)",
+        aptInstall("build-essential"),
+    ),
+    RustToolchain(
+        "Rust toolchain (cargo)",
+        listOf("cargo"),
+        "Rust: rust-analyzer reads the project with cargo (and building and running Rust)",
+        "Debian packages (apt, needs sudo; cargo and rustc 1.85 with GCC and LLVM, about 970 MB)",
+        aptInstall("cargo"),
+    ),
     ;
 
     companion object {

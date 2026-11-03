@@ -347,6 +347,7 @@ private fun LazyListScope.intelligence(settings: WorkbenchSettings, set: SetSett
     item { SwitchRow(Icons.Outlined.Mouse, "Hover", "Resting a mouse or touchpad pointer on code shows its type, docs and problems (Ctrl+K Ctrl+I at the cursor)", settings.editorHover) { set(WorkbenchSettings.EDITOR_HOVER, it) } }
     if (settings.editorHover) {
         item { SliderRow(Icons.Outlined.Timer, "Hover delay", settings.editorHoverDelay.toFloat(), 0f..2000f, "%.0f ms", steps = 19) { set(WorkbenchSettings.EDITOR_HOVER_DELAY, it.roundToInt()) } }
+        item { SliderRow(Icons.Outlined.Timer, "Hover hiding delay", settings.editorHoverHidingDelay.toFloat(), 0f..2000f, "%.0f ms", steps = 19) { set(WorkbenchSettings.EDITOR_HOVER_HIDING_DELAY, it.roundToInt()) } }
     }
     item { SwitchRow(Icons.Outlined.DataObject, "Inlay hints", "Inferred types and parameter names at the end of the line, from the language server", settings.inlayHints) { set(WorkbenchSettings.INLAY_HINTS, if (it) "on" else "off") } }
     item { SwitchRow(Icons.Outlined.Numbers, "Reference counts", "\"3 references\" after functions and classes (code lens); tap one to list them", settings.codeLens) { set(WorkbenchSettings.CODE_LENS, it) } }

@@ -38,6 +38,15 @@ package_of() {
     esac
 }
 
+# npm `overrides` for a package whose own ranges now resolve to something it can't load:
+# sql-language-server 1.7.1 imports vscode-languageserver-protocol/lib/common/protocol, which
+# the protocol's later releases no longer export (vscode-languageserver's own copy is left alone).
+overrides_of() {
+    case "$1" in
+        sql-language-server) echo '{"vscode-languageserver-protocol@^3.15.3": "3.16.0"}' ;;
+    esac
+}
+
 # Where a package goes: agents under agents/, servers under servers/ (one folder per package).
 dir_of() {
     case "$1" in
@@ -98,12 +107,18 @@ write_wrapper() {
 }
 
 setup() {
-    local agent=$1 package directory
+    local agent=$1 package directory overrides
     package=$(package_of "$agent")
     directory=$(dir_of "$agent")
     install_node
     echo "Installing $package…"
     mkdir -p "$directory"
+    overrides=$(overrides_of "$agent")
+    if [ -n "$overrides" ] && ! grep -qF '"overrides"' "$directory/package.json" 2>/dev/null; then
+        # A fresh tree, so what's installed already is resolved again with the overrides.
+        rm -rf "$directory/node_modules" "$directory/package-lock.json"
+        printf '{\n  "overrides": %s\n}\n' "$overrides" > "$directory/package.json"
+    fi
     PATH="$NODE_DIR/bin:$PATH" "$NODE_DIR/bin/npm" install --prefix "$directory" \
         --no-fund --no-audit --no-update-notifier --omit=dev --loglevel=error "$package"
     [ -f "$(entry_of "$agent")" ] || fail "$package did not install its entry point"

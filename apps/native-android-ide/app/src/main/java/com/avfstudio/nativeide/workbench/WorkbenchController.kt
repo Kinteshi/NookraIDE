@@ -799,7 +799,7 @@ class WorkbenchController(private val context: Context) {
                 diagnostics.clear()
                 diagnostics.addAll(diagnosticsByClient.values.flatMap { it.values.flatten() })
                 refreshEditorProblems()
-                documents.forEach { ensureLanguageServers(it.path) }
+                activePath?.let(::ensureLanguageServers)
             }
         }
     }
@@ -865,6 +865,16 @@ class WorkbenchController(private val context: Context) {
             // vtsls draws reference counts only when asked (VS Code's settings).
             fill("typescript.referencesCodeLens.enabled", true)
             fill("javascript.referencesCodeLens.enabled", true)
+        }
+        // VS Code's defaults for these servers, which check nothing until told to.
+        if (language == OtherLanguageServer.Json.id) {
+            fill("json.validate.enable", true)
+            fill("json.format.enable", true)
+        }
+        if (language == OtherLanguageServer.Yaml.id) {
+            fill("yaml.validate", true)
+            fill("yaml.hover", true)
+            fill("yaml.completion", true)
         }
         if (language == "python-format" && settings.pythonLintRules.extendSelect.isNotEmpty()) {
             fill("ruff.lint.extendSelect", com.google.gson.JsonArray().apply { settings.pythonLintRules.extendSelect.forEach(::add) })
@@ -2314,6 +2324,9 @@ class WorkbenchController(private val context: Context) {
         preferences.edit().putString(workspaceSessionKey(workspace), gson.toJson(session)).apply()
     }
 
+    /** Tabs reopening in the background from the last session. */
+    private val restoringTabs = mutableSetOf<String>()
+
     private fun restoreSession(workspace: String) {
         if (sessionRestored) return
         sessionRestored = true
@@ -2324,7 +2337,9 @@ class WorkbenchController(private val context: Context) {
             ?: legacySession(workspace)
         val open = saved.open.orEmpty().filter { isPathWithinRoot(it, workspace) }
         pinnedTabs.addAll(saved.pinned.orEmpty().filter { it in open && it !in pinnedTabs })
-        open.sortedBy { it == saved.active }.forEach { openPath(it, preview = it == saved.preview) }
+        // Only the active tab is shown (and starts its language servers); the rest wait to be shown.
+        val active = saved.active?.takeIf { it in open } ?: open.lastOrNull()
+        open.sortedBy { it == active }.forEach { openPath(it, preview = it == saved.preview, background = it != active) }
         // Offline there is no folder to list; Explorer shows the files this device has instead.
         if (!vfs.isConnected()) return
         saved.directory?.takeIf { isPathWithinRoot(it, workspace) && it != workspace }?.let(::loadDirectory)
@@ -2733,7 +2748,9 @@ class WorkbenchController(private val context: Context) {
                 workspaceRoot = workspace
                 reloadWorkspaceSnippets(workspace)
                 refreshGitStatus()
-                documents.forEach { ensureLanguageServers(it.path) }
+                // Only the shown file's servers: restored tabs start theirs when shown (VS Code
+                // loads them then too), so a dozen tabs don't start a dozen servers at once.
+                activePath?.let(::ensureLanguageServers)
                 startCopilot()
                 notebooks.values.forEach { session ->
                     session.kernelState = "No kernel"
@@ -2853,7 +2870,8 @@ class WorkbenchController(private val context: Context) {
      * search match) it is a preview tab that the next such open replaces; a second tap within
      * [DOUBLE_TAP_MS] keeps it, like a double click in VS Code.
      */
-    fun openPath(path: String, preview: Boolean = false) {
+    /** [background]: a restored tab that opens without being shown. */
+    fun openPath(path: String, preview: Boolean = false, background: Boolean = false) {
         // Offline, a guest file opens from this device's copy if there is one.
         if (!vfs.isConnected() && isGuestPath(path) && !repository.hasCopy(path)) {
             status = "Connect to a guest before opening files"
@@ -2872,11 +2890,12 @@ class WorkbenchController(private val context: Context) {
         } else {
             previewRequests -= path
         }
+        if (background) restoringTabs += path else restoringTabs -= path
         // Images open in the viewer, which reads the file itself; there is no text to load.
         if (isImagePath(path)) {
             if (isGuestPath(path) && vfs.isConnected()) rememberOfflineFile(path)
             addTab(DocumentSession(path, "", null, dirty = false, binary = true), asPreview = previewRequests.remove(path))
-            selectDocument(path)
+            if (!restoringTabs.remove(path)) selectDocument(path)
             return
         }
         busy = true
@@ -2959,11 +2978,12 @@ class WorkbenchController(private val context: Context) {
                 }
                 // An SVG opens drawn (avf.svg.openAsImage); the breadcrumb's buttons show its source.
                 if (existing == null && isSvgPath(session.path) && settings.svgAsImage) markdownPreviews[session.path] = MarkdownPreviewMode.Only
-                selectDocument(session.path)
+                val background = restoringTabs.remove(session.path)
+                if (!background) selectDocument(session.path)
                 status = if (session.conflict != null) "Remote changes detected; choose how to resolve" else "Opened ${session.path.substringAfterLast('/')}"
                 fetchLanguagePackIfWanted(session.path)
                 notifyDocumentOpened(session)
-                ensureLanguageServers(session.path)
+                if (!background) ensureLanguageServers(session.path)
                 if (lspLanguageId(session.path) != null) refreshOutline(session)
                 if (session.conflict != null) dialog = WorkbenchDialog.Conflict(session)
             }
@@ -3867,7 +3887,7 @@ class WorkbenchController(private val context: Context) {
             is EditorEvent.FocusChanged -> post {
                 if (event.focused) focusArea = FocusArea.Editor else if (focusArea == FocusArea.Editor) focusArea = FocusArea.Other
             }
-            is EditorEvent.PointerRested -> post { if (event.left) onPointerLeftEditor() else onPointerRested(event.uri, event.position) }
+            is EditorEvent.PointerRested -> post { if (event.left) scheduleHoverHide() else onPointerRested(event.uri, event.position) }
             is EditorEvent.Zoomed -> post {
                 editorViewportTick++
                 // Saved once the fingers stop, rounded like the Settings slider.
@@ -3994,8 +4014,10 @@ class WorkbenchController(private val context: Context) {
     private fun ensureLanguageServers(path: String) {
         val workspace = workspaceRoot ?: return
         if (!vfs.isConnected() || path in notebooks) return
+        val starting = languageClients.filterValues { it in languageClientsFor(path) && !it.isStarted }
+        if (starting.isEmpty()) return
         scheduledServerStop?.cancel(false)
-        languageClients.filterValues { it in languageClientsFor(path) && !it.isStarted }.forEach { (language, client) ->
+        starting.forEach { (language, client) ->
             val tool = languageServerTool(language)
             status = "Starting $tool"
             // ty finds the chosen interpreter's environment through CONDA_PREFIX / VIRTUAL_ENV.
@@ -4015,6 +4037,7 @@ class WorkbenchController(private val context: Context) {
                         return@post
                     }
                     status = "$tool ready"
+                    OtherLanguageServer.byId(language)?.let(::offerToolchain)
                     documents.filter { client in languageClientsFor(it.path) }.forEach { document ->
                         notifyDocumentOpened(document)
                         if (activePath == document.path) {
@@ -4026,6 +4049,17 @@ class WorkbenchController(private val context: Context) {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    /** A server that runs without the toolchain it works through (gopls without go): offered once a session. */
+    private fun offerToolchain(server: OtherLanguageServer) {
+        val toolchain = server.toolchain ?: return
+        checkGuestTools {
+            if (guestTool(toolchain) != DependencyState.Missing || dialog != null || !offeredServerInstalls.add(toolchain)) return@checkGuestTools
+            offerInstall(toolchain, "The ${server.label} is running, but it needs the ${toolchain.label} to understand your code.") {
+                restartLanguageServer(server.id)
             }
         }
     }
@@ -4073,6 +4107,7 @@ class WorkbenchController(private val context: Context) {
         clearCodeLens()
         refreshEditorProblems()
         activeDocument?.let { document ->
+            ensureLanguageServers(document.path)
             refreshOutline(document)
             refreshSemanticTokens(document)
             scheduleInlayHints(document.path, delayMs = 0)
@@ -4332,8 +4367,9 @@ class WorkbenchController(private val context: Context) {
 
     private fun onPointerRested(path: String, position: LspPosition?) {
         if (path != activePath) return
+        // Off its word: the card stays a moment, so the pointer can go onto it (VS Code's hiding delay).
         if (position == null) {
-            hideHoverCard()
+            scheduleHoverHide()
             return
         }
         val document = activeDocument ?: return
@@ -4344,15 +4380,18 @@ class WorkbenchController(private val context: Context) {
     var hoverCardHovered = false
     private var scheduledHoverHide: ScheduledFuture<*>? = null
 
-    /** The pointer left the editor: the card goes shortly after, unless it went onto the card. */
-    private fun onPointerLeftEditor() {
+    /** The pointer left the card's word or the editor: the card goes shortly after, unless it went onto the card. */
+    private fun scheduleHoverHide() {
+        if (hoverCard == null) return
         scheduledHoverHide?.cancel(false)
-        scheduledHoverHide = timer.schedule({ post { if (!hoverCardHovered) hideHoverCard() } }, 500, TimeUnit.MILLISECONDS)
+        val delay = settings.editorHoverHidingDelay.toLong()
+        scheduledHoverHide = timer.schedule({ post { if (!hoverCardHovered) hideHoverCard() } }, delay, TimeUnit.MILLISECONDS)
     }
 
+    /** Off the card: it goes after the hiding delay too, so the pointer can go back to its word. */
     fun leaveHoverCard() {
         hoverCardHovered = false
-        hideHoverCard()
+        scheduleHoverHide()
     }
 
     fun hideHoverCard() {
@@ -4366,6 +4405,7 @@ class WorkbenchController(private val context: Context) {
     }
 
     private fun showHoverAt(document: DocumentSession, position: LspPosition, fromPointer: Boolean) {
+        scheduledHoverHide?.cancel(false)
         val request = ++hoverRequest
         val uri = diagnosticUri(document.path)
         val problems = diagnostics.filter { it.uri == uri && it.covers(position) }.sortedBy { it.severity ?: 4 }

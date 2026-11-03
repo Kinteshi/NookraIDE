@@ -1655,7 +1655,7 @@ User's pick (11-02): backlog 26, 27, 28 (found in batch 32), "to round them up".
   in a new terminal, then opens it. Checked the offer for zsh and dismissed it (nothing was
   installed in the guest).
 
-## 34. Pointer fixes, terminal find, snippets, language servers on demand, Source Control extras (11-02 15:20–16:25; WIP, mostly checked)
+## 34. Pointer fixes, terminal find, snippets, language servers on demand, Source Control extras (11-02 15:20–16:25, finished 21:25–22:10; done, checked)
 User's pick (11-02): backlog 1-10 of the 11-02 table (items 31, 32, 33, 29, 30, the 14/24
 leftovers, 16 and 5 of the reviews, 8 and 13 of the 11-01 review). 299 app unit tests, 95
 daemon and the protocol tests pass. The guest runs the new daemon (`.previous` is batch 32's).
@@ -1708,6 +1708,59 @@ daemon and the protocol tests pass. The guest runs the new daemon (`.previous` i
   All checked on a scratch repository (since deleted).
 * Left on the device: Taplo in ~/.local/bin; copy on select back off; the AVFPTR log property
   cleared; staged files removed. The pointer debug logs stay, gated by `log.tag.AVFPTR`.
+
+Finishing the batch (11-02 evening; the user confirmed the I-beam and the hover card on their
+touchpad; backlog 34-37). 299 app unit tests and 95 daemon tests pass; the guest runs this
+daemon (it carries the new avf-node-agent).
+* (User) The hover card closed as soon as the pointer left the word, so it couldn't be reached
+  to scroll it. It now stays for VS Code's hiding delay (`editor.hover.hidingDelay`, 300 ms,
+  Settings → Code intelligence → Hover hiding delay) after the pointer leaves its word, the
+  editor or the card itself, and a new word's card cancels the pending close. **To confirm with
+  the user's touchpad** (scrolling a long card).
+* (35) Snippet field outlines lagged a character: the overlay's draw lambda captured nothing
+  that changed, so Compose kept it and never redrew it after an edit; the revision (and the
+  scroll tick) are now read while drawing. Same fix for the find-in-selection shading, which
+  stayed put on scroll. Snippet fields are selected as search does, so sora doesn't open its
+  copy/paste bar on them. Checked: "prr" inserted, both `name` fields outlined around "total"
+  as it was typed, Tab to the end.
+* (35) Language-server snippets: the client told servers it had no snippet support, so they
+  sent none. It says it has now; the CSS server's `color: $0;` inserted with the cursor before
+  the `;`, then value suggestions. Checked.
+* Suggestions while typing didn't open on a fresh line, or at all in a file without a grammar
+  (CSS before its grammar was downloaded): sora refuses when no highlight span covers the
+  cursor. Only a span marked "no completion" (a comment, a string) stops it now. Checked in CSS
+  and Python. A gated debug log for the suggest requests: `log.tag.AVFSUG`.
+* (36) Language servers, all installed through the daemon and opened on a file each:
+  * Go, C/C++ and Rust start but need their toolchains (`go list` fails, `stdio.h` isn't found,
+    "Failed to load workspaces" without cargo). When one runs without its toolchain, the app
+    offers it once a session (Go toolchain `golang-go`, about 530 MB; C/C++ compiler and
+    headers `build-essential`, about 290 MB; Rust `cargo`, about 970 MB), then restarts the
+    server. Checked: all three offers appear. **Not checked**: the servers with their
+    toolchains installed (installing them in the guest was blocked in this session).
+  * clangd answered (references, an inlay hint, problems); Bash and Marksman show reference
+    counts; YAML, HTML, Dockerfile start.
+  * JSON showed no problems: VS Code's server checks nothing until `json.validate.enable`; the
+    app now sends VS Code's defaults for JSON and YAML. Checked: "Trailing comma".
+  * sql-language-server 1.7.1 exited at start: npm resolves its `vscode-languageserver-protocol`
+    range to 3.18, which no longer exports a file it imports. avf-node-agent pins 3.16.0 with an
+    npm override for that range only (its vscode-languageserver keeps its own 3.17 copy) and
+    reinstalls from scratch once. Checked: sqlint's problems show (it prints timings on stdout,
+    which the daemon's line-based header reader skips).
+  * Reopening the app started every restored tab's server at once (twelve here) and they all
+    timed out on initialize. Restored tabs now open in the background, and a file's servers
+    start when it is shown (VS Code loads restored editors then too). Checked: only the active
+    file's server started; data.json's started on switching to it.
+* (37) The next-edit chip: after renaming `self.y`, Copilot proposed line 7; scrolled away, the
+  chip read "↑ Copilot's next edit at line 7 · Tab go to it · Esc dismiss", Tab went there,
+  Tab accepted. Checked.
+* Found on the way: after a fling, the overlays over the text (fold arrows, inlay hints, ghost
+  text) stayed where it began. sora sends one ScrollEvent when a fling starts and moves the
+  text in `computeScroll` without more; the editor now reports offset changes from there.
+  Checked: fold arrows aligned after a fling and a slow drag.
+* Left on the device: nothing from this round. The test folder, its snippet file
+  (~/Projects/.vscode, created for the test), the npm servers, Marksman and the apt packages
+  (gopls, clangd, rust-analyzer and what they pulled in) were removed; the AVFSUG and AVFCOP
+  log properties cleared; tabs back to the user's four. Taplo stays from earlier.
 
 ## Backlog
 To investigate (user, 10-28):
@@ -1888,7 +1941,7 @@ day, L several days.
       latched modifiers and breakpoints. S-M.
   22. Accessibility pass (TalkBack labels for the editor, tree and outputs). M.
   23. Instrumented tests and golden screenshots (spec 12; the app has unit tests only). L.
-  24. (Done in batch 32, except the off-screen chip, still unchecked after batch 34.) Batch 28 leftovers: the next-edit card can sit under a problem tooltip; the off-screen
+  24. (Done in batch 32; the off-screen chip checked in batch 34.) Batch 28 leftovers: the next-edit card can sit under a problem tooltip; the off-screen
       chip and the Interactive window's export weren't checked on the tablet. S.
 * Pointer (registered 11-01, user: "I don't know if they should be appearing, but at the moment they are not"):
   25. (Done in batch 32.) Tooltips on hover with a mouse or touchpad, as VS Code shows them. Today none show: the
@@ -1928,14 +1981,27 @@ day, L several days.
       (`EditorTouchEventHandler.onMouseEvent`: `if (mouseDoubleClick) return true`). Extend the
       selection by whole words while dragging after a double click (and by lines after a triple
       click, as VS Code), in the editor view; check the touchpad's tap-and-drag too. S-M.
-* Left from batch 34 (11-02):
-  34. Confirm with the user's mouse/touchpad: the I-beam over code and the terminal, and that
+* Left from batch 34 (11-02; 34-37 done in batch 34's second round):
+  34. (Done: the user confirmed both.) Confirm with the user's mouse/touchpad: the I-beam over code and the terminal, and that
       the hover card no longer blinks (only a simulated touchpad was used). S.
-  35. Check the snippet field outlines after the redraw fix, and a language server's snippet
+  35. (Done in batch 34.) Check the snippet field outlines after the redraw fix, and a language server's snippet
       completion (a call with parameter stops). S.
-  36. Try the language servers not yet run on the tablet: gopls, clangd, rust-analyzer (apt,
+  36. (Done in batch 34, except Go, C/C++ and Rust with their toolchains installed.) Try the language servers not yet run on the tablet: gopls, clangd, rust-analyzer (apt,
       needs sudo), the npm ones (Bash, YAML, JSON, HTML, CSS, Dockerfile, SQL) and Marksman. S-M.
-  37. The next-edit off-screen chip, still unchecked (from batch 28). S.
+  37. (Done in batch 34.) The next-edit off-screen chip, still unchecked (from batch 28). S.
+* Left from batch 34's second round (11-02):
+  38. Confirm with the user's touchpad that the hover card can be reached and scrolled (the
+      hiding delay). S.
+  39. Go, C/C++ and Rust with their toolchains: accept the offer (or install `golang-go`,
+      `build-essential`, `cargo`) and check gopls, clangd and rust-analyzer on a module, a file
+      with `#include <stdio.h>` and a cargo project. S.
+  40. Snippets wait for the language server's answer: while a fresh server is still indexing
+      (ty with a large environment takes seconds), typing a prefix shows nothing. VS Code shows
+      snippets at once and merges the server's items when they come. S-M.
+  41. Restored tabs come back in the order their files finished loading, with the active one
+      last; keep the saved order. S.
+  42. sqlint (inside sql-language-server) reports its style rules ("A linebreak is required
+      after SELECT") as errors; consider a default `.sqlintrc` or lowering them to warnings. S.
 * Still left out on purpose: multi-cursor, sticky scroll, minimap (Aardink switch; folding came in batch 31);
   split editor groups and the 3-way merge editor; tasks.json; MCP, other AI providers and the
   built-in chat agent (Copilot, Claude Code and Gemini through ACP instead); foldable postures

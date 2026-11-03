@@ -720,6 +720,10 @@ private fun FindScopeOverlay(controller: WorkbenchController) {
     if (scope.first >= content.length || scope.isEmpty()) return
     val shade = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
     androidx.compose.foundation.Canvas(Modifier.fillMaxSize().clipToBounds()) {
+        // Read while drawing: the lambda captures nothing that changes, so Compose keeps it and
+        // only state read here redraws it after a scroll or an edit.
+        controller.editorViewportTick
+        controller.documentRevision
         textRangeRects(view, scope.first, minOf(scope.last + 1, content.length), size.width).forEach { rect ->
             drawRect(shade, topLeft = rect.topLeft, size = rect.size)
         }
@@ -760,6 +764,9 @@ private fun SnippetStopsOverlay(controller: WorkbenchController) {
     val colors = MaterialTheme.colorScheme
     val density = LocalDensity.current
     androidx.compose.foundation.Canvas(Modifier.fillMaxSize().clipToBounds()) {
+        // Read while drawing too (see FindScopeOverlay): typing in a field changes no capture.
+        controller.editorViewportTick
+        view.snippetRevision
         val stroke = with(density) { 1.dp.toPx() }
         session.stops.forEachIndexed { index, stop ->
             if (stop.index == 0) return@forEachIndexed
@@ -1472,7 +1479,8 @@ internal class NativeCodeEditor(
         val final = session.isFinal
         // Ending first, so the selection change below doesn't look like leaving the snippet.
         if (final) snippetSession = null
-        selectOffsets(span[0].coerceIn(0, text.length), span[1].coerceIn(0, text.length))
+        // As search selects (VS Code shows no copy/paste bar on a snippet field either).
+        selectOffsets(span[0].coerceIn(0, text.length), span[1].coerceIn(0, text.length), SelectionChangeEvent.CAUSE_SEARCH)
         snippetRevision++
     }
 
@@ -1547,6 +1555,25 @@ internal class NativeCodeEditor(
             zoomTo(textSizePx, live = false)
         }
         return true
+    }
+
+    // Scrolling ----------------------------------------------------------------------------------
+
+    /**
+     * The text moved without a ScrollEvent: sora sends one when a fling starts, then moves the
+     * text frame by frame here, so the overlays drawn over it (fold arrows, inlay hints, ghost
+     * text) would stay where the fling began.
+     */
+    var onScrolled: (() -> Unit)? = null
+    private var reportedOffsetX = 0
+    private var reportedOffsetY = 0
+
+    override fun computeScroll() {
+        super.computeScroll()
+        if (offsetX == reportedOffsetX && offsetY == reportedOffsetY) return
+        reportedOffsetX = offsetX
+        reportedOffsetY = offsetY
+        onScrolled?.invoke()
     }
 
     // Pointer rest (the hover card) -------------------------------------------------------------

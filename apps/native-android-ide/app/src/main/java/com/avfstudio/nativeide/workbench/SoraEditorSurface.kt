@@ -315,6 +315,7 @@ internal class SoraEditorSurface(
         val scrollReceipt = editor.subscribeAlways(ScrollEvent::class.java) {
             listener(EditorEvent.ViewportChanged("", visibleLines))
         }
+        editor.onScrolled = { listener(EditorEvent.ViewportChanged("", visibleLines)) }
         val focusReceipt = editor.subscribeAlways(EditorFocusChangeEvent::class.java) { event ->
             listener(EditorEvent.FocusChanged("", event.isGainFocus))
         }
@@ -327,6 +328,7 @@ internal class SoraEditorSurface(
         }
         return Closeable {
             editor.onPointerRest = null
+            editor.onScrolled = null
             contentReceipt.unsubscribe()
             selectionReceipt.unsubscribe()
             scrollReceipt.unsubscribe()

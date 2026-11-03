@@ -21,6 +21,11 @@ import java.util.concurrent.TimeoutException
 private const val MAX_SHOWN = 300
 private const val REQUEST_TIMEOUT_MS = 15_000L
 
+/** `adb shell setprop log.tag.AVFSUG DEBUG` logs suggest requests and what came back. */
+private inline fun suggestLog(message: () -> String) {
+    if (android.util.Log.isLoggable("AVFSUG", android.util.Log.DEBUG)) android.util.Log.d("AVFSUG", message())
+}
+
 /** What the suggest popup asks the workbench (its language servers) for. */
 internal interface CompletionProvider {
     val languageId: String
@@ -66,6 +71,7 @@ internal class SoraCompletionLanguage(
         val before = lineText.substring(0, wordStart)
         val trigger = if (word.isEmpty()) provider.triggerCharacters.firstOrNull { before.endsWith(it) } else null
         val cached = cache?.takeIf { it.line == position.line && it.wordStart == wordStart && it.before == before }
+        suggestLog { "request ${position.line}:$column word='$word' invoked=$invoked cached=${cached != null}" }
         if (!invoked && cached == null) {
             if (!provider.quickSuggestions) return
             if (word.isEmpty() && trigger == null) return
@@ -86,11 +92,12 @@ internal class SoraCompletionLanguage(
                 base.requireAutoComplete(content, position, publisher, extraArguments)
                 return
             }
-            await(future, publisher) ?: return
+            await(future, publisher) ?: return.also { suggestLog { "no answer for '$word'" } }
         }
         cache = Cached(position.line, wordStart, before, list)
         val items = filterCompletions(list.items, word).take(MAX_SHOWN)
         val snippets = snippetItems(word, wordStart, invoked)
+        suggestLog { "'$word': ${list.items.size} items, ${items.size} match, ${snippets.size} snippets" }
         if (items.isEmpty() && snippets.isEmpty()) return
         // A newer key may have replaced this request while the server answered; its items would be stale.
         publisher.checkCancelled()
@@ -130,6 +137,7 @@ internal class SoraCompletionLanguage(
                 try {
                     publisher.checkCancelled()
                 } catch (cancelled: CompletionCancelledException) {
+                    suggestLog { "cancelled while waiting" }
                     future.cancel(false)
                     throw cancelled
                 }
@@ -153,6 +161,16 @@ internal class PreselectingCompletion(private val codeEditor: CodeEditor) : Edit
     /** Only typing asks: an edit made while another view has the keys (Replace All, a rename) doesn't. */
     override fun requireCompletion() {
         if (codeEditor.hasFocus()) super.requireCompletion()
+    }
+
+    /**
+     * sora refuses when no highlight span covers the cursor yet: a new line before it is
+     * highlighted again, or a file with no grammar at all. Only a span marked so (a comment, a
+     * string) keeps the popup away.
+     */
+    override fun checkNoCompletion(): Boolean {
+        val span = io.github.rosemoe.sora.lang.styling.StylesUtils.getSpanForPosition(codeEditor.styles, codeEditor.cursor.left()) ?: return false
+        return io.github.rosemoe.sora.lang.styling.TextStyle.isNoCompletion(span.style)
     }
 
     override fun updateCompletionWindowPosition(shouldSetSize: Boolean) {

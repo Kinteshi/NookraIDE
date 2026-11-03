@@ -4,21 +4,24 @@ package com.avfstudio.nativeide.workbench
  * Language servers beyond Python and TypeScript (`avf.languageServers.others`): each starts when
  * a file of its language opens, like those two, and is offered for install the first time one
  * opens without it. [id] is the guest tool and the daemon's server id; [extensions] and
- * [fileNames] map to the LSP language id the server is told.
+ * [fileNames] map to the LSP language id the server is told. A server that works through a
+ * [toolchain] (gopls runs `go`) gets that offered too when it runs without it.
  */
 enum class OtherLanguageServer(
     val id: String,
     val extensions: Map<String, String>,
     val dependency: GuestDependency,
     val fileNames: Map<String, String> = emptyMap(),
+    val toolchain: GuestDependency? = null,
 ) {
-    Go("gopls", mapOf("go" to "go"), GuestDependency.Gopls, mapOf("go.mod" to "go.mod")),
+    Go("gopls", mapOf("go" to "go"), GuestDependency.Gopls, mapOf("go.mod" to "go.mod"), GuestDependency.GoToolchain),
     C(
         "clangd",
         mapOf("c" to "c", "h" to "c", "cpp" to "cpp", "cc" to "cpp", "cxx" to "cpp", "hpp" to "cpp", "hh" to "cpp", "hxx" to "cpp"),
         GuestDependency.Clangd,
+        toolchain = GuestDependency.CToolchain,
     ),
-    Rust("rust-analyzer", mapOf("rs" to "rust"), GuestDependency.RustAnalyzer),
+    Rust("rust-analyzer", mapOf("rs" to "rust"), GuestDependency.RustAnalyzer, toolchain = GuestDependency.RustToolchain),
     Bash("bash-language-server", mapOf("sh" to "shellscript", "bash" to "shellscript"), GuestDependency.BashLanguageServer, mapOf(".bashrc" to "shellscript", ".bash_profile" to "shellscript")),
     Yaml("yaml-language-server", mapOf("yaml" to "yaml", "yml" to "yaml"), GuestDependency.YamlLanguageServer),
     Json("json-language-server", mapOf("json" to "json", "jsonc" to "jsonc", "code-snippets" to "jsonc"), GuestDependency.JsonLanguageServer),

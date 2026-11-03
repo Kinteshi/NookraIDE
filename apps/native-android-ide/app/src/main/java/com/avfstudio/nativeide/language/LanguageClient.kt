@@ -533,7 +533,8 @@ class LanguageClient(
                     addProperty("dynamicRegistration", false)
                     addProperty("contextSupport", true)
                     add("completionItem", JsonObject().apply {
-                        addProperty("snippetSupport", false)
+                        // Tab stops and placeholders (NativeCodeEditor.insertSnippet).
+                        addProperty("snippetSupport", true)
                         addProperty("labelDetailsSupport", true)
                         addProperty("insertReplaceSupport", true)
                         addProperty("preselectSupport", true)
