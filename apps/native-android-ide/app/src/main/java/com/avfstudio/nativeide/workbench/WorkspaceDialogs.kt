@@ -6,7 +6,9 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -117,19 +119,22 @@ internal fun OpenFolderDialog(controller: WorkbenchController, dialog: Workbench
                 }
                 dialog.error?.let { Text(it, color = colors.error, style = MaterialTheme.typography.bodySmall) }
                 val folders = dialog.folders
-                when {
-                    folders == null && dialog.error == null -> CircularProgressIndicator(Modifier.padding(16.dp).size(24.dp))
-                    folders.isNullOrEmpty() -> Text(
-                        "No folders here",
-                        color = colors.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(12.dp),
-                    )
-                    else -> LazyColumn(Modifier.heightIn(max = 320.dp)) {
-                        // Hidden folders (.cache, .config) after the user's own.
-                        items(folders.sortedBy { it.name.startsWith('.') }, key = { it.path }) { folder ->
-                            FolderRow(folder.name, null, icon = { Icon(Icons.Outlined.Folder, contentDescription = null) }) {
-                                controller.showOpenFolder(folder.path)
+                // One height for every folder: the dialog and its buttons stay put while browsing.
+                Box(Modifier.height(320.dp)) {
+                    when {
+                        folders == null && dialog.error == null -> CircularProgressIndicator(Modifier.padding(16.dp).size(24.dp))
+                        folders.isNullOrEmpty() -> Text(
+                            "No folders here",
+                            color = colors.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.padding(12.dp),
+                        )
+                        else -> LazyColumn(Modifier.fillMaxSize()) {
+                            // Hidden folders (.cache, .config) after the user's own.
+                            items(folders.sortedBy { it.name.startsWith('.') }, key = { it.path }) { folder ->
+                                FolderRow(folder.name, null, icon = { Icon(Icons.Outlined.Folder, contentDescription = null) }) {
+                                    controller.showOpenFolder(folder.path)
+                                }
                             }
                         }
                     }

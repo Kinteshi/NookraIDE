@@ -468,22 +468,36 @@ private const val TABLE_ROW_LIMIT = 2000
 /** Rows measured for column widths. */
 private const val TABLE_MEASURED_ROWS = 200
 
+/** The data viewer has the room to show more of a long value than a cell output does. */
+private val DATA_VIEWER_COLUMN_WIDTH = 480.dp
+
+/** A table row's height: bodySmall's line and the cell's padding. */
+internal val TABLE_ROW_HEIGHT = 26.dp
+
 /**
  * A DataFrame as a native table: theme colours, header rows that stay while the rows scroll,
  * numbers aligned right, and a tap on a column header sorts by it (ascending, descending, off).
  */
 /** The Variables view's data viewer: the notebook's native table, taller, with its own sort state. */
 @Composable
-internal fun DataViewerTable(table: OutputTable) {
+internal fun DataViewerTable(table: OutputTable, maxBodyHeight: Dp) {
     var presentation by remember(table) { mutableStateOf(OutputPresentation()) }
-    OutputTableView(table, presentation, Modifier, maxBodyHeight = 560.dp) { presentation = it }
+    OutputTableView(table, presentation, Modifier, maxBodyHeight = maxBodyHeight, maxColumnWidth = DATA_VIEWER_COLUMN_WIDTH) { presentation = it }
+}
+
+/** How wide the data viewer draws [table]: its columns, as wide as their text. */
+@Composable
+internal fun dataViewerTableWidth(table: OutputTable): Dp {
+    val style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = "tnum")
+    val widths = columnWidths(table, style, style.copy(fontWeight = FontWeight.SemiBold), DATA_VIEWER_COLUMN_WIDTH)
+    return widths.fold(0.dp) { sum, width -> sum + width }
 }
 
 /** The data viewer's table when the kernel sorts (all rows, not just the page): [onSort] asks for a column, or null for none. */
 @Composable
 internal fun DataViewerTable(table: OutputTable, sortColumn: Int?, ascending: Boolean, maxBodyHeight: Dp, onSort: (Int?, Boolean) -> Unit) {
     val presentation = OutputPresentation(sortColumn = sortColumn, sortDirection = if (ascending) SortDirection.Ascending else SortDirection.Descending)
-    OutputTableView(table, presentation, Modifier, maxBodyHeight = maxBodyHeight, sortLocally = false) { next ->
+    OutputTableView(table, presentation, Modifier, maxBodyHeight = maxBodyHeight, sortLocally = false, maxColumnWidth = DATA_VIEWER_COLUMN_WIDTH) { next ->
         onSort(next.sortColumn, next.sortDirection == SortDirection.Ascending)
     }
 }
@@ -496,6 +510,7 @@ private fun OutputTableView(
     maxBodyHeight: Dp = 420.dp,
     /** False when the rows come sorted (the data viewer's kernel sorts them all). */
     sortLocally: Boolean = true,
+    maxColumnWidth: Dp = 280.dp,
     onPresentation: (OutputPresentation) -> Unit,
 ) {
     val colors = MaterialTheme.colorScheme
@@ -505,7 +520,7 @@ private fun OutputTableView(
     val rows = remember(table, sortColumn, presentation.sortDirection) {
         if (sortColumn != null && sortLocally) table.sortedBody(sortColumn, presentation.sortDirection) else table.body
     }
-    val widths = columnWidths(table, style, headerStyle)
+    val widths = columnWidths(table, style, headerStyle, maxColumnWidth)
     val numeric = remember(table) {
         List(table.columnCount) { column ->
             table.body.filterNot(::isEllipsisRow).mapNotNull { it.getOrNull(column) }
@@ -521,14 +536,17 @@ private fun OutputTableView(
         }
         onPresentation(next)
     }
+    val horizontal = rememberScrollState()
+    val vertical = rememberScrollState()
     Column(modifier) {
         Box(
             Modifier
                 .clip(RoundedCornerShape(8.dp))
-                .border(1.dp, colors.outlineVariant, RoundedCornerShape(8.dp)),
+                .border(1.dp, colors.outlineVariant, RoundedCornerShape(8.dp))
+                .scrollbars(horizontal, vertical),
         ) {
             SelectionContainer {
-                Column(Modifier.horizontalScroll(rememberScrollState())) {
+                Column(Modifier.horizontalScroll(horizontal)) {
                     table.head.forEachIndexed { r, line ->
                         Row(Modifier.background(colors.surfaceContainerHigh)) {
                             line.forEachIndexed { column, cell ->
@@ -546,7 +564,7 @@ private fun OutputTableView(
                             }
                         }
                     }
-                    Column(Modifier.heightIn(max = maxBodyHeight).verticalScroll(rememberScrollState())) {
+                    Column(Modifier.heightIn(max = maxBodyHeight).verticalScroll(vertical)) {
                         rows.take(TABLE_ROW_LIMIT).forEachIndexed { r, line ->
                             Row(Modifier.background(if (r % 2 == 0) colors.surface else colors.surfaceContainerLow)) {
                                 line.forEachIndexed { column, cell ->
@@ -594,12 +612,12 @@ private fun TableCellText(text: String, style: TextStyle, color: Color, width: D
     )
 }
 
-/** Each column as wide as its widest text (of the first rows), between 40 and 280 dp. */
+/** Each column as wide as its widest text (of the first rows), between 40 dp and [maxWidth]. */
 @Composable
-private fun columnWidths(table: OutputTable, style: TextStyle, headerStyle: TextStyle): List<Dp> {
+private fun columnWidths(table: OutputTable, style: TextStyle, headerStyle: TextStyle, maxWidth: Dp): List<Dp> {
     val measurer = rememberTextMeasurer()
     val density = LocalDensity.current
-    return remember(table, style, density) {
+    return remember(table, style, density, maxWidth) {
         val lines: List<List<TableCell>> = table.head + table.body.take(TABLE_MEASURED_ROWS)
         List(table.columnCount) { column ->
             val widest = lines.withIndex().maxOfOrNull { (row, line) ->
@@ -613,7 +631,7 @@ private fun columnWidths(table: OutputTable, style: TextStyle, headerStyle: Text
                 val text = if (head) cell.text + " ▲" else cell.text
                 measurer.measure(text, if (cell.header || head) headerStyle else style, maxLines = 1).size.width
             } ?: 0
-            with(density) { (widest.toDp() + 17.dp).coerceIn(40.dp, 280.dp) }
+            with(density) { (widest.toDp() + 17.dp).coerceIn(40.dp, maxWidth) }
         }
     }
 }

@@ -194,6 +194,7 @@ object EditorCommands {
         command("clangd.restart", "clangd: Restart language server", ""),
         command("rust-analyzer.restartServer", "rust-analyzer: Restart server", ""),
         command("materialcode.restartLanguageServers", "Restart Language Servers of the Active File", ""),
+        command("materialcode.resetPaneSizes", "View: Reset Pane Sizes", ""),
         command("editor.action.fontZoomIn", "Editor Font Zoom In", "Ctrl+="),
         command("editor.action.fontZoomOut", "Editor Font Zoom Out", "Ctrl+-"),
         command("workbench.action.openSettingsJson", "Open User Settings (JSON)", ""),

@@ -1,5 +1,9 @@
 package com.avfstudio.nativeide.workbench
 
+import androidx.compose.material.icons.outlined.Link
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.AccountTree
+import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.foundation.background
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.input.ImeAction
@@ -98,7 +102,7 @@ fun SidebarContent(controller: WorkbenchController, view: SidebarView, modifier:
             }
             if (view == SidebarView.Explorer) {
                 Tooltip("Refresh") { IconButton(onClick = {
-                    controller.currentDirectory.takeIf(String::isNotEmpty)?.let(controller::loadDirectory)
+                    controller.refreshExplorer()
                     if (controller.settings.gitDecorations) controller.refreshGitStatus()
                 }) {
                     Icon(Icons.Outlined.Refresh, contentDescription = "Refresh")
@@ -130,7 +134,7 @@ internal fun OfflineFilesList(controller: WorkbenchController) {
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
         )
         if (files.isEmpty()) {
-            EmptyMessage("No copies yet: files opened while connected are kept for offline use.")
+            EmptyState(Icons.Outlined.CloudOff, "No offline copies yet", "Files opened while connected are kept for offline use.")
         } else {
             LazyColumn {
                 items(files) { path ->
@@ -153,8 +157,8 @@ private fun OutlineList(controller: WorkbenchController) {
     var problemsOnly by remember { mutableStateOf(false) }
     val visible = if (showProblems && problemsOnly) rowsWithProblems(rows, problems) else rows.indices.toList()
     when {
-        document == null -> EmptyMessage("Open a file to show its symbols.")
-        rows.isEmpty() -> EmptyMessage("No symbols found.")
+        document == null -> EmptyState(Icons.Outlined.AccountTree, "No file is open", "Open a file to show its symbols.")
+        rows.isEmpty() -> EmptyState(Icons.Outlined.AccountTree, "No symbols found")
         else -> Column {
             if (showProblems && fileDiagnostics.isNotEmpty()) {
                 Row(Modifier.padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -204,7 +208,7 @@ private fun NotebookOutlineList(controller: WorkbenchController, session: Notebo
             )
         }
         if (entries.isEmpty()) {
-            EmptyMessage(if (codeCells) "No cells yet." else "No headings: Markdown cells with # titles show here.")
+            EmptyState(Icons.Outlined.AccountTree, if (codeCells) "No cells yet" else "No headings", if (codeCells) null else "Markdown cells with # titles show here.")
         } else {
             LazyColumn {
                 items(entries) { entry ->
@@ -226,7 +230,7 @@ fun ProblemsList(controller: WorkbenchController) {
     val issues = controller.languageServerIssues
     val diagnostics = controller.diagnostics
     if (issues.isEmpty() && diagnostics.isEmpty()) {
-        EmptyMessage("No problems have been detected in the open files.")
+        EmptyState(Icons.Outlined.CheckCircle, "No problems", "None detected in the open files.")
         return
     }
     val groups = problemsByFile(diagnostics)
@@ -283,7 +287,7 @@ private fun ProblemRow(icon: ImageVector, tint: androidx.compose.ui.graphics.Col
 private fun ReferencesList(controller: WorkbenchController) {
     val locations = controller.referenceLocations
     if (locations.isEmpty()) {
-        EmptyMessage("Run Find All References (Shift+Alt+F12) on a symbol.")
+        EmptyState(Icons.Outlined.Link, "No references yet", "Run Find All References (Shift+Alt+F12) on a symbol.")
         return
     }
     val colors = MaterialTheme.colorScheme
@@ -325,7 +329,7 @@ private fun ReferencesList(controller: WorkbenchController) {
 private fun CallHierarchyList(controller: WorkbenchController) {
     val view = controller.callHierarchy
     if (view == null) {
-        EmptyMessage("Run Peek Call Hierarchy (Shift+Alt+H) on a function.")
+        EmptyState(Icons.Outlined.AccountTree, "No call hierarchy yet", "Run Peek Call Hierarchy (Shift+Alt+H) on a function.")
         return
     }
     val colors = MaterialTheme.colorScheme

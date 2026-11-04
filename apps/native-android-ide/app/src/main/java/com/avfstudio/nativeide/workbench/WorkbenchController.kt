@@ -551,6 +551,28 @@ class WorkbenchController(private val context: Context) {
             chatVisibleState.value = value
             saveLayout("layout-chat", if (value) "shown" else "")
         }
+    /** Pane sizes in dp, kept while the pane is closed and across starts; null until dragged (the layout's default). */
+    var panelHeight by mutableStateOf(layoutValue("layout-panel-height", "").toFloatOrNull())
+    var sidebarWidth by mutableStateOf(layoutValue("layout-sidebar-width", "").toFloatOrNull())
+    var chatWidth by mutableStateOf(layoutValue("layout-chat-width", "").toFloatOrNull())
+
+    /** A drag ended: the pane sizes last until the next one. */
+    fun savePaneSizes() {
+        panelHeight?.let { saveLayout("layout-panel-height", it.toString()) }
+        sidebarWidth?.let { saveLayout("layout-sidebar-width", it.toString()) }
+        chatWidth?.let { saveLayout("layout-chat-width", it.toString()) }
+    }
+
+    /** Back to the layout's default sizes. */
+    fun resetPaneSizes() {
+        panelHeight = null
+        sidebarWidth = null
+        chatWidth = null
+        preferences.edit().remove("layout-panel-height").remove("layout-sidebar-width").remove("layout-chat-width").apply()
+    }
+
+    /** What's typed in the chat box; it stays when the chat closes. */
+    var chatDraft by mutableStateOf("")
     var settingsVisible by mutableStateOf(false)
     var compactDestination by mutableStateOf(CompactDestination.Editor)
     private var focusAreaState by mutableStateOf(FocusArea.Other)
@@ -1315,6 +1337,8 @@ class WorkbenchController(private val context: Context) {
     fun onAppVisibilityChanged(visible: Boolean) {
         appVisible = visible
         if (visible) startStatsPolling() else stopStatsPolling()
+        // Files may have changed from Linux Terminal or another app meanwhile.
+        if (visible) refreshExplorer()
         if (!visible && settings.autoSave in setOf(AutoSaveMode.OnFocusChange, AutoSaveMode.OnWindowChange)) autoSaveAll()
         // Coming back from Linux Terminal usually means the guest is up now.
         // A retry scheduled in the background may be a minute away; try now instead.
@@ -4376,12 +4400,18 @@ class WorkbenchController(private val context: Context) {
             }
     }
 
-    private fun afterFileSystemChange() {
+    /** Lists Explorer's folder and the folders open in it again. */
+    fun refreshExplorer() {
+        if (!vfs.isConnected()) return
         currentDirectory.takeIf(String::isNotEmpty)?.let(::loadDirectory)
         // Reload open folders; ones that went away (deleted, renamed) close.
         folderChildren.keys.toList().forEach { path ->
             if (path in expandedFolders) loadFolderChildren(path) else folderChildren.remove(path)
         }
+    }
+
+    private fun afterFileSystemChange() {
+        refreshExplorer()
         quickOpenIndex = emptyList()
         refreshQuickOpenIndex()
     }
@@ -5648,6 +5678,12 @@ class WorkbenchController(private val context: Context) {
         val text = surface.text.substring(range.first, range.last)
         clipboard.setPrimaryClip(ClipData.newPlainText("MaterialCode", text))
         if (cut) surface.deleteSelection()
+    }
+
+    /** A chat code block's Copy button. */
+    fun copyChatCode(code: String) {
+        context.getSystemService(ClipboardManager::class.java)?.setPrimaryClip(ClipData.newPlainText("Code", code))
+        status = "Copied the code"
     }
 
     private fun pasteClipboard() {
@@ -7440,7 +7476,11 @@ class WorkbenchController(private val context: Context) {
         session.textLog.onCommandsChanged = {
             post {
                 session.commandsRevision++
-                session.lastExitCode = session.textLog.commands().lastOrNull()?.exitCode
+                val finished = session.textLog.commands().lastOrNull()?.exitCode
+                // A command that just ended may have made or removed files; Explorer shows them.
+                if (finished != null && session.textLog.commands().size != session.commandsSeen) refreshExplorer()
+                session.commandsSeen = session.textLog.commands().size
+                session.lastExitCode = finished
             }
         }
     }
@@ -9422,12 +9462,13 @@ class WorkbenchController(private val context: Context) {
                 val root = workspaceRoot.orEmpty().trimEnd('/')
                 quickOpenIndex
                     .filter { fuzzyMatch(text, it.path.removePrefix(root)) }
-                    .sortedBy { if (it.name.startsWith(text, true)) 0 else 1 }
+                    .sortedBy { matchRank(text, it.name) }
                     .take(200)
                     .map(QuickOpenItem::File)
             }
             QuickOpenMode.Commands -> EditorCommands.all.distinctBy { it.id }
                 .filter { fuzzyMatch(text.trim(), it.title) || it.id.contains(text.trim(), true) }
+                .sortedBy { matchRank(text, it.title) }
                 .map { QuickOpenItem.Command(it, keybindingFor(it.id)) }
             QuickOpenMode.EditorSymbols -> {
                 val document = activeDocument
@@ -9605,6 +9646,7 @@ class WorkbenchController(private val context: Context) {
             "go.languageserver.restart" -> restartServerCommand(OtherLanguageServer.Go.id)
             "clangd.restart" -> restartServerCommand(OtherLanguageServer.C.id)
             "rust-analyzer.restartServer" -> restartServerCommand(OtherLanguageServer.Rust.id)
+            "materialcode.resetPaneSizes" -> resetPaneSizes()
             "materialcode.restartLanguageServers" -> activePath?.let { path ->
                 val languages = languageClientsFor(path).mapNotNull { client -> languageClients.entries.firstOrNull { it.value === client }?.key }
                 if (languages.isEmpty()) status = "No language server works on ${path.substringAfterLast('/')}"

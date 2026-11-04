@@ -1,5 +1,7 @@
 package com.avfstudio.nativeide.workbench
 
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.rememberTextMeasurer
 import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
@@ -800,7 +802,7 @@ private fun ChoiceRow(
                     selected = selected == value,
                     onClick = { onSelect(value) },
                     shape = SegmentedButtonDefaults.itemShape(index, options.size),
-                ) { Text(label, maxLines = 2, textAlign = TextAlign.Center) }
+                ) { Text(label, maxLines = 1, softWrap = false) }
             }
         }
     }
@@ -817,7 +819,13 @@ private fun ChoiceRow(
         } else {
             summary?.let { { Text(it) } }
         },
-        trailingContent = if (below) null else ({ Buttons(Modifier) }),
+        // Equal buttons, as wide as the longest label and the check need (the row's default stops at the longest word).
+        trailingContent = if (below) null else ({
+            val measurer = rememberTextMeasurer()
+            val style = MaterialTheme.typography.labelLarge
+            val longest = remember(options, style) { options.maxOf { (_, label) -> measurer.measure(label, style).size.width } }
+            Buttons(Modifier.width((with(LocalDensity.current) { longest.toDp() } + 60.dp) * options.size))
+        }),
         colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surface),
         modifier = Modifier.widthIn(max = 840.dp).fillMaxWidth(),
     )

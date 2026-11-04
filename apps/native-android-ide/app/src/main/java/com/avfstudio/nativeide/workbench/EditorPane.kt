@@ -1,5 +1,19 @@
 package com.avfstudio.nativeide.workbench
 
+import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.outlined.DeleteSweep
+import androidx.compose.material.icons.outlined.ClearAll
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.PhoneAndroid
+import androidx.compose.material.icons.automirrored.outlined.NoteAdd
+import androidx.compose.material.icons.outlined.Cloud
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.Terminal
+import androidx.compose.material.icons.outlined.Widgets
+import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.runtime.remember
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.material.icons.outlined.Image
@@ -357,18 +371,20 @@ private fun EditorTab(controller: WorkbenchController, document: DocumentSession
             }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                 @Composable
-                fun item(label: String, action: () -> Unit) = DropdownMenuItem(
+                fun item(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, action: () -> Unit) = DropdownMenuItem(
                     text = { Text(label) },
+                    leadingIcon = { Icon(icon, contentDescription = null) },
                     onClick = {
                         menu = false
                         action()
                     },
                 )
-                if (pinned) item("Unpin") { controller.unpinTab(path) } else item("Pin") { controller.pinTab(path) }
-                if (preview) item("Keep open") { controller.keepTab(path) }
-                item("Close") { controller.requestCloseDocument(path) }
-                item("Close others") { controller.closeOtherTabs(path) }
-                if (!path.startsWith("scratch:")) item("Copy path") { controller.copyPath(if (isDevicePath(path)) path.substringAfterLast('/') else path) }
+                if (pinned) item("Unpin", Icons.Outlined.PushPin) { controller.unpinTab(path) } else item("Pin", Icons.Outlined.PushPin) { controller.pinTab(path) }
+                if (preview) item("Keep open", Icons.Outlined.Check) { controller.keepTab(path) }
+                item("Close", Icons.Outlined.Close) { controller.requestCloseDocument(path) }
+                item("Close others", Icons.Outlined.ClearAll) { controller.closeOtherTabs(path) }
+                item("Close all", Icons.Outlined.DeleteSweep) { controller.runCommand("workbench.action.closeAllEditors") }
+                if (!path.startsWith("scratch:")) item("Copy path", Icons.Outlined.ContentCopy) { controller.copyPath(if (isDevicePath(path)) path.substringAfterLast('/') else path) }
             }
         }
     }
@@ -416,32 +432,53 @@ private fun EmptyEditor(controller: WorkbenchController) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        Text("MaterialCode", style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.onSurface)
+        val colors = MaterialTheme.colorScheme
+        Icon(
+            androidx.compose.ui.res.painterResource(com.avfstudio.nativeide.R.drawable.ic_launcher_monochrome),
+            contentDescription = null,
+            tint = colors.primary,
+            modifier = Modifier.size(96.dp),
+        )
+        Text("MaterialCode", style = MaterialTheme.typography.headlineMedium, color = colors.onSurface)
         Spacer(Modifier.height(16.dp))
-        listOf(
-            "Open Folder" to "Ctrl+K Ctrl+O",
-            "Quick Open" to "Ctrl+P",
-            "Command Palette" to "Ctrl+Shift+P",
-            "Toggle Terminal" to "Ctrl+`",
-            "Copilot Chat" to "Ctrl+Alt+I",
-            "Settings" to "Ctrl+,",
-        ).forEach { (label, keys) ->
-            Row(Modifier.widthIn(max = 360.dp).fillMaxWidth().padding(vertical = 4.dp)) {
-                Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
-                Text(keys, color = MaterialTheme.colorScheme.primary, fontFamily = FontFamily.Monospace)
+        // Each line does what it says; the keys are for next time.
+        val actions: List<Triple<androidx.compose.ui.graphics.vector.ImageVector, String, Pair<String, () -> Unit>>> = listOf(
+            Triple(Icons.Outlined.FolderOpen, "Open Folder", "Ctrl+K Ctrl+O" to { if (controller.connected) controller.showOpenFolder() else controller.dialog = WorkbenchDialog.Connect }),
+            Triple(Icons.Outlined.Search, "Quick Open", "Ctrl+P" to { controller.runCommand("workbench.action.quickOpen") }),
+            Triple(Icons.Outlined.Widgets, "Command Palette", "Ctrl+Shift+P" to { controller.runCommand("workbench.action.showCommands") }),
+            Triple(Icons.Outlined.Terminal, "Toggle Terminal", "Ctrl+`" to { controller.runCommand("workbench.action.terminal.toggleTerminal") }),
+            Triple(Icons.Outlined.AutoAwesome, "Chat", "Ctrl+Alt+I" to { controller.runCommand("workbench.action.chat.open") }),
+            Triple(Icons.Outlined.Settings, "Settings", "Ctrl+," to { controller.settingsVisible = true }),
+        )
+        Column(Modifier.widthIn(max = 400.dp).fillMaxWidth()) {
+            actions.forEach { (icon, label, keysAndAction) ->
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable(onClick = keysAndAction.second).padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Icon(icon, contentDescription = null, tint = colors.onSurfaceVariant, modifier = Modifier.size(18.dp))
+                    Text(label, color = colors.onSurface, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                    Text(keysAndAction.first, color = colors.onSurfaceVariant, style = MaterialTheme.typography.labelMedium, fontFamily = FontFamily.Monospace)
+                }
             }
         }
         Spacer(Modifier.height(20.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (controller.connected) {
-                androidx.compose.material3.FilledTonalButton(onClick = { controller.showOpenFolder() }) { Text("Open folder…") }
-            } else {
+            if (!controller.connected) {
                 androidx.compose.material3.FilledTonalButton(onClick = { controller.dialog = WorkbenchDialog.Connect }) {
+                    Icon(Icons.Outlined.Cloud, contentDescription = null, modifier = Modifier.padding(end = 8.dp).size(18.dp))
                     Text("Connect to guest")
                 }
             }
-            androidx.compose.material3.OutlinedButton(onClick = { controller.newUntitledFile() }) { Text("New untitled file") }
-            androidx.compose.material3.OutlinedButton(onClick = { controller.pickLocalFile?.invoke() }) { Text("Open from device…") }
+            androidx.compose.material3.OutlinedButton(onClick = { controller.newUntitledFile() }) {
+                Icon(Icons.AutoMirrored.Outlined.NoteAdd, contentDescription = null, modifier = Modifier.padding(end = 8.dp).size(18.dp))
+                Text("New untitled file")
+            }
+            androidx.compose.material3.OutlinedButton(onClick = { controller.pickLocalFile?.invoke() }) {
+                Icon(Icons.Outlined.PhoneAndroid, contentDescription = null, modifier = Modifier.padding(end = 8.dp).size(18.dp))
+                Text("Open from device…")
+            }
         }
         // VS Code's Start page: the last folders, a tap away (without a guest, from this device's copies).
         val offlineFolders = !controller.connected && controller.settings.offlineWorkspace
@@ -452,19 +489,23 @@ private fun EmptyEditor(controller: WorkbenchController) {
         }.take(5)
         if (recent.isNotEmpty()) {
             Spacer(Modifier.height(20.dp))
-            Column(Modifier.widthIn(max = 360.dp).fillMaxWidth()) {
+            Column(Modifier.widthIn(max = 400.dp).fillMaxWidth()) {
                 Text(
                     if (offlineFolders) "Recent folders · offline" else "Recent folders",
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(horizontal = 10.dp),
                 )
                 recent.forEach { path ->
                     Row(
                         Modifier.fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
                             .clickable { if (offlineFolders) controller.openOfflineWorkspace(path) else controller.openWorkspace(path) }
-                            .padding(vertical = 6.dp),
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
+                        Icon(Icons.Outlined.Folder, contentDescription = null, tint = colors.onSurfaceVariant, modifier = Modifier.size(18.dp))
                         Text(path.substringAfterLast('/').ifEmpty { path }, color = MaterialTheme.colorScheme.onSurface)
                         Text(
                             "  " + path.substringBeforeLast('/'),

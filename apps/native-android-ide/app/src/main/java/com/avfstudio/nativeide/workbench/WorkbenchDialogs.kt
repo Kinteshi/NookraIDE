@@ -1,5 +1,15 @@
 package com.avfstudio.nativeide.workbench
 
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.ui.window.Dialog
+import androidx.compose.material.icons.outlined.Code
+import androidx.compose.material.icons.automirrored.outlined.InsertDriveFile
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
@@ -690,13 +700,34 @@ private fun <T> PaletteDialog(
     // The cursor goes after a prefix the caller set, and follows when the caller changes the text.
     var field by remember { mutableStateOf(TextFieldValue(query, TextRange(query.length))) }
     LaunchedEffect(query) { if (field.text != query) field = TextFieldValue(query, TextRange(query.length)) }
-    BasicAlertDialog(onDismissRequest = onDismiss, modifier = Modifier.padding(horizontal = 24.dp)) {
+    // The row Enter picks; the arrow keys move it and a new query starts over.
+    var selected by remember { mutableStateOf(0) }
+    LaunchedEffect(query) { selected = 0 }
+    val current = selected.coerceIn(0, (items.size - 1).coerceAtLeast(0))
+    val listState = rememberLazyListState()
+    LaunchedEffect(current) {
+        val visible = listState.layoutInfo.visibleItemsInfo
+        if (visible.none { it.index == current && it.offset >= 0 && it.offset + it.size <= listState.layoutInfo.viewportEndOffset }) {
+            listState.scrollToItem(if (visible.firstOrNull()?.index ?: 0 < current) (current - visible.size + 2).coerceAtLeast(0) else current)
+        }
+    }
+    // A window that fills the screen, with the box at a fixed place near the top as in VS Code: a
+    // window sized to the results moved with each key and restarted the keyboard's input.
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Box(
+            Modifier.fillMaxSize().clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onDismiss).imePadding(),
+            contentAlignment = Alignment.TopCenter,
+        ) {
         Surface(
-            shape = RoundedCornerShape(28.dp),
+            shape = RoundedCornerShape(20.dp),
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
             tonalElevation = 6.dp,
+            shadowElevation = 8.dp,
+            modifier = Modifier.padding(horizontal = 16.dp).padding(top = 56.dp, bottom = 16.dp).widthIn(max = 680.dp).fillMaxWidth()
+                // A tap on the box itself stays in it.
+                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {},
         ) {
-            Column(Modifier.padding(16.dp)) {
+            Column(Modifier.padding(12.dp)) {
                 val focus = remember { FocusRequester() }
                 LaunchedEffect(Unit) { focus.requestFocus() }
                 OutlinedTextField(
@@ -716,34 +747,50 @@ private fun <T> PaletteDialog(
                             when {
                                 event.type != KeyEventType.KeyDown -> false
                                 event.key == Key.Enter -> {
-                                    items.firstOrNull()?.let(onPick)
+                                    items.getOrNull(current)?.let(onPick)
                                     true
                                 }
                                 event.key == Key.Escape -> {
                                     onDismiss()
                                     true
                                 }
+                                event.key == Key.DirectionDown -> {
+                                    if (items.isNotEmpty()) selected = (current + 1) % items.size
+                                    true
+                                }
+                                event.key == Key.DirectionUp -> {
+                                    if (items.isNotEmpty()) selected = (current - 1 + items.size) % items.size
+                                    true
+                                }
                                 else -> false
                             }
                         },
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
-                    keyboardActions = KeyboardActions(onGo = { items.firstOrNull()?.let(onPick) }),
+                    keyboardActions = KeyboardActions(onGo = { items.getOrNull(current)?.let(onPick) }),
                 )
                 header()
-                LazyColumn(Modifier.heightIn(max = 440.dp).padding(top = 8.dp)) {
-                    items(items) { item ->
-                        Row(Modifier.fillMaxWidth().clickable { onPick(item) }) { row(item) }
+                LazyColumn(Modifier.heightIn(max = 440.dp).padding(top = 8.dp), state = listState) {
+                    itemsIndexed(items) { index, item ->
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(if (index == current) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
+                                .clickable { onPick(item) },
+                        ) { row(item) }
                     }
                 }
             }
+        }
         }
     }
 }
 
 @Composable
-private fun PaletteRow(title: String, detail: String?) {
+private fun PaletteRow(title: String, detail: String?, leading: (@Composable () -> Unit)? = null) {
     ListItem(
-        headlineContent = { Text(title, maxLines = 1) },
+        headlineContent = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        leadingContent = leading,
         trailingContent = detail?.let {
             {
                 Text(
@@ -755,7 +802,7 @@ private fun PaletteRow(title: String, detail: String?) {
                 )
             }
         },
-        colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
         modifier = Modifier.height(48.dp),
     )
 }
@@ -797,13 +844,24 @@ private fun DataViewerDialog(controller: WorkbenchController, dialog: WorkbenchD
         controller.loadDataViewer(dialog.copy(query = query, offset = 0))
     }
     val table = dialog.table
-    // One size whatever the page holds: a dialog window that resizes while the filter is typed
-    // restarts the keyboard's input, which garbled the word being typed.
-    val height = (androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp * 0.62f).dp
+    // As big as the whole table needs, up to most of the screen. From its unfiltered size, and only
+    // ever wider: a dialog window that resizes while the filter is typed restarts the keyboard's
+    // input, which garbled the word being typed.
+    val configuration = androidx.compose.ui.platform.LocalConfiguration.current
+    var tableWidth by remember(dialog.name) { mutableStateOf(0.dp) }
+    table?.let { tableWidth = maxOf(tableWidth, dataViewerTableWidth(it.table)) }
+    val windowWidth = (tableWidth + 50.dp).coerceIn(DATA_VIEWER_MIN_WIDTH, (configuration.screenWidthDp.dp - 48.dp).coerceAtLeast(DATA_VIEWER_MIN_WIDTH))
+    val height = if (table == null) {
+        180.dp
+    } else {
+        val rows = minOf(table.total, DATA_VIEWER_PAGE) + table.table.head.size
+        // The table, the filter and the pager or note.
+        (TABLE_ROW_HEIGHT * maxOf(rows, 3) + 130.dp).coerceAtMost((configuration.screenHeightDp * 0.72f).dp)
+    }
     AlertDialog(
         onDismissRequest = { controller.dialog = null },
         properties = DialogProperties(usePlatformDefaultWidth = false),
-        modifier = Modifier.padding(24.dp).widthIn(max = 1100.dp).fillMaxWidth(),
+        modifier = Modifier.padding(24.dp).width(windowWidth),
         title = {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(dialog.name, fontFamily = FontFamily.Monospace)
@@ -834,7 +892,7 @@ private fun DataViewerDialog(controller: WorkbenchController, dialog: WorkbenchD
                     dialog.error != null -> Text(dialog.error, color = colors.error)
                     table == null -> Text("Asking the kernel…", color = colors.onSurfaceVariant)
                     !table.pages -> {
-                        DataViewerTable(table.table)
+                        DataViewerTable(table.table, maxBodyHeight = height - 60.dp)
                         val shown = table.table.body.size
                         Text(
                             (if (table.total > shown) "First $shown of ${table.total} rows · tap a column to sort them" else "${table.total} rows · tap a column to sort") +
@@ -844,13 +902,15 @@ private fun DataViewerDialog(controller: WorkbenchController, dialog: WorkbenchD
                         )
                     }
                     else -> {
-                        Box(Modifier.weight(1f)) {
-                            DataViewerTable(table.table, dialog.sort, dialog.ascending, maxBodyHeight = height - 190.dp) { column, ascending ->
+                        BoxWithConstraints(Modifier.weight(1f)) {
+                            val body = maxHeight - TABLE_ROW_HEIGHT * table.table.head.size - 2.dp
+                            DataViewerTable(table.table, dialog.sort, dialog.ascending, maxBodyHeight = body.coerceAtLeast(TABLE_ROW_HEIGHT)) { column, ascending ->
                                 controller.loadDataViewer(dialog.copy(sort = column, ascending = ascending, offset = 0))
                             }
                         }
                         val pageSize = table.table.body.size
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        // The height of the buttons with or without them: it holds the table's place.
+                        Row(Modifier.heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
                             val first = table.offset + 1
                             val last = table.offset + pageSize
                             Text(
@@ -864,6 +924,8 @@ private fun DataViewerDialog(controller: WorkbenchController, dialog: WorkbenchD
                             )
                             val step = maxOf(pageSize, 1)
                             val lastPage = ((table.matched - 1).coerceAtLeast(0) / DATA_VIEWER_PAGE) * DATA_VIEWER_PAGE
+                            // One page has nothing to go to.
+                            if (lastPage > 0) {
                             Tooltip("First page") { IconButton(enabled = table.offset > 0, onClick = { controller.loadDataViewer(dialog.copy(offset = 0)) }) {
                                 Icon(Icons.Outlined.FirstPage, contentDescription = "First page")
                             } }
@@ -876,6 +938,7 @@ private fun DataViewerDialog(controller: WorkbenchController, dialog: WorkbenchD
                             Tooltip("Last page") { IconButton(enabled = table.offset < lastPage, onClick = { controller.loadDataViewer(dialog.copy(offset = lastPage)) }) {
                                 Icon(Icons.Outlined.LastPage, contentDescription = "Last page")
                             } }
+                            }
                         }
                     }
                 }
@@ -936,6 +999,9 @@ private fun SharedFilesDialog(controller: WorkbenchController, shared: Workbench
 
 /** The data viewer's page size; the controller asks for as many rows. */
 internal const val DATA_VIEWER_PAGE = 500
+
+/** The filter's hint and the pager fit in this, however small the table. */
+private val DATA_VIEWER_MIN_WIDTH = 560.dp
 
 /** VS Code's indentation quick pick, in one dialog: spaces or tabs, the size, detect again, convert. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -1136,6 +1202,21 @@ private fun GuestSetupDialog(controller: WorkbenchController, setup: WorkbenchDi
 }
 
 /** Subsequence match, like VS Code's quick pick: "wbc" matches "WorkbenchController". */
+/**
+ * How well [candidate] answers [query], lower first: it starts with it, a word starts with it, it
+ * holds it, or (what's left of [fuzzyMatch]) only its letters are there in order.
+ */
+internal fun matchRank(query: String, candidate: String): Int {
+    val text = query.trim()
+    val at = candidate.indexOf(text, ignoreCase = true)
+    return when {
+        at == 0 -> 0
+        at < 0 -> 3
+        Regex("""(^|[^\p{L}\p{N}])""" + Regex.escape(text), RegexOption.IGNORE_CASE).containsMatchIn(candidate) -> 1
+        else -> 2
+    }
+}
+
 internal fun fuzzyMatch(query: String, candidate: String): Boolean {
     if (query.isBlank()) return true
     var index = 0
@@ -1579,9 +1660,13 @@ private fun QuickOpenDialog(controller: WorkbenchController) {
         },
     ) { item ->
         when (item) {
-            is QuickOpenItem.File -> PaletteRow(item.entry.name, item.entry.path.removePrefix(root).removePrefix("/").substringBeforeLast('/', ""))
+            is QuickOpenItem.File -> PaletteRow(item.entry.name, item.entry.path.removePrefix(root).removePrefix("/").substringBeforeLast('/', "")) {
+                FileIconView(item.entry.name, controller.fileIconTheme, LocalDarkTheme.current, Icons.AutoMirrored.Outlined.InsertDriveFile)
+            }
             is QuickOpenItem.Command -> PaletteRow(item.command.title, item.keybinding.takeIf(String::isNotEmpty))
-            is QuickOpenItem.Symbol -> PaletteRow(item.name, item.detail)
+            is QuickOpenItem.Symbol -> PaletteRow(item.name, item.detail) {
+                Icon(Icons.Outlined.Code, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             is QuickOpenItem.Line -> PaletteRow(item.title, null)
             is QuickOpenItem.Prefix -> PaletteRow(item.mode.prefix.ifEmpty { "…" } + "  " + item.mode.title, null)
             is QuickOpenItem.Message -> Text(

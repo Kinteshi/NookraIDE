@@ -1954,6 +1954,65 @@ and 124 daemon tests pass; the guest runs this daemon and jupyter bridge-6.
   small files, a uv venv with ipywidgets and its kernel spec) were removed; the guest's package
   list is unchanged. uv's cache keeps the ipywidgets wheels.
 
+## 38. UI and behaviour pass: chat, tables, panes, Quick Open, one look for empty panes (11-03 23:05–23:55; done, checked except as noted)
+User's request (11-03): make the UI and general behaviour more polished and coherent, icons where
+appropriate, tables that fit their content, chat output and controls stable and easier to read.
+322 app unit tests pass (4 new in ChatPaneTest); no daemon change.
+* Chat:
+  * The list follows the newest text until scrolled up, and again once scrolled to the end, with
+    a button to go to the newest message. It used to animate to the top of the last item at every
+    chunk, so a long reply jumped and pulled back anyone reading above.
+  * Replies are the notebook's native Markdown (headings, lists, inline code, tables, links),
+    with smaller headings and code blocks with their language and a Copy button; never a page,
+    which would reload at each chunk. Agent text sits flat on the pane; only the user's is a bubble.
+  * Tool calls are one line with a spinner, check or error (a tap shows a long title); thoughts are
+    their first line without `**` (a tap shows all); an answered permission shrinks to one line;
+    Deny is readable on the card's colour; buttons wrap in a narrow chat.
+  * Model, mode and effort are one line that scrolls sideways, each with an icon, in the same
+    order before and after a session lists them. They used to wrap to two lines and swap places.
+    The progress strip keeps its place when idle, and Stop the agent sits left of the header's
+    buttons so they don't move. What's typed stays when the chat closes.
+* Tables: the data viewer sizes itself to the table (columns up to 480 dp, rows up to 72% of the
+  screen), from the unfiltered size and only ever wider, so typing a filter doesn't resize the
+  window (that restarts the keyboard's input). Checked with 3 rows x 2 columns, 12 x 24 and
+  5 000 x 4. The pager shows only with more than one page. Notebook and viewer tables draw thin
+  scrollbars, so a cut-off table shows there is more.
+* Panes: the side bar, chat and bottom panel resize by dragging the gaps between them, keep their
+  size when closed and across starts, and always leave the editor room; "View: Reset Pane Sizes"
+  goes back. No Settings toggle: nothing changes until dragged. The panel's tabs have icons and
+  scroll when narrow, so its actions are never pushed out (with the chat open they were).
+* Quick Open and the command palette: a fixed box near the top (its window no longer resizes with
+  the results), file icons, a highlighted row that the arrow keys move and Enter picks. Whole words
+  now rank before scattered letters: "Reset" found Configure Workspace Snippets first.
+* One look for empty panes (`EmptyState`, CommonUi.kt): icon, what's missing, what to do, in
+  Terminal, Ports, Variables, Interactive, Problems, Outline, References, Call Hierarchy, Git,
+  Explorer, Chat and Past chats. The Welcome page has the app's logo, and its actions now do what
+  they say (they were plain text); its buttons and recent folders have icons.
+* Status bar: branch and error and warning counts, each a tap from its view; Ln and Col from the
+  start, so the items beside them don't move at the first tap.
+* Fixes found on the way:
+  * Explorer missed files made outside the app until Refresh. It now lists again when it opens,
+    when the app comes back, and after a terminal command ends (shell integration); Refresh also
+    reloads open folders.
+  * Settings' two-way and three-way buttons wrapped ("Follow system") or clipped ("Material You"):
+    the row stops at the longest word, so it now gets its width from the longest label.
+  * Open Editors cut the fifth row by a few pixels; it fits six and shows half of a seventh.
+  * The Open Folder dialog changed height with each folder; its list has one height.
+  * Search files' ripple was a rectangle on the rounded box.
+  * The workspace root's row showed a back arrow that goes nowhere; it shows a folder.
+  * The tab menu has icons and Close all.
+* Removed: the terminal and chat buttons of the top bar, which repeated the rail's (and said
+  "Copilot chat" for any agent). Compact layout has its own navigation and keeps working.
+* Checked on the tablet at full size and at phone width: chat with a real Copilot reply (Markdown,
+  tools, permissions, scrolling up), data viewer, Quick Open, palette, Settings, pane drags and
+  restart, Welcome page.
+* Not fully checked: holding position while a reply arrives, because Copilot delivered these
+  replies in bulk (scrolled up after the reply, the position held); filter typing with the new
+  data viewer size; ipywidgets were not exercised (not changed; the kernel had no ipywidgets).
+* Test files (~/Projects/b38, and a .vscode/workspace.code-snippets a mistaken command created) were
+  removed; the guest's package list is unchanged; uv's cache keeps pandas and ipywidgets wheels. The
+  three test chats left Past chats (Copilot keeps their files under ~/.copilot/session-state).
+
 ## Backlog
 To investigate (user, 10-28):
 * (Done in batch 16, with a notebook-side finding.) Plotly figures updating in place (the user's private-notebook-1.ipynb: `plot_handle =
@@ -2236,6 +2295,13 @@ day, L several days.
   56. ipywidgets not drawn yet: binary-data widgets (ipycanvas, bqplot), media (Image, Video,
       Audio), pickers (ColorPicker, DatePicker), Play, and third-party widget libraries; saved
       `metadata.widgets` drawn before the kernel runs. M-L.
+  57. Check on a slow reply that the chat holds its position when scrolled up (batch 38: Copilot's
+      replies arrived in bulk), and that a filter typed in the data viewer keeps the keyboard's
+      input. S.
+  58. A wide table's index column that stays while the columns scroll (notebook and data viewer). S-M.
+  59. A tab restored for a file that no longer exists (launch.json and cells.py on the tablet) shows
+      its saved copy with no sign the file is gone; VS Code marks it deleted. S.
+  60. Check whether batch 38's fixed Quick Open window also stops the keys lost while indexing (54). S.
 * Still left out on purpose: multi-cursor, sticky scroll, minimap (Aardink switch; folding came in batch 31);
   split editor groups and the 3-way merge editor; tasks.json; MCP, other AI providers and the
   built-in chat agent (Copilot, Claude Code and Gemini through ACP instead); foldable postures

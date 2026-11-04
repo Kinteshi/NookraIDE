@@ -1,5 +1,9 @@
 package com.avfstudio.nativeide.workbench
 
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.Icon
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.ContentCopy
 import android.annotation.SuppressLint
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -401,7 +405,37 @@ internal fun NotebookMarkdown(controller: WorkbenchController, markdown: String,
     }
 }
 
-private class MarkdownContext(val source: MarkdownSource, val colors: InlineColors, val palette: SyntaxPalette) {
+/**
+ * An agent's reply: the same native Markdown as a notebook, with smaller headings for the narrow
+ * pane and code blocks that can be copied. Never a page (math or raw HTML stay text): the reply
+ * arrives in chunks, and a page would reload at each one.
+ */
+@Composable
+internal fun ChatMarkdown(controller: WorkbenchController, markdown: String, modifier: Modifier = Modifier) {
+    val document = remember(markdown) { MarkdownRenderer.parse(markdown) }
+    val colors = MaterialTheme.colorScheme
+    val dark = LocalDarkTheme.current
+    val root = controller.workspaceRoot.orEmpty()
+    val source = remember(root) { controller.markdownSource("$root/", null) }
+    val context = MarkdownContext(
+        source,
+        InlineColors(colors.primary, colors.onSurface, colors.surfaceContainerHigh, colors.onSurfaceVariant),
+        syntaxPalette(controller.settings.syntaxColors, colors, dark),
+        compact = true,
+        onCopyCode = controller::copyChatCode,
+    )
+    SelectionContainer(modifier) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { MarkdownBlocks(document, context, 0) }
+    }
+}
+
+private class MarkdownContext(
+    val source: MarkdownSource,
+    val colors: InlineColors,
+    val palette: SyntaxPalette,
+    val compact: Boolean = false,
+    val onCopyCode: ((String) -> Unit)? = null,
+) {
     fun inline(node: Node): AnnotatedString = inlineMarkdown(node, colors) { href ->
         if (!href.startsWith("#")) source.onLink(source.resolve(href))
     }
@@ -422,14 +456,15 @@ private fun MarkdownBlock(node: Node, context: MarkdownContext, depth: Int) {
     val typography = MaterialTheme.typography
     when (node) {
         is Heading -> Column {
-            val style = when (node.level) {
-                1 -> typography.headlineSmall
-                2 -> typography.titleLarge
-                3 -> typography.titleMedium
+            val style = when {
+                context.compact -> if (node.level <= 2) typography.titleMedium else typography.titleSmall
+                node.level == 1 -> typography.headlineSmall
+                node.level == 2 -> typography.titleLarge
+                node.level == 3 -> typography.titleMedium
                 else -> typography.titleSmall
             }
             Text(remember(node) { context.inline(node) }, style = style.copy(fontWeight = FontWeight.SemiBold))
-            if (node.level <= 2) HorizontalDivider(Modifier.padding(top = 4.dp), color = colors.outlineVariant)
+            if (node.level <= 2 && !context.compact) HorizontalDivider(Modifier.padding(top = 4.dp), color = colors.outlineVariant)
         }
         is Paragraph -> {
             val image = node.firstChild as? MdImage
@@ -486,17 +521,29 @@ private fun MarkdownCode(code: String, info: String, context: MarkdownContext) {
             AnnotatedString(code)
         }
     }
-    Text(
-        text,
-        fontFamily = FontFamily.Monospace,
-        style = MaterialTheme.typography.bodySmall,
-        softWrap = false,
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(colors.surfaceContainerHigh, RoundedCornerShape(6.dp))
-            .horizontalScroll(rememberScrollState())
-            .padding(10.dp),
-    )
+    val copy = context.onCopyCode
+    Column(Modifier.fillMaxWidth().background(colors.surfaceContainerHigh, RoundedCornerShape(6.dp))) {
+        if (copy != null) {
+            Row(Modifier.fillMaxWidth().padding(start = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(language, style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant, modifier = Modifier.weight(1f))
+                Tooltip("Copy code") {
+                    androidx.compose.material3.IconButton(onClick = { copy(code) }, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Outlined.ContentCopy, contentDescription = "Copy code", modifier = Modifier.size(16.dp))
+                    }
+                }
+            }
+        }
+        Text(
+            text,
+            fontFamily = FontFamily.Monospace,
+            style = MaterialTheme.typography.bodySmall,
+            softWrap = false,
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(start = 10.dp, end = 10.dp, bottom = 10.dp, top = if (copy != null) 0.dp else 10.dp),
+        )
+    }
 }
 
 /** Column by column, so every column is as wide as its widest cell; wide tables scroll sideways. */

@@ -1,5 +1,6 @@
 package com.avfstudio.nativeide.workbench
 
+import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -63,7 +64,7 @@ fun SourceControlView(controller: WorkbenchController) {
     val status = controller.gitStatus
     Column(Modifier.fillMaxSize()) {
         when {
-            !controller.connected -> EmptyMessage("Connect to a guest to use Git.")
+            !controller.connected -> EmptyState(Icons.Outlined.CloudOff, "Not connected", "Connect to the guest to use Git.")
             controller.gitMissing -> Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("Git isn't installed in the guest.", style = MaterialTheme.typography.bodyMedium)
                 Button(

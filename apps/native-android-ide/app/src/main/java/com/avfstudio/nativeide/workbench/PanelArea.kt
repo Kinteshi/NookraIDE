@@ -1,5 +1,13 @@
 package com.avfstudio.nativeide.workbench
 
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.material.icons.outlined.CloudOff
+import androidx.compose.material.icons.outlined.PlayCircleOutline
+import androidx.compose.material.icons.outlined.DataObject
+import androidx.compose.material.icons.outlined.Lan
+import androidx.compose.material.icons.automirrored.outlined.Article
+import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.material.icons.outlined.BugReport
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -78,10 +86,39 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.foundation.layout.fillMaxHeight
 
-/** Bottom panel (Ctrl+J): terminals, problems and the output log, resizable by its top edge. */
+private val PanelTab.icon: ImageVector
+    get() = when (this) {
+        PanelTab.Terminal -> Icons.Outlined.Terminal
+        PanelTab.Debug -> Icons.Outlined.BugReport
+        PanelTab.Problems -> Icons.Outlined.ErrorOutline
+        PanelTab.Output -> Icons.AutoMirrored.Outlined.Article
+        PanelTab.Ports -> Icons.Outlined.Lan
+        PanelTab.Variables -> Icons.Outlined.DataObject
+        PanelTab.Interactive -> Icons.Outlined.PlayCircleOutline
+    }
+
+/** A panel tab; the wide and the compact layout draw the same one. */
 @Composable
-fun PanelArea(controller: WorkbenchController, modifier: Modifier = Modifier) {
-    var height by remember { mutableFloatStateOf(320f) }
+internal fun PanelTabChip(controller: WorkbenchController, tab: PanelTab) {
+    FilterChip(
+        selected = controller.panelTab == tab,
+        onClick = { controller.panelTab = tab },
+        leadingIcon = { Icon(tab.icon, contentDescription = null, modifier = Modifier.size(16.dp)) },
+        label = {
+            val count = when (tab) {
+                PanelTab.Problems -> controller.diagnostics.size
+                PanelTab.Ports -> controller.visiblePorts.size
+                else -> 0
+            }
+            Text(if (count > 0) "${tab.title} $count" else tab.title, maxLines = 1)
+        },
+    )
+}
+
+/** Bottom panel (Ctrl+J): terminals, problems and the output log, resizable by its top edge up to [maxHeight] dp. */
+@Composable
+fun PanelArea(controller: WorkbenchController, modifier: Modifier = Modifier, maxHeight: Float = 900f) {
+    val height = (controller.panelHeight ?: 320f).coerceIn(140f, maxHeight.coerceAtLeast(140f))
     val density = LocalDensity.current
     val colors = MaterialTheme.colorScheme
     Column(modifier.fillMaxWidth().height(height.dp).background(colors.surfaceContainerLow)) {
@@ -91,32 +128,28 @@ fun PanelArea(controller: WorkbenchController, modifier: Modifier = Modifier) {
                 .height(10.dp)
                 .draggable(
                     orientation = Orientation.Vertical,
-                    state = rememberDraggableState { delta -> height = (height - delta / density.density).coerceIn(140f, 900f) },
+                    state = rememberDraggableState { delta ->
+                        controller.panelHeight = ((controller.panelHeight ?: height) - delta / density.density).coerceIn(140f, maxHeight.coerceAtLeast(140f))
+                    },
+                    onDragStopped = { controller.savePaneSizes() },
                 ),
             contentAlignment = Alignment.Center,
         ) {
             Box(Modifier.width(36.dp).height(4.dp).background(colors.outlineVariant, RoundedCornerShape(2.dp)))
         }
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+            Modifier.fillMaxWidth().padding(start = 8.dp, end = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            PanelTab.entries.forEach { tab ->
-                FilterChip(
-                    selected = controller.panelTab == tab,
-                    onClick = { controller.panelTab = tab },
-                    label = {
-                        val count = when (tab) {
-                            PanelTab.Problems -> controller.diagnostics.size
-                            PanelTab.Ports -> controller.visiblePorts.size
-                            else -> 0
-                        }
-                        Text(if (count > 0) "${tab.title} $count" else tab.title)
-                    },
-                )
+            // The tabs scroll when the panel is narrow; the actions beside them stay.
+            Row(
+                Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                PanelTab.entries.forEach { tab -> PanelTabChip(controller, tab) }
             }
-            Spacer(Modifier.weight(1f))
             if (controller.panelTab == PanelTab.Terminal) TerminalActions(controller)
             Tooltip("Hide panel") { IconButton(onClick = { controller.panelVisible = false }) {
                 Icon(Icons.Outlined.KeyboardArrowDown, contentDescription = "Hide panel")
@@ -173,13 +206,11 @@ fun TerminalView(controller: WorkbenchController, modifier: Modifier = Modifier)
         }
         val session = controller.activeTerminal
         if (session == null) {
-            Column(
-                Modifier.fillMaxSize(),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center,
-            ) {
-                Text("No terminal is open", color = colors.onSurfaceVariant)
-                TextButton(onClick = { controller.newTerminal() }) { Text("New terminal  Ctrl+Shift+`") }
+            EmptyState(Icons.Outlined.Terminal, "No terminal is open", "Ctrl+Shift+` opens one too.") {
+                FilledTonalButton(onClick = { controller.newTerminal() }) {
+                    Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(18.dp).padding(end = 2.dp))
+                    Text("New terminal")
+                }
             }
             return
         }
@@ -299,11 +330,11 @@ fun PortsView(controller: WorkbenchController) {
     val hidden = ports.size - ports.count { !controller.isInternalPort(it) }
     Column(Modifier.fillMaxSize()) {
         if (!controller.connected) {
-            EmptyMessage("Connect to the guest to see its ports.")
+            EmptyState(Icons.Outlined.CloudOff, "Not connected", "Connect to the guest to see its ports.")
             return@Column
         }
         if (shown.isEmpty()) {
-            EmptyMessage("Nothing listens in the guest yet. Start a server (python3 -m http.server, npm run dev) and it shows up here.")
+            EmptyState(Icons.Outlined.Lan, "No ports yet", "Start a server in the guest (python3 -m http.server, npm run dev) and it shows up here.", Modifier.weight(1f))
         }
         androidx.compose.foundation.lazy.LazyColumn(Modifier.weight(1f, fill = shown.isNotEmpty())) {
             items(shown.size) { index ->
@@ -377,15 +408,15 @@ fun VariablesView(controller: WorkbenchController) {
         val result = session?.variables
         when {
             session == null -> {
-                EmptyMessage("Open a notebook to see its kernel's variables.")
+                EmptyState(Icons.Outlined.DataObject, "No notebook is open", "Open a notebook to see its kernel's variables.")
                 return@Column
             }
             session.kernelName == null -> {
-                EmptyMessage("Start ${session.document.path.substringAfterLast('/')}'s kernel (run a cell) to see its variables.")
+                EmptyState(Icons.Outlined.DataObject, "The kernel isn't running", "Run a cell of ${session.document.path.substringAfterLast('/')} to see its variables.")
                 return@Column
             }
             result?.unsupported == true -> {
-                EmptyMessage("Variables are listed for Python kernels.")
+                EmptyState(Icons.Outlined.DataObject, "Python kernels only", "Variables are listed for Python kernels.")
                 return@Column
             }
         }

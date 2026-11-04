@@ -1,5 +1,33 @@
 package com.avfstudio.nativeide.workbench
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.ExpandLess
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.SmallFloatingActionButton
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Speed
+import androidx.compose.material.icons.outlined.Tune
+import androidx.compose.material.icons.outlined.Memory
+import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.material.icons.outlined.Lightbulb
+import androidx.compose.material.icons.outlined.Shield
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Checklist
+import androidx.compose.material.icons.outlined.ArrowDownward
+import androidx.compose.material.icons.outlined.PowerSettingsNew
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.draw.clip
@@ -78,20 +106,51 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 
+/** Far past any reply's height: the list stops at its end. */
+private const val CHAT_LIST_END = 10_000_000
+
+internal enum class ChatToolState { Running, Done, Failed, Other }
+
+/** An ACP tool call's status (pending, in_progress, completed, failed). */
+internal fun chatToolState(status: String?): ChatToolState = when (status?.lowercase()) {
+    "pending", "in_progress" -> ChatToolState.Running
+    "completed" -> ChatToolState.Done
+    "failed" -> ChatToolState.Failed
+    else -> ChatToolState.Other
+}
+
+/** A thought as agents send it, a bold title and a paragraph: plain, without its marks or an empty end. */
+internal fun chatThoughtText(text: String): String = text.replace("**", "").trim().trimEnd('…').trim()
+
 @Composable
 fun CopilotChatPane(controller: WorkbenchController, modifier: Modifier = Modifier, onClose: (() -> Unit)? = null) {
-    var draft by remember { mutableStateOf("") }
+    val draft = controller.chatDraft
     val entries = controller.chatEntries
     val listState = rememberLazyListState()
     val colors = MaterialTheme.colorScheme
-    LaunchedEffect(entries.size, entries.lastOrNull()) {
-        if (entries.isNotEmpty()) listState.animateScrollToItem(entries.lastIndex)
+    // The list stays at the newest text until scrolled up, and comes back when scrolled to the end.
+    var following by remember { mutableStateOf(true) }
+    val userScroll = remember {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (source == NestedScrollSource.UserInput && available.y > 0f) following = false
+                return Offset.Zero
+            }
+        }
+    }
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.canScrollForward to following }.collect { (more, follow) ->
+            if (!more) following = true
+            // Directly, not animated: a reply grows many times a second, and each animation would restart the last.
+            else if (follow && controller.chatEntries.isNotEmpty()) listState.scrollToItem(controller.chatEntries.lastIndex, CHAT_LIST_END)
+        }
     }
     fun send() {
         val text = draft.trim()
         if (text.isNotEmpty() && !controller.chatBusy) {
             controller.sendChat(text)
-            draft = ""
+            controller.chatDraft = ""
+            following = true
         }
     }
     Column(modifier.fillMaxSize().background(colors.surfaceContainerLow)) {
@@ -105,13 +164,14 @@ fun CopilotChatPane(controller: WorkbenchController, modifier: Modifier = Modifi
             } else {
                 Box(Modifier.weight(1f)) { ChatAgentPicker(controller) }
             }
+            // Left of the others, so they don't move when the agent starts or stops.
+            if (controller.chatAgentRunning) {
+                Tooltip("Stop the agent") { IconButton(onClick = controller::endChatSession) { Icon(Icons.Outlined.PowerSettingsNew, contentDescription = "Stop the agent") } }
+            }
             Tooltip("New chat") { IconButton(onClick = controller::newChat) { Icon(Icons.Outlined.Add, contentDescription = "New chat") } }
             Tooltip("Past chats") { IconButton(onClick = { if (controller.showChatHistory) controller.showChatHistory = false else controller.openChatHistory() }) {
                 Icon(Icons.Outlined.History, contentDescription = "Past chats", tint = if (controller.showChatHistory) colors.primary else colors.onSurfaceVariant)
             } }
-            if (controller.chatAgentRunning) {
-                Tooltip("Stop the agent") { IconButton(onClick = controller::endChatSession) { Icon(Icons.Outlined.Stop, contentDescription = "Stop the agent") } }
-            }
             onClose?.let { Tooltip("Close chat") { IconButton(onClick = it) { Icon(Icons.Outlined.Close, contentDescription = "Close chat") } } }
         }
         if (controller.chatAuthMethods.isNotEmpty() || controller.chatSignInNeeded) {
@@ -138,22 +198,35 @@ fun CopilotChatPane(controller: WorkbenchController, modifier: Modifier = Modifi
             ChatHistoryList(controller, Modifier.weight(1f).fillMaxWidth())
             return@Column
         }
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
+        Box(Modifier.weight(1f).fillMaxWidth()) {
             if (entries.isEmpty()) {
-                item {
-                    Text(
-                        "Ask ${controller.chatAgentKind.label} about this workspace. The agent runs in the guest and asks before it edits files or runs commands.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = colors.onSurfaceVariant,
-                        modifier = Modifier.padding(vertical = 12.dp),
-                    )
+                EmptyState(
+                    Icons.Outlined.AutoAwesome,
+                    "Ask ${controller.chatAgentKind.label} about this workspace",
+                    "The agent runs in the guest and asks before it edits files or runs commands.",
+                )
+            }
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxSize().nestedScroll(userScroll).padding(horizontal = 12.dp),
+                contentPadding = PaddingValues(vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                items(entries, contentType = { it::class }) { entry -> ChatEntryView(entry, controller) }
+            }
+            if (!following && listState.canScrollForward) {
+                Box(Modifier.align(Alignment.BottomEnd).padding(12.dp)) {
+                    Tooltip("Go to the newest message") {
+                        SmallFloatingActionButton(onClick = { following = true }, containerColor = colors.secondaryContainer) {
+                            Icon(Icons.Outlined.ArrowDownward, contentDescription = "Go to the newest message")
+                        }
+                    }
                 }
             }
-            items(entries) { entry -> ChatEntryView(entry, controller) }
+        }
+        // Always there, so the controls below don't move when a reply starts or ends.
+        Box(Modifier.fillMaxWidth().height(2.dp)) {
+            if (controller.chatBusy) LinearProgressIndicator(Modifier.fillMaxSize())
         }
         if (controller.chatAttachments.isNotEmpty()) {
             FlowRow(
@@ -173,7 +246,7 @@ fun CopilotChatPane(controller: WorkbenchController, modifier: Modifier = Modifi
         }
         ChatOptionsRow(controller)
         Row(
-            Modifier.fillMaxWidth().padding(12.dp),
+            Modifier.fillMaxWidth().padding(start = 4.dp, end = 12.dp, top = 6.dp, bottom = 12.dp),
             verticalAlignment = Alignment.Bottom,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
@@ -202,7 +275,7 @@ fun CopilotChatPane(controller: WorkbenchController, modifier: Modifier = Modifi
             }
             OutlinedTextField(
                 value = draft,
-                onValueChange = { draft = it },
+                onValueChange = { controller.chatDraft = it },
                 modifier = Modifier
                     .weight(1f)
                     .heightIn(max = 180.dp)
@@ -237,7 +310,7 @@ fun CopilotChatPane(controller: WorkbenchController, modifier: Modifier = Modifi
 private fun ChatEntryView(entry: ChatEntry, controller: WorkbenchController) {
     val colors = MaterialTheme.colorScheme
     when (entry) {
-        is ChatEntry.User -> Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
+        is ChatEntry.User -> Column(Modifier.fillMaxWidth().padding(start = 32.dp), horizontalAlignment = Alignment.End) {
             Surface(
                 color = colors.primaryContainer,
                 contentColor = colors.onPrimaryContainer,
@@ -261,36 +334,26 @@ private fun ChatEntryView(entry: ChatEntry, controller: WorkbenchController) {
                 }
             }
         }
-        is ChatEntry.Agent -> Surface(
-            color = colors.surfaceContainerHigh,
-            shape = RoundedCornerShape(18.dp, 18.dp, 18.dp, 4.dp),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            SelectionContainer { ChatMarkdown(entry.text, Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) }
-        }
-        is ChatEntry.Thought -> Text(
-            entry.text,
-            style = MaterialTheme.typography.bodySmall,
-            color = colors.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 6.dp),
-        )
-        is ChatEntry.Tool -> AssistChip(
-            onClick = {},
-            label = { Text(entry.title + (entry.status?.let { " · $it" }.orEmpty()), maxLines = 1) },
-            leadingIcon = { Icon(Icons.Outlined.Build, contentDescription = null, modifier = Modifier.size(16.dp)) },
-        )
+        // Flat on the pane, as wide as it is: the room goes to the text, not to a bubble's margins.
+        is ChatEntry.Agent -> ChatMarkdown(controller, entry.text, Modifier.padding(horizontal = 2.dp))
+        is ChatEntry.Thought -> ChatThought(entry)
+        is ChatEntry.Tool -> ChatTool(entry)
         is ChatEntry.Plan -> Card(colors = CardDefaults.cardColors(containerColor = colors.surfaceContainer)) {
-            Column(Modifier.padding(12.dp)) {
-                Text("Plan", style = MaterialTheme.typography.labelLarge)
+            Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Icon(Icons.Outlined.Checklist, contentDescription = null, tint = colors.primary, modifier = Modifier.size(16.dp))
+                    Text("Plan", style = MaterialTheme.typography.labelLarge)
+                }
                 entry.entries.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall) }
             }
         }
-        is ChatEntry.Notice -> Text(
-            entry.text,
-            style = MaterialTheme.typography.bodySmall,
-            color = colors.tertiary,
-            modifier = Modifier.padding(horizontal = 6.dp),
-        )
+        is ChatEntry.Notice -> Row(
+            Modifier.padding(horizontal = 2.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Icon(Icons.Outlined.Info, contentDescription = null, tint = colors.tertiary, modifier = Modifier.padding(top = 1.dp).size(16.dp))
+            SelectionContainer { Text(entry.text, style = MaterialTheme.typography.bodySmall, color = colors.tertiary) }
+        }
         is ChatEntry.DeviceCode -> Card(colors = CardDefaults.cardColors(containerColor = colors.secondaryContainer)) {
             Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
@@ -307,7 +370,7 @@ private fun ChatEntryView(entry: ChatEntry, controller: WorkbenchController) {
                             color = colors.onSecondaryContainer,
                         )
                     }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         FilledTonalButton(onClick = { controller.openDeviceLogin(entry) }) { Text("Copy code and open GitHub") }
                         OutlinedButton(onClick = controller::cancelChatSignIn) { Text("Cancel") }
                     }
@@ -315,18 +378,40 @@ private fun ChatEntryView(entry: ChatEntry, controller: WorkbenchController) {
             }
         }
         is ChatEntry.SignInLink -> SignInLinkCard(entry, controller)
-        is ChatEntry.Permission -> Card(colors = CardDefaults.cardColors(containerColor = colors.tertiaryContainer)) {
-            Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(entry.title, style = MaterialTheme.typography.titleSmall, color = colors.onTertiaryContainer)
-                if (entry.answer != null) {
-                    Text(entry.answer, style = MaterialTheme.typography.bodySmall, color = colors.onTertiaryContainer)
-                } else {
+        // Answered, it's a line of the history; only a waiting question stands out.
+        is ChatEntry.Permission -> if (entry.answer != null) {
+            Row(
+                Modifier.padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Icon(Icons.Outlined.Shield, contentDescription = null, tint = colors.onSurfaceVariant, modifier = Modifier.size(14.dp))
+                Text(
+                    "${entry.answer}: ${entry.title}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = colors.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        } else {
+            Card(colors = CardDefaults.cardColors(containerColor = colors.tertiaryContainer)) {
+                Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Icon(Icons.Outlined.Shield, contentDescription = null, tint = colors.onTertiaryContainer, modifier = Modifier.padding(top = 1.dp).size(18.dp))
+                        Text(entry.title, style = MaterialTheme.typography.titleSmall, color = colors.onTertiaryContainer)
+                    }
+                    // A narrow chat wraps them rather than cutting the last one off.
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         entry.options.forEach { option ->
                             if (option.kind.startsWith("allow")) {
                                 FilledTonalButton(onClick = { controller.answerPermission(entry, option.id) }) { Text(option.name) }
                             } else {
-                                OutlinedButton(onClick = { controller.answerPermission(entry, option.id) }) { Text(option.name) }
+                                OutlinedButton(
+                                    onClick = { controller.answerPermission(entry, option.id) },
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = colors.onTertiaryContainer),
+                                    border = BorderStroke(1.dp, colors.onTertiaryContainer.copy(alpha = 0.6f)),
+                                ) { Text(option.name) }
                             }
                         }
                     }
@@ -412,24 +497,63 @@ private fun SignInLinkCard(entry: ChatEntry.SignInLink, controller: WorkbenchCon
     }
 }
 
-/** Minimal Markdown: fenced code blocks in monospace, everything else as paragraphs. */
+/** What the agent is thinking, muted and short (a tap shows it all), so it doesn't push the reply around. */
 @Composable
-private fun ChatMarkdown(text: String, modifier: Modifier = Modifier) {
+private fun ChatThought(entry: ChatEntry.Thought) {
     val colors = MaterialTheme.colorScheme
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        text.split("```").forEachIndexed { index, part ->
-            if (index % 2 == 1) {
-                Surface(color = colors.surfaceContainerLowest, shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) {
-                    Text(
-                        part.substringAfter('\n', part).trimEnd(),
-                        fontFamily = FontFamily.Monospace,
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(10.dp),
-                    )
-                }
-            } else if (part.isNotBlank()) {
-                Text(part.trim(), style = MaterialTheme.typography.bodyMedium)
+    var open by remember { mutableStateOf(false) }
+    val text = remember(entry.text) { chatThoughtText(entry.text) }
+    val summary = text.substringBefore('\n')
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable { open = !open }.padding(horizontal = 2.dp, vertical = 2.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Icon(Icons.Outlined.Lightbulb, contentDescription = null, tint = colors.onSurfaceVariant, modifier = Modifier.padding(top = 1.dp).size(16.dp))
+        Text(
+            if (open) text else summary,
+            style = MaterialTheme.typography.bodySmall,
+            color = colors.onSurfaceVariant,
+            maxLines = if (open) Int.MAX_VALUE else 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        if (summary != text) {
+            Icon(
+                if (open) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+                contentDescription = if (open) "Show less" else "Show all",
+                tint = colors.onSurfaceVariant,
+                modifier = Modifier.size(16.dp),
+            )
+        }
+    }
+}
+
+/** A tool the agent ran: its state and title on one line (a tap shows a long title whole). */
+@Composable
+private fun ChatTool(entry: ChatEntry.Tool) {
+    val colors = MaterialTheme.colorScheme
+    var open by remember { mutableStateOf(false) }
+    val state = chatToolState(entry.status)
+    Surface(color = colors.surfaceContainer, shape = RoundedCornerShape(10.dp), onClick = { open = !open }, modifier = Modifier.fillMaxWidth()) {
+        Row(
+            Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            when (state) {
+                ChatToolState.Running -> CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                ChatToolState.Done -> Icon(Icons.Outlined.Check, contentDescription = "Done", tint = colors.primary, modifier = Modifier.size(16.dp))
+                ChatToolState.Failed -> Icon(Icons.Outlined.ErrorOutline, contentDescription = "Failed", tint = colors.error, modifier = Modifier.size(16.dp))
+                ChatToolState.Other -> Icon(Icons.Outlined.Build, contentDescription = null, tint = colors.onSurfaceVariant, modifier = Modifier.size(16.dp))
             }
+            Text(
+                entry.title,
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.onSurface,
+                fontFamily = FontFamily.Monospace,
+                maxLines = if (open) Int.MAX_VALUE else 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
@@ -445,15 +569,17 @@ private fun referenceIcon(reference: ChatReference) =
 private fun ChatOptionsRow(controller: WorkbenchController) {
     val options = controller.chatConfigOptions
     var confirmAllowAll by remember { mutableStateOf<Pair<com.avfstudio.nativeide.ai.AcpConfigOption, String>?>(null) }
-    FlowRow(
-        Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 6.dp),
+    // One line that scrolls sideways: wrapped, the box below it jumped as the choices changed.
+    Row(
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(start = 12.dp, end = 12.dp, top = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         if (options.isEmpty()) {
             listOf("model" to "Model", "mode" to "Mode").forEach { (id, name) ->
                 AssistChip(
                     onClick = controller::loadChatOptions,
-                    label = { Text("$name: ${controller.rememberedChatChoice(id) ?: "Default"}", maxLines = 1) },
+                    label = { ChatChipLabel(name, controller.rememberedChatChoice(id) ?: "Default") },
+                    leadingIcon = { Icon(chatOptionIcon(id), contentDescription = null, modifier = Modifier.size(16.dp)) },
                     trailingIcon = {
                         if (controller.chatOptionsLoading) CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
                         else Icon(Icons.Outlined.ArrowDropDown, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -461,13 +587,15 @@ private fun ChatOptionsRow(controller: WorkbenchController) {
                 )
             }
         }
-        if (controller.chatAgentKind == ChatAgentKind.Copilot) ReasoningEffortChip(controller)
-        options.forEach { option ->
+        // The same order before and after a session lists them, so the chips don't change places.
+        @Composable
+        fun optionChip(option: com.avfstudio.nativeide.ai.AcpConfigOption) {
             var open by remember(option.id) { mutableStateOf(false) }
             Box {
                 AssistChip(
                     onClick = { open = true },
-                    label = { Text("${option.name}: ${option.choices.firstOrNull { it.value == option.current }?.name ?: option.current}", maxLines = 1) },
+                    label = { ChatChipLabel(option.name, option.choices.firstOrNull { it.value == option.current }?.name ?: option.current) },
+                    leadingIcon = { Icon(chatOptionIcon(option.id), contentDescription = null, modifier = Modifier.size(16.dp)) },
                     trailingIcon = { Icon(Icons.Outlined.ArrowDropDown, contentDescription = null, modifier = Modifier.size(18.dp)) },
                 )
                 DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
@@ -497,6 +625,10 @@ private fun ChatOptionsRow(controller: WorkbenchController) {
                 }
             }
         }
+        val (first, rest) = options.sortedBy { chatOptionRank(it.id) }.partition { chatOptionRank(it.id) < 2 }
+        first.forEach { optionChip(it) }
+        if (controller.chatAgentKind == ChatAgentKind.Copilot) ReasoningEffortChip(controller)
+        rest.forEach { optionChip(it) }
     }
     confirmAllowAll?.let { (option, value) ->
         AlertDialog(
@@ -509,6 +641,33 @@ private fun ChatOptionsRow(controller: WorkbenchController) {
     }
 }
 
+/** An option chip's choice, with the option's name for tooltips and TalkBack; a long model name is cut short. */
+@Composable
+private fun ChatChipLabel(name: String, choice: String) {
+    Tooltip(name) {
+        Text(
+            choice,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.widthIn(max = 170.dp).semantics { contentDescription = "$name: $choice" },
+        )
+    }
+}
+
+/** The chips' order: model, mode, then the rest. */
+internal fun chatOptionRank(id: String): Int = when {
+    "model" in id -> 0
+    "mode" in id -> 1
+    else -> 2
+}
+
+private fun chatOptionIcon(id: String) = when {
+    "model" in id -> Icons.Outlined.Memory
+    "mode" in id -> Icons.Outlined.Tune
+    "effort" in id || "thought" in id || "reason" in id -> Icons.Outlined.Speed
+    else -> Icons.Outlined.Settings
+}
+
 /** Copilot CLI's `--reasoning-effort`, which it reads at launch; changing it starts a new session. */
 @Composable
 private fun ReasoningEffortChip(controller: WorkbenchController) {
@@ -517,7 +676,8 @@ private fun ReasoningEffortChip(controller: WorkbenchController) {
     Box {
         AssistChip(
             onClick = { open = true },
-            label = { Text("Effort: ${reasoningEffortLabel(current)}", maxLines = 1) },
+            label = { ChatChipLabel("Effort", reasoningEffortLabel(current)) },
+            leadingIcon = { Icon(chatOptionIcon("effort"), contentDescription = null, modifier = Modifier.size(16.dp)) },
             trailingIcon = { Icon(Icons.Outlined.ArrowDropDown, contentDescription = null, modifier = Modifier.size(18.dp)) },
         )
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
@@ -547,12 +707,7 @@ private fun ChatHistoryList(controller: WorkbenchController, modifier: Modifier 
         controller.chatSessionsLoading -> Box(modifier.padding(24.dp), contentAlignment = Alignment.TopCenter) {
             CircularProgressIndicator(Modifier.size(24.dp))
         }
-        controller.chatSessions.isEmpty() -> Text(
-            "No past chats in this workspace yet.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = colors.onSurfaceVariant,
-            modifier = modifier.padding(16.dp),
-        )
+        controller.chatSessions.isEmpty() -> EmptyState(Icons.Outlined.History, "No past chats yet", "Chats in this workspace show up here.", modifier)
         else -> LazyColumn(modifier.padding(horizontal = 6.dp)) {
             items(controller.chatSessions, key = { it.id }) { row ->
                 var menu by remember { mutableStateOf(false) }

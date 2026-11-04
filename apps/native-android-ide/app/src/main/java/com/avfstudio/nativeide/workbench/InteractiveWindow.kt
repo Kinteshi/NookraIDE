@@ -1,5 +1,6 @@
 package com.avfstudio.nativeide.workbench
 
+import androidx.compose.material.icons.outlined.PlayCircleOutline
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -73,7 +74,9 @@ fun InteractiveView(controller: WorkbenchController) {
     val path = controller.interactivePath
     val session = path?.let(controller::interactiveSession) ?: controller.activeInteractive
     if (path == null || session == null) {
-        EmptyMessage(
+        EmptyState(
+            Icons.Outlined.PlayCircleOutline,
+            "Nothing has run here yet",
             "Run a # %% cell of a Python file (Ctrl+Enter, or Run Cell above it) to see its output here. " +
                 "\"Jupyter: Run Selection/Line in Interactive Window\" runs other code.",
         )

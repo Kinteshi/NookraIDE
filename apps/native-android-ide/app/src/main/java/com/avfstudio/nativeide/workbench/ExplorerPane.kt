@@ -1,5 +1,6 @@
 package com.avfstudio.nativeide.workbench
 
+import androidx.compose.material.icons.outlined.CloudOff
 import android.view.HapticFeedbackConstants
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -99,7 +100,9 @@ fun ExplorerList(controller: WorkbenchController) {
     LaunchedEffect(controller.connected) { if (controller.connected && controller.settings.gitDecorations) controller.refreshGitStatus() }
     when {
         controller.offline -> OfflineFilesList(controller)
-        !controller.connected && controller.roots.isEmpty() -> EmptyMessage("Connect to a guest to browse its workspace.")
+        !controller.connected && controller.roots.isEmpty() -> EmptyState(Icons.Outlined.CloudOff, "Not connected", "Connect to the guest to browse its workspace.") {
+            androidx.compose.material3.FilledTonalButton(onClick = { controller.dialog = WorkbenchDialog.Connect }) { Text("Connect") }
+        }
         directory.isEmpty() -> LazyColumn {
             items(controller.roots) { root ->
                 PaneRow(Icons.Outlined.Folder, root.substringAfterLast('/').ifEmpty { root }) { controller.loadDirectory(root) }
@@ -148,6 +151,8 @@ private fun ExplorerTree(controller: WorkbenchController, directory: String) {
     // The open workspace is the top, as in VS Code (the daemon may serve folders above it).
     val atRoot = controller.workspaceRoot?.let { it.trimEnd('/') == directory.trimEnd('/') }
         ?: controller.roots.any { it.trimEnd('/') == directory.trimEnd('/') }
+    // Files made outside the app (a terminal, the agent) are there when Explorer opens.
+    LaunchedEffect(Unit) { controller.refreshExplorer() }
     Column(Modifier.fillMaxSize()) {
         if (selecting) SelectionBar(controller, selection.toList())
         // Its own section above the files, as in VS Code (inside the list, tabs opened later went
@@ -155,7 +160,8 @@ private fun ExplorerTree(controller: WorkbenchController, directory: String) {
         if (settings.openEditors && controller.documents.isNotEmpty()) {
             OpenEditorsHeader(controller)
             if (controller.openEditorsExpanded) {
-                Column(Modifier.heightIn(max = 180.dp).verticalScroll(rememberScrollState())) {
+                // Six rows, and half of a seventh when there are more to scroll to.
+                Column(Modifier.heightIn(max = 246.dp).verticalScroll(rememberScrollState())) {
                     controller.documents.toList().forEach { document -> key(document.path) { OpenEditorRow(controller, document) } }
                 }
             }
@@ -166,7 +172,8 @@ private fun ExplorerTree(controller: WorkbenchController, directory: String) {
                 item(key = "up") {
                     Box(Modifier.dropTarget(drag, "up", parent.takeIf { !atRoot && it.isNotEmpty() })) {
                         PaneRow(
-                            Icons.AutoMirrored.Outlined.ArrowBack,
+                            // The arrow only where it goes somewhere.
+                            if (atRoot) Icons.Outlined.FolderOpen else Icons.AutoMirrored.Outlined.ArrowBack,
                             if (atRoot) directory else "..",
                             muted = true,
                             selected = drag.target != null && drag.target == parent && !atRoot,

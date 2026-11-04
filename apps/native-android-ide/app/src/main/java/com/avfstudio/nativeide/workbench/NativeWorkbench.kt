@@ -199,6 +199,8 @@ private fun WorkbenchLayout(controller: WorkbenchController) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val expanded = maxWidth >= 600.dp
         val roomy = maxWidth >= 1200.dp
+        val windowWidth = maxWidth.value
+        val windowHeight = maxHeight.value
         Column(Modifier.fillMaxSize()) {
             TopBar(controller, expanded)
             GuestProblemBanner(controller)
@@ -206,32 +208,54 @@ private fun WorkbenchLayout(controller: WorkbenchController) {
             if (expanded) {
                 Row(Modifier.weight(1f).fillMaxWidth()) {
                     WorkbenchRail(controller)
+                    // Panes keep the size they were dragged to, and always leave the editor some room.
+                    val chatOpen = controller.chatVisible
+                    val sidebarOpen = controller.sidebar != null
+                    val limit = (windowWidth - 80f - MIN_EDITOR_WIDTH).coerceAtLeast(MIN_SIDE_PANE_WIDTH)
+                    val chatWidth = (controller.chatWidth ?: if (roomy) 420f else 340f).coerceIn(MIN_SIDE_PANE_WIDTH, limit)
+                    val sidebarWidth = (controller.sidebarWidth ?: if (roomy) 300f else 260f)
+                        .coerceIn(MIN_SIDE_PANE_WIDTH, (limit - if (chatOpen) chatWidth else 0f).coerceAtLeast(MIN_SIDE_PANE_WIDTH))
                     controller.sidebar?.let { view ->
-                        SidebarContent(controller, view, Modifier.width(if (roomy) 300.dp else 260.dp).paneShape())
+                        SidebarContent(controller, view, Modifier.width(sidebarWidth.dp).paneShape())
+                        PaneGutter(
+                            onDrag = { delta -> controller.sidebarWidth = (sidebarWidth + delta).coerceIn(MIN_SIDE_PANE_WIDTH, limit - if (chatOpen) chatWidth else 0f) },
+                            onStopped = controller::savePaneSizes,
+                        )
                     }
                     Column(Modifier.weight(1f).fillMaxHeight()) {
                         Box(Modifier.weight(1f).fillMaxWidth().paneShape()) { EditorArea(controller) }
-                        if (controller.panelVisible) PanelArea(controller, Modifier.paneShape())
+                        // The panel leaves the editor its tabs and a few lines.
+                        if (controller.panelVisible) PanelArea(controller, Modifier.paneShape(), maxHeight = windowHeight - MIN_EDITOR_HEIGHT)
                     }
-                    if (controller.chatVisible) {
+                    if (chatOpen) {
+                        PaneGutter(
+                            onDrag = { delta -> controller.chatWidth = (chatWidth - delta).coerceIn(MIN_SIDE_PANE_WIDTH, limit - if (sidebarOpen) sidebarWidth else 0f) },
+                            onStopped = controller::savePaneSizes,
+                        )
                         CopilotChatPane(
                             controller,
-                            Modifier.width(if (roomy) 420.dp else 340.dp).paneShape(),
+                            Modifier.width(chatWidth.dp).padding(end = 8.dp).paneShape(),
                             onClose = { controller.chatVisible = false },
                         )
+                    } else {
+                        Spacer(Modifier.width(8.dp))
                     }
                 }
             } else {
                 Box(Modifier.weight(1f).fillMaxWidth()) { CompactContent(controller) }
                 CompactNavigation(controller)
             }
-            StatusBar(controller)
+            StatusBar(controller, expanded)
         }
     }
 }
 
+private const val MIN_SIDE_PANE_WIDTH = 200f
+private const val MIN_EDITOR_WIDTH = 360f
+private const val MIN_EDITOR_HEIGHT = 300f
+
 /** Content panes sit in rounded cards on the container colour, like other Material 3 apps. */
-private fun Modifier.paneShape(): Modifier = padding(end = 8.dp, bottom = 4.dp).clip(RoundedCornerShape(16.dp))
+private fun Modifier.paneShape(): Modifier = padding(bottom = 4.dp).clip(RoundedCornerShape(16.dp))
 
 @Composable
 private fun TopBar(controller: WorkbenchController, expanded: Boolean) {
@@ -262,10 +286,10 @@ private fun TopBar(controller: WorkbenchController, expanded: Boolean) {
             )
         }
         Surface(
+            onClick = { controller.runCommand("workbench.action.quickOpen") },
             color = colors.surfaceContainerHighest,
             shape = CircleShape,
-            modifier = Modifier.weight(1f).height(40.dp).padding(horizontal = 8.dp)
-                .clickable { controller.runCommand("workbench.action.quickOpen") },
+            modifier = Modifier.weight(1f).height(40.dp).padding(horizontal = 8.dp),
         ) {
             Row(Modifier.padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Outlined.Search, contentDescription = null, tint = colors.onSurfaceVariant, modifier = Modifier.size(20.dp))
@@ -294,14 +318,6 @@ private fun TopBar(controller: WorkbenchController, expanded: Boolean) {
                 leadingIconContentColor = colors.onPrimaryContainer,
             ),
         )
-        if (expanded) {
-            Tooltip("Toggle terminal", "workbench.action.terminal.toggleTerminal") { IconButton(onClick = { controller.runCommand("workbench.action.terminal.toggleTerminal") }) {
-                Icon(Icons.Outlined.Terminal, contentDescription = "Toggle terminal")
-            } }
-            Tooltip("Copilot chat", "workbench.action.chat.open") { IconButton(onClick = { controller.runCommand("workbench.action.chat.open") }) {
-                Icon(Icons.Outlined.AutoAwesome, contentDescription = "Copilot chat", tint = if (controller.chatVisible) colors.primary else colors.onSurfaceVariant)
-            } }
-        }
         Box {
             Tooltip("More") { IconButton(onClick = { menu = true }) { Icon(Icons.Outlined.MoreVert, contentDescription = "More") } }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
@@ -396,7 +412,7 @@ private fun CompactContent(controller: WorkbenchController) {
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 listOf(PanelTab.Terminal, PanelTab.Debug, PanelTab.Output, PanelTab.Ports, PanelTab.Variables, PanelTab.Interactive).forEach { tab ->
-                    FilterChip(selected = controller.panelTab == tab, onClick = { controller.panelTab = tab }, label = { Text(tab.title) })
+                    PanelTabChip(controller, tab)
                 }
                 if (controller.panelTab == PanelTab.Terminal) TerminalActions(controller)
             }
@@ -454,7 +470,7 @@ private fun CompactNavigation(controller: WorkbenchController) {
 }
 
 @Composable
-private fun StatusBar(controller: WorkbenchController) {
+private fun StatusBar(controller: WorkbenchController, expanded: Boolean) {
     controller.documentRevision
     val colors = MaterialTheme.colorScheme
     val document = controller.activeDocument
@@ -475,6 +491,29 @@ private fun StatusBar(controller: WorkbenchController) {
                 CircleShape,
             ),
         )
+        // VS Code's left end: the branch and the problem counts, each a tap from its view.
+        if (expanded) {
+            controller.gitStatus?.branch?.takeIf { controller.connected }?.let { branch ->
+                StatusItem(branch, Icons.AutoMirrored.Outlined.CallSplit, tooltip = "Source Control", command = "workbench.view.scm") {
+                    controller.runCommand("workbench.view.scm")
+                }
+            }
+            val errors = controller.diagnostics.count { it.severity == 1 || it.severity == null }
+            val warnings = controller.diagnostics.count { it.severity == 2 }
+            Tooltip("Problems", "workbench.actions.view.problems") {
+                Row(
+                    Modifier.clickable { controller.runCommand("workbench.actions.view.problems") },
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(3.dp),
+                ) {
+                    Icon(Icons.Outlined.ErrorOutline, contentDescription = "Errors", modifier = Modifier.size(14.dp), tint = if (errors > 0) colors.error else colors.onSurfaceVariant)
+                    Text("$errors", style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant)
+                    Spacer(Modifier.width(3.dp))
+                    Icon(Icons.Outlined.Warning, contentDescription = "Warnings", modifier = Modifier.size(14.dp), tint = if (warnings > 0) colors.tertiary else colors.onSurfaceVariant)
+                    Text("$warnings", style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant)
+                }
+            }
+        }
         Text(
             controller.status,
             style = MaterialTheme.typography.labelMedium,
@@ -518,7 +557,9 @@ private fun StatusBar(controller: WorkbenchController) {
         )
         // An image has no lines, encoding or language to show.
         if (document != null && controller.activeNotebook == null && !document.binary) {
-            controller.cursorPosition?.let { StatusItem("Ln ${it.line + 1}, Col ${it.character + 1}", tooltip = "Go to Line/Column", command = "workbench.action.gotoLine") { controller.showGoToLine() } }
+            // There from the start (a file just opened has its cursor at the top), so the items beside it don't move at the first tap.
+            val cursor = controller.cursorPosition
+            StatusItem("Ln ${(cursor?.line ?: 0) + 1}, Col ${(cursor?.character ?: 0) + 1}", tooltip = "Go to Line/Column", command = "workbench.action.gotoLine") { controller.showGoToLine() }
             StatusItem(controller.indentation(document).label, tooltip = "Select Indentation") { controller.dialog = WorkbenchDialog.IndentationPicker }
             StatusItem(document.encoding, tooltip = "Select Encoding") { controller.dialog = WorkbenchDialog.Encoding }
             StatusItem(if (document.eol == "\r\n") "CRLF" else "LF", tooltip = "Select End of Line Sequence") { controller.dialog = WorkbenchDialog.LineEnding }
