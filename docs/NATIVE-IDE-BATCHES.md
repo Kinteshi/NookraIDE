@@ -2363,6 +2363,10 @@ day, L several days.
   62. Open Folder's Recent keeps folders that no longer exist (b34, django_example on the tablet);
       drop them, as the environment pickers do. S.
   63. The app can reopen as a floating window partly off-screen after an install or restart. S-M.
+  64. Replace Gemini CLI with Antigravity CLI as the Chat view's Google agent (user, 11-04). First check
+      that it has a Linux arm64 build, how it signs in, and whether it speaks ACP. Touches the tool
+      pack (`guest/tools/catalog.json`, `avf-node-agent.sh`), `ChatAgents.kt`, `GuestDependencies.kt`,
+      the sign-in flow, the commands and the spec's agent list. S-M if it speaks ACP; L if not.
 * Still left out on purpose: multi-cursor, sticky scroll, minimap (Aardink switch; folding came in batch 31);
   split editor groups and the 3-way merge editor; tasks.json; MCP, other AI providers and the
   built-in chat agent (Copilot, Claude Code and Gemini through ACP instead); foldable postures
