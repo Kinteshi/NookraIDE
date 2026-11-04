@@ -37,6 +37,7 @@ import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material.icons.outlined.Link
+import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.TableChart
 import androidx.compose.material.icons.outlined.Refresh
@@ -77,7 +78,6 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.material.icons.outlined.VerticalSplit
-import androidx.compose.material.icons.outlined.ArrowDropDown
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Replay
@@ -177,12 +177,8 @@ fun TerminalView(controller: WorkbenchController, modifier: Modifier = Modifier)
     val colors = MaterialTheme.colorScheme
     val dark = LocalDarkTheme.current
     Column(modifier.fillMaxSize()) {
-        // Below the panel's tabs: what acts on terminals, then the terminals themselves.
-        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            TerminalActions(controller)
-            if (controller.terminals.isNotEmpty()) {
-                androidx.compose.material3.VerticalDivider(Modifier.padding(horizontal = 6.dp).height(20.dp), color = colors.outlineVariant)
-            }
+        // Below the panel's tabs: the terminals, then what acts on them, which stays put while the tabs scroll.
+        Row(Modifier.fillMaxWidth().padding(start = 8.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Row(
                 Modifier.weight(1f).horizontalScroll(rememberScrollState()),
                 verticalAlignment = Alignment.CenterVertically,
@@ -212,6 +208,10 @@ fun TerminalView(controller: WorkbenchController, modifier: Modifier = Modifier)
                     )
                 }
             }
+            if (controller.terminals.isNotEmpty()) {
+                androidx.compose.material3.VerticalDivider(Modifier.padding(horizontal = 6.dp).height(20.dp), color = colors.outlineVariant)
+            }
+            TerminalActions(controller)
         }
         val session = controller.activeTerminal
         if (session == null) {
@@ -524,7 +524,7 @@ fun TerminalActions(controller: WorkbenchController) {
     Tooltip("New terminal", "workbench.action.terminal.new") { IconButton(onClick = { controller.newTerminal() }, modifier = TERMINAL_ACTION) { Icon(Icons.Outlined.Add, contentDescription = "New terminal", modifier = TERMINAL_ACTION_ICON) } }
     var more by remember { mutableStateOf(false) }
     Box {
-        Tooltip("More terminal actions") { IconButton(onClick = { more = true }, modifier = TERMINAL_ACTION) { Icon(Icons.Outlined.ArrowDropDown, contentDescription = "More terminal actions", modifier = TERMINAL_ACTION_ICON) } }
+        Tooltip("More terminal actions") { IconButton(onClick = { more = true }, modifier = TERMINAL_ACTION) { Icon(Icons.Outlined.MoreVert, contentDescription = "More terminal actions", modifier = TERMINAL_ACTION_ICON) } }
         DropdownMenu(expanded = more, onDismissRequest = { more = false }) {
             // VS Code's launch profile list under +, then the terminal's own actions.
             controller.terminalProfiles.forEach { profile ->

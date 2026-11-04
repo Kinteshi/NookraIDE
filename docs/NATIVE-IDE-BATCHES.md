@@ -2062,9 +2062,11 @@ before", and backlog 54, 57, 58, 59, 60. 328 app unit tests pass (QuickOpenWalkT
 ## 40. Terminal toolbar on its own row, the app's icon in the status bar (11-04 00:55; done, checked at full size)
 User's request (11-04). 328 app unit tests pass.
 * The terminal's actions left the panel's tab row: the panel's tabs are alone there, and below them
-  a row holds the actions (slimmer, 36 dp) on the left and the terminal tabs on their right. The
-  terminal tab now shows for a single terminal too, so closing one is always a tap away. Not looked
-  at in the phone-width layout, which draws the same view.
+  a row holds the terminal tabs on the left and the actions (slimmer, 36 dp) on the right, where they
+  stay while the tabs scroll (the user's choice, after trying them the other way round). The menu
+  of more actions has the three dots used elsewhere: its down arrow looked like the panel's hide
+  button above it. The terminal tab now shows for a single terminal too, so closing one is always
+  a tap away. Not looked at in the phone-width layout, which draws the same view.
 * The connection notification's status bar icon was Android's Bluetooth symbol. It's the launcher
   icon's `</>` now (res/drawable/ic_notification.xml). Checked in the status bar and with `dumpsys notification`.
 
