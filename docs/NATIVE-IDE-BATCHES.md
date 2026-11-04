@@ -2379,6 +2379,12 @@ day, L several days.
       was unreliable under memory pressure, the spec rejected Monaco in a WebView for that reason,
       and VS Code's workbench is TypeScript on the DOM. Find what could really carry over (extension host,
       extensions, grammars) and its measured memory. Answering S-M; doing it XL.
+  68. Explore bundling the terminal image with the app, using AVF without depending on the Linux Terminal
+      app: is it possible? (User, 11-04.) Today's cost of that dependency: the app's foreground service can't
+      keep Terminal's VM alive, and Back in Terminal stops it. First check whether an ordinary app can
+      get AVF's VM API and custom VM images (from memory, unverified: system API, permission
+      `MANAGE_VIRTUAL_MACHINE`, not for normal apps; see what the tablet grants and whether adb can),
+      then image size and updates. Answering S; doing it L or more, if allowed at all.
 * Still left out on purpose: multi-cursor, sticky scroll, minimap (Aardink switch; folding came in batch 31);
   split editor groups and the 3-way merge editor; tasks.json; MCP, other AI providers and the
   built-in chat agent (Copilot, Claude Code and Gemini through ACP instead); foldable postures
