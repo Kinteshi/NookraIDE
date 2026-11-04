@@ -2370,9 +2370,24 @@ day, L several days.
   65. Explore other backends besides the AVF guest: proot, Termux and others (user, 11-04). Compare
       memory, file and process speed, stability under memory pressure (the guest's main problem),
       background survival on Android, and what the daemon and tools need (they are glibc arm64
-      builds today). Exploring S-M; adopting one L or more. VSCodroid 1.6.0 (Play, on the tablet) is a
-      working no-VM example, read from its APK on 11-04, not run: a Termux-style `usr` tree, executables
-      packed as `lib*.so`, no VM permission. Test first whether the user's notebook libraries can run that way.
+      builds today). Exploring S-M; adopting one L or more. proot and Termux themselves not tried yet.
+      VSCodroid 1.6.0 (Play) is a working no-VM example, run and probed on the tablet 11-04 (Termux-style
+      `usr` tree, executables packed as `lib*.so`, no VM permission, Android-ABI Python 3.14):
+      * Works: a real ipykernel 7.4 (ready in 6.4 s, 69 MB, ran numpy), numpy 2.5 with OpenBLAS (1500x1500
+        matmul 0.14 s), pandas 3 (groupby of 1M rows 0.07 s), plotly, git, bash, tmux, make, ripgrep, npm.
+        Files are direct: 300 MB written in 0.19 s, 3 000 files created in 0.13 s, listed in 14 ms.
+      * No Android wheel: scipy, scikit-learn, matplotlib, pillow, pyarrow, torch, tensorflow, catboost,
+        lightgbm, xgboost, onnxruntime, opencv, statsmodels, numba, lxml, cryptography, orjson, ruff.
+        So the user's notebooks (torch, scikit-learn, catboost) can't run this way. Its optional C/C++
+        pack wasn't tried. Without it, pip builds only pure-Python fallbacks (markupsafe, tornado).
+      * Missing: apt, sudo, proot, compilers, curl. A plain Linux binary is refused (rg: "unexpected
+        e_type: 2"); an Android binary copied to the home folder runs through `linker64` and
+        `libtermux-exec.so`, so code in writable storage can be mapped executable. VSCodroid's own
+        notes say shared storage (FUSE) has no symlinks, which breaks npm there; not checked.
+      * Memory: about 1.2 GB with one README open (app 409 MB, renderer 409 MB, Node about 400 MB, by
+        dumpsys's per-process totals), against the 400-700 MB it advertises. Service survives Home (see 69).
+      * Open: glibc in the sandbox, which would make normal manylinux ML wheels possible (see 70).
+        Not checked: screen off, long background runs.
   66. Improve and refine the offline experience (user, 11-04). Batch 24 built the base
       (`avf.offline.openLastFolder`: cached files, queued saves, Explorer of known files). Start by
       walking through it on the tablet to list the rough edges, then choose. M, to be sized after the walk.
@@ -2382,7 +2397,7 @@ day, L several days.
       and VS Code's workbench is TypeScript on the DOM. Find what could really carry over (extension host,
       extensions, grammars) and its measured memory. Answering S-M; doing it XL. VSCodroid (see 65) is the
       first form on Android: VS Code's server on Node, its web client in a WebView. It says 400-700 MB
-      typical; not measured here.
+      typical; measured about 1.2 GB idle with one file open, so a port doesn't answer the memory problem.
   68. Explore bundling the terminal image with the app, using AVF without depending on the Linux Terminal
       app: is it possible? (User, 11-04.) Today's cost of that dependency: the app's foreground service can't
       keep Terminal's VM alive, and Back in Terminal stops it. Checked 11-04: not for a store install.
@@ -2390,6 +2405,26 @@ day, L several days.
       `USE_CUSTOM_VIRTUAL_MACHINE` is signature|development; the VM API is a system API. AOSP's README allows
       `adb shell pm grant` for development, so it may work on this tablet only; not tried. It would not
       fix the guest's trouble under memory pressure. Trying the grant S; doing it L or more.
+  69. The guest can be killed by Android's phantom process limit (found 11-04). `max_phantom_processes` is 32 for
+      the whole device, and a running VM takes 6 (`virtmgr`, 4 `crosvm`, `crosvm_debian`). Over the limit,
+      a change of foreground app trims processes of any app: with 40 test `sleep`s in VSCodroid, pressing Home
+      killed all of VSCodroid's processes (its Node server came back; terminals and work were lost), another
+      app's `logcat` and Terminal's `virtmgr` within 4 s. Under the limit, all stayed up for at least 3 min
+      after Home. So many processes in any app (DataLoader workers, npm) may stop the guest. Unproven whether
+      this has already happened: the VM was found off at 16:15, before the test, with a stale `virtmgr`, cause not
+      logged (no `crosvm` kill in the events log since 14:39). Work: warn near the limit and say so when
+      the guest goes away; explain Developer options' child process setting (not changed; check Samsung's menu).
+      No Settings toggle: a warning only. S-M. Don't repeat this test with the VM up.
+  70. A mode for when Terminal/AVF isn't available (user, 11-04; from 15, 65, 68). Sketch, by layers:
+      (a) Offline editor: exists (batch 24, item 66). (b) Local backend: the daemon built for
+      aarch64-linux-android, packed as `lib*.so` with Python, git and ripgrep, same protocol so the UI stays;
+      gives editor, terminal, Git and light notebooks (numpy, pandas, plotly), and it must stay well under 32
+      processes. M-L. (c) ML: a daemon on another Linux machine, through the existing connection profiles; the
+      one route for torch available now, not tried. (d) Unproven: glibc in the sandbox. Tried in VSCodroid: Android's
+      `linker64` refuses Debian's loader for lacking PT_PHDR; with that added it segfaults on RELRO, because both
+      linkers relocate it. The next attempt was blocked by Claude Code's permissions, not by Android.
+      An app of our own wouldn't need this: a loader packed as `lib*.so` can be executed directly. Prove it with one
+      manylinux wheel before planning on it. Settings: a backend picker (AVF guest, local, remote). L overall.
 * Still left out on purpose: multi-cursor, sticky scroll, minimap (Aardink switch; folding came in batch 31);
   split editor groups and the 3-way merge editor; tasks.json; MCP, other AI providers and the
   built-in chat agent (Copilot, Claude Code and Gemini through ACP instead); foldable postures
