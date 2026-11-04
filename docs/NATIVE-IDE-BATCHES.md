@@ -18,6 +18,10 @@ Status values: **done** (committed), **in progress**, **planned**.
 | 7 | Debugging (DAP with debugpy) | done (tablet check pending) | `2746b65` |
 | 8 | Daemon hosted on Linux and Windows (WSL2) machines, with a connection guide | done (host install not run) | see `git log` |
 
+This table stops at batch 8. From batch 9 on, each section's heading gives its status. The latest
+is [41](#41-backlog-additions-and-vscodroid-explored-11-04-no-app-change), and what's still open is in
+[Open backlog](#open-backlog-11-04).
+
 ## 1. Workbench rewrite (done)
 Material You shell, settings page, VS Code shortcuts, ConnectBot terminal over daemon PTYs,
 Jupyter notebooks through `avf-jupyter-bridge`, Copilot inline suggestions and ACP chat,
@@ -2070,7 +2074,54 @@ User's request (11-04). 328 app unit tests pass.
 * The connection notification's status bar icon was Android's Bluetooth symbol. It's the launcher
   icon's `</>` now (res/drawable/ic_notification.xml). Checked in the status bar and with `dumpsys notification`.
 
+## 41. Backlog additions and VSCodroid explored (11-04; no app change)
+User's requests (11-04): register items 64–68, then look at VSCodroid, which was installed on the tablet
+from Play, and use it to think about working without Terminal. Only this file changed (`a3217e7`, `7c8b172`,
+`7c293b2`, `ffbd715`, `d13a00a`), so batch 40's 328 app tests still stand. Findings are in items 65 and 67–70.
+* AVF without Terminal (68): not for a store install. The tablet's permission table limits both VM
+  permissions; an adb grant on this tablet alone may work, not tried.
+* VSCodroid is unrelated to 68: it uses no VM. It's VS Code's server on Node with a WebView, built on Android's
+  own libc. Editor, terminal, Git and light notebooks work; torch, scikit-learn and catboost have no Android wheel.
+* The phantom process limit can stop the guest (69). Found by accident, in a test of 40 processes that also killed
+  Terminal's `virtmgr`. The VM was already off (no `crosvm` at 16:15, before the test; cause unknown), so nothing
+  running was lost to it. Opening Terminal to check booted the VM at 16:47; the app then showed Connected.
+* Stopped by a permission, not by a result: glibc in the sandbox (70 d). Claude Code's permission system
+  blocked running a patched copy of a downloaded loader. **Waiting on the user** to allow it or drop it.
+* Left on the tablet: VSCodroid stopped, its `~/vdprobe` and pip cache removed, its `.ipython` folder and
+  shell history remain; the adb redirect and test keyboard are gone; the guest is running.
+
 ## Backlog
+### Open backlog (11-04)
+The current list of what's open; the older lists below keep the history and details. "#" is the number
+used when showing the user this table. "Item" is the number in the lists below, where one exists.
+
+| # | Item | Size | Description |
+|---|------|------|-------------|
+| 1 | 52 | M–L | Memory 420–504 MB against the 250 MB budget |
+| 2 | 53 | M | Key to frame p95 24.3 ms against the 16 ms budget |
+| 3 | 57 | S | Data viewer filter with the on-screen keyboard |
+| 4 | 61 | S–M | Files beyond Quick Open's 20,000 |
+| 5 | 62 | S | Recent keeps folders that no longer exist |
+| 6 | 63 | S–M | App can reopen as a partly off-screen floating window |
+| 7 | 55 | S | Deep Rust projects on the tablet (about 1 GB of Rust) |
+| 8 | 56 | M–L | Widgets not drawn yet |
+| 9 | 22 | M | Accessibility pass |
+| 10 | 23 | L | Automated on-device tests and screenshot comparisons |
+| 11 | – | XL | Aardink switch (on hold until 0.9) |
+| 12 | – | ? | Copilot exits after a daemon restart (watching) |
+| 13 | 64 | S–M or L | Replace Gemini CLI with Antigravity CLI |
+| 14 | 65 | S–M to explore, L+ to adopt | Other backends: proot, Termux and others |
+| 15 | 66 | M, after a walkthrough | Refine the offline experience |
+| 16 | 67 | S–M to answer, XL to do | VS Code port, or a native app and Rust backend from one |
+| 17 | 68 | S to try the grant, L+ to do | Bundle the image and use AVF without Terminal: not for store installs |
+| 18 | 69 | S–M | Warn near the phantom process limit, and say so when the guest goes away |
+| 19 | 70 | L overall | Mode without Terminal: local backend, ML on another machine, glibc if proven |
+
+Loose ends, not sized:
+* The unsaved dot seen once after saving a restored deleted file (batch 39; not reproduced in three tries).
+* The terminal's toolbar row at phone width (batch 40; not looked at).
+* Whether to continue the glibc test (70 d): the user's decision.
+
 To investigate (user, 10-28):
 * (Done in batch 16, with a notebook-side finding.) Plotly figures updating in place (the user's private-notebook-1.ipynb: `plot_handle =
   display(fig, display_id=True)`, then `plot_handle.update(fig)` per epoch). First look: the

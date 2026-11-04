@@ -1,7 +1,14 @@
 # Native IDE (Track B) — handoff
 
-Last updated: 2026-10-23, 17:10 (UTC−3). Read this first when resuming. The batch plan and its status are in [NATIVE-IDE-BATCHES.md](NATIVE-IDE-BATCHES.md). Scope decisions are in
+Last updated: 2026-11-04 (UTC−3). Read this first when resuming. The batch plan and its status are in [NATIVE-IDE-BATCHES.md](NATIVE-IDE-BATCHES.md). Scope decisions are in
 [NATIVE-ANDROID-IDE-SPEC.md](NATIVE-ANDROID-IDE-SPEC.md) under "Scope reset (2026-10-23)".
+
+## Current state (2026-11-04)
+
+* **Progress:** batches 1–40 are done, and 41 was exploration with no app change. Each is described in the batch plan.
+* **What's open:** [Open backlog](NATIVE-IDE-BATCHES.md#open-backlog-11-04), which replaces this file's old "Remaining" list.
+* **Waiting on the user:** whether to continue the glibc test (backlog item 70 d). Claude Code's permission system blocked it, so it needs the user's approval.
+* **Tablet:** the latest build is installed, and the guest was rebooted at 16:47 on 11-04. The sections "Reference tablet" and "Done" below mostly date from 10-23, so some of what they describe may have moved on. The batch plan is the record since then.
 
 ## Where things are
 
@@ -20,7 +27,7 @@ cargo test -p avf-daemon -p avf-protocol
 PATH=$HOME/.cargo/bin:$PATH cargo zigbuild --release -p avf-daemon --target aarch64-unknown-linux-gnu.2.28
 ```
 
-At last run: the app had 76 unit tests and the daemon 66 + 18, all passing; clippy was clean.
+At last run: 328 app unit tests (batch 40) and 124 daemon tests (batch 37, the last daemon change), all passing.
 
 ## Reference tablet (Galaxy Tab S11 Ultra, SM-X930)
 
@@ -31,6 +38,8 @@ At last run: the app had 76 unit tests and the daemon 66 + 18, all passing; clip
   * A system code-server on 8080, which is not ours.
 * **Running guest commands:** push a script to `/sdcard/Download`, bring Linux Terminal to the front, and type `bash /mnt/shared/Download/x.sh`. Write results to `/mnt/shared/Download/*.log` and read them back with adb.
 * **Never send Back to Linux Terminal.** It shuts the VM down and the app then kills it forcibly. After a VM stop, "Preparando o terminal" is just the boot (about a minute).
+* **Don't start many processes in any app while the guest matters.** Android allows 32 phantom processes across the device, and the VM takes 6. Going over and then changing the foreground app trims processes of any app, including Terminal's `virtmgr` (backlog item 69).
+* **Check that the VM is really up:** `adb shell ps -A | grep crosvm_debian`. A `virtmgr` alone doesn't mean it is. Opening Terminal boots it again.
 * **Guest reset:** at 13:46 on 2026-10-23 the Debian image was reset from Terminal → Settings → Recovery (not by automation), which wiped the whole guest, Track A and the system code-server included. To re-provision Track B, push the arm64 daemon and run `scripts/install-native-daemon.sh` (it now bootstraps a pinned, checksum-verified uv 0.13.0 and no longer needs openssl). Then enter the new token in the app and accept port 19870 in the notification shade.
 * **Port forwarding after a reboot:** forwards can be missing even though the ports are allowed. Toggle the port off and on in Terminal → Settings → Controle de portas. A new port raises a notification; tap *Aceitar*.
 * **Hosting on a computer (batch 8):** see [HOSTING-THE-DAEMON.md](HOSTING-THE-DAEMON.md).
@@ -102,21 +111,11 @@ At last run: the app had 76 unit tests and the daemon 66 + 18, all passing; clip
 * Colours stay correct when opening a file, on edit bursts, and on new lines (`~/Projects/hl_test.py`).
 * Measured memory (earlier build): daemon 7 MB, ty 41 MB, ruff 18 MB, Copilot language server 283 MB, `copilot --acp` 288 MB.
 
-## Remaining (in priority order)
+## Remaining
 
-1. **Finish chat sign-in on the device** (needs the user to approve on GitHub): tap Sign in in the chat pane, approve the code, then confirm that the daemon-launched `copilot --acp` answers a prompt. If it doesn't, check where the CLI stored the token (`~/.copilot/`, without printing it).
-2. **Copilot language server memory when signed out:** after a guest reset, Copilot stays enabled and its server (~280 MB) keeps running while it reports "not signed in". Consider stopping it until sign-in.
-3. **Re-measure the app's memory (PSS/RSS)** with the new UI, termlib and Material icons; the debug APK is 39 MB.
-4. **Small notebook gaps:**
-   - HTML-only outputs show a placeholder.
-   - Kernel completion isn't wired: `KernelClient.complete` exists but no UI uses it.
-   - `NotebookCell` autofocus (added at the end, not yet seen on device).
-   - The reset guest has no Python with ipykernel; check the kernel picker's "Install ipykernel" flow on a fresh guest (Debian's system pip is externally managed).
-5. **Initial setup / host reset:** the current recovery is manual (push daemon, run the installer, type a 64-character token in 4-character chunks, accept the port). Also: the app neither reconnects on launch nor restores open tabs.
-6. **Not built yet:** customisable keybindings (`keybindings.json`), TypeScript 7 `tsc --lsp` measurement (Node isn't in the guest), and a phone-width check of the compact layout.
-7. **Decide later whether to merge daemon changes with Track A's Supervisor branch.** The two branches' `lib.rs` have diverged. Track A's guest install was also lost in the reset.
+See the [Open backlog](NATIVE-IDE-BATCHES.md#open-backlog-11-04). One decision from the old list has no entry there: whether to merge daemon changes with Track A's Supervisor branch. The two branches' `lib.rs` have diverged, and Track A's guest install was lost in the 10-23 reset.
 
 ## Device leftovers to clean up
 
-The 13:46 guest reset removed the earlier test files. Current leftovers:
+Recorded on 10-23 after the 13:46 guest reset, and not rechecked since:
 * `~/Projects/hl_test.py` (highlighting test file; the user also edited it), `~/Projects/notes` (empty, from the rename test), and `~/Projects/avf-tests/` (`keys.ipynb`, `comments.py`, `Untitled-1`, plus a `welcome.py` the user saved there with Ctrl+S). The app also keeps an unsaved draft of it with test edits, and test lines in the `welcome.py` scratch file; close both without saving.
