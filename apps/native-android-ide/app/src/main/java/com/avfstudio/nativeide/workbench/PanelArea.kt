@@ -115,6 +115,10 @@ internal fun PanelTabChip(controller: WorkbenchController, tab: PanelTab) {
     )
 }
 
+/** The terminal toolbar's buttons, slimmer than the default so its row stays low. */
+private val TERMINAL_ACTION = Modifier.size(36.dp)
+private val TERMINAL_ACTION_ICON = Modifier.size(20.dp)
+
 /** Bottom panel (Ctrl+J): terminals, problems and the output log, resizable by its top edge up to [maxHeight] dp. */
 @Composable
 fun PanelArea(controller: WorkbenchController, modifier: Modifier = Modifier, maxHeight: Float = 900f) {
@@ -150,7 +154,6 @@ fun PanelArea(controller: WorkbenchController, modifier: Modifier = Modifier, ma
             ) {
                 PanelTab.entries.forEach { tab -> PanelTabChip(controller, tab) }
             }
-            if (controller.panelTab == PanelTab.Terminal) TerminalActions(controller)
             Tooltip("Hide panel") { IconButton(onClick = { controller.panelVisible = false }) {
                 Icon(Icons.Outlined.KeyboardArrowDown, contentDescription = "Hide panel")
             } }
@@ -174,16 +177,22 @@ fun TerminalView(controller: WorkbenchController, modifier: Modifier = Modifier)
     val colors = MaterialTheme.colorScheme
     val dark = LocalDarkTheme.current
     Column(modifier.fillMaxSize()) {
-        if (controller.terminals.size > 1 || controller.terminals.any { it.exited || it.lastExitCode != null }) {
+        // Below the panel's tabs: what acts on terminals, then the terminals themselves.
+        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            TerminalActions(controller)
+            if (controller.terminals.isNotEmpty()) {
+                androidx.compose.material3.VerticalDivider(Modifier.padding(horizontal = 6.dp).height(20.dp), color = colors.outlineVariant)
+            }
             Row(
-                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp),
+                Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+                verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 controller.terminals.forEach { session ->
                     InputChip(
                         selected = session.id == controller.activeTerminalId,
                         onClick = { controller.activeTerminalId = session.id },
-                        label = { Text(if (session.exited) "${session.title} (exited)" else session.title) },
+                        label = { Text(if (session.exited) "${session.title} (exited)" else session.title, maxLines = 1) },
                         leadingIcon = {
                             // Shell integration's last exit status, as VS Code's command decorations colour it.
                             val code = session.lastExitCode
@@ -504,18 +513,18 @@ fun VariablesView(controller: WorkbenchController) {
 /** The terminal's own buttons: find in its output, links in it, a new terminal. */
 @Composable
 fun TerminalActions(controller: WorkbenchController) {
-    Tooltip("Find in terminal") { IconButton(onClick = { if (controller.terminalFindVisible) controller.terminalFindVisible = false else controller.showTerminalFind() }) {
-        Icon(Icons.Outlined.Search, contentDescription = "Find in terminal")
+    Tooltip("Find in terminal") { IconButton(onClick = { if (controller.terminalFindVisible) controller.terminalFindVisible = false else controller.showTerminalFind() }, modifier = TERMINAL_ACTION) {
+        Icon(Icons.Outlined.Search, contentDescription = "Find in terminal", modifier = TERMINAL_ACTION_ICON)
     } }
-    Tooltip("Open a detected link") { IconButton(onClick = controller::showTerminalLinks) { Icon(Icons.Outlined.Link, contentDescription = "Open a detected link") } }
+    Tooltip("Open a detected link") { IconButton(onClick = controller::showTerminalLinks, modifier = TERMINAL_ACTION) { Icon(Icons.Outlined.Link, contentDescription = "Open a detected link", modifier = TERMINAL_ACTION_ICON) } }
     TerminalCommandsButton(controller)
     Tooltip("Split terminal", "workbench.action.terminal.split") {
-        IconButton(onClick = controller::splitTerminal) { Icon(Icons.Outlined.VerticalSplit, contentDescription = "Split terminal") }
+        IconButton(onClick = controller::splitTerminal, modifier = TERMINAL_ACTION) { Icon(Icons.Outlined.VerticalSplit, contentDescription = "Split terminal", modifier = TERMINAL_ACTION_ICON) }
     }
-    Tooltip("New terminal", "workbench.action.terminal.new") { IconButton(onClick = { controller.newTerminal() }) { Icon(Icons.Outlined.Add, contentDescription = "New terminal") } }
+    Tooltip("New terminal", "workbench.action.terminal.new") { IconButton(onClick = { controller.newTerminal() }, modifier = TERMINAL_ACTION) { Icon(Icons.Outlined.Add, contentDescription = "New terminal", modifier = TERMINAL_ACTION_ICON) } }
     var more by remember { mutableStateOf(false) }
     Box {
-        Tooltip("More terminal actions") { IconButton(onClick = { more = true }) { Icon(Icons.Outlined.ArrowDropDown, contentDescription = "More terminal actions") } }
+        Tooltip("More terminal actions") { IconButton(onClick = { more = true }, modifier = TERMINAL_ACTION) { Icon(Icons.Outlined.ArrowDropDown, contentDescription = "More terminal actions", modifier = TERMINAL_ACTION_ICON) } }
         DropdownMenu(expanded = more, onDismissRequest = { more = false }) {
             // VS Code's launch profile list under +, then the terminal's own actions.
             controller.terminalProfiles.forEach { profile ->
@@ -563,7 +572,7 @@ private fun TerminalCommandsButton(controller: WorkbenchController) {
     val colors = MaterialTheme.colorScheme
     var open by remember { mutableStateOf(false) }
     Box {
-        Tooltip("Commands") { IconButton(onClick = { open = true }) { Icon(Icons.Outlined.History, contentDescription = "Commands") } }
+        Tooltip("Commands") { IconButton(onClick = { open = true }, modifier = TERMINAL_ACTION) { Icon(Icons.Outlined.History, contentDescription = "Commands", modifier = TERMINAL_ACTION_ICON) } }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             val commands = controller.terminalCommands(session).asReversed().take(20)
             if (commands.isEmpty()) {

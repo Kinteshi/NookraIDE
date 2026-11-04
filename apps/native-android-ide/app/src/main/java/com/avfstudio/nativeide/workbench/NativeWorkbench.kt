@@ -415,7 +415,6 @@ private fun CompactContent(controller: WorkbenchController) {
                 listOf(PanelTab.Terminal, PanelTab.Debug, PanelTab.Output, PanelTab.Ports, PanelTab.Variables, PanelTab.Interactive).forEach { tab ->
                     PanelTabChip(controller, tab)
                 }
-                if (controller.panelTab == PanelTab.Terminal) TerminalActions(controller)
             }
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 when (controller.panelTab) {

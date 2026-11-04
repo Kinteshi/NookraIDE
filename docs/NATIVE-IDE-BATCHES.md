@@ -2059,6 +2059,15 @@ before", and backlog 54, 57, 58, 59, 60. 328 app unit tests pass (QuickOpenWalkT
   more tries (x.py, q.py, r.py, including a restored tab with a formatting change) stayed clean.
 * Test files (~/Projects/b39: 100 000 files, notebooks) were removed; the guest's package list is unchanged.
 
+## 40. Terminal toolbar on its own row, the app's icon in the status bar (11-04 00:55; done, checked at full size)
+User's request (11-04). 328 app unit tests pass.
+* The terminal's actions left the panel's tab row: the panel's tabs are alone there, and below them
+  a row holds the actions (slimmer, 36 dp) on the left and the terminal tabs on their right. The
+  terminal tab now shows for a single terminal too, so closing one is always a tap away. Not looked
+  at in the phone-width layout, which draws the same view.
+* The connection notification's status bar icon was Android's Bluetooth symbol. It's the launcher
+  icon's `</>` now (res/drawable/ic_notification.xml). Checked in the status bar and with `dumpsys notification`.
+
 ## Backlog
 To investigate (user, 10-28):
 * (Done in batch 16, with a notebook-side finding.) Plotly figures updating in place (the user's private-notebook-1.ipynb: `plot_handle =
