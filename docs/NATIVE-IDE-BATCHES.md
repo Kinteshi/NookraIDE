@@ -2013,6 +2013,52 @@ appropriate, tables that fit their content, chat output and controls stable and 
   removed; the guest's package list is unchanged; uv's cache keeps pandas and ipywidgets wheels. The
   three test chats left Past chats (Copilot keeps their files under ~/.copilot/session-state).
 
+## 39. Notebook hover card, Quick Open on large folders, deleted files in tabs, frozen table index (11-04 00:15–00:55; done, checked)
+User's pick (11-04): the notebook's hover card, which "simply disappears as the editor's did
+before", and backlog 54, 57, 58, 59, 60. 328 app unit tests pass (QuickOpenWalkTest is new); no daemon change.
+* (User) Notebook hover card. It closed as soon as the pointer left the word, with no hiding delay, so
+  it couldn't be reached. It now works as the editor's: `editor.hover.hidingDelay` after the
+  pointer leaves its word or cell, kept while the pointer is on the card, and closed after the
+  delay once it leaves the card; resting on another word replaces it. The card starts at the
+  word instead of the character under the pointer, as in VS Code, so straight up lands on it (it
+  used to miss by a few pixels). The card is a window of its own, so the cell's Exit can arrive
+  after the card's Enter (9 ms later in the log): that case must not start a hide. Checked with a
+  virtual touchpad, finger down: rest on `greet`, slide onto the card (still there 3 s later),
+  slide off (gone); and off the word without touching the card (gone).
+* (54) Quick Open no longer slows the guest. It listed every folder at once; with 1 000 folders
+  that is the burst the AVF guest collapses under. It now lists two at a time, nearest first.
+  Opening a 200-cell notebook while indexing 100 000 files: **7.2 s before, 0.12 s after** (three runs).
+  * Typing finds files while indexing (the first index of a folder shows what it has so far), and
+    a redraw no longer repeats the matching. Batch 38's ranking built a regular expression per file
+    at each key; it's a plain scan now.
+  * The index holds 20 000 files (was 5 000), and the box says when a folder has more. Top-level
+    folders take turns, so one huge folder doesn't use up the limit before small ones are seen.
+* (60) Lost keys: none in eight runs typing "mod0420" on a test keyboard as the box opened during
+  indexing. Batch 38's fixed window had left one: a key typed before the box had focus went to the
+  editor or terminal (seen once, in the terminal). Those keys now go in the box.
+* (57) Checked what batch 38 couldn't: with a temporary command streaming a line every 150 ms
+  through the chat's real path (not committed), the list follows the newest line; scrolled up,
+  frames 2.5 s apart are pixel-identical while lines keep arriving; the arrow jumps to the newest
+  and follows again. The data viewer's filter typed on a test keyboard with results reloading mid-word:
+  text intact, the dialog neither moved nor resized, 111 of 5 000 rows. The on-screen keyboard was
+  not tried (a hardware keyboard is attached), and that's the case the fixed size is for.
+* (59) Tabs of deleted files: struck through, red, "(deleted)", also in Open Editors, with a banner
+  (Save, Close). Checked when a tab is restored and the file is gone (the user's launch.json and
+  cells.py show it), and when a command deletes a file or its whole folder while it's open
+  (marked in about 2 s). Save puts the file back with its folders; auto-save doesn't, as it
+  would undo the deletion. No Settings toggle: it only reports a fact.
+* (58) A table's index stays while the columns scroll, in notebooks and the data viewer, with a line at
+  its edge once columns are under it; MultiIndex and two-row headers stay aligned. It scrolls
+  with the rest if it would take over 40% of the width. No Settings toggle: it only shows when it helps.
+* Fixes found on the way:
+  * **Batch 38's report was wrong**: Explorer did not refresh after a terminal command. The check compared
+    the number of commands, which changes when one starts, not when it ends. It counts finished ones now.
+  * Explorer and the tabs also refresh when an agent's tool finishes.
+  * The top bar's chip said "Connecting…" while opening a file (it read the general busy flag).
+* Seen once and not explained: after Save on the restored gone.py, its tab kept the unsaved dot. Three
+  more tries (x.py, q.py, r.py, including a restored tab with a formatting change) stayed clean.
+* Test files (~/Projects/b39: 100 000 files, notebooks) were removed; the guest's package list is unchanged.
+
 ## Backlog
 To investigate (user, 10-28):
 * (Done in batch 16, with a notebook-side finding.) Plotly figures updating in place (the user's private-notebook-1.ipynb: `plot_handle =
@@ -2287,7 +2333,7 @@ day, L several days.
   53. Keystroke to frame: median 18.7 ms, p95 24.3 ms (budget 16 ms p95, i.e. one frame at
       120 Hz). Profile a key press (sora's layout, the overlays, LSP didChange on the main
       thread?). M.
-  54. Quick Open's index walk of a 100 000-file workspace slows other guest reads (a 484 KB
+  54. (Done in batch 39.) Quick Open's index walk of a 100 000-file workspace slows other guest reads (a 484 KB
       notebook: 0.4 s at startup, 2.7 s from Quick Open; a 50 MB log's first page 3.6 s once),
       and keys typed while "Indexing workspace…" are lost. Give file reads priority or stream the
       index. S-M.
@@ -2295,13 +2341,17 @@ day, L several days.
   56. ipywidgets not drawn yet: binary-data widgets (ipycanvas, bqplot), media (Image, Video,
       Audio), pickers (ColorPicker, DatePicker), Play, and third-party widget libraries; saved
       `metadata.widgets` drawn before the kernel runs. M-L.
-  57. Check on a slow reply that the chat holds its position when scrolled up (batch 38: Copilot's
+  57. (Done in batch 39, except the on-screen keyboard.) Check on a slow reply that the chat holds its position when scrolled up (batch 38: Copilot's
       replies arrived in bulk), and that a filter typed in the data viewer keeps the keyboard's
       input. S.
-  58. A wide table's index column that stays while the columns scroll (notebook and data viewer). S-M.
-  59. A tab restored for a file that no longer exists (launch.json and cells.py on the tablet) shows
+  58. (Done in batch 39.) A wide table's index column that stays while the columns scroll (notebook and data viewer). S-M.
+  59. (Done in batch 39.) A tab restored for a file that no longer exists (launch.json and cells.py on the tablet) shows
       its saved copy with no sign the file is gone; VS Code marks it deleted. S.
-  60. Check whether batch 38's fixed Quick Open window also stops the keys lost while indexing (54). S.
+  60. (Done in batch 39.) Check whether batch 38's fixed Quick Open window also stops the keys lost while indexing (54). S.
+  61. Find files beyond Quick Open's 20 000 in very large folders (ask the guest: `rg --files`). S-M.
+  62. Open Folder's Recent keeps folders that no longer exist (b34, django_example on the tablet);
+      drop them, as the environment pickers do. S.
+  63. The app can reopen as a floating window partly off-screen after an install or restart. S-M.
 * Still left out on purpose: multi-cursor, sticky scroll, minimap (Aardink switch; folding came in batch 31);
   split editor groups and the 3-way merge editor; tasks.json; MCP, other AI providers and the
   built-in chat agent (Copilot, Claude Code and Gemini through ACP instead); foldable postures

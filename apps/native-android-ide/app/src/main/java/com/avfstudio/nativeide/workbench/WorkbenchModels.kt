@@ -235,8 +235,8 @@ class TerminalSession(val id: UUID, val emulator: TerminalEmulator, title: Strin
     var commandsRevision by mutableStateOf(0)
     /** The last finished command's exit status (shell integration), for the tab's mark. */
     var lastExitCode by mutableStateOf<Int?>(null)
-    /** Commands shell integration had reported the last time it reported any. */
-    var commandsSeen = 0
+    /** Commands shell integration had seen end the last time it reported any. */
+    var commandsFinished = 0
     /** The view's selection and scrolling, once it is shown. */
     var selection: org.connectbot.terminal.SelectionController? = null
     var scroll: TerminalScroll? = null

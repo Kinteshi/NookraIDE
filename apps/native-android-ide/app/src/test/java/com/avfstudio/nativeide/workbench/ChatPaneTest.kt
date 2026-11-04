@@ -29,6 +29,14 @@ class ChatPaneTest {
     }
 
     @Test
+    fun hoverCardsStartAtTheWord() {
+        assertEquals(6, wordStart("print(undefined_name)", 14))
+        assertEquals(6, wordStart("print(undefined_name)", 6))
+        assertEquals(0, wordStart("print(undefined_name)", 3))
+        assertEquals(21, wordStart("print(undefined_name)", 99))
+    }
+
+    @Test
     fun optionsKeepModelThenModeThenTheRest() {
         val ids = listOf("allow_all", "mode", "model")
         assertEquals(listOf("model", "mode", "allow_all"), ids.sortedBy(::chatOptionRank))

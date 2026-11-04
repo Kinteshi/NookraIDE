@@ -1,5 +1,9 @@
 package com.avfstudio.nativeide.workbench
 
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.foundation.layout.BoxWithConstraints
 import android.graphics.BitmapFactory
 import android.util.Base64
 import androidx.compose.foundation.Image
@@ -475,8 +479,9 @@ private val DATA_VIEWER_COLUMN_WIDTH = 480.dp
 internal val TABLE_ROW_HEIGHT = 26.dp
 
 /**
- * A DataFrame as a native table: theme colours, header rows that stay while the rows scroll,
- * numbers aligned right, and a tap on a column header sorts by it (ascending, descending, off).
+ * A DataFrame as a native table: theme colours, header rows that stay while the rows scroll, an
+ * index that stays while the columns scroll, numbers aligned right, and a tap on a column header
+ * sorts by it (ascending, descending, off).
  */
 /** The Variables view's data viewer: the notebook's native table, taller, with its own sort state. */
 @Composable
@@ -538,45 +543,74 @@ private fun OutputTableView(
     }
     val horizontal = rememberScrollState()
     val vertical = rememberScrollState()
+    // The index stays while the columns scroll, unless it would take most of a narrow window.
+    val indexWidth = remember(widths, table) { widths.take(table.indexColumns).fold(0.dp) { sum, width -> sum + width } }
+    @Composable
+    fun headCells(r: Int, line: List<TableCell>, columns: IntRange) {
+        Row(Modifier.background(colors.surfaceContainerHigh)) {
+            columns.forEach { column ->
+                val cell = line[column]
+                val arrow = if (r == table.head.lastIndex && column == sortColumn) {
+                    if (presentation.sortDirection == SortDirection.Ascending) " ▲" else " ▼"
+                } else ""
+                TableCellText(
+                    (if (cell.spanned) "" else cell.text) + arrow,
+                    headerStyle,
+                    colors.onSurface,
+                    widths.getOrElse(column) { 48.dp },
+                    if (numeric.getOrElse(column) { false }) TextAlign.End else TextAlign.Start,
+                    Modifier.noKeyFocus().clickable { sortBy(column) },
+                )
+            }
+        }
+    }
+    @Composable
+    fun bodyCells(r: Int, line: List<TableCell>, columns: IntRange) {
+        Row(Modifier.background(if (r % 2 == 0) colors.surface else colors.surfaceContainerLow)) {
+            columns.forEach { column ->
+                val cell = line[column]
+                TableCellText(
+                    if (cell.spanned && sortColumn == null) "" else cell.text,
+                    if (cell.header) headerStyle else style,
+                    if (cell.header) colors.onSurfaceVariant else colors.onSurface,
+                    widths.getOrElse(column) { 48.dp },
+                    if (numeric.getOrElse(column) { false } && !cell.header) TextAlign.End else TextAlign.Start,
+                    if (cell.header) Modifier.background(colors.surfaceContainer) else Modifier,
+                )
+            }
+        }
+    }
     Column(modifier) {
-        Box(
-            Modifier
-                .clip(RoundedCornerShape(8.dp))
-                .border(1.dp, colors.outlineVariant, RoundedCornerShape(8.dp))
-                .scrollbars(horizontal, vertical),
-        ) {
-            SelectionContainer {
-                Column(Modifier.horizontalScroll(horizontal)) {
-                    table.head.forEachIndexed { r, line ->
-                        Row(Modifier.background(colors.surfaceContainerHigh)) {
-                            line.forEachIndexed { column, cell ->
-                                val arrow = if (r == table.head.lastIndex && column == sortColumn) {
-                                    if (presentation.sortDirection == SortDirection.Ascending) " ▲" else " ▼"
-                                } else ""
-                                TableCellText(
-                                    (if (cell.spanned) "" else cell.text) + arrow,
-                                    headerStyle,
-                                    colors.onSurface,
-                                    widths.getOrElse(column) { 48.dp },
-                                    if (numeric.getOrElse(column) { false }) TextAlign.End else TextAlign.Start,
-                                    Modifier.noKeyFocus().clickable { sortBy(column) },
-                                )
+        BoxWithConstraints {
+            val frozen = if (indexWidth <= maxWidth * 0.4f) table.indexColumns else 0
+            // A line at the index's edge once columns have gone under it.
+            val edge = Modifier.drawWithContent {
+                drawContent()
+                if (horizontal.value > 0) drawRect(colors.outlineVariant, Offset(size.width - 1.dp.toPx(), 0f), Size(1.dp.toPx(), size.height))
+            }
+            val shownRows = rows.take(TABLE_ROW_LIMIT)
+            Box(
+                Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .border(1.dp, colors.outlineVariant, RoundedCornerShape(8.dp))
+                    .scrollbars(horizontal, vertical),
+            ) {
+                SelectionContainer {
+                    Column {
+                        Row {
+                            if (frozen > 0) {
+                                Column(edge) { table.head.forEachIndexed { r, line -> headCells(r, line, 0 until frozen) } }
+                            }
+                            Column(Modifier.weight(1f, fill = false).horizontalScroll(horizontal)) {
+                                table.head.forEachIndexed { r, line -> headCells(r, line, frozen until line.size) }
                             }
                         }
-                    }
-                    Column(Modifier.heightIn(max = maxBodyHeight).verticalScroll(vertical)) {
-                        rows.take(TABLE_ROW_LIMIT).forEachIndexed { r, line ->
-                            Row(Modifier.background(if (r % 2 == 0) colors.surface else colors.surfaceContainerLow)) {
-                                line.forEachIndexed { column, cell ->
-                                    TableCellText(
-                                        if (cell.spanned && sortColumn == null) "" else cell.text,
-                                        if (cell.header) headerStyle else style,
-                                        if (cell.header) colors.onSurfaceVariant else colors.onSurface,
-                                        widths.getOrElse(column) { 48.dp },
-                                        if (numeric.getOrElse(column) { false } && !cell.header) TextAlign.End else TextAlign.Start,
-                                        if (cell.header) Modifier.background(colors.surfaceContainer) else Modifier,
-                                    )
-                                }
+                        Row(Modifier.heightIn(max = maxBodyHeight).verticalScroll(vertical)) {
+                            if (frozen > 0) {
+                                Column(edge) { shownRows.forEachIndexed { r, line -> bodyCells(r, line, 0 until frozen) } }
+                            }
+                            Column(Modifier.weight(1f, fill = false).horizontalScroll(horizontal)) {
+                                shownRows.forEachIndexed { r, line -> bodyCells(r, line, frozen until line.size) }
                             }
                         }
                     }

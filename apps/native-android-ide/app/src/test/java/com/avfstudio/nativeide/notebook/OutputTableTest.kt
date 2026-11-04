@@ -82,6 +82,17 @@ class OutputTableTest {
     }
 
     @Test
+    fun theIndexIsTheLeadingColumnsOfHeadersInEveryRow() {
+        fun row(vararg cells: Pair<String, Boolean>) = cells.map { (text, header) -> TableCell(text, header) }
+        val head = listOf(row("" to true, "a" to true))
+        assertEquals(1, OutputTable(head, listOf(row("0" to true, "1" to false), row("..." to true, "..." to false)), "").indexColumns)
+        assertEquals(0, OutputTable(head, listOf(row("x" to false, "1" to false)), "").indexColumns)
+        // Nothing but headers has no columns left to scroll.
+        assertEquals(0, OutputTable(head, listOf(row("0" to true, "1" to true)), "").indexColumns)
+        assertEquals(1, parseDataFrameHtml(pandas)?.indexColumns)
+    }
+
+    @Test
     fun otherHtmlKeepsItsHtmlView() {
         assertNull(parseDataFrameHtml("<table id=\"T_abc\"><tr><td>1</td></tr></table>"))
         assertNull(parseDataFrameHtml("<b>dataframe</b>"))

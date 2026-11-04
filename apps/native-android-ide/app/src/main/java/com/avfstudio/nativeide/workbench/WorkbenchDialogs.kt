@@ -1207,14 +1207,16 @@ private fun GuestSetupDialog(controller: WorkbenchController, setup: WorkbenchDi
  * holds it, or (what's left of [fuzzyMatch]) only its letters are there in order.
  */
 internal fun matchRank(query: String, candidate: String): Int {
+    // Called for every file of a large folder at each key: no regular expressions here.
     val text = query.trim()
-    val at = candidate.indexOf(text, ignoreCase = true)
-    return when {
-        at == 0 -> 0
-        at < 0 -> 3
-        Regex("""(^|[^\p{L}\p{N}])""" + Regex.escape(text), RegexOption.IGNORE_CASE).containsMatchIn(candidate) -> 1
-        else -> 2
+    var at = candidate.indexOf(text, ignoreCase = true)
+    if (at == 0) return 0
+    if (at < 0) return 3
+    while (at > 0) {
+        if (!candidate[at - 1].isLetterOrDigit()) return 1
+        at = candidate.indexOf(text, at + 1, ignoreCase = true)
     }
+    return 2
 }
 
 internal fun fuzzyMatch(query: String, candidate: String): Boolean {
@@ -1654,6 +1656,13 @@ private fun QuickOpenDialog(controller: WorkbenchController) {
                     mode.title,
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(start = 16.dp, top = 8.dp),
+                )
+            } else if (controller.quickOpenTruncated) {
+                Text(
+                    "This folder has many files: searching the first ${"%,d".format(controller.quickOpenIndex.size)}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(start = 16.dp, top = 8.dp),
                 )
             }

@@ -380,7 +380,8 @@ private fun OpenEditorRow(controller: WorkbenchController, document: com.avfstud
             path.endsWith(".ipynb") -> Icons.Outlined.Code
             else -> Icons.AutoMirrored.Outlined.InsertDriveFile
         },
-        path.removePrefix("scratch:/").substringAfterLast('/') + if (folder.isNotEmpty() && !path.startsWith("scratch:")) "  ·  $folder" else "",
+        path.removePrefix("scratch:/").substringAfterLast('/') + (if (path in controller.deletedFiles) " (deleted)" else "") + if (folder.isNotEmpty() && !path.startsWith("scratch:")) "  ·  $folder" else "",
+        labelColor = MaterialTheme.colorScheme.error.takeIf { path in controller.deletedFiles },
         leading = controller.fileIconTheme?.let { theme ->
             { FileIconView(path.substringAfterLast('/'), theme, LocalDarkTheme.current, Icons.AutoMirrored.Outlined.InsertDriveFile) }
         },

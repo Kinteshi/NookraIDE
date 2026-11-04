@@ -4,6 +4,118 @@ import com.avfstudio.nativeide.transport.FileEntry
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 
+/** Folders listed at a time for Quick Open's index; the app's other requests share the guest with them. */
+private const val QUICK_OPEN_LISTINGS = 2
+
+private const val QUICK_OPEN_MAX_DEPTH = 8
+private const val QUICK_OPEN_PROGRESS_MS = 300L
+
+/**
+ * Walks a folder for Quick Open: nearest folders first and only [QUICK_OPEN_LISTINGS] at a time.
+ * The AVF guest collapses when many threads read at once: asking for 1 000 folders together made
+ * a notebook take 7 s to open instead of 0.4 s. The top-level folders take turns, so one huge
+ * folder doesn't use up [maxFiles] before the small ones are seen. Callbacks run on the listing's thread.
+ */
+internal class QuickOpenWalk(
+    private val list: (String) -> java.util.concurrent.CompletableFuture<List<FileEntry>>,
+    private val isExcluded: (FileEntry) -> Boolean,
+    private val walksInto: (FileEntry) -> Boolean,
+    private val maxFiles: Int,
+    private val onProgress: (List<FileEntry>) -> Unit,
+    /** The files found, and whether the folder has more than [maxFiles]. */
+    private val onDone: (List<FileEntry>, Boolean) -> Unit,
+    private val now: () -> Long = System::currentTimeMillis,
+) {
+    /** Folders to list, by top-level folder ("" for the root); [turns] says whose turn it is. */
+    private val waiting = LinkedHashMap<String, ArrayDeque<Pair<String, Int>>>()
+    private val turns = ArrayDeque<String>()
+    private var root = ""
+    private val files = ArrayList<FileEntry>()
+    private var listing = 0
+    private var truncated = false
+    private var finished = false
+    private var lastProgress = 0L
+
+    fun start(root: String) {
+        lastProgress = now()
+        synchronized(this) {
+            this.root = root.trimEnd('/')
+            enqueue("", root, 0)
+        }
+        next()
+    }
+
+    private fun enqueue(branch: String, path: String, depth: Int) {
+        waiting.getOrPut(branch) { ArrayDeque<Pair<String, Int>>().also { turns.addLast(branch) } }.addLast(path to depth)
+    }
+
+    /** The next folder, from the top-level folder whose turn it is. */
+    private fun nextFolder(): Pair<String, Int>? {
+        val branch = turns.removeFirstOrNull() ?: return null
+        val queue = waiting.getValue(branch)
+        val folder = queue.removeFirst()
+        if (queue.isEmpty()) waiting.remove(branch) else turns.addLast(branch)
+        return folder
+    }
+
+    /** Ends the walk with no more callbacks (another folder opened, or a newer walk began). */
+    @Synchronized
+    fun cancel() {
+        finished = true
+        waiting.clear()
+        turns.clear()
+    }
+
+    private fun next() {
+        val started = mutableListOf<Pair<String, Int>>()
+        var done = false
+        synchronized(this) {
+            if (finished) return
+            while (listing < QUICK_OPEN_LISTINGS) {
+                started += nextFolder() ?: break
+                listing++
+            }
+            if (listing == 0 && waiting.isEmpty()) {
+                finished = true
+                done = true
+            }
+        }
+        if (done) onDone(files, truncated)
+        started.forEach { (path, depth) ->
+            list(path).whenComplete { children, _ -> arrived(children.orEmpty(), depth) }
+        }
+    }
+
+    private fun arrived(children: List<FileEntry>, depth: Int) {
+        var progress: List<FileEntry>? = null
+        synchronized(this) {
+            listing--
+            if (finished) return
+            val shown = children.filterNot(isExcluded)
+            val found = shown.filterNot(FileEntry::isDirectory)
+            val room = maxFiles - files.size
+            if (found.size > room) truncated = true
+            files += found.take(room)
+            if (files.size >= maxFiles) {
+                if (waiting.isNotEmpty() || shown.any(FileEntry::isDirectory)) truncated = true
+                waiting.clear()
+                turns.clear()
+            } else if (depth < QUICK_OPEN_MAX_DEPTH) {
+                shown.filter { it.isDirectory && walksInto(it) }.forEach { folder ->
+                    enqueue(folder.path.removePrefix("$root/").substringBefore('/'), folder.path, depth + 1)
+                }
+            }
+            val time = now()
+            if (time - lastProgress >= QUICK_OPEN_PROGRESS_MS) {
+                lastProgress = time
+                progress = files.toList()
+            }
+        }
+        progress?.let(onProgress)
+        next()
+    }
+}
+
 /** What Quick Open lists, chosen by the first character typed, as in VS Code. */
 enum class QuickOpenMode(val prefix: String, val title: String) {
     Files("", "Go to File"),

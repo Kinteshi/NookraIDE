@@ -1,5 +1,6 @@
 package com.avfstudio.nativeide.workbench
 
+import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.DeleteSweep
 import androidx.compose.material.icons.outlined.ClearAll
@@ -129,6 +130,7 @@ fun EditorArea(controller: WorkbenchController, modifier: Modifier = Modifier) {
                 if (controller.hasPreview(document.path)) MarkdownPreviewButtons(controller, preview)
             }
         }
+        activeDocument?.takeIf { it.path in controller.deletedFiles }?.let { DeletedFileBanner(controller, it.path) }
         controller.languagePackOffer?.let { pack -> LanguagePackBanner(controller, pack) }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             val notebook = controller.activeNotebook
@@ -175,6 +177,27 @@ fun EditorArea(controller: WorkbenchController, modifier: Modifier = Modifier) {
                 ProblemScrollMarks(controller, Modifier.align(Alignment.TopEnd))
             }
         }
+    }
+}
+
+/** The active tab's file is gone from the guest; what's shown is this device's copy. */
+@Composable
+private fun DeletedFileBanner(controller: WorkbenchController, path: String) {
+    val colors = MaterialTheme.colorScheme
+    Row(
+        Modifier.fillMaxWidth().background(colors.errorContainer).padding(start = 14.dp, end = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Icon(Icons.Outlined.Warning, contentDescription = null, tint = colors.onErrorContainer, modifier = Modifier.size(16.dp))
+        Text(
+            "This file no longer exists in the guest. This is the copy kept on this device; saving puts it back.",
+            style = MaterialTheme.typography.bodySmall,
+            color = colors.onErrorContainer,
+            modifier = Modifier.weight(1f).padding(vertical = 6.dp),
+        )
+        androidx.compose.material3.TextButton(onClick = controller::saveActiveDocument) { Text("Save") }
+        androidx.compose.material3.TextButton(onClick = { controller.requestCloseDocument(path) }) { Text("Close") }
     }
 }
 
@@ -350,10 +373,13 @@ private fun EditorTab(controller: WorkbenchController, document: DocumentSession
                     size = 15.dp,
                     tint = if (selected) colors.primary else colors.onSurfaceVariant,
                 )
+                val deleted = path in controller.deletedFiles
                 Text(
-                    path.substringAfterLast('/'),
+                    path.substringAfterLast('/') + if (deleted) " (deleted)" else "",
                     style = MaterialTheme.typography.labelLarge,
                     fontStyle = if (preview) FontStyle.Italic else FontStyle.Normal,
+                    textDecoration = if (deleted) androidx.compose.ui.text.style.TextDecoration.LineThrough else null,
+                    color = if (deleted) colors.error else androidx.compose.ui.graphics.Color.Unspecified,
                     maxLines = 1,
                 )
                 Box(

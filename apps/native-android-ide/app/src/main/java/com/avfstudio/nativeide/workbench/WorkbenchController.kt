@@ -248,7 +248,7 @@ private const val MAX_OUTPUT_LINES = 500
 private const val FOREGROUND_RECONNECT_CAP_S = 10L
 /** How long after a reattach the replayed output may still make the emulator answer old queries. */
 private const val TERMINAL_REPLAY_WINDOW_MS = 3000L
-private const val MAX_QUICK_OPEN_FILES = 5000
+private const val MAX_QUICK_OPEN_FILES = 20_000
 /** Chat options remembered across sessions; approvals ("permissions") never are. */
 private val rememberedChatCategories = setOf("model", "mode")
 private const val LINUX_TERMINAL_PACKAGE = "com.android.virtualization.terminal"
@@ -468,6 +468,13 @@ class WorkbenchController(private val context: Context) {
     var quickOpenIndex by mutableStateOf(emptyList<FileEntry>())
         private set
     var quickOpenIndexing by mutableStateOf(false)
+    /** The folder has more files than the index holds. */
+    var quickOpenTruncated by mutableStateOf(false)
+    private var quickOpenWalk: QuickOpenWalk? = null
+    private var quickOpenWalkRoot: String? = null
+    private var quickOpenIndexPartial = false
+    /** The last query's files, whose matching a redraw shouldn't repeat over a large index. */
+    private var quickOpenFilesCache: Triple<String, List<FileEntry>, List<QuickOpenItem>>? = null
         private set
 
     // Language intelligence ---------------------------------------------------------------------
@@ -3332,6 +3339,12 @@ class WorkbenchController(private val context: Context) {
         folderChildren.clear()
         entries = emptyList()
         currentDirectory = ""
+        quickOpenWalk?.cancel()
+        quickOpenWalk = null
+        quickOpenIndexing = false
+        quickOpenTruncated = false
+        quickOpenIndexPartial = false
+        deletedFiles.clear()
         quickOpenIndex = emptyList()
         searchResults.clear()
         searchSummary = null
@@ -3426,23 +3439,35 @@ class WorkbenchController(private val context: Context) {
     /** Walks the workspace for Quick Open, skipping dependency and cache folders. */
     fun refreshQuickOpenIndex() {
         val root = workspaceRoot ?: return
-        if (quickOpenIndexing || !vfs.isConnected()) return
+        if (quickOpenIndexing && quickOpenWalkRoot == root) return
+        if (!vfs.isConnected()) return
+        quickOpenWalk?.cancel()
         quickOpenIndexing = true
-        val files = java.util.concurrent.ConcurrentLinkedQueue<FileEntry>()
-        fun walk(path: String, depth: Int): CompletableFuture<Unit> =
-            vfs.listDir(path).thenCompose { children ->
-                val shown = children.filterNot { isExcluded(it.path) }
-                shown.filterNot(FileEntry::isDirectory).forEach(files::add)
-                if (files.size > MAX_QUICK_OPEN_FILES || depth >= 8) return@thenCompose CompletableFuture.completedFuture(Unit)
-                val nested = shown.filter { it.isDirectory && walksIntoForQuickOpen(it.name) }.map { walk(it.path, depth + 1) }
-                CompletableFuture.allOf(*nested.toTypedArray()).thenApply { }
-            }.exceptionally { }
-        walk(root, 0).whenComplete { _, _ ->
-            post {
-                quickOpenIndex = files.sortedBy { it.path }
-                quickOpenIndexing = false
-            }
-        }
+        quickOpenWalkRoot = root
+        lateinit var walk: QuickOpenWalk
+        walk = QuickOpenWalk(
+            list = vfs::listDir,
+            isExcluded = { isExcluded(it.path) },
+            walksInto = { walksIntoForQuickOpen(it.name) },
+            maxFiles = MAX_QUICK_OPEN_FILES,
+            // The first index of a folder shows what it has so far, so typing finds files at once.
+            onProgress = { files -> post { if (quickOpenWalk === walk && (quickOpenIndex.isEmpty() || quickOpenIndexPartial)) { quickOpenIndex = files; quickOpenIndexPartial = true } } },
+            onDone = { files, truncated ->
+                io.execute {
+                    val sorted = files.sortedBy { it.path }
+                    post {
+                        if (quickOpenWalk === walk) {
+                            quickOpenIndex = sorted
+                            quickOpenIndexPartial = false
+                            quickOpenTruncated = truncated
+                            quickOpenIndexing = false
+                        }
+                    }
+                }
+            },
+        )
+        quickOpenWalk = walk
+        walk.start(root)
     }
 
     /** A folder row in the tree: opens or closes it in place, loading its children the first time. */
@@ -3609,6 +3634,8 @@ class WorkbenchController(private val context: Context) {
                 val background = restoringTabs.remove(session.path)
                 if (!background) selectDocument(session.path)
                 status = if (session.conflict != null) "Remote changes detected; choose how to resolve" else "Opened ${session.path.substringAfterLast('/')}"
+                // A tab restored from this device's copy may be all that's left of the file.
+                checkFileExists(session.path)
                 fetchLanguagePackIfWanted(session.path)
                 notifyDocumentOpened(session)
                 trackRustCrate(session.path)
@@ -3628,6 +3655,7 @@ class WorkbenchController(private val context: Context) {
 
     fun selectDocument(path: String) {
         activePath = path
+        checkFileExists(path)
         persistSession()
         pagedDocument = null
         compactDestination = CompactDestination.Editor
@@ -3700,6 +3728,7 @@ class WorkbenchController(private val context: Context) {
     }
 
     fun closeDocument(path: String) {
+        deletedFiles.remove(path)
         if (previewTab == path) previewTab = null
         pinnedTabs.remove(path)
         documents.firstOrNull { it.path == path }?.let(closedDocuments::add)
@@ -3980,6 +4009,11 @@ class WorkbenchController(private val context: Context) {
 
     /** [automatic]: an auto save, which leaves the cursor's line untrimmed (as VS Code does). */
     private fun saveDocument(document: DocumentSession, automatic: Boolean = false) {
+        if (document.path in deletedFiles) {
+            // Only an asked-for save brings a deleted file back: auto-save would undo the deletion.
+            if (!automatic) restoreDeletedFile(document) { saveDocument(document) }
+            return
+        }
         applySaveCleanups(document, automatic)
         status = "Saving ${document.path}"
         repository.save(document).whenComplete { result, error ->
@@ -4400,9 +4434,44 @@ class WorkbenchController(private val context: Context) {
             }
     }
 
-    /** Lists Explorer's folder and the folders open in it again. */
+    /** Open guest files that no longer exist (deleted outside the app): their tabs say so, as VS Code's do. */
+    val deletedFiles = mutableStateListOf<String>()
+
+    private fun checkFileExists(path: String) {
+        if (!isGuestPath(path) || !vfs.isConnected()) return
+        vfs.stat(path).whenComplete { _, error ->
+            post {
+                val cause = error?.let { generateSequence(it) { failure -> failure.cause }.last() }
+                when {
+                    error == null -> deletedFiles.remove(path)
+                    cause is GuestVfsException && cause.code == "NotFound" && documents.any { it.path == path } && path !in deletedFiles -> deletedFiles.add(path)
+                }
+            }
+        }
+    }
+
+    /** Saving a deleted file brings it back, with its folders; a null base time because there's nothing to conflict with. */
+    private fun restoreDeletedFile(document: DocumentSession, then: () -> Unit) {
+        deletedFiles.remove(document.path)
+        document.baseModifiedTs = null
+        val root = roots.firstOrNull { isPathWithinRoot(document.path, it) }?.trimEnd('/')
+        var ready: CompletableFuture<*> = CompletableFuture.completedFuture(Unit)
+        if (root != null) {
+            var folder = root
+            document.path.removePrefix(root).trim('/').split('/').dropLast(1).forEach { name ->
+                folder += "/$name"
+                val next = folder
+                // Folders that exist answer AlreadyExists; a real problem shows when the file is written.
+                ready = ready.thenCompose { vfs.create(next, directory = true).handle { _, _ -> Unit } }
+            }
+        }
+        ready.whenComplete { _, _ -> post(then) }
+    }
+
+    /** Lists Explorer's folder and the folders open in it again, and checks the open files are still there. */
     fun refreshExplorer() {
         if (!vfs.isConnected()) return
+        documents.forEach { checkFileExists(it.path) }
         currentDirectory.takeIf(String::isNotEmpty)?.let(::loadDirectory)
         // Reload open folders; ones that went away (deleted, renamed) close.
         folderChildren.keys.toList().forEach { path ->
@@ -6868,6 +6937,8 @@ class WorkbenchController(private val context: Context) {
                 if (index >= 0) {
                     val existing = chatEntries[index] as ChatEntry.Tool
                     chatEntries[index] = existing.copy(title = event.title ?: existing.title, status = event.status ?: existing.status)
+                    // A finished tool may have made or removed files; Explorer and the tabs show it.
+                    if (event.status == "completed" && existing.status != "completed") refreshExplorer()
                 } else {
                     chatEntries.add(ChatEntry.Tool(event.id, event.title ?: event.kind ?: "Tool call", event.status))
                 }
@@ -7476,11 +7547,12 @@ class WorkbenchController(private val context: Context) {
         session.textLog.onCommandsChanged = {
             post {
                 session.commandsRevision++
-                val finished = session.textLog.commands().lastOrNull()?.exitCode
-                // A command that just ended may have made or removed files; Explorer shows them.
-                if (finished != null && session.textLog.commands().size != session.commandsSeen) refreshExplorer()
-                session.commandsSeen = session.textLog.commands().size
-                session.lastExitCode = finished
+                val commands = session.textLog.commands()
+                // A command that just ended may have made or removed files; Explorer and the tabs show it.
+                val finished = commands.count { it.exitCode != null }
+                if (finished > session.commandsFinished) refreshExplorer()
+                session.commandsFinished = finished
+                session.lastExitCode = commands.lastOrNull()?.exitCode
             }
         }
     }
@@ -8920,6 +8992,9 @@ class WorkbenchController(private val context: Context) {
     /** The hover card at [offset] in [cell]: its problems, and the server's hover (a resting pointer or Ctrl+K Ctrl+I). */
     fun showCellHover(session: NotebookSession, cell: NotebookCell, offset: Int, fromPointer: Boolean) {
         if (cell.type != CellType.Code) return
+        // On its way to the card, the pointer may rest on another word for a moment.
+        if (fromPointer && cellHoverHovered) return
+        keepCellHover()
         val problems = session.cellProblems[cell.id].orEmpty().filter { offset in it.start..maxOf(it.start, it.end) }
         val client = cellServer(session).takeIf { it.isReady && settings.notebookLanguageServer }
         val position = client?.let { cellMirrorPosition(session, cell, offset) }
@@ -8944,8 +9019,43 @@ class WorkbenchController(private val context: Context) {
     }
 
     fun hideCellHover(session: NotebookSession) {
+        keepCellHover()
+        cellHoverHovered = false
         hoverRequest++
         session.cellHover = null
+    }
+
+    /** The pointer is on the cell's hover card (it stays while it is). */
+    private var cellHoverHovered = false
+    private var scheduledCellHoverHide: ScheduledFuture<*>? = null
+
+    /** The pointer is back on the card's word, or on the card: no hiding after all. */
+    fun keepCellHover() {
+        scheduledCellHoverHide?.cancel(false)
+        scheduledCellHoverHide = null
+    }
+
+    /** The pointer left the card's word or cell: the card goes shortly after, unless it went onto the card. */
+    fun scheduleCellHoverHide(session: NotebookSession) {
+        // The card is a window of its own: the cell's Exit can arrive after the card's Enter.
+        if (session.cellHover == null || cellHoverHovered || scheduledCellHoverHide != null) return
+        val delay = settings.editorHoverHidingDelay.toLong()
+        scheduledCellHoverHide = timer.schedule({
+            post {
+                scheduledCellHoverHide = null
+                if (!cellHoverHovered) hideCellHover(session)
+            }
+        }, delay, TimeUnit.MILLISECONDS)
+    }
+
+    fun enterCellHover() {
+        cellHoverHovered = true
+        keepCellHover()
+    }
+
+    fun leaveCellHover(session: NotebookSession) {
+        cellHoverHovered = false
+        scheduleCellHoverHide(session)
     }
 
     /** F12 in a cell: the definition, in another cell (selected) or a file (opened). */
@@ -9093,6 +9203,10 @@ class WorkbenchController(private val context: Context) {
     }
 
     fun saveNotebook(session: NotebookSession) {
+        if (session.document.path in deletedFiles) {
+            restoreDeletedFile(session.document) { saveNotebook(session) }
+            return
+        }
         session.document.updateText(session.notebook.toJson())
         status = "Saving ${session.document.path}"
         repository.save(session.document).whenComplete { result, error ->
@@ -9460,11 +9574,14 @@ class WorkbenchController(private val context: Context) {
         return when (mode) {
             QuickOpenMode.Files -> {
                 val root = workspaceRoot.orEmpty().trimEnd('/')
-                quickOpenIndex
-                    .filter { fuzzyMatch(text, it.path.removePrefix(root)) }
-                    .sortedBy { matchRank(text, it.name) }
-                    .take(200)
-                    .map(QuickOpenItem::File)
+                val index = quickOpenIndex
+                quickOpenFilesCache?.takeIf { it.first == text && it.second === index }?.third
+                    ?: index
+                        .filter { fuzzyMatch(text, it.path.removePrefix(root)) }
+                        .sortedBy { matchRank(text, it.name) }
+                        .take(200)
+                        .map(QuickOpenItem::File)
+                        .also { quickOpenFilesCache = Triple(text, index, it) }
             }
             QuickOpenMode.Commands -> EditorCommands.all.distinctBy { it.id }
                 .filter { fuzzyMatch(text.trim(), it.title) || it.id.contains(text.trim(), true) }
@@ -9537,6 +9654,14 @@ class WorkbenchController(private val context: Context) {
      * control byte so an IME can't swallow Ctrl+C.
      */
     fun routeHardwareKey(event: AndroidKeyEvent): Boolean {
+        // Quick Open's window takes a moment to get focus; what's typed by then goes in its box, not the editor or terminal.
+        if (dialog == WorkbenchDialog.QuickOpen && !event.isCtrlPressed && !event.isAltPressed && !event.isMetaPressed) {
+            val character = event.unicodeChar
+            if (character >= 32 && character != 127) {
+                if (event.action == AndroidKeyEvent.ACTION_DOWN) quickOpenFilter += character.toChar()
+                return true
+            }
+        }
         if (dialog != null) return false
         if (event.action == AndroidKeyEvent.ACTION_UP) return consumedKeyDowns.remove(event.keyCode)
         if (event.action != AndroidKeyEvent.ACTION_DOWN) return false

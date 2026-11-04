@@ -304,7 +304,8 @@ private fun TopBar(controller: WorkbenchController, expanded: Boolean) {
         }
         AssistChip(
             onClick = { controller.dialog = WorkbenchDialog.Connect },
-            label = { Text(if (controller.busy) "Connecting…" else if (controller.connected) "Connected" else "Connect") },
+            // busy is any operation, opening a file too; only without a connection does it mean connecting.
+            label = { Text(if (controller.connected) "Connected" else if (controller.busy) "Connecting…" else "Connect") },
             leadingIcon = {
                 Icon(
                     if (controller.connected) Icons.Outlined.Cloud else Icons.Outlined.CloudOff,

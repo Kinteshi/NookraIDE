@@ -104,9 +104,17 @@ internal fun sameWord(source: String, offset: Int, other: Int): Boolean {
     return other in start until end
 }
 
+/** Where the word (identifier) at [offset] in [source] starts. */
+internal fun wordStart(source: String, offset: Int): Int {
+    var start = offset.coerceIn(0, source.length)
+    while (start > 0 && isIdentifierCharacter(source[start - 1])) start--
+    return start
+}
+
 /**
  * A mouse, touchpad or stylus pointer resting on a code cell's text asks for the hover card
- * there (`editor.hover.delay`); moving to another word, or a press, closes it.
+ * there (`editor.hover.delay`). Off the word the card stays for `editor.hover.hidingDelay`, so the
+ * pointer can go onto it, as in the code editor; resting on another word replaces it, a press closes it.
  */
 internal fun Modifier.cellHover(
     controller: WorkbenchController,
@@ -127,15 +135,24 @@ internal fun Modifier.cellHover(
                         val shown = layout() ?: continue
                         val offset = cellOffsetAt(shown, change.position)
                         val hover = session.cellHover?.takeIf { it.cellId == cell.id }
-                        if (hover != null && (offset == null || !sameWord(cell.source, hover.offset, offset))) controller.hideCellHover(session)
-                        if (offset != null && session.cellHover?.cellId != cell.id) {
+                        val onItsWord = hover != null && offset != null && sameWord(cell.source, hover.offset, offset)
+                        if (onItsWord) {
+                            controller.keepCellHover()
+                            continue
+                        }
+                        if (hover != null) controller.scheduleCellHoverHide(session)
+                        if (offset != null) {
                             pending = launch {
                                 delay(controller.settings.editorHoverDelay.toLong())
                                 controller.showCellHover(session, cell, offset, fromPointer = true)
                             }
                         }
                     }
-                    PointerEventType.Exit -> pending?.cancel()
+                    // Also when the pointer goes onto the card, a window of its own: the card's Enter keeps it.
+                    PointerEventType.Exit -> {
+                        pending?.cancel()
+                        if (session.cellHover?.cellId == cell.id) controller.scheduleCellHoverHide(session)
+                    }
                     PointerEventType.Press -> {
                         pending?.cancel()
                         if (session.cellHover != null) controller.hideCellHover(session)
@@ -154,7 +171,8 @@ internal fun CellHoverCard(controller: WorkbenchController, session: NotebookSes
     // The text sits 12 dp inside the box the popup is anchored to.
     val inset = with(density) { 12.dp.roundToPx() }
     val gap = with(density) { 4.dp.roundToPx() }
-    val offset = hover.offset.coerceIn(0, layout.layoutInput.text.length)
+    // At the word's start, as in VS Code: from anywhere on the word, straight up lands on the card.
+    val offset = wordStart(layout.layoutInput.text.text, hover.offset.coerceIn(0, layout.layoutInput.text.length))
     val line = layout.getLineForOffset(offset)
     val x = layout.getHorizontalPosition(offset, usePrimaryDirection = true).roundToInt() + inset
     val top = layout.getLineTop(line).roundToInt() + inset
@@ -172,7 +190,16 @@ internal fun CellHoverCard(controller: WorkbenchController, session: NotebookSes
             shape = MaterialTheme.shapes.small,
             shadowElevation = 4.dp,
             border = androidx.compose.foundation.BorderStroke(1.dp, colors.outlineVariant),
-            modifier = Modifier.widthIn(max = 560.dp).heightIn(max = 320.dp),
+            modifier = Modifier.widthIn(max = 560.dp).heightIn(max = 320.dp).pointerInput(hover) {
+                awaitPointerEventScope {
+                    while (true) {
+                        when (awaitPointerEvent().type) {
+                            PointerEventType.Enter -> controller.enterCellHover()
+                            PointerEventType.Exit -> controller.leaveCellHover(session)
+                        }
+                    }
+                }
+            },
         ) {
             HoverCardContent(controller, session.document.path, hover.problems.map { HoverProblem(it.severity, it.message, it.origin) }, hover.markdown)
         }

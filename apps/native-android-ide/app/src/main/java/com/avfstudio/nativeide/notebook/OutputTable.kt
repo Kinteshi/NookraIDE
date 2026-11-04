@@ -10,6 +10,13 @@ data class TableCell(val text: String, val header: Boolean, val spanned: Boolean
 /** A DataFrame's HTML table as a grid: the column header rows, then the body rows, all as wide. */
 data class OutputTable(val head: List<List<TableCell>>, val body: List<List<TableCell>>, val caption: String) {
     val columnCount: Int get() = (head + body).maxOfOrNull { it.size } ?: 0
+
+    /** The leading columns of `<th>` in every row, the index; none when the whole table is that. */
+    val indexColumns: Int
+        get() {
+            val count = body.minOfOrNull { row -> row.takeWhile(TableCell::header).size } ?: 0
+            return if (count >= columnCount) 0 else count
+        }
 }
 
 enum class SortDirection { Ascending, Descending }
