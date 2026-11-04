@@ -2370,7 +2370,9 @@ day, L several days.
   65. Explore other backends besides the AVF guest: proot, Termux and others (user, 11-04). Compare
       memory, file and process speed, stability under memory pressure (the guest's main problem),
       background survival on Android, and what the daemon and tools need (they are glibc arm64
-      builds today). Exploring S-M; adopting one L or more.
+      builds today). Exploring S-M; adopting one L or more. VSCodroid 1.6.0 (Play, on the tablet) is a
+      working no-VM example, read from its APK on 11-04, not run: a Termux-style `usr` tree, executables
+      packed as `lib*.so`, no VM permission. Test first whether the user's notebook libraries can run that way.
   66. Improve and refine the offline experience (user, 11-04). Batch 24 built the base
       (`avf.offline.openLastFolder`: cached files, queued saves, Explorer of known files). Start by
       walking through it on the tablet to list the rough edges, then choose. M, to be sized after the walk.
@@ -2378,13 +2380,16 @@ day, L several days.
       port? (User, 11-04; a question to answer first.) Weigh it against what is known: Track A (code-server)
       was unreliable under memory pressure, the spec rejected Monaco in a WebView for that reason,
       and VS Code's workbench is TypeScript on the DOM. Find what could really carry over (extension host,
-      extensions, grammars) and its measured memory. Answering S-M; doing it XL.
+      extensions, grammars) and its measured memory. Answering S-M; doing it XL. VSCodroid (see 65) is the
+      first form on Android: VS Code's server on Node, its web client in a WebView. It says 400-700 MB
+      typical; not measured here.
   68. Explore bundling the terminal image with the app, using AVF without depending on the Linux Terminal
       app: is it possible? (User, 11-04.) Today's cost of that dependency: the app's foreground service can't
-      keep Terminal's VM alive, and Back in Terminal stops it. First check whether an ordinary app can
-      get AVF's VM API and custom VM images (from memory, unverified: system API, permission
-      `MANAGE_VIRTUAL_MACHINE`, not for normal apps; see what the tablet grants and whether adb can),
-      then image size and updates. Answering S; doing it L or more, if allowed at all.
+      keep Terminal's VM alive, and Back in Terminal stops it. Checked 11-04: not for a store install.
+      On the tablet (Android 16), `MANAGE_VIRTUAL_MACHINE` is signature|development|preinstalled and
+      `USE_CUSTOM_VIRTUAL_MACHINE` is signature|development; the VM API is a system API. AOSP's README allows
+      `adb shell pm grant` for development, so it may work on this tablet only; not tried. It would not
+      fix the guest's trouble under memory pressure. Trying the grant S; doing it L or more.
 * Still left out on purpose: multi-cursor, sticky scroll, minimap (Aardink switch; folding came in batch 31);
   split editor groups and the 3-way merge editor; tasks.json; MCP, other AI providers and the
   built-in chat agent (Copilot, Claude Code and Gemini through ACP instead); foldable postures
