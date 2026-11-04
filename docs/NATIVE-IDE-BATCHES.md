@@ -2367,6 +2367,18 @@ day, L several days.
       that it has a Linux arm64 build, how it signs in, and whether it speaks ACP. Touches the tool
       pack (`guest/tools/catalog.json`, `avf-node-agent.sh`), `ChatAgents.kt`, `GuestDependencies.kt`,
       the sign-in flow, the commands and the spec's agent list. S-M if it speaks ACP; L if not.
+  65. Explore other backends besides the AVF guest: proot, Termux and others (user, 11-04). Compare
+      memory, file and process speed, stability under memory pressure (the guest's main problem),
+      background survival on Android, and what the daemon and tools need (they are glibc arm64
+      builds today). Exploring S-M; adopting one L or more.
+  66. Improve and refine the offline experience (user, 11-04). Batch 24 built the base
+      (`avf.offline.openLastFolder`: cached files, queued saves, Explorer of known files). Start by
+      walking through it on the tablet to list the rough edges, then choose. M, to be sized after the walk.
+  67. Could VS Code be ported to serve the app, or a new native app and Rust backend be made from a VS Code
+      port? (User, 11-04; a question to answer first.) Weigh it against what is known: Track A (code-server)
+      was unreliable under memory pressure, the spec rejected Monaco in a WebView for that reason,
+      and VS Code's workbench is TypeScript on the DOM. Find what could really carry over (extension host,
+      extensions, grammars) and its measured memory. Answering S-M; doing it XL.
 * Still left out on purpose: multi-cursor, sticky scroll, minimap (Aardink switch; folding came in batch 31);
   split editor groups and the 3-way merge editor; tasks.json; MCP, other AI providers and the
   built-in chat agent (Copilot, Claude Code and Gemini through ACP instead); foldable postures
