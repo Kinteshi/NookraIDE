@@ -2116,6 +2116,8 @@ used when showing the user this table. "Item" is the number in the lists below, 
 | 17 | 68 | S to try the grant, L+ to do | Bundle the image and use AVF without Terminal: not for store installs |
 | 18 | 69 | S–M | Warn near the phantom process limit, and say so when the guest goes away |
 | 19 | 70 | L overall | Mode without Terminal: local backend, ML on another machine, glibc if proven |
+| 20 | 71 | S to ask | Ask Aardink for public text positions (overlays) |
+| 21 | 72 | S to ask | Ask Aardink for gutter icons and taps (breakpoints) |
 
 Loose ends, not sized:
 * The unsaved dot seen once after saving a restored deleted file (batch 39; not reproduced in three tries).
@@ -2495,6 +2497,11 @@ day, L several days.
       linkers relocate it. The next attempt was blocked by Claude Code's permissions, not by Android.
       An app of our own wouldn't need this: a loader packed as `lib*.so` can be executed directly. Prove it with one
       manylinux wheel before planning on it. Settings: a backend picker (AVF guest, local, remote). L overall.
+  71. Ask Aardink for public text positions: a pixel rect for an offset or line, updated on scroll and layout
+      (user, 11-04: yes, draft first). Ten of the app's overlays need them, and they aren't on its roadmap. S to
+      ask; the answer decides phase 5 of the [switch plan](AARDINK-SWITCH-PLAN.md). Not filed yet.
+  72. Ask Aardink for a gutter icon in a decoration and a host callback for gutter taps (user, 11-04: yes, draft
+      first). Breakpoints need them; the roadmap's glyph was built as a bar. S to ask. Not filed yet.
 * Still left out on purpose: multi-cursor, sticky scroll, minimap (Aardink switch; folding came in batch 31);
   split editor groups and the 3-way merge editor; tasks.json; MCP, other AI providers and the
   built-in chat agent (Copilot, Claude Code and Gemini through ACP instead); foldable postures
