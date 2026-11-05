@@ -2107,7 +2107,7 @@ used when showing the user this table. "Item" is the number in the lists below, 
 | 8 | 56 | M–L | Widgets not drawn yet |
 | 9 | 22 | M | Accessibility pass |
 | 10 | 23 | L | Automated on-device tests and screenshot comparisons |
-| 11 | – | XL | Aardink switch: on hold, gates in its entry below; re-measure 0.8.0, then decide at 0.9 |
+| 11 | – | XL | Aardink switch: on hold, gates in its entry below; 0.8.0 measured, start-up memory and gesture hitches fail; decide at 0.9 |
 | 12 | – | ? | Copilot exits after a daemon restart (watching) |
 | 13 | 64 | S–M or L | Replace Gemini CLI with Antigravity CLI |
 | 14 | 65 | S–M to explore, L+ to adopt | Other backends: proot, Termux and others |
@@ -2185,12 +2185,16 @@ To investigate (user, 10-28):
 * Refactor: replace sora-editor with Aardink (user, 10-28). **Decided (user, 10-28): it will be
   done, for the licence (Apache-2.0 instead of sora's LGPL-2.1); held for later.** Revisited 11-04
   against 0.8.0 (`docs/native-editor-evaluation.md`, "Revisit 2026-11-04"): closer, still not ready.
-  * Switch when all of these hold (numbers proposed 11-04, the user's to change; lab means
-    `:aardink-lab` on the tablet with the guest running, as on 10-28):
-    1. Memory: at most 30 MB PSS above sora in the lab, and checked with several files open. **Not
-       re-measured on 0.8.0.** On 0.7.0: 324-334 vs 195-201 MB.
-    2. Scrolling: at most 2 missed deadlines per 1,000 frames and p95 at most 18 ms. **Not re-measured.**
-       On 0.7.0: 22-25 per ~1,000 and 24-26 ms; sora 1 per ~4,000 and 17-18 ms.
+  * Switch when all of these hold (numbers proposed 11-04, the user's to change; lab means the release build
+    of `:aardink-lab`, compiled with `speed`, on the tablet with the guest running). Measured 11-04 on 0.8.0,
+    with one editor and 10,000 lines:
+    1. Memory: at most 30 MB PSS above sora, before and after scrolling, and with several files open.
+       **Fails before scrolling:** 430-502 vs 136-152 MB, about 240 MB of it native heap, cause unknown. Meets
+       it after scrolling: 121-140 vs 140-142 MB. Several files not checked. Aardink's figure has no TextMate
+       yet; sora's does.
+    2. Scrolling: at most 2 missed deadlines per 1,000 frames and p95 at most 18 ms. **Fails on deadlines:** 23-24
+       of ~1,600 against sora's 1 of ~5,000, from two slow frames (18-50 ms) at the start of each
+       gesture, steady after that. Meets p95: 12 ms, the same as sora (p99 17 vs 12).
     3. Ghost text, inlay hints, code lens, semantic tokens: planned for 0.9 (§7.3), no date. The app draws
        the first three as overlays on sora, but Aardink gives no pixel position for a line or caret
        (`ViewportInfo` has only scroll offsets and line numbers), so that route is closed too.
@@ -2207,8 +2211,9 @@ To investigate (user, 10-28):
   * Accepted risks: a minor may break the API until the 1.0 freeze (0.7 to 0.8 needed no lab change), one
     main author (Apache-2.0 allows a fork), no saved view state until 1.0 (scroll and folds per tab are
     ours to keep), highlighting off above 2 MiB (`plainTextFallbackChars`; the paged view stays).
-  * Order: re-run the lab on 0.8.0 first. If 1 and 2 still fail by a wide margin, the rest can wait,
-    and that's worth telling upstream. Otherwise decide when 0.9 ships. Python as a built-in grammar comes in 0.10.
+  * Order: find out whether normal-sized files show the memory at start (the lab has only 10,000 lines) and
+    what the native heap is, then raise it and the gesture hitch upstream if they're real. Decide when 0.9
+    ships. Python as a built-in grammar comes in 0.10.
   * Effort if done: still XL, about 2-3 weeks of batches, with fewer unknowns:
     * (Done in batch 20.) Route the controller's 29 direct `editorView` uses through
       `EditorSurface`. An Aardink switch now replaces `SoraEditorSurface` and the editor pane.

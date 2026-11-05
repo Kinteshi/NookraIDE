@@ -133,9 +133,42 @@ Revisit when Aardink ships 0.9 (semantic tokens, ghost text, decorations), by re
 
 Read from 0.8.0's sources, changelog and roadmap, and from the app's code. The `:aardink-lab` app now
 builds against 0.8.0 with no code change, on the app's Kotlin 2.4.20 and Compose BOM 2026.09 (Aardink
-itself uses Kotlin 2.4.21). **It was not run:** the tablet was locked and the guest off, so the
-memory and scrolling figures above are still 0.7.0's and may have changed. The licence is still Apache-2.0
-in the file and the POM; GitHub's "Other" label is its detector, not a change.
+itself uses Kotlin 2.4.21). The licence is still Apache-2.0 in the file and the POM; GitHub's "Other" label
+is its detector, not a change.
+
+Measured on the tablet the same evening, with the guest running and load average about 24: 10,000 lines,
+three cold starts each, then 12 pairs of 250 ms injected swipes, two rounds each. The lab gained a release
+build (R8, not debuggable), because a debuggable build penalises a Compose editor far more than a view.
+These are the release build, compiled with `cmd package compile -m speed -f`:
+
+| Metric | sora-editor 0.23.6 + TextMate | Aardink 0.8.0 |
+| --- | --- | --- |
+| First editor frame (composition only, not tokenizing) | 66-91 ms | 54-62 ms |
+| PSS 8 s after a cold start, before scrolling | 136-152 MB | 430-502 MB |
+| PSS after scrolling | 140-142 MB | 121-140 MB |
+| Frame deadlines missed | 1 of 4,986-5,226 | 23-24 of 1,608-1,622 |
+| Frame p90 / p95 / p99 | 11 / 12 / 12 ms | 10 / 12 / 17 ms |
+| Frames over 16.6 ms in one swipe | none of 117 | two of 28-35, at its start: 18-50 ms |
+
+What this adds to the 10-28 figures:
+* **The debug build misled that comparison on scrolling.** In debug, today's run repeats 10-28 for both
+  versions: 0.7.0 and 0.8.0 both miss 24 and have p95 23 ms, against sora's 1 and 11 ms. Release makes p95 equal.
+  The misses stay, at one per swipe or so, so they're a hitch as a gesture starts, not constant jank.
+* **Memory depends on when it's read.** Left idle, Aardink stays high: one run settled at 325 MB with
+  239 MB of native heap and 13 MB of Java heap, unchanged from 8 s to 90 s (sora 126 MB). Scrolling then
+  frees it, to sora's level. Its cause wasn't investigated. It may scale with the 10,000-line document, and
+  normal-sized files weren't tested; the lab's document is fixed.
+* 0.7.0 to 0.8.0 changed nothing measurable (debug: 276-311 vs 300-332 MB before scrolling, within noise or
+  slightly up).
+
+Limits of this test: one editor, not several files; Aardink uses its own declarative Python grammar while
+sora's figure includes TextMate, so an adapter would add to Aardink's side; injected swipes, not a finger.
+Aardink renders about 30 frames per swipe to sora's 117, so its momentum after the swipe seems much shorter,
+which also makes frame totals not directly comparable. How that feels wasn't judged.
+
+To repeat: `./gradlew -p apps/native-android-ide :aardink-lab:assembleRelease`, install it, then
+`adb shell cmd package compile -m speed -f com.avfstudio.aardinklab`, and read `dumpsys meminfo` and
+`dumpsys gfxinfo` (also `framestats`) for `.LabActivity` and `.SoraLabActivity`.
 
 | Gap on 10-28 | Aardink 0.8.0 |
 | --- | --- |
@@ -158,7 +191,8 @@ New on our side since 10-28:
 
 Verdict: **still not viable, but closer.** The blockers are now specific, and the switch's conditions are
 listed in `docs/NATIVE-IDE-BATCHES.md`, under the backlog's "Refactor: replace sora-editor with Aardink".
-Next step: re-run the lab on 0.8.0 with the tablet unlocked and the guest running, as on 10-28.
+Scrolling is no longer the wide gap it looked like, apart from the hitch at each gesture's start. Memory
+before the first scroll is now the largest measured problem. Next step: a lab document of normal size.
 
 Build and run the available checks from the repository root:
 

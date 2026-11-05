@@ -15,6 +15,15 @@ android {
         versionName = "0.1.0"
     }
 
+    // Measure this one: a debuggable build penalises a Compose editor far more than sora's view.
+    buildTypes {
+        release {
+            signingConfig = signingConfigs.getByName("debug")
+            isMinifyEnabled = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
