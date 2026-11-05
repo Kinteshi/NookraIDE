@@ -2107,7 +2107,7 @@ used when showing the user this table. "Item" is the number in the lists below, 
 | 8 | 56 | M–L | Widgets not drawn yet |
 | 9 | 22 | M | Accessibility pass |
 | 10 | 23 | L | Automated on-device tests and screenshot comparisons |
-| 11 | – | XL | Aardink switch (on hold until 0.9) |
+| 11 | – | XL | Aardink switch: on hold, gates in its entry below; re-measure 0.8.0, then decide at 0.9 |
 | 12 | – | ? | Copilot exits after a daemon restart (watching) |
 | 13 | 64 | S–M or L | Replace Gemini CLI with Antigravity CLI |
 | 14 | 65 | S–M to explore, L+ to adopt | Other backends: proot, Termux and others |
@@ -2183,30 +2183,50 @@ To investigate (user, 10-28):
   checksum, install, and re-colour open tabs. A setting to ask, always fetch, or never; an
   "Installed languages" list in Settings to remove them. Not the Microsoft Marketplace. Likely M.
 * Refactor: replace sora-editor with Aardink (user, 10-28). **Decided (user, 10-28): it will be
-  done, for the licence (Apache-2.0 instead of sora's LGPL-2.1); held for later.** Evaluated the
-  same day (`docs/native-editor-evaluation.md`, "Re-evaluation 2026-10-28"); not ready yet,
-  revisit at Aardink 0.9.
-  * Measured on the tablet against sora: about 130 MB more PSS per editor (324-334 vs
-    195-201 MB), 22-25 missed frame deadlines per ~1,000 scroll frames (sora: 1 per ~4,000),
-    first frame about 80 ms faster.
-  * Missing for parity: TextMate (grammar packs, imported themes, Material You syntax themes),
-    semantic tokens and ghost text (planned for 0.9), and host decorations (breakpoints, the
-    paused line, bracket colours).
-  * Effort if done: XL, about 2-3 weeks of batches:
+  done, for the licence (Apache-2.0 instead of sora's LGPL-2.1); held for later.** Revisited 11-04
+  against 0.8.0 (`docs/native-editor-evaluation.md`, "Revisit 2026-11-04"): closer, still not ready.
+  * Switch when all of these hold (numbers proposed 11-04, the user's to change; lab means
+    `:aardink-lab` on the tablet with the guest running, as on 10-28):
+    1. Memory: at most 30 MB PSS above sora in the lab, and checked with several files open. **Not
+       re-measured on 0.8.0.** On 0.7.0: 324-334 vs 195-201 MB.
+    2. Scrolling: at most 2 missed deadlines per 1,000 frames and p95 at most 18 ms. **Not re-measured.**
+       On 0.7.0: 22-25 per ~1,000 and 24-26 ms; sora 1 per ~4,000 and 17-18 ms.
+    3. Ghost text, inlay hints, code lens, semantic tokens: planned for 0.9 (§7.3), no date. The app draws
+       the first three as overlays on sora, but Aardink gives no pixel position for a line or caret
+       (`ViewportInfo` has only scroll offsets and line numbers), so that route is closed too.
+    4. Breakpoints: `DecorationStyle` has only a coloured gutter bar, and the host gets no gutter tap.
+       Icons and taps aren't on its roadmap, so this needs asking upstream, a fork or a different design.
+    5. Keyboards: our own pass with the Book Cover (ABNT2 dead keys), Gboard and Samsung's keyboard. Its
+       manual IME passes haven't been run; they're planned for 1.0.
+    6. TextMate: our adapter works with VS Code grammar packs and imported themes. Possible now: the
+       `IncrementalTokenizer` interface and `NamedTokenType` scopes are public. It adds tm4e (EPL-2.0).
+    7. `minSdk` 26: the app is on 24, Aardink needs 26. A small change, but the user's call.
+  * No longer blockers (0.7, 0.8): change and selection events, commands and keybindings as data,
+    decorations (paused line, conflict tints, symbol and find highlights), folding with the Ctrl+K chords,
+    Material 3 and VS Code themes, pinch zoom, bracket pair colours, the `setText` data-loss risk (0.6.3).
+  * Accepted risks: a minor may break the API until the 1.0 freeze (0.7 to 0.8 needed no lab change), one
+    main author (Apache-2.0 allows a fork), no saved view state until 1.0 (scroll and folds per tab are
+    ours to keep), highlighting off above 2 MiB (`plainTextFallbackChars`; the paged view stays).
+  * Order: re-run the lab on 0.8.0 first. If 1 and 2 still fail by a wide margin, the rest can wait,
+    and that's worth telling upstream. Otherwise decide when 0.9 ships. Python as a built-in grammar comes in 0.10.
+  * Effort if done: still XL, about 2-3 weeks of batches, with fewer unknowns:
     * (Done in batch 20.) Route the controller's 29 direct `editorView` uses through
       `EditorSurface`. An Aardink switch now replaces `SoraEditorSurface` and the editor pane.
-    * A Compose editor pane with keys, auto-pairing, tab stops, comment and line commands, and
-      IME (L).
-    * A TextMate tokenizer adapter on tm4e (L), or a hand-written grammar per language that drops
-      VS Code grammar packs.
-    * Themes mapped to Aardink's `EditorTheme` (M).
-    * Semantic and bracket colours merged into its tokens (M-L).
-    * Problems onto its built-in diagnostics (S-M).
-    * Ghost text, breakpoints and the paused line, which need its 0.9 APIs (M, blocked).
-    * The large-file view (S), and tests and tablet checks (M).
+    * A Compose editor pane in place of `NativeCodeEditor` and sora's view: keys, IME, the app's window-level
+      key routing (L; M-L now that its commands and bindings are data).
+    * The TextMate tokenizer adapter on tm4e (L).
+    * Completion onto `LanguageService` in place of `SoraCompletion.kt` (M). Added since 10-28.
+    * Themes mapped to `EditorTheme` (S-M; was M).
+    * Semantic colours through the adapter or 0.9's layer; built-in bracket colours replace
+      `BracketColorizer.kt` (M; was M-L).
+    * Problems onto its diagnostics; folding onto `FoldingProvider`, dropping our two Java files in sora's
+      package (S-M).
+    * Overlays drawn over the code since 10-28: inlay hints, code lenses, ghost text, notebook-style `# %%`
+      cells, fold arrows, conflict actions (M, needs 0.9 or positions).
+    * Breakpoints (blocked, see 4). The large-file view (S), and tests and tablet checks (M).
   * Gains: Apache-2.0 (settles the open LGPL question), Compose-native, and built-in
-    find/replace, folding, minimap, sticky scroll and snippets. Notebook cells could share the
-    same editor.
+    find/replace, minimap, sticky scroll, multi-cursor, snippets, overview ruler and breadcrumbs. Notebook
+    cells could share the same editor.
 
 Candidates from the spec review (10-29; `docs/NATIVE-ANDROID-IDE-SPEC.md` against the app).
 Not picked yet. Effort: S about half a day, M about a day, L several days.

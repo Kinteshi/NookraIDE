@@ -129,6 +129,37 @@ visibly worse, and Copilot ghost text, semantic tokens and breakpoints would reg
 Revisit when Aardink ships 0.9 (semantic tokens, ghost text, decorations), by re-running the lab
 (`adb shell am start -n com.avfstudio.aardinklab/.LabActivity`, or `.SoraLabActivity`).
 
+## Revisit 2026-11-04: Aardink 0.8.0
+
+Read from 0.8.0's sources, changelog and roadmap, and from the app's code. The `:aardink-lab` app now
+builds against 0.8.0 with no code change, on the app's Kotlin 2.4.20 and Compose BOM 2026.09 (Aardink
+itself uses Kotlin 2.4.21). **It was not run:** the tablet was locked and the guest off, so the
+memory and scrolling figures above are still 0.7.0's and may have changed. The licence is still Apache-2.0
+in the file and the POM; GitHub's "Other" label is its detector, not a change.
+
+| Gap on 10-28 | Aardink 0.8.0 |
+| --- | --- |
+| Host decorations | Closed for ranges and whole lines: background, underline, border, minimap and overview-ruler marks, hover text. They follow edits. |
+| Breakpoint icons | Open. The gutter gets a coloured bar (the roadmap's glyph was built as a bar) and the host gets no gutter tap. Not on the roadmap. |
+| Document change events | Closed: `contentChanges()`, content and selection listeners. |
+| Semantic tokens, ghost text, inlay hints | Open, planned for 0.9 (§7.3), which depends on an inline-layout spike. No date, and no 0.9 branch on 11-04. Releases: 0.6 on 10-03, 0.7 on 10-24, 0.8 on 11-01. |
+| TextMate | Still none, and not planned. An adapter is possible on the public `IncrementalTokenizer` and `NamedTokenType`, whose colours resolve by scope prefix as TextMate's do. |
+| Python | Not built in until 0.10. An adapter makes this moot. |
+| `setText` data-loss risk | Closed in 0.6.3: it edits only the exposed window. |
+
+New on our side since 10-28:
+* The app draws inlay hints, code lenses, ghost text, `# %%` cell rules, fold arrows and conflict actions
+  as overlays on sora, using its line positions. Aardink has no public equivalent: `ViewportInfo` has
+  scroll offsets and line numbers, and `CodeEditorLayout` gives the host no way to reach its controller.
+  So overlays can't stand in for 0.9's APIs.
+* `minSdk`: Aardink needs 26, the app is on 24.
+* Our folding is two Java files in sora's package (`FoldingLayout`, `EditorLayoutAccess`), extending its
+  `LineBreakLayout`. Include them when the LGPL question is settled; the switch would remove them.
+
+Verdict: **still not viable, but closer.** The blockers are now specific, and the switch's conditions are
+listed in `docs/NATIVE-IDE-BATCHES.md`, under the backlog's "Refactor: replace sora-editor with Aardink".
+Next step: re-run the lab on 0.8.0 with the tablet unlocked and the guest running, as on 10-28.
+
 Build and run the available checks from the repository root:
 
 ```sh
