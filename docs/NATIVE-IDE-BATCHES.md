@@ -2135,8 +2135,8 @@ used when showing the user this table. "Item" is the number in the lists below, 
 | 17 | 68 | S to try the grant, L+ to do | Bundle the image and use AVF without Terminal: not for store installs |
 | 18 | 69 | S–M | Warn near the phantom process limit, and say so when the guest goes away |
 | 19 | 70 | L overall | Mode without Terminal: local backend, ML on another machine, glibc if proven |
-| 20 | 71 | S to ask | Ask Aardink for public text positions (overlays) |
-| 21 | 72 | S to ask | Ask Aardink for gutter icons and taps (breakpoints) |
+| 20 | 71 | S to ask | Ask Aardink for public text positions (overlays); drafted, the user will come back to it |
+| 21 | 72 | S to ask | Ask Aardink for gutter icons and taps (breakpoints); drafted, the user will come back to it |
 
 Loose ends, not sized:
 * The unsaved dot seen once after saving a restored deleted file (batch 39; not reproduced in three tries).
@@ -2520,9 +2520,9 @@ day, L several days.
   71. Ask Aardink for public text positions: a pixel rect for an offset or line, updated on scroll and layout
       (user, 11-04: yes, draft first). Ten of the app's overlays need them, and they aren't on its roadmap. S to
       ask; the answer decides phase 5 of the [switch plan](AARDINK-SWITCH-PLAN.md). Drafted in
-      [AARDINK-UPSTREAM-REQUESTS.md](AARDINK-UPSTREAM-REQUESTS.md); not filed.
+      [AARDINK-UPSTREAM-REQUESTS.md](AARDINK-UPSTREAM-REQUESTS.md); not filed: the user will come back to it (11-05).
   72. Ask Aardink for a gutter icon in a decoration and a host callback for gutter taps (user, 11-04: yes, draft
-      first). Breakpoints need them; the roadmap's glyph was built as a bar. S to ask. Drafted in the same file; not filed.
+      first). Breakpoints need them; the roadmap's glyph was built as a bar. S to ask. Drafted in the same file; not filed: the user will come back to it (11-05).
 * Still left out on purpose: multi-cursor, sticky scroll, minimap (Aardink switch; folding came in batch 31);
   split editor groups and the 3-way merge editor; tasks.json; MCP, other AI providers and the
   built-in chat agent (Copilot, Claude Code and Gemini through ACP instead); foldable postures
