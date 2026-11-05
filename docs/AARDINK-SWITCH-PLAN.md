@@ -14,8 +14,9 @@ Build Aardink beside sora and flip when it reaches parity, so the app stays usab
 * **A setting picks the engine:** `avf.editor.engine`, `sora` (default) or `aardink`, marked experimental in
   Settings. It is removed with sora in phase 7. A partial Aardink mode is fine while sora is the default.
 * **`EditorSurface` is the seam:** a new `AardinkEditorSurface` sits beside `SoraEditorSurface`, so the
-  controller changes little. Its 80 uses of `editorSurface` are already engine-neutral; the 24 direct uses of
-  the sora view (`soraEditor()` and casts) are not, and move behind the surface first.
+  controller changes little: it no longer touches sora at all (phase 0).
+* **One live editor at a time,** as today: the app recreates the view when the active tab changes, so tabs
+  don't each hold an editor. Scroll and folds per tab are kept by us.
 * **One batch per phase or less,** each ending in a commit, tests and a tablet check, as usual.
 * **Pin the version.** A minor may break the API until 1.0, so take each one in its own small batch.
 
@@ -41,14 +42,13 @@ If 1 or 2 are declined, a fork is allowed by the licence but is a real maintenan
 * Lab: a normal-sized document (about 500 lines) beside the 10,000-line one, for the memory question. Add tabs too.
 * Spike the highest technical risk, the TextMate adapter: `IncrementalTokenizer` on tm4e with
   `python.tmLanguage.json` in the lab. Measure tokenizing time and memory; check colours against sora.
-* Move the 24 direct uses of the sora view behind `EditorSurface` or into sora-only code.
+* (Done.) Move the controller's direct uses of the sora view behind `EditorSurface`; what's left is sora-only code.
 * Exit: the adapter works in the lab, and the user has decided what to file upstream.
 
 ### Phase 1: a working editor behind the setting (L)
-* Dependency, `minSdk` 26 (the app is on 24), the setting, `AardinkEditorSurface` and a Compose pane.
+* Dependency, the setting, `AardinkEditorSurface` and a Compose pane. (`minSdk` is already 34, from phase 0.)
 * Open, edit, save, undo, selection, word wrap, line numbers, zoom, read-only; events to the controller
-  (content, selection, viewport, focus, zoom). Tabs: one `CodeEditorState` per open file, scroll and folds
-  kept by us.
+  (content, selection, viewport, focus, zoom).
 * Keys: the window-level `KeyRouter` keeps first say; `EditorOptions.keyBindings` removes what the app handles.
 * **Exit: real keyboards on the tablet.** Book Cover with ABNT2 dead keys, Gboard, Samsung's keyboard, touch
   selection, touchpad and pointer. This comes early on purpose: its own manual IME passes aren't due until 1.0,

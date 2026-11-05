@@ -12,6 +12,7 @@ import com.avfstudio.nativeide.editor.FIND_MATCH_COLOR_ID
 import com.avfstudio.nativeide.editor.LineMarks
 import com.avfstudio.nativeide.editor.LspPosition
 import com.avfstudio.nativeide.editor.LspRange
+import com.avfstudio.nativeide.editor.ParsedSnippet
 import com.avfstudio.nativeide.editor.SYMBOL_HIGHLIGHT_COLOR_ID
 import com.avfstudio.nativeide.editor.SYMBOL_WRITE_HIGHLIGHT_COLOR_ID
 import com.avfstudio.nativeide.editor.TagDecoration
@@ -56,6 +57,18 @@ internal class SoraEditorSurface(
     override val visibleLines: VisibleLines
         get() = VisibleLines(editor.firstVisibleLine, editor.lastVisibleLine)
     override val lineCount: Int get() = editor.lineCount
+    override val indentUnit: String get() = if (editor.insertSpaces) " ".repeat(editor.tabWidth) else "\t"
+    override val selectedText: String
+        get() = editor.cursor.takeIf { it.isSelected }?.let { editor.text.substring(it.left, it.right) }.orEmpty()
+    override fun insertSnippet(snippet: ParsedSnippet, from: Int, to: Int) = editor.insertSnippet(snippet, from, to)
+    override fun resetPointerRest() = editor.resetPointerRest()
+    override fun touchpadPinch(event: android.view.MotionEvent): Boolean? {
+        if (!editor.isShown) return null
+        val origin = IntArray(2).also(editor::getLocationInWindow)
+        val inside = event.x >= origin[0] && event.x < origin[0] + editor.width &&
+            event.y >= origin[1] && event.y < origin[1] + editor.height
+        return if (inside) editor.touchpadPinch(event) else null
+    }
     override fun lineText(line: Int): String = editor.text.getLineString(line)
     override val selectionOffsets: IntRange get() = editor.cursorRange.let { it.startIndex..it.endIndex }
 
@@ -237,12 +250,7 @@ internal class SoraEditorSurface(
     /** The inverse of [spToPx]; Android 14 scales large fonts non-linearly. */
     private fun pxToSp(px: Float): Float {
         val metrics = editor.resources.displayMetrics
-        return if (android.os.Build.VERSION.SDK_INT >= 34) {
-            android.util.TypedValue.deriveDimension(android.util.TypedValue.COMPLEX_UNIT_SP, px, metrics)
-        } else {
-            @Suppress("DEPRECATION")
-            px / metrics.scaledDensity
-        }
+        return android.util.TypedValue.deriveDimension(android.util.TypedValue.COMPLEX_UNIT_SP, px, metrics)
     }
 
     override var parameterHintsShown: Boolean

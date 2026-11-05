@@ -185,7 +185,7 @@ New on our side since 10-28:
   as overlays on sora, using its line positions. Aardink has no public equivalent: `ViewportInfo` has
   scroll offsets and line numbers, and `CodeEditorLayout` gives the host no way to reach its controller.
   So overlays can't stand in for 0.9's APIs.
-* `minSdk`: Aardink needs 26, the app is on 24.
+* `minSdk`: Aardink needs 26, the app was on 24. Raised to 34 the same day.
 * Our folding is two Java files in sora's package (`FoldingLayout`, `EditorLayoutAccess`), extending its
   `LineBreakLayout`. Include them when the LGPL question is settled; the switch would remove them.
 

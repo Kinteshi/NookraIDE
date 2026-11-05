@@ -5,7 +5,6 @@ import android.content.Intent
 import android.content.pm.ShortcutInfo
 import android.content.pm.ShortcutManager
 import android.graphics.drawable.Icon
-import android.os.Build
 import com.avfstudio.nativeide.MainActivity
 import com.avfstudio.nativeide.R
 
@@ -40,7 +39,6 @@ object IntentRouter {
  * (`avf.launcher.recentFolders`). Empty [folders] removes them.
  */
 fun updateLauncherShortcuts(context: Context, folders: List<String>) {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N_MR1) return
     val manager = context.getSystemService(ShortcutManager::class.java) ?: return
     runCatching {
         val limit = manager.maxShortcutCountPerActivity.coerceAtMost(4)

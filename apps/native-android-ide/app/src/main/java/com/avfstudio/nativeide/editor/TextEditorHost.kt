@@ -102,6 +102,15 @@ interface EditorSurface {
     fun runFoldCommand(commandId: String): Boolean = false
     /** The find widget's matches, [current] (an index in [matches], or -1) stronger. */
     fun setFindHighlights(matches: List<LspRange>, current: Int) {}
+    /** One level of indentation here, spaces or a tab; null to go by the settings. */
+    val indentUnit: String? get() = null
+    val selectedText: String get() = selectionOffsets.let { text.substring(it.first, it.last) }
+    /** Puts [snippet] over the offsets [from] until [to], with its tab stops active. */
+    fun insertSnippet(snippet: ParsedSnippet, from: Int, to: Int) {}
+    /** The pointer left what it rested on, so the same place can show a hover again. */
+    fun resetPointerRest() {}
+    /** A touchpad pinch in window coordinates: whether it was used, or null when it's not over the editor. */
+    fun touchpadPinch(event: android.view.MotionEvent): Boolean? = null
     fun observe(listener: (EditorEvent) -> Unit): Closeable
 }
 

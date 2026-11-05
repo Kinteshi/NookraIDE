@@ -1,7 +1,6 @@
 package com.avfstudio.nativeide.workbench
 
 import android.content.Context
-import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
@@ -38,7 +37,7 @@ private val FallbackDark = darkColorScheme(primary = Color(0xFF9ECAFF), secondar
 private val FallbackLight = lightColorScheme(primary = Color(0xFF0061A4), secondary = Color(0xFF535F70))
 
 /**
- * Material You theme: dynamic colour from the wallpaper on Android 12+, an optional pure-black
+ * Material You theme: dynamic colour from the wallpaper, an optional pure-black
  * dark variant for OLED panels, and a static baseline palette otherwise.
  */
 @Composable
@@ -50,7 +49,7 @@ fun AvfTheme(settings: WorkbenchSettings, tooltips: Tooltips = Tooltips(settings
     }
     val context = LocalContext.current
     val base = when {
-        settings.dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ->
+        settings.dynamicColor ->
             if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
         dark -> FallbackDark
         else -> FallbackLight

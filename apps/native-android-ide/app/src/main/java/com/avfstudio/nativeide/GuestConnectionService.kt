@@ -9,7 +9,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.net.Uri
-import android.os.Build
 import android.os.IBinder
 
 class GuestConnectionService : Service() {
@@ -20,29 +19,23 @@ class GuestConnectionService : Service() {
         val state = intent?.getStringExtra(EXTRA_STATE) ?: "Connected"
         createNotificationChannel()
         val notification = buildNotification(endpoint, state)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE,
-            )
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
-        }
+        startForeground(
+            NOTIFICATION_ID,
+            notification,
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE,
+        )
         return START_NOT_STICKY
     }
 
     private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "Guest connection",
-                NotificationManager.IMPORTANCE_LOW,
-            ).apply {
-                description = "Keeps the active AVF guest connection available in the background"
-            }
-            getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+        val channel = NotificationChannel(
+            CHANNEL_ID,
+            "Guest connection",
+            NotificationManager.IMPORTANCE_LOW,
+        ).apply {
+            description = "Keeps the active AVF guest connection available in the background"
         }
+        getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
     }
 
     private fun buildNotification(endpoint: String, state: String): Notification {
@@ -55,12 +48,7 @@ class GuestConnectionService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val host = Uri.parse(endpoint).host.orEmpty()
-        return (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            Notification.Builder(this, CHANNEL_ID)
-        } else {
-            @Suppress("DEPRECATION")
-            Notification.Builder(this)
-        })
+        return Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("MaterialCode")
             .setContentText(if (host.isBlank()) state else "$state · $host")
@@ -80,11 +68,7 @@ class GuestConnectionService : Service() {
             val intent = Intent(context, GuestConnectionService::class.java)
                 .putExtra(EXTRA_ENDPOINT, endpoint)
                 .putExtra(EXTRA_STATE, state)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
-            }
+            context.startForegroundService(intent)
         }
 
         fun stop(context: Context) {

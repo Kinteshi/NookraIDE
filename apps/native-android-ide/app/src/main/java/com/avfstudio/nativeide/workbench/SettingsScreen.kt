@@ -2,7 +2,6 @@ package com.avfstudio.nativeide.workbench
 
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.rememberTextMeasurer
-import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -260,7 +259,7 @@ private fun LazyListScope.appearance(controller: WorkbenchController, settings: 
         SwitchRow(
             Icons.Outlined.ColorLens,
             "Dynamic colour",
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) "Material You palette from your wallpaper" else "Needs Android 12 or later",
+            "Material You palette from your wallpaper",
             settings.dynamicColor,
         ) { set(WorkbenchSettings.DYNAMIC_COLOR, it) }
     }

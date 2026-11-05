@@ -26,6 +26,15 @@ private class TextSurface(initialText: String) : EditorSurface {
 
 class EditorSurfaceDefaultsTest {
     @Test
+    fun selectedTextIsWhatTheSelectionCovers() {
+        val surface = TextSurface("ab\ncde\n")
+        surface.select(0, 1, 1, 2)
+        assertEquals("b\ncd", surface.selectedText)
+        surface.select(1, 1, 1, 1)
+        assertEquals("", surface.selectedText)
+    }
+
+    @Test
     fun offsetsAndPositionsRoundTrip() {
         val surface = TextSurface("ab\ncde\n")
         assertEquals(LspPosition(1, 1), surface.positionAt(4))

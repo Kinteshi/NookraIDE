@@ -2,9 +2,7 @@ package com.avfstudio.nativeide.workbench
 
 import android.content.ContentValues
 import android.content.Context
-import android.os.Build
 import android.provider.MediaStore
-import androidx.annotation.RequiresApi
 import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -28,7 +26,6 @@ fun guestBundleAvailable(context: Context): Boolean =
  * because Android won't let an app overwrite Downloads entries it no longer owns) and returns the
  * command to run in Linux Terminal. Older setup folders this app created are removed.
  */
-@RequiresApi(Build.VERSION_CODES.Q)
 fun exportGuestBundle(context: Context): String {
     if (!guestBundleAvailable(context)) {
         throw IOException("This build has no guest bundle; build it with scripts/build-guest-bundle.sh")

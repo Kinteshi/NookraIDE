@@ -2090,6 +2090,17 @@ from Play, and use it to think about working without Terminal. Only this file ch
 * Left on the tablet: VSCodroid stopped, its `~/vdprobe` and pip cache removed, its `.ipython` folder and
   shell history remain; the adb redirect and test keyboard are gone; the guest is running.
 
+## 42. Aardink switch, phase 0 (11-04; in progress)
+User's go-ahead (11-04) on the [plan](AARDINK-SWITCH-PLAN.md). 329 app unit tests pass.
+* `minSdk` 34, Android 14, up from 24 (user: raise it, devices without AVF don't matter). 34 is the first with AVF's
+  system feature, and it keeps Android 14 tablets usable against a daemon on a computer. The 17 version checks this
+  made dead are gone, including the Android 10 setup error and the "Needs Android 12" note in Settings.
+* The controller no longer touches sora: snippets, hover reset and touchpad pinch go through `EditorSurface`
+  (`indentUnit`, `selectedText`, `insertSnippet`, `resetPointerRest`, `touchpadPinch`). The rest of the 24 direct
+  uses are sora-only code by nature: `EditorPane`, `SoraCompletion`, and `PeekOverlay`, which needs positions (phase 5).
+* Checked on the tablet: starts, connects, foreground service and notification. **Not** checked by hand:
+  Insert Snippet and touchpad pinch after the move; they join phase 1's tablet pass.
+
 ## Backlog
 ### Open backlog (11-04)
 The current list of what's open; the older lists below keep the history and details. "#" is the number
@@ -2203,7 +2214,7 @@ To investigate (user, 10-28):
        manual IME passes haven't been run; they're planned for 1.0.
     6. TextMate: our adapter works with VS Code grammar packs and imported themes. Possible now: the
        `IncrementalTokenizer` interface and `NamedTokenType` scopes are public. It adds tm4e (EPL-2.0).
-    7. `minSdk` 26: the app is on 24, Aardink needs 26. A small change, but the user's call.
+    7. (Done in batch 42.) `minSdk`: Aardink needs 26; the app is on 34.
   * No longer blockers (0.7, 0.8): change and selection events, commands and keybindings as data,
     decorations (paused line, conflict tints, symbol and find highlights), folding with the Ctrl+K chords,
     Material 3 and VS Code themes, pinch zoom, bracket pair colours, the `setText` data-loss risk (0.6.3).

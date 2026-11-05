@@ -6,7 +6,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
-import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -217,7 +216,7 @@ private val CODE_LENS_KINDS = setOf(5, 6, 9, 10, 11, 12, 23)
 /** How long Undo stays offered after an Explorer delete or move; the daemon keeps a deleted entry 10 s. */
 private const val UNDO_WINDOW_MS = 9_500L
 /** A finished action's buzz (CONFIRM since Android 11). */
-internal val HAPTIC_CONFIRM = if (android.os.Build.VERSION.SDK_INT >= 30) HapticFeedbackConstants.CONFIRM else HapticFeedbackConstants.VIRTUAL_KEY
+internal val HAPTIC_CONFIRM = HapticFeedbackConstants.CONFIRM
 private val KEYBINDINGS_TEMPLATE = """
     // Keyboard shortcuts, in VS Code's keybindings.json format. A command starting with "-"
     // removes that default shortcut. "when" clauses are kept but not evaluated here.
@@ -1047,8 +1046,7 @@ class WorkbenchController(private val context: Context) {
     }
 
     fun requestGuestConnection() {
-        val needsPermission = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        val needsPermission = context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         val ask = requestNotificationPermission
         if (needsPermission && ask != null) ask() else connectGuest()
     }
@@ -1058,8 +1056,7 @@ class WorkbenchController(private val context: Context) {
         guestProblem = null
         status = "Connecting to guest"
         languageServerIssues = emptyList()
-        val notificationsAllowed = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
-            context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+        val notificationsAllowed = context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
         keepAliveError = if (notificationsAllowed) null else {
             "Notification permission denied; Android may hide the background connection notification"
         }
@@ -2803,10 +2800,6 @@ class WorkbenchController(private val context: Context) {
     /** Copies the bundled daemon and installer to Downloads and builds the Linux Terminal command. */
     fun prepareGuestSetup() {
         setupError = null
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-            setupError = "Setting up the guest from the app needs Android 10 or later"
-            return
-        }
         io.execute {
             val result = runCatching { exportGuestBundle(context) }
             post {
@@ -4995,11 +4988,11 @@ class WorkbenchController(private val context: Context) {
 
     /** [body] indented for [line] (tabs as the file's indentation) with its variables read from the editor and file. */
     private fun prepareSnippetFor(path: String, body: String, line: Int, column: Int): ParsedSnippet {
-        val view = soraEditor()
-        val lineText = view?.text?.takeIf { line < it.lineCount }?.getLineString(line).orEmpty()
+        val surface = editorSurface
+        val lineText = surface?.takeIf { line < it.lineCount }?.lineText(line).orEmpty()
         val indentation = lineText.takeWhile { it == ' ' || it == '\t' }
-        val unit = if (view?.insertSpaces != false) " ".repeat(view?.tabWidth ?: settings.tabSize) else "\t"
-        val selected = view?.takeIf { it.cursor.isSelected }?.let { it.text.substring(it.cursor.left, it.cursor.right) }.orEmpty()
+        val unit = surface?.indentUnit ?: " ".repeat(settings.tabSize)
+        val selected = surface?.selectedText.orEmpty()
         var wordStart = column.coerceAtMost(lineText.length)
         while (wordStart > 0 && isIdentifierCharacter(lineText[wordStart - 1])) wordStart--
         var wordEnd = column.coerceAtMost(lineText.length)
@@ -5022,7 +5015,7 @@ class WorkbenchController(private val context: Context) {
     /** Snippets: Insert Snippet: the active file's snippets in a palette; the pick goes at the cursor. */
     fun showInsertSnippet() {
         val path = activePath
-        if (path == null || activeNotebook != null || soraEditor() == null) {
+        if (path == null || activeNotebook != null || editorSurface == null) {
             status = "Open a file to insert a snippet"
             return
         }
@@ -5037,11 +5030,12 @@ class WorkbenchController(private val context: Context) {
 
     fun insertSnippet(snippet: Snippet) {
         dialog = null
-        val view = soraEditor() ?: return
+        val surface = editorSurface ?: return
         val path = activePath ?: return
-        val cursor = view.cursor
-        view.insertSnippet(prepareSnippetFor(path, snippet.body, cursor.leftLine, cursor.leftColumn), cursor.left, cursor.right)
-        view.requestFocus()
+        val start = surface.selectionStart()
+        val range = surface.selectionOffsets
+        surface.insertSnippet(prepareSnippetFor(path, snippet.body, start.line, start.character), range.first, range.last)
+        surface.focus()
     }
 
     /** Snippets: Configure Workspace Snippets: `.vscode/workspace.code-snippets`, made from a template if missing. */
@@ -5131,7 +5125,7 @@ class WorkbenchController(private val context: Context) {
         hoverRequest++
         if (hoverCard != null) {
             hoverCard = null
-            soraEditor()?.resetPointerRest()
+            editorSurface?.resetPointerRest()
         }
     }
 
@@ -6571,13 +6565,8 @@ class WorkbenchController(private val context: Context) {
 
     /** A touchpad pinch, from the activity: the editor under the pointer zooms, or a notebook. */
     fun onTouchpadPinch(event: android.view.MotionEvent): Boolean {
-        if (!settings.pinchToZoom || android.os.Build.VERSION.SDK_INT < 34) return false
-        soraEditor()?.takeIf { it.isShown }?.let { view ->
-            val origin = IntArray(2).also(view::getLocationInWindow)
-            if (event.x >= origin[0] && event.x < origin[0] + view.width && event.y >= origin[1] && event.y < origin[1] + view.height) {
-                return view.touchpadPinch(event)
-            }
-        }
+        if (!settings.pinchToZoom) return false
+        editorSurface?.touchpadPinch(event)?.let { return it }
         if (fontZoomAreas.values.none { it.contains(androidx.compose.ui.geometry.Offset(event.x, event.y)) }) return false
         touchpadPinchFactor(event)?.let(::pinchZoom)
         if (event.actionMasked == android.view.MotionEvent.ACTION_UP || event.actionMasked == android.view.MotionEvent.ACTION_CANCEL) endPinchZoom()

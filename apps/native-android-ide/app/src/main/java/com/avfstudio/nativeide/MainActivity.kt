@@ -70,7 +70,7 @@ class MainActivity : ComponentActivity() {
 
     /** Compose drops touchpad pinches before they reach the views inside it; they go to the workbench here. */
     override fun dispatchTouchEvent(ev: android.view.MotionEvent): Boolean {
-        if (android.os.Build.VERSION.SDK_INT >= 34 && ev.classification == android.view.MotionEvent.CLASSIFICATION_PINCH &&
+        if (ev.classification == android.view.MotionEvent.CLASSIFICATION_PINCH &&
             com.avfstudio.nativeide.workbench.TouchpadPinch.handler?.invoke(ev) == true
         ) {
             return true
