@@ -6,6 +6,8 @@ import android.os.SystemClock
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 import io.github.rosemoe.sora.langs.textmate.TextMateColorScheme
@@ -36,18 +38,25 @@ class SoraLabActivity : ComponentActivity() {
             IThemeSource.fromInputStream(assets.open("textmate/avf-dark.tmTheme.json"), "avf-dark.tmTheme.json", Charsets.UTF_8),
         )
         ThemeRegistry.getInstance().findThemeByFileName("avf-dark.tmTheme.json")?.let(ThemeRegistry.getInstance()::setTheme)
+        val lines = intent.getIntExtra("lines", 10_000)
+        val tabs = intent.getIntExtra("tabs", 1)
         setContent {
-            AndroidView(
-                modifier = Modifier.fillMaxSize(),
-                factory = { context ->
-                    CodeEditor(context).apply {
-                        setTypefaceText(Typeface.MONOSPACE)
-                        colorScheme = TextMateColorScheme.create(ThemeRegistry.getInstance())
-                        setEditorLanguage(TextMateLanguage.create("source.python", true))
-                        setText(sampleDocument(10_000))
-                    }
-                },
-            )
+            // As in the app: one live editor, made again when the active tab changes.
+            val tab by tabCycle(tabs)
+            key(tab) {
+                AndroidView(
+                    modifier = Modifier.fillMaxSize(),
+                    factory = { context ->
+                        CodeEditor(context).apply {
+                            setTypefaceText(Typeface.MONOSPACE)
+                            colorScheme = TextMateColorScheme.create(ThemeRegistry.getInstance())
+                            setEditorLanguage(TextMateLanguage.create("source.python", true))
+                            setText(sampleDocument(lines, tab))
+                        }
+                    },
+                    onRelease = { it.release() },
+                )
+            }
             window.decorView.post {
                 android.util.Log.i("AardinkLab", "first-frame-ms=${SystemClock.uptimeMillis() - start}")
             }

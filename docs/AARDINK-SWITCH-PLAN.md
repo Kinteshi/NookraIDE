@@ -1,6 +1,6 @@
 # Plan: switching from sora-editor to Aardink
 
-Status: **planned, not started** (2026-11-04). Nothing here is implemented.
+Status: **phase 0 done** (2026-11-05), phase 1 not started. The app itself still runs on sora.
 
 **Decided by the user:** the switch will happen, for the licence (Apache-2.0 instead of sora's LGPL-2.1).
 On 11-04 they judged the measured memory and scrolling not to be impediments, and expect Aardink's release
@@ -32,30 +32,35 @@ These are ordered by how much they unblock. Filing them is the user's decision.
 | 3 | Ghost text, inlay hints, code lens | 0.9, after a layout spike | Copilot's suggestions, inlay hints, lenses, Python cell actions |
 | 4 | Semantic token layer | 0.9 | Optional: our tokenizer adapter can merge them |
 | 5 | Saved view state (scroll, folds) | 1.0 | Optional: we can keep it per tab |
-| 6 | Memory before the first scroll, and the slow frames as a gesture starts | Android gates in 0.10 | Better numbers; shared with data once phase 0 has them |
+| 6 | The slow frames as a gesture starts; a note on the declarative tokenizer's native memory | Android gates in 0.10 | Better numbers; the app avoids the second through its adapter |
 
 If 1 or 2 are declined, a fork is allowed by the licence but is a real maintenance cost; ask the user before going there.
 
 ## Phases
 
-### Phase 0: preparation (S-M; nothing changes for users)
-* Lab: a normal-sized document (about 500 lines) beside the 10,000-line one, for the memory question. Add tabs too.
-* Spike the highest technical risk, the TextMate adapter: `IncrementalTokenizer` on tm4e with
-  `python.tmLanguage.json` in the lab. Measure tokenizing time and memory; check colours against sora.
-* (Done.) Move the controller's direct uses of the sora view behind `EditorSurface`; what's left is sora-only code.
-* Exit: the adapter works in the lab, and the user has decided what to file upstream.
+### Phase 0: preparation (done 11-05, except filing requests)
+* Lab: file size and tab options. Normal files are fine, and five tabs don't accumulate.
+* The TextMate adapter works in the lab (`TextMateTokenizer`, tested on the device), with sora's colours, and removes the
+  memory peak: 77-79 MB at 10,000 lines against sora's 107-115. Numbers in
+  [native-editor-evaluation.md](native-editor-evaluation.md), "Switch phase 0".
+* The controller no longer touches sora; what's left is sora-only code. `minSdk` is 34.
+* Still open: the user filing requests 1 and 2, drafted in [AARDINK-UPSTREAM-REQUESTS.md](AARDINK-UPSTREAM-REQUESTS.md).
 
 ### Phase 1: a working editor behind the setting (L)
 * Dependency, the setting, `AardinkEditorSurface` and a Compose pane. (`minSdk` is already 34, from phase 0.)
 * Open, edit, save, undo, selection, word wrap, line numbers, zoom, read-only; events to the controller
   (content, selection, viewport, focus, zoom).
 * Keys: the window-level `KeyRouter` keeps first say; `EditorOptions.keyBindings` removes what the app handles.
+* Tests touching Aardink run on the device: its classes are Java 21 bytecode and Gradle here runs Java 17. Tests against
+  `EditorSurface` stay on the JVM.
 * **Exit: real keyboards on the tablet.** Book Cover with ABNT2 dead keys, Gboard, Samsung's keyboard, touch
   selection, touchpad and pointer. This comes early on purpose: its own manual IME passes aren't due until 1.0,
   and this could stop the plan.
 
 ### Phase 2: colours (L)
 * The adapter from phase 0, for all grammar packs, in the background and cancellable.
+* tm4e as our own module, since it has no official Maven package and leaves with sora: `org.eclipse.tm4e.core`, EPL-2.0.
+  Upstream 0.18.0 needs Java 21 to build, so either that or the 110 files from sora's sources jar. Decide here.
 * Themes through `EditorTheme`: built-in light and dark, Material You syntax colours
   (`fromColorScheme`), imported VS Code themes.
 * Built-in bracket pair colours replace `BracketColorizer.kt`. Semantic tokens merged in the adapter.
@@ -116,8 +121,7 @@ Checked on the tablet before phase 6. Features the app has today that the switch
 |---|---|
 | Real keyboards or IME don't hold up | Phase 1 tests them first; stop before the expensive work |
 | Requests 1 and 2 are declined or slow | Interim breakpoints work; overlays wait; sora stays default meanwhile |
-| The TextMate adapter is too slow or heavy | Phase 0 spike finds out; the fallback is declarative grammars, which loses VS Code grammar packs |
-| Memory pressure destabilises the guest | Not a gate (user's decision), but measured in phases 0 and 6, since it has corrupted the guest before |
+| Memory pressure destabilises the guest | Not a gate (user's decision). Phase 0 looks good; measured again in phase 6, since it has corrupted the guest before |
 | API breaks in a minor | Pinned version, one bump per batch |
 | One main author | Apache-2.0 allows a fork if the project stops |
 

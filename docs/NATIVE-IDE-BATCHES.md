@@ -2090,7 +2090,7 @@ from Play, and use it to think about working without Terminal. Only this file ch
 * Left on the tablet: VSCodroid stopped, its `~/vdprobe` and pip cache removed, its `.ipython` folder and
   shell history remain; the adb redirect and test keyboard are gone; the guest is running.
 
-## 42. Aardink switch, phase 0 (11-04; in progress)
+## 42. Aardink switch, phase 0 (11-04 to 11-05; done, except filing the requests to Aardink)
 User's go-ahead (11-04) on the [plan](AARDINK-SWITCH-PLAN.md). 329 app unit tests pass.
 * `minSdk` 34, Android 14, up from 24 (user: raise it, devices without AVF don't matter). 34 is the first with AVF's
   system feature, and it keeps Android 14 tablets usable against a daemon on a computer. The 17 version checks this
@@ -2100,6 +2100,14 @@ User's go-ahead (11-04) on the [plan](AARDINK-SWITCH-PLAN.md). 329 app unit test
   uses are sora-only code by nature: `EditorPane`, `SoraCompletion`, and `PeekOverlay`, which needs positions (phase 5).
 * Checked on the tablet: starts, connects, foreground service and notification. **Not** checked by hand:
   Insert Snippet and touchpad pinch after the move; they join phase 1's tablet pass.
+* The TextMate adapter works, in the lab (`aardink-lab/.../TextMateTokenizer.kt`): 7 tests on the tablet, including random
+  edits checked against a full pass, and sora's colours. It answers the memory question: the peak before the first scroll
+  was Aardink's declarative tokenizer. With the adapter at 10,000 lines, 77-79 MB against sora's 107-115, and 500-line files
+  61 against 72. Scrolling large files spikes for a moment and settles below sora. Tabs don't accumulate. The hitch at
+  each gesture's start stays. Numbers: `docs/native-editor-evaluation.md`, "Switch phase 0".
+* The lab takes `lines`, `tabs` and `grammar` extras and has a release build; its tests run on the device, because Aardink's
+  classes are Java 21 bytecode and Gradle here runs Java 17.
+* tm4e has no official Maven package and leaves with sora, so phase 2 carries it as a module.
 
 ## Backlog
 ### Open backlog (11-04)
@@ -2200,8 +2208,8 @@ To investigate (user, 10-28):
   [AARDINK-SWITCH-PLAN.md](AARDINK-SWITCH-PLAN.md), where Aardink is built beside sora behind a setting. Revisited
   11-04 against 0.8.0 (`docs/native-editor-evaluation.md`, "Revisit 2026-11-04").
   * Recorded, not gates (user, 11-04: "not an impediment"). Release build, one editor, 10,000 lines, 0.8.0:
-    1. Memory: 430-502 vs sora's 136-152 MB before scrolling, about 240 MB of it native heap, cause unknown;
-       121-140 vs 140-142 MB after. Several files not checked. Aardink's figure has no TextMate yet.
+    1. Memory: 430-502 vs sora's 136-152 MB before scrolling, 121-140 vs 140-142 MB after, with Aardink's own grammar. In
+       batch 42 that peak turned out to be its declarative tokenizer: with our TextMate adapter 77-79 vs 107-115 MB (smaller window).
     2. Scrolling: p95 12 ms, as sora (p99 17 vs 12); 23-24 missed deadlines of ~1,600 against 1 of ~5,000, from two
        slow frames (18-50 ms) at the start of each gesture.
   * What the switch needs:
@@ -2445,7 +2453,8 @@ day, L several days.
   61. Find files beyond Quick Open's 20 000 in very large folders (ask the guest: `rg --files`). S-M.
   62. Open Folder's Recent keeps folders that no longer exist (b34, django_example on the tablet);
       drop them, as the environment pickers do. S.
-  63. The app can reopen as a floating window partly off-screen after an install or restart. S-M.
+  63. The app can reopen as a floating window partly off-screen after an install or restart. S-M. From batch 42's lab: after an
+      uninstall a window opens floating; `<layout>` in the manifest and `am start --windowingMode 1` don't change it.
   64. Replace Gemini CLI with Antigravity CLI as the Chat view's Google agent (user, 11-04). First check
       that it has a Linux arm64 build, how it signs in, and whether it speaks ACP. Touches the tool
       pack (`guest/tools/catalog.json`, `avf-node-agent.sh`), `ChatAgents.kt`, `GuestDependencies.kt`,

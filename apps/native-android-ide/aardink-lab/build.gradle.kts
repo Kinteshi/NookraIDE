@@ -13,6 +13,7 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "0.1.0"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     // Measure this one: a debuggable build penalises a Compose editor far more than sora's view.
@@ -45,4 +46,7 @@ dependencies {
     // sora-editor as the app uses it, measured side by side with aardink (SoraLabActivity).
     implementation("io.github.Rosemoe.sora-editor:editor:0.23.6")
     implementation("io.github.Rosemoe.sora-editor:language-textmate:0.23.6")
+    // On the device: Aardink's classes are Java 21 bytecode, which Gradle's Java 17 can't load for JVM tests.
+    androidTestImplementation("androidx.test:runner:1.7.0")
+    androidTestImplementation("androidx.test.ext:junit:1.3.0")
 }

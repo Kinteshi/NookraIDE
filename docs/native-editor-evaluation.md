@@ -192,7 +192,7 @@ New on our side since 10-28:
 Verdict: **still not viable, but closer.** The blockers are now specific, and the switch's conditions are
 listed in `docs/NATIVE-IDE-BATCHES.md`, under the backlog's "Refactor: replace sora-editor with Aardink".
 Scrolling is no longer the wide gap it looked like, apart from the hitch at each gesture's start. Memory
-before the first scroll is now the largest measured problem. Next step: a lab document of normal size.
+before the first scroll looked like the largest problem; the next section shows it isn't the editor's.
 
 The user decided on 11-04 that these measurements aren't an impediment and started planning the switch:
 [AARDINK-SWITCH-PLAN.md](AARDINK-SWITCH-PLAN.md).
@@ -203,3 +203,42 @@ Build and run the available checks from the repository root:
 ./apps/native-android-ide/gradlew -p apps/native-android-ide :app:assembleDebug
 ./apps/native-android-ide/gradlew -p apps/native-android-ide :app:testDebugUnitTest
 ```
+
+## Switch phase 0, 2026-11-05: TextMate adapter and normal file sizes
+
+The lab gained `lines`, `tabs` and `grammar` extras and `TextMateTokenizer`, an `IncrementalTokenizer` on tm4e with the
+app's Python grammar and theme. Its 7 tests pass on the tablet, including 40 rounds of random edits, each
+compared with a full pass. Its colours match sora's by eye, with the same grammar and theme.
+
+Release build compiled with `speed`, guest running, MaterialCode closed, 0.8.0. **The lab window was floating, about
+915 x 650 dp** (after an uninstall it opens that way and nothing tried made it stay maximized), so these compare with
+each other, not with the 11-04 table.
+
+PSS in MB, 8 s after a cold start, untouched:
+
+| Lines | sora + TextMate | Aardink, own grammar | Aardink + TextMate adapter |
+| --- | --- | --- | --- |
+| 500 | 72-73 | 112-113 | 61 |
+| 2,000 | 76-78 | 252 | 64-65 |
+| 10,000 | 107-115 | 432-467 | 77-79 |
+
+* **The memory before the first scroll comes from Aardink's declarative tokenizer, not the editor.** Native heap at 10,000
+  lines is 150-330 MB with it, and 11-12 MB with the adapter. The app would use the adapter, so this
+  doesn't apply to it. Why the declarative one holds it wasn't investigated.
+* **Right after scrolling, large files spike, then settle.** At 10,000 lines: about 200 MB (native heap 98 MB, graphics 46 MB)
+  straight after 24 swipes, 84 MB 30 s later; sora 93, then 90. At 2,000 lines: 95-149, then 76. At 500 lines: 81 (sora 90).
+* **Tokenizing is fast enough:** a full pass takes 95-105 ms at 500 lines, 325-329 ms at 2,000 and 1.6 s at 10,000, in
+  the background, with the text showing first. About 0.16 ms per line, on simple sample lines.
+* **Tabs don't accumulate:** five files, 15 switches, one live editor as in the app: peak 85 MB, ending at 67 (sora 89, 70).
+* **Scrolling, unchanged by the tokenizer:** 23 missed of about 1,900 (sora 1 of about 5,100); p90 9-10 ms (11), p95 12 ms (11),
+  p99 18-19 ms (12). The hitch at each gesture's start stays, so it isn't tokenizing.
+
+Other facts for the switch:
+* tm4e has no official Maven Central package; it reaches the app inside sora's LGPL `language-textmate`. Removing sora
+  means carrying `org.eclipse.tm4e.core` ourselves, EPL-2.0, as a module. Its dependencies (gson, joni, jcodings,
+  snakeyaml-engine) are on Central. Upstream 0.18.0 needs Java 21 to build; sora's sources jar has 110 tm4e files.
+* Aardink's classes are Java 21 bytecode. Android builds are fine, but JVM unit tests run on this machine's Java 17 can't load
+  them, so tests touching Aardink run on the device, as the adapter's do.
+
+Limits: sample lines rather than real code, a smaller window, no editing in the editor itself yet (the adapter's edits were tested
+directly), and no real app around it. Phase 6 measures that.
