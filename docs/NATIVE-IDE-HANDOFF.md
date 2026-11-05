@@ -7,6 +7,7 @@ Last updated: 2026-11-04 (UTC−3). Read this first when resuming. The batch pla
 
 * **Progress:** batches 1–40 are done, and 41 was exploration with no app change. Each is described in the batch plan.
 * **What's open:** [Open backlog](NATIVE-IDE-BATCHES.md#open-backlog-11-04), which replaces this file's old "Remaining" list.
+* **Next large piece:** the switch to Aardink, planned in [AARDINK-SWITCH-PLAN.md](AARDINK-SWITCH-PLAN.md), not started.
 * **Waiting on the user:** whether to continue the glibc test (backlog item 70 d). Claude Code's permission system blocked it, so it needs the user's approval.
 * **Tablet:** the latest build is installed, and the guest was rebooted at 16:47 on 11-04. The sections "Reference tablet" and "Done" below mostly date from 10-23, so some of what they describe may have moved on. The batch plan is the record since then.
 

@@ -194,6 +194,9 @@ listed in `docs/NATIVE-IDE-BATCHES.md`, under the backlog's "Refactor: replace s
 Scrolling is no longer the wide gap it looked like, apart from the hitch at each gesture's start. Memory
 before the first scroll is now the largest measured problem. Next step: a lab document of normal size.
 
+The user decided on 11-04 that these measurements aren't an impediment and started planning the switch:
+[AARDINK-SWITCH-PLAN.md](AARDINK-SWITCH-PLAN.md).
+
 Build and run the available checks from the repository root:
 
 ```sh
