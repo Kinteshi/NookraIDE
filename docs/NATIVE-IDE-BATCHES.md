@@ -2499,9 +2499,10 @@ day, L several days.
       manylinux wheel before planning on it. Settings: a backend picker (AVF guest, local, remote). L overall.
   71. Ask Aardink for public text positions: a pixel rect for an offset or line, updated on scroll and layout
       (user, 11-04: yes, draft first). Ten of the app's overlays need them, and they aren't on its roadmap. S to
-      ask; the answer decides phase 5 of the [switch plan](AARDINK-SWITCH-PLAN.md). Not filed yet.
+      ask; the answer decides phase 5 of the [switch plan](AARDINK-SWITCH-PLAN.md). Drafted in
+      [AARDINK-UPSTREAM-REQUESTS.md](AARDINK-UPSTREAM-REQUESTS.md); not filed.
   72. Ask Aardink for a gutter icon in a decoration and a host callback for gutter taps (user, 11-04: yes, draft
-      first). Breakpoints need them; the roadmap's glyph was built as a bar. S to ask. Not filed yet.
+      first). Breakpoints need them; the roadmap's glyph was built as a bar. S to ask. Drafted in the same file; not filed.
 * Still left out on purpose: multi-cursor, sticky scroll, minimap (Aardink switch; folding came in batch 31);
   split editor groups and the 3-way merge editor; tasks.json; MCP, other AI providers and the
   built-in chat agent (Copilot, Claude Code and Gemini through ACP instead); foldable postures
