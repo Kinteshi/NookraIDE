@@ -14,6 +14,7 @@ import com.avfstudio.nativeide.PythonTextMate
 import com.avfstudio.nativeide.assets.AssetPackGrammarLoader
 import com.avfstudio.nativeide.document.DocumentSession
 import com.avfstudio.nativeide.editor.BRACKET_COLORS
+import com.avfstudio.nativeide.editor.LanguageRules
 import com.avfstudio.nativeide.editor.LIGHT_BRACKET_COLORS
 import com.avfstudio.nativeide.editor.TextMateTokenizer
 import com.avfstudio.nativeide.editor.semanticColorsByKind
@@ -80,15 +81,32 @@ internal object AardinkSyntax {
     }
 
     /** The document's grammar as a tokenizer; null when no grammar knows the file (it stays plain). */
-    fun tokenizerFor(registry: Registry, document: DocumentSession): TextMateTokenizer? {
-        val scope = if (document.languageId in setOf("py", "pyi")) {
-            PYTHON_SCOPE
-        } else {
-            AssetPackGrammarLoader.scopeNameFor(document.path.substringAfterLast('/'))
-        } ?: return null
+    fun tokenizerFor(registry: Registry, document: DocumentSession, rules: LanguageRules?): TextMateTokenizer? {
+        val scope = scopeFor(document) ?: return null
         val grammar = runCatching { registry.loadGrammar(scope) }.getOrNull() ?: return null
-        return TextMateTokenizer(grammar, if (scope == PYTHON_SCOPE) CommentSyntax(line = "#") else null)
+        return TextMateTokenizer(grammar, rules?.lineComment?.let { CommentSyntax(line = it) })
     }
+
+    /**
+     * The file's `language-configuration.json` (closing pairs, Enter, indentation, comments): the app's
+     * own for Python, a grammar pack's for its languages. Null when there's none, or it can't be read.
+     */
+    fun rulesFor(context: Context, document: DocumentSession): LanguageRules? {
+        val scope = scopeFor(document) ?: return null
+        val json = runCatching {
+            if (scope == PYTHON_SCOPE) {
+                context.assets.open("textmate/python.language-configuration.json").use { it.reader().readText() }
+            } else {
+                AssetPackGrammarLoader.configurationFile(scope)?.readText()
+            }
+        }.getOrNull() ?: return null
+        return runCatching { LanguageRules.parse(json) }
+            .onFailure { android.util.Log.w("AardinkSyntax", "Could not read the language configuration for $scope", it) }
+            .getOrNull()
+    }
+
+    private fun scopeFor(document: DocumentSession): String? =
+        if (document.languageId in setOf("py", "pyi")) PYTHON_SCOPE else AssetPackGrammarLoader.scopeNameFor(document.path.substringAfterLast('/'))
 
     fun editorTheme(theme: SyntaxTheme, registry: Registry, colors: ColorScheme, dark: Boolean): EditorTheme {
         val (tokenColors, tokenStyles) = textMateTokenColors(registry.colorMap)

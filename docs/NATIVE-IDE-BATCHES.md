@@ -2128,8 +2128,8 @@ User's go-ahead (11-05), with leave to install toolchains: Java 21 now sits besi
   Text keys still go through it, which dead keys need. Backlog 73 asks upstream.
 * Not checked: the user's Book Cover itself (attached, so the on-screen keyboard stays hidden, by Android's setting),
   the on-screen keyboard, selection handles, saving to the guest (it was off). The cursor isn't kept per tab, as with sora.
-* Left on the tablet: the scratch tab closed without saving. **Correction (11-08):** the engine went back to sora only
-  offline; the guest's settings kept Aardink, so the app opened in Aardink whenever it was connected, until batch 45.
+* Left on the tablet: the scratch tab closed without saving. (Batch 45 said the engine only went back to sora
+  offline; that was wrong, see batch 46. The user switched to Aardink to try it.)
 
 ## 44. Aardink switch, phase 2: syntax colours (11-08; done, semantic colours not seen on the tablet)
 User's go-ahead (11-08). 343 app unit tests pass (6 new for the tokenizer, on Java 21).
@@ -2158,10 +2158,35 @@ User's request (11-08): update the Aardink backlog for 0.9, and make it a habit 
 * Lab, release build, guest running: the Samsung keyboard issue is still there (Enter, Shift+Left; backlog 73). The gesture
   hitch is unchanged (23-24 missed of about 2,000 frames, 24 swipes); p99 16 ms, from 18-19; memory as before.
 * App: semantic colours seen at last, with the guest's language server (`pandas`, `pd`, `DataFrame`), closing batch 44's gap.
-* Found: the engine setting changed offline in batches 43 and 44 never reached the guest's settings, so the app ran Aardink
-  whenever connected (corrections above). Set to sora while connected; it held across a restart. Backlog 74.
+* (Wrong, corrected in batch 46.) "The engine setting changed offline never reached the guest": settings are kept on the
+  device only, and the changes were the user's own, trying Aardink as batch 43 suggested. Backlog 74 is withdrawn.
 * What 0.9 changes for the switch: requests 3 and 4 delivered, request 1 narrowed to two overlays, phase 3 smaller,
   phase 5 unblocked but for those two; details in the plan.
+
+## 46. Aardink switch, phase 3: language features (11-08; done, but suggestions can't be chosen from a keyboard yet)
+User's pick: A1. 359 app unit tests pass.
+* `AardinkLanguageService`: completion from the app's language servers and the file's snippets (sorted as the server
+  sorts, snippets placed as `editor.snippetSuggestions` says), resolved on demand for documentation and auto-import edits;
+  hover and signature help as Markdown; the controller keeps definition, rename, code actions and format. Problems,
+  occurrence and find highlights go to Aardink as diagnostics and decorations; folding from the workbench's ranges with the
+  fold commands; snippets as VS Code syntax for Aardink's own engine; Ctrl+Space.
+* `LanguageRules`: our reader of `language-configuration.json` (Enter rules, indentation rules, closing and surrounding pairs,
+  comments, `notIn`), the app's own for Python and a pack's for its languages. **Aardink 0.9's `LanguageConfiguration` can't
+  load on Android**: a regex in its class initializer (`\{\d+(,\d*)?}`) is refused by Android's regex engine (the JVM takes
+  it), so the tests passed and the tablet failed. Backlog 75.
+* Pairs with a hardware keyboard are done before the input method (`typePairKey`): closing, surrounding a selection, and
+  typing over a closer auto-closing inserted (`ClosingOvertype`; Aardink has no type-over, backlog 76). Aardink tells its
+  listeners about an edit after making it, which first made the closers' bookkeeping wrong; closers are now announced first.
+* Checked on the tablet, guest running, in a throwaway `~/Projects/b46/t.py` (deleted after): problems and their counts,
+  occurrence highlights, signature help (`print(`), indentation after `def` and nested `if`, pairs and type-over for `()`,
+  `[]`, quotes (none in a comment), find with its highlights, folding.
+* **Suggestions show only as Aardink's touch strip under the editor**, never as a list at the caret: on Android its
+  `PlatformInfo.hasSoftKeyboard` is fixed at true, and the keys for the list (arrows, Enter, Tab) only work at the caret. So
+  with the Book Cover a suggestion can be tapped but not chosen from the keyboard. Backlog 77; the switch can't flip until then.
+* Not done: `else:` moving back a level as it's typed (VS Code re-indents on typing; ours does it at Enter only). Not checked
+  on the tablet: hover (needs a pointer resting), snippets (unit tests only), the on-screen keyboard's pairs (Aardink's path).
+* Corrected: batch 45's offline-settings finding was wrong (settings are on the device; the user switched to Aardink); G19 is
+  withdrawn. The engine stays on Aardink, the user's choice.
 
 ## Backlog
 ### Open backlog (11-08)
@@ -2191,16 +2216,18 @@ A for Aardink). "Item" is the number in the lists below, where one exists.
 | G16 | 68 | S to try the grant, L+ to do | Bundle the image and use AVF without Terminal: not for store installs |
 | G17 | 69 | S–M | Warn near the phantom process limit, and say so when the guest goes away |
 | G18 | 70 | L overall | Mode without Terminal: local backend, ML on another machine, glibc if proven |
-| G19 | 74 | S–M | Settings changed offline are lost on reconnect |
 
 #### Aardink switch backlog
 
 Until Aardink replaces sora: the remaining phases of the [plan](AARDINK-SWITCH-PLAN.md), which has the details, and
-what the switch is waiting on. Phases 0–2 are done (batches 42–44), on Aardink 0.9.0 (batch 45).
+what the switch is waiting on. Phases 0–3 are done (batches 42–46), on Aardink 0.9.0 (batch 45); A1 was phase 3.
 
 | # | Item | Size | Description |
 |---|------|------|-------------|
-| A1 | Phase 3 | M | Language features through `LanguageService` on the app's LSP client: completion with details, Markdown hover and signature help, occurrences, definition, problems and quick fixes, find and replace, snippets, folding, auto-indent and pairs from `language-configuration.json` |
+| A13 | 77 | S to ask, blocks A5 | Ask Aardink for the completion list at the caret on Android with a hardware keyboard; until then suggestions are tap-only |
+| A14 | 75 | S to ask | Tell Aardink its `LanguageConfiguration` can't load on Android (regex); ours reads the files meanwhile |
+| A15 | 76 | S to ask | Ask Aardink for typing over auto-inserted closers; ours does it for hardware keys |
+| A16 | 46 | S | `else:` and the like moving back a level as they're typed, not only at Enter |
 | A2 | Phase 4 | M | Decorations: paused line, conflict tints, symbol and find highlights, cell rules, problem marks; interim breakpoints (red gutter bar, F9 and a menu); the large-file view and peek on read-only editors |
 | A3 | Phase 5 | M | Aardink's built-in ghost text, inlay hints and code lenses (Python cells, merge conflicts), in place of our overlays; first on a device with Samsung's keyboard |
 | A4 | Phase 5 | S–M, waits on A9 or a design | Next Edit's card and the definition peek, the two overlays with no built-in answer |
@@ -2606,8 +2633,13 @@ day, L several days.
       selection is turned round by the input method's `setSelection` (11-08, batch 43; worked around in the app). Its
       `setSelection` could ignore a range equal to the current one. S to ask; not drafted yet. The user will come back to it.
       Still there in 0.9.0 (lab, 11-08).
-  74. A setting changed while the guest is off is lost when it comes back: the guest's settings file wins (batches 43-45,
-      the editor engine). Keep offline changes and write them on reconnect, or say they won't last. S-M. Found 11-08.
+  74. (Withdrawn 11-08, batch 46: a misdiagnosis. Settings live on the device; the engine changes were the user's.)
+  75. Tell Aardink: `LanguageConfiguration` can't load on Android, a regex Android's engine refuses in a class initializer
+      (`\{\d+(,\d*)?}`, the `}` unescaped). Ours reads the files meanwhile. S to ask; not drafted.
+  76. Ask Aardink for typing over closers it auto-inserted (VS Code's `autoClosingOvertype`). Ours does it for hardware keys. S to ask.
+  77. Ask Aardink for the completion list at the caret on Android with a hardware keyboard (`PlatformInfo.hasSoftKeyboard` is
+      fixed at true there), with its keys. Until then suggestions can't be chosen from the keyboard: this blocks the default
+      flip. S to ask; M to work around in the app (our own list), not planned.
 * Still left out on purpose: multi-cursor, sticky scroll, minimap (Aardink switch; folding came in batch 31);
   split editor groups and the 3-way merge editor; tasks.json; MCP, other AI providers and the
   built-in chat agent (Copilot, Claude Code and Gemini through ACP instead); foldable postures

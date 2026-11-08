@@ -1,6 +1,6 @@
 # Plan: switching from sora-editor to Aardink
 
-Status: **phase 2 done** (2026-11-08) on Aardink **0.9.0**; sora stays the default. Phase 3 (language features) is next.
+Status: **phase 3 done** (2026-11-08, batch 46) on Aardink 0.9.0; sora stays the default. Phase 4 next; the flip waits on request 8.
 
 **Decided by the user:** the switch will happen, for the licence (Apache-2.0 instead of sora's LGPL-2.1).
 On 11-04 they judged the measured memory and scrolling not to be impediments, and expect Aardink's release
@@ -35,6 +35,9 @@ Filing them is the user's decision.
 | 4 | Semantic token layer | **Delivered in 0.9** (`semanticTokens`, `semanticHighlighting`). Ours works already (batch 44); theirs can replace it once completion goes through `LanguageService` | Optional |
 | 5 | Saved view state (scroll, folds) | 1.0 | Optional: we can keep it per tab |
 | 6 | The slow frames as a gesture starts | 0.10's performance work (Android gates, baseline profile). Unchanged in 0.9 (measured 11-08) | Better scrolling |
+| 8 | **Completion list at the caret on Android with a hardware keyboard** (backlog 77): `PlatformInfo.hasSoftKeyboard` is fixed at true, so suggestions are a touch strip only | Not on the roadmap | Choosing suggestions from the Book Cover; **blocks phase 6** |
+| 9 | `LanguageConfiguration` loads on Android (backlog 75): a regex in its initializer is refused there | Bug in 0.9.0 | Dropping our own reader |
+| 10 | Type over auto-inserted closers (backlog 76) | Not on the roadmap | Dropping our key-level type-over, and the on-screen keyboard's doubled closers |
 | 7 | Samsung's keyboard: Enter and Shift+arrows (backlog 73) | Not mentioned; 1.0 plans device validation with Samsung's keyboard. **Still there in 0.9** (lab, 11-08) | Removing our workaround |
 
 If 1 or 2 are declined, a fork is allowed by the licence but is a real maintenance cost; ask the user before going there.
@@ -65,16 +68,14 @@ If 1 or 2 are declined, a fork is allowed by the licence but is a real maintenan
 * tm4e: still from sora's package; for phase 7, upstream 0.18.0 (builds with Java 21, now installed) or sora's 110 files.
 * Parity note: Aardink's lines are taller at the same font size (`EditorOptions.lineHeight` can match sora's).
 
-### Phase 3: language features (M; was M-L before 0.9)
-* Through `LanguageService`, backed by the app's existing LSP client rather than Aardink's: completion
-  (replaces `SoraCompletion.kt`) with 0.9's detail pane and `resolveCompletion`, hover and signature help as Markdown
-  (0.9), occurrences, go to definition. Aardink's own `LspLanguageService` (0.9) stays unused: our client serves sora too.
-* Auto-indent, closing pairs and surrounding a selection from VS Code's `language-configuration.json` (0.9's
-  `LanguageConfiguration`); grammar packs ship one. Python's indentation after `:` comes from here.
-* Problems onto its diagnostics, with tags and quick fixes.
-* Find and replace, keeping the find widget and scope. Snippets, with stops and mirrors.
-* Folding onto `FoldingProvider` with the existing LSP and indentation ranges (`requestFoldableRanges` can wait on the server, 0.9).
-* Auto-pairing, tab stops, comment and line commands, linked tag edits.
+### Phase 3: language features (done 11-08, batch 46)
+* `AardinkLanguageService` on the app's LSP client: completion (and snippets) resolved on demand, Markdown hover and
+  signature help; problems, occurrences and find as diagnostics and decorations; folding; snippets; Ctrl+Space.
+* `LanguageRules` reads `language-configuration.json` ourselves (Aardink's reader can't load on Android, request 9): Enter
+  and indentation rules, closing and surrounding pairs, comments. Pairs on a hardware keyboard are done before the input
+  method, with type-over (request 10).
+* Left: suggestions can't be chosen from a hardware keyboard (request 8); `else:` dedent as typed; hover and snippets
+  unchecked on the tablet.
 
 ### Phase 4: decorations (M)
 * Paused line, conflict tints, symbol and find highlights, Python cell rules, problem marks on the scrollbar
@@ -139,6 +140,7 @@ the user the full backlog and what changed in coverage.
 | Release | Reviewed | What changed for us |
 | --- | --- | --- |
 | 0.8.0 | 11-04 | Decorations, change events, commands, keybindings, Material 3 themes (batch 41 revisit). |
+| 0.9.0 (phase 3 on it) | 11-08, batch 46 | Found requests 8 to 10 (completion list with a hardware keyboard, `LanguageConfiguration` on Android, type-over). |
 | 0.9.0 | 11-08, batch 45 | Requests 3 and 4 delivered; phase 3 smaller, phase 5 unblocked but for two overlays; request 1 narrowed. Our tokenizer broke the new rule for an empty `previousTokens` (fixed). No source change needed. Samsung keyboard issue and gesture hitch unchanged. |
 
 ## Size

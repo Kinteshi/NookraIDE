@@ -17,6 +17,7 @@ import androidx.compose.ui.unit.sp
 import com.aardarch.aardink.core.ContentChange
 import com.aardarch.aardink.core.CodeEditorState
 import com.aardarch.aardink.core.PlainTextTokenizer
+import com.aardarch.aardink.core.NamedTokenType
 import com.aardarch.aardink.ui.CodeEditorLayout
 import com.aardarch.aardink.ui.EditorOptions
 import com.aardarch.aardink.ui.LocalEditorTheme
@@ -33,13 +34,30 @@ internal fun AardinkEditorView(controller: WorkbenchController, document: Docume
     val syntaxColors = controller.settings.syntaxColors
     val syntax = remember(colors, dark, syntaxColors, controller.editorThemeRevision) { syntaxTheme(context, colors, dark, syntaxColors) }
     val registry = remember(syntax.key) { AardinkSyntax.registry(context, syntax) }
-    val grammar = remember(registry, document.path, controller.grammarRevision) { AardinkSyntax.tokenizerFor(registry, document) }
+    val rules = remember(document.path, controller.grammarRevision) { AardinkSyntax.rulesFor(context, document) }
+    val grammar = remember(registry, document.path, controller.grammarRevision, rules) { AardinkSyntax.tokenizerFor(registry, document, rules) }
     // Made once per file: a new theme or grammar changes its tokenizer, and keeps its text and undo.
     val state = remember { CodeEditorState(document.text, grammar ?: PlainTextTokenizer) }
     val surface = remember(state) { AardinkEditorSurface(state) }
+    // What the language servers know, with the file's closing pairs and Enter rules.
+    val overtype = surface.overtype
+    val service = remember(document.path, rules) {
+        AardinkLanguageService(controller, document, rules, tokenKindAt = { offset ->
+            val line = state.document.offsetToLineCol(offset.coerceIn(0, state.document.length)).first
+            (state.tokensForLine(line).firstOrNull { it.start <= offset && offset < it.end }?.type as? NamedTokenType)?.name
+        }, overtype = overtype)
+    }
     SideEffect {
+        surface.rules = rules
+        surface.tokenKindAt = service.tokenKindAt
         surface.tokenizer = grammar
         state.tokenizer = grammar ?: PlainTextTokenizer
+        surface.highlightColors = HighlightColors(
+            symbol = colors.primary.copy(alpha = 0.18f),
+            symbolWrite = colors.tertiary.copy(alpha = 0.26f),
+            findMatch = colors.tertiary.copy(alpha = 0.28f),
+            findCurrent = colors.tertiary.copy(alpha = 0.6f),
+        )
     }
     surface.applyConfig(controller.editorConfig(document))
     val config = surface.config
@@ -48,12 +66,17 @@ internal fun AardinkEditorView(controller: WorkbenchController, document: Docume
         CodeEditorLayout(
             state = state,
             modifier = Modifier.fillMaxSize().focusRequester(surface.focusRequester),
+            languageService = service,
+            foldState = surface.foldState,
+            foldingProvider = surface.foldingProvider,
+            // The workbench's problems: handed over, so the editor doesn't ask the service for its own.
+            diagnostics = surface.problems,
             options = EditorOptions(
                 softWrap = config.wordWrap,
                 showLineNumbers = config.lineNumbers,
-                showFoldMarkers = false,
-                showDiagnosticAnnotations = false,
+                showFoldMarkers = config.folding,
                 showDiffMarkers = false,
+                quickSuggestions = controller.settings.quickSuggestions,
                 tabSize = config.tabSize,
                 insertSpaces = config.insertSpaces,
                 fontSize = config.fontSizeSp.sp,
@@ -68,6 +91,8 @@ internal fun AardinkEditorView(controller: WorkbenchController, document: Docume
     }
     DisposableEffect(surface) {
         val edited: (List<ContentChange>) -> Unit = { changes ->
+            if (changes.any { it.isReset }) overtype.clear()
+            changes.filter { !it.isReset }.forEach { overtype.edited(it.offset, it.deletedLength, it.insertedText) }
             if (changes.any { !it.isReset }) {
                 document.updateText(state.text)
                 controller.onDocumentEdited(document)

@@ -17,6 +17,8 @@ object AssetPackGrammarLoader {
     private val filenameScopes = mutableMapOf<String, Pair<String, String>>()
     /** Scope → the pack and grammar file, for registries other than sora's (the Aardink editor's). */
     private val grammarFiles = mutableMapOf<String, Pair<String, File>>()
+    /** Scope → the pack and its language's `language-configuration.json`, where it has one. */
+    private val configurationFiles = mutableMapOf<String, Pair<String, File>>()
 
     @Synchronized
     fun loadInstalled(context: Context) {
@@ -59,8 +61,12 @@ object AssetPackGrammarLoader {
     fun grammarFile(scopeName: String): File? = grammarFiles[scopeName]?.second
 
     @Synchronized
+    fun configurationFile(scopeName: String): File? = configurationFiles[scopeName]?.second
+
+    @Synchronized
     fun forgetPack(packId: String) {
         grammarFiles.values.removeAll { it.first == packId }
+        configurationFiles.values.removeAll { it.first == packId }
         extensionScopes.values.removeAll { it.first == packId }
         filenameScopes.values.removeAll { it.first == packId }
         loadedPacks -= packId
@@ -102,6 +108,7 @@ object AssetPackGrammarLoader {
             val configuration = language?.configurationPath?.let { path ->
                 validateContributionFile(extensionRoot, path)
             }
+            configuration?.let { configurationFiles[scopeName] = packId to it }
             GrammarDefinition(
                 languageId = languageId ?: scopeName,
                 grammarPath = "asset-packs/$packId/extension/${resolvedGrammar.relativeTo(extensionRoot).invariantSeparatorsPath}",
