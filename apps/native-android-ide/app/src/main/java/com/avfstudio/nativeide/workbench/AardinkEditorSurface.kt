@@ -28,6 +28,7 @@ import com.avfstudio.nativeide.editor.LspPosition
 import com.avfstudio.nativeide.editor.ClosingOvertype
 import com.avfstudio.nativeide.editor.LanguageRules
 import com.avfstudio.nativeide.editor.EditorProblem
+import com.avfstudio.nativeide.editor.LineMarks
 import com.avfstudio.nativeide.editor.FoldRange
 import com.avfstudio.nativeide.editor.LspRange
 import com.avfstudio.nativeide.editor.LspTextEdit
@@ -157,6 +158,56 @@ internal class AardinkEditorSurface(val state: CodeEditorState) : EditorSurface 
             val color = if (index == current) highlightColors.findCurrent else highlightColors.findMatch
             Decoration(offsetOf(range.start) until offsetOf(range.end), DecorationStyle(background = color, overviewRulerColor = color))
         })
+    }
+
+    /**
+     * Breakpoints as a bar in the gutter, in a colour for each kind (Aardink has no gutter icons yet,
+     * request 2), and the paused line tinted across. Problems need nothing here: their diagnostics put
+     * a dot in the gutter already.
+     */
+    override fun setLineMarks(marks: LineMarks) {
+        val lines = state.document.lineCount
+        val decorations = buildList {
+            marks.breakpoints.filter { it in 0 until lines }.forEach { line ->
+                val color = when (line) {
+                    in marks.logpoints -> LOGPOINT_COLOR
+                    in marks.conditionalBreakpoints -> CONDITIONAL_BREAKPOINT_COLOR
+                    else -> BREAKPOINT_COLOR
+                }
+                val start = state.document.lineStart(line)
+                add(Decoration(start until start, DecorationStyle(gutterColor = color, overviewRulerColor = color)))
+            }
+            marks.pausedLine?.takeIf { it in 0 until lines }?.let { line ->
+                add(Decoration(lineRange(line, line), DecorationStyle(background = PAUSED_LINE_COLOR, wholeLine = true, gutterColor = PAUSED_GUTTER_COLOR, overviewRulerColor = PAUSED_GUTTER_COLOR)))
+            }
+        }
+        state.setDecorations("line-marks", decorations)
+    }
+
+    /** Whole lines tinted for [owner]: merge conflicts' sides, Python cells' markers. */
+    fun setLineTints(owner: String, tints: List<LineTint>) {
+        val lines = state.document.lineCount
+        state.setDecorations(owner, tints.mapNotNull { tint ->
+            if (tint.last < tint.first || tint.first !in 0 until lines) return@mapNotNull null
+            Decoration(
+                lineRange(tint.first, tint.last.coerceAtMost(lines - 1)),
+                DecorationStyle(background = tint.color, wholeLine = true, overviewRulerColor = tint.ruler),
+            )
+        })
+    }
+
+    /** Find in selection's scope, shaded while the find widget is open (VS Code's `findRangeHighlightBackground`). */
+    fun setFindScope(scope: IntRange?, color: Color) {
+        val length = state.document.length
+        val range = scope?.takeIf { !it.isEmpty() && it.first < length }?.let { it.first until minOf(it.last + 1, length) }
+        state.setDecorations("find-scope", listOfNotNull(range?.let { Decoration(it, DecorationStyle(background = color)) }))
+    }
+
+    /** From the start of [first] to the end of [last], as a decoration's range. */
+    private fun lineRange(first: Int, last: Int): IntRange {
+        val start = state.document.lineStart(first)
+        val end = state.document.lineStart(last) + state.document.lineText(last).length
+        return start until end
     }
 
     override fun selectFound(selection: EditorSelection) {
@@ -305,6 +356,37 @@ internal class AardinkEditorSurface(val state: CodeEditorState) : EditorSurface 
 /** [keyed] again when [now] is the same range with its ends swapped; null for any other selection. */
 internal fun turnedRound(keyed: TextRange?, now: TextRange): TextRange? =
     keyed?.takeIf { !it.collapsed && now.start == it.end && now.end == it.start }
+
+/** Lines [first] to [last] tinted [color], marked in the overview ruler with [ruler] if given. */
+internal data class LineTint(val first: Int, val last: Int, val color: Color, val ruler: Color = Color.Unspecified)
+
+/** VS Code's breakpoint red; the other kinds get their own colour while the gutter shows bars, not icons. */
+internal val BREAKPOINT_COLOR = Color(0xFFE51400)
+internal val CONDITIONAL_BREAKPOINT_COLOR = Color(0xFFFF8C00)
+internal val LOGPOINT_COLOR = Color(0xFFB180D7)
+private val PAUSED_LINE_COLOR = Color(0x40FFCC00)
+private val PAUSED_GUTTER_COLOR = Color(0xFFFFCC00)
+
+/**
+ * Merge conflicts tinted as VS Code does (current changes green, incoming blue, the marker lines
+ * stronger), and each Python cell's `# %%` line, faintly, where sora drew a rule above it.
+ */
+internal fun conflictTints(conflicts: List<MergeConflict>): List<LineTint> {
+    val current = Color(0xFF40C8AE)
+    val incoming = Color(0xFF40A6FF)
+    return conflicts.flatMap { conflict ->
+        val currentEnd = (conflict.base ?: conflict.separator) - 1
+        listOf(
+            LineTint(conflict.start, conflict.start, current.copy(alpha = 0.35f), current),
+            LineTint(conflict.start + 1, currentEnd, current.copy(alpha = 0.14f)),
+            LineTint(conflict.separator + 1, conflict.end - 1, incoming.copy(alpha = 0.14f)),
+            LineTint(conflict.end, conflict.end, incoming.copy(alpha = 0.35f), incoming),
+        )
+    }
+}
+
+internal fun cellTints(cells: List<PythonCell>, color: Color): List<LineTint> =
+    cells.map { LineTint(it.marker, it.marker, color) }
 
 internal data class HighlightColors(
     val symbol: Color = Color(0x2E7F7FFF),

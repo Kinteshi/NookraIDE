@@ -19,9 +19,11 @@ import com.aardarch.aardink.core.CodeEditorState
 import com.aardarch.aardink.core.PlainTextTokenizer
 import com.aardarch.aardink.core.NamedTokenType
 import com.aardarch.aardink.ui.CodeEditorLayout
+import com.aardarch.aardink.ui.EditorMenuItem
 import com.aardarch.aardink.ui.EditorOptions
 import com.aardarch.aardink.ui.LocalEditorTheme
 import com.avfstudio.nativeide.document.DocumentSession
+import com.avfstudio.nativeide.document.isGuestPath
 import com.avfstudio.nativeide.editor.EditorEvent
 import kotlinx.coroutines.launch
 
@@ -61,6 +63,18 @@ internal fun AardinkEditorView(controller: WorkbenchController, document: Docume
     }
     surface.applyConfig(controller.editorConfig(document))
     val config = surface.config
+    // Toggle and edit the cursor line's breakpoint; the gutter can't be tapped for one yet (request 2).
+    val breakpointItems = remember(document.path) {
+        if (!isGuestPath(document.path)) {
+            emptyList()
+        } else {
+            listOf(
+                EditorMenuItem("Toggle Breakpoint") { controller.toggleBreakpoint(document.path, state.cursorLine + 1) },
+                EditorMenuItem("Edit Breakpoint…") { controller.editBreakpoint(document.path, state.cursorLine + 1) },
+            )
+        }
+    }
+    AardinkDecorations(controller, document, surface)
     val theme = remember(syntax, registry, colors, dark) { AardinkSyntax.editorTheme(syntax, registry, colors, dark) }
     CompositionLocalProvider(LocalEditorTheme provides theme) {
         CodeEditorLayout(
@@ -81,7 +95,11 @@ internal fun AardinkEditorView(controller: WorkbenchController, document: Docume
                 insertSpaces = config.insertSpaces,
                 fontSize = config.fontSizeSp.sp,
                 pinchToZoom = config.pinchToZoom,
+                // Problems, find matches, a symbol's uses and breakpoints beside the scrollbar; a tap goes there.
+                overviewRuler = true,
             ),
+            contextMenuItems = breakpointItems,
+            touchMenuItems = breakpointItems,
             onFontSizeChange = if (config.pinchToZoom) {
                 { size -> surface.emit(EditorEvent.Zoomed("", size.value)) }
             } else {
@@ -92,7 +110,17 @@ internal fun AardinkEditorView(controller: WorkbenchController, document: Docume
     DisposableEffect(surface) {
         val edited: (List<ContentChange>) -> Unit = { changes ->
             if (changes.any { it.isReset }) overtype.clear()
-            changes.filter { !it.isReset }.forEach { overtype.edited(it.offset, it.deletedLength, it.insertedText) }
+            changes.filter { !it.isReset }.forEach { change ->
+                overtype.edited(change.offset, change.deletedLength, change.insertedText)
+                // Breakpoints move with the lines they're on, as sora's edits move them.
+                if (change.deletedLength > 0) {
+                    controller.moveBreakpoints(document.path, insertion = false, change.startLine, change.startColumn, change.oldEndLine)
+                }
+                if (change.insertedText.isNotEmpty()) {
+                    val endLine = change.startLine + change.insertedText.count { it == '\n' }
+                    controller.moveBreakpoints(document.path, insertion = true, change.startLine, change.startColumn, endLine)
+                }
+            }
             if (changes.any { !it.isReset }) {
                 document.updateText(state.text)
                 controller.onDocumentEdited(document)
@@ -118,4 +146,45 @@ internal fun AardinkEditorView(controller: WorkbenchController, document: Docume
     }
     SideEffect { controller.editorReady(surface) }
     LaunchedEffect(document.path) { controller.onActiveDocumentChanged() }
+}
+
+/**
+ * What the workbench draws on the file's lines in Aardink, as decorations that follow the text: breakpoints
+ * and the paused line, merge conflicts' sides, Python cells' markers, find in selection's scope.
+ */
+@Composable
+private fun AardinkDecorations(controller: WorkbenchController, document: DocumentSession, surface: AardinkEditorSurface) {
+    val colors = MaterialTheme.colorScheme
+    val breakpoints = controller.breakpoints[document.path]
+    val options = controller.breakpointOptions[document.path]
+    val paused = controller.executionPoint
+    LaunchedEffect(surface, breakpoints, options, paused) { controller.refreshLineMarks(document.path) }
+    val conflicts = controller.activeConflicts()
+    LaunchedEffect(surface, conflicts) { surface.setLineTints("conflicts", conflictTints(conflicts)) }
+    val cells = controller.activePythonCells()
+    val cellColor = colors.outlineVariant.copy(alpha = 0.35f)
+    LaunchedEffect(surface, cells, cellColor) { surface.setLineTints("cells", cellTints(cells, cellColor)) }
+    val scope = controller.findScope?.takeIf { controller.findVisible && controller.activeNotebook == null }
+    val scopeColor = colors.primary.copy(alpha = 0.12f)
+    LaunchedEffect(surface, scope, scopeColor) { surface.setFindScope(scope, scopeColor) }
+}
+
+/** A large file's page, read-only and plain, in Aardink: only the lines on screen are laid out. */
+@Composable
+internal fun AardinkReadOnlyView(text: String, syntaxColors: SyntaxColors, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val colors = MaterialTheme.colorScheme
+    val dark = LocalDarkTheme.current
+    val syntax = remember(colors, dark, syntaxColors) { syntaxTheme(context, colors, dark, syntaxColors) }
+    val registry = remember(syntax.key) { AardinkSyntax.registry(context, syntax) }
+    val theme = remember(syntax, registry, colors, dark) { AardinkSyntax.editorTheme(syntax, registry, colors, dark) }
+    val state = remember { CodeEditorState(text, PlainTextTokenizer) }
+    LaunchedEffect(text) { if (state.text != text) state.loadText(text) }
+    CompositionLocalProvider(LocalEditorTheme provides theme) {
+        CodeEditorLayout(
+            state = state,
+            modifier = modifier,
+            options = EditorOptions(readOnly = true, showDiffMarkers = false, showFoldMarkers = false, fontSize = 13.sp),
+        )
+    }
 }

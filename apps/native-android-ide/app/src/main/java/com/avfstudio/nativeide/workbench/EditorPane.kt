@@ -174,7 +174,8 @@ fun EditorArea(controller: WorkbenchController, modifier: Modifier = Modifier) {
             // With every tab closed the welcome page shows; the last editor's lenses and hints go with it.
             if (notebook == null && paged == null && activeDocument != null && preview == null && !image) {
                 EditorOverlays(controller)
-                ProblemScrollMarks(controller, Modifier.align(Alignment.TopEnd))
+                // Aardink marks problems in its own overview ruler.
+                if (controller.settings.editorEngine == EditorEngine.Sora) ProblemScrollMarks(controller, Modifier.align(Alignment.TopEnd))
             }
         }
     }
@@ -569,6 +570,10 @@ private fun LargeFileView(controller: WorkbenchController) {
             Tooltip("Next page") { IconButton(onClick = { controller.pageLargeFile(1) }, enabled = paged.canGoNext) {
                 Icon(Icons.Outlined.ChevronRight, contentDescription = "Next page")
             } }
+        }
+        if (controller.settings.editorEngine == EditorEngine.Aardink) {
+            AardinkReadOnlyView(paged.text, controller.settings.syntaxColors, Modifier.fillMaxSize())
+            return@Column
         }
         AndroidView(
             modifier = Modifier.fillMaxSize(),

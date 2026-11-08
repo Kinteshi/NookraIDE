@@ -104,4 +104,49 @@ class AardinkEditorSurfaceTest {
         surface.applyConfig(EditorConfig(tabSize = 2, insertSpaces = false))
         assertEquals("\t", surface.indentUnit)
     }
+
+    @Test
+    fun breakpointsAreGutterBarsByKindAndThePausedLineIsTintedAcross() {
+        val surface = surface("a = 1\nb = 2\nc = 3\n")
+        surface.setLineMarks(
+            com.avfstudio.nativeide.editor.LineMarks(
+                breakpoints = setOf(0, 1, 2, 9),
+                conditionalBreakpoints = setOf(1),
+                logpoints = setOf(2),
+                pausedLine = 1,
+            ),
+        )
+        val marks = surface.state.decorations("line-marks")
+        // The line past the end is left out.
+        assertEquals(4, marks.size)
+        val bars = marks.filter { !it.style.wholeLine }
+        assertEquals(listOf(0 until 0, 6 until 6, 12 until 12), bars.map { it.range })
+        assertEquals(listOf(BREAKPOINT_COLOR, CONDITIONAL_BREAKPOINT_COLOR, LOGPOINT_COLOR), bars.map { it.style.gutterColor })
+        val paused = marks.single { it.style.wholeLine }
+        assertEquals(6 until 11, paused.range)
+        surface.setLineMarks(com.avfstudio.nativeide.editor.LineMarks())
+        assertTrue(surface.state.decorations("line-marks").isEmpty())
+    }
+
+    @Test
+    fun conflictSidesAreTintedAndTheirMarkersShowInTheRuler() {
+        val text = "<<<<<<< HEAD\nmine\n=======\ntheirs\n>>>>>>> branch\n"
+        val surface = surface(text)
+        val conflict = MergeConflict(start = 0, base = null, separator = 2, end = 4, currentLabel = "HEAD", incomingLabel = "branch")
+        surface.setLineTints("conflicts", conflictTints(listOf(conflict)))
+        val tints = surface.state.decorations("conflicts")
+        assertEquals(listOf(0 until 12, 13 until 17, 26 until 32, 33 until 47), tints.map { it.range })
+        assertTrue(tints.all { it.style.wholeLine })
+        assertEquals(2, tints.count { it.style.overviewRulerColor != androidx.compose.ui.graphics.Color.Unspecified })
+    }
+
+    @Test
+    fun findScopeIsShadedAndGoesWhenCleared() {
+        val surface = surface("abcdef")
+        val shade = androidx.compose.ui.graphics.Color.Gray
+        surface.setFindScope(1..3, shade)
+        assertEquals(listOf(1 until 4), surface.state.decorations("find-scope").map { it.range })
+        surface.setFindScope(null, shade)
+        assertTrue(surface.state.decorations("find-scope").isEmpty())
+    }
 }

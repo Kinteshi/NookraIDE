@@ -2188,6 +2188,19 @@ User's pick: A1. 359 app unit tests pass.
 * Corrected: batch 45's offline-settings finding was wrong (settings are on the device; the user switched to Aardink); G19 is
   withdrawn. The engine stays on Aardink, the user's choice.
 
+## 47. Aardink switch, phase 4: decorations (11-08; built and unit-tested, tablet check in batch 52)
+User's pick: A2, with A3, A4, A8, A16 and A17 after it.
+* Breakpoints as a bar in Aardink's gutter, a colour per kind (plain red, conditional amber, logpoint violet) and in the overview
+  ruler: Aardink has no gutter icons or taps yet (request 2, A10). Toggled by F9 as before, and by Toggle Breakpoint and Edit
+  Breakpoint… in Aardink's right-click and touch menus. They move with edits as sora's do (from Aardink's content changes).
+* The paused line tinted across with a yellow gutter bar; merge conflicts' sides tinted as VS Code does (markers stronger, and in
+  the ruler); each `# %%` line faintly tinted where sora drew a rule above it; find in selection's scope shaded. All are
+  decorations, so they follow the text between updates.
+* Aardink's overview ruler on (problems, find matches, a symbol's uses, breakpoints; a tap goes there), in place of the app's
+  problem marks beside the scrollbar, which stay for sora.
+* The large-file view pages through a read-only Aardink editor when the engine is Aardink.
+* The peek needs a position on screen, so it moved to A4 with Next Edit's card.
+
 ## Backlog
 ### Open backlog (11-08)
 The current lists of what's open, in two: the general backlog, and the Aardink switch's until it's complete. The older
