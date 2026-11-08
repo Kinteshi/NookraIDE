@@ -296,7 +296,7 @@ private fun LazyListScope.editor(settings: WorkbenchSettings, set: SetSetting) {
         ChoiceRow(
             Icons.Outlined.Science,
             "Editor engine",
-            "Experimental: Aardink is the app's next editor. Breakpoints show as bars and are set from F9 or the menu, not by tapping the gutter",
+            "Aardink is the editor. sora-editor, the previous one, stays here for a while in case something is missing. With Aardink, breakpoints show as bars and are set from F9 or the menu, not by tapping the gutter",
             EditorEngine.entries.map { it.key to it.label },
             settings.editorEngine.key,
         ) { set(WorkbenchSettings.EDITOR_ENGINE, it) }

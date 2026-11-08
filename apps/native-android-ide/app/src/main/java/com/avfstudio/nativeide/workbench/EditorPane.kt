@@ -558,6 +558,8 @@ private fun LargeFileView(controller: WorkbenchController) {
     val colors = MaterialTheme.colorScheme
     val dark = LocalDarkTheme.current
     Column(Modifier.fillMaxSize()) {
+        // Its buttons in the banner's own content colour: the theme's default was pale on the container.
+        androidx.compose.runtime.CompositionLocalProvider(androidx.compose.material3.LocalContentColor provides colors.onTertiaryContainer) {
         Row(
             Modifier.fillMaxWidth().background(colors.tertiaryContainer).padding(horizontal = 12.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -574,6 +576,7 @@ private fun LargeFileView(controller: WorkbenchController) {
             Tooltip("Next page") { IconButton(onClick = { controller.pageLargeFile(1) }, enabled = paged.canGoNext) {
                 Icon(Icons.Outlined.ChevronRight, contentDescription = "Next page")
             } }
+        }
         }
         if (controller.settings.editorEngine == EditorEngine.Aardink) {
             AardinkReadOnlyView(paged.text, controller.settings.syntaxColors, Modifier.fillMaxSize())

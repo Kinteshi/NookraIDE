@@ -2311,6 +2311,42 @@ unit tests pass.
   parameter hints with the active parameter in bold, the list under `pri`, Next Edit's card under its line, the peek under
   line 4 and Escape closing it.
 
+## 55. Aardink switch, phase 6: parity on the tablet, Aardink the default, the real app measured (A5) (11-08; done but the daily use)
+User's pick: A5. 381 app unit tests pass.
+* **Aardink is the default engine** (`editorEngine`), sora-editor a setting away until phase 7; Settings says so. The user's
+  own setting was Aardink already.
+* Parity on the tablet, in a throwaway `~/Projects/b55` (deleted after, the breakpoint cleared): debugging (F9, F5, paused
+  line tinted, inline values beside lines 1-4, call stack and variables, stop); linked tag editing in HTML (`div` and
+  `</div>` renamed together); the 19 MiB log in the large-file view; Alt+Down and Shift+Alt+Down; Markdown preview beside
+  the editor following it; Show Hover, parameter hints, suggestions, Next Edit, peek, lenses, hints, ghost text, `else:`,
+  pairs, tab stops, breakpoints, conflicts and cells from batches 52-54.
+* Gaps found and closed:
+  * Linked tag editing wasn't wired to Aardink (sora had its own): Aardink's `linkedEditingRanges` now answers from the
+    workbench's tag matcher, with `editor.linkedEditing`, for the same markup languages.
+  * Backspace between a pair auto-closing inserted takes both (`editor.autoClosingDelete`), on hardware keys, as sora did.
+  * A CR LF file's lines came with their `\r` from Aardink (the text itself round-trips): the surface strips it, as the
+    workbench's line features expect.
+  * **Line commands (move, copy, delete, insert line) replaced the whole text**: no edit event, so the language servers never
+    heard of them (hints landed on the wrong lines), and undo history was wiped, with sora too. They now apply one minimal
+    edit: one undo step, servers told, hints, breakpoints and decorations moving with the text. Replace All in the active
+    file likewise. Reloads (file changed in the guest, Load Guest Version, a line-ending change) now tell the servers.
+  * The large-file banner's page buttons were pale on its container (sora too): its content colour is now
+    `onTertiaryContainer`.
+* Not in the app with either engine, so not parity gaps: debug hover values (the plan listed them; the hover shows types) and
+  Copilot's partial accept. Registered as G19.
+* Measured, with five files and a notebook open, two terminals and the Python servers (same setup as batch 37):
+  | | Aardink | sora-editor |
+  |---|---|---|
+  | Memory | 262-290 MB PSS, 414-442 MB RSS (Java heap 26-45, native 40, graphics 55-63, private other 16-17) | batch 37: 308-393 PSS, 420-504 RSS |
+  | Key to frame, 64 keys through the test keyboard and Samsung's input method | median 30.1-30.5 ms, p95 35.3-36.9 ms | median 23.9 ms, p95 30.5 ms (same session, same way) |
+  Batch 37's 18.7 / 24.3 ms were injected keys, which skip the input method's composing, so they aren't comparable. Aardink
+  is about 6 ms a key slower here: for G2, which starts from these numbers. The guest stayed up throughout.
+* Not checked on the tablet: the on-screen keyboard (A7), imported themes, keybindings.json chords beyond Ctrl+K V and
+  Ctrl+K Ctrl+I, rename and code actions (the workbench's, unchanged), the banner's new colour.
+* Seen, not investigated: a notebook tab the user had open (`private-notebook-2.ipynb`) wasn't restored after a force
+  stop; perhaps a preview tab (tapped once), which may not be restored.
+* Left for the user: daily use for as long as they choose (the rest of A5), then phase 7.
+
 ## Backlog
 ### Open backlog (11-08)
 The current lists of what's open, in two: the general backlog, and the Aardink switch's until it's complete. The older
@@ -2323,12 +2359,12 @@ Grouped (11-08) so that what's cheaper done together is done together; the numbe
 
 | Group | # | Item | Size | Description |
 |---|---|------|------|-------------|
-| **1. Performance, after the flip** | G1 | 52 | M–L | Memory 420–504 MB against the 250 MB budget |
-| | G2 | 53 | M | Key to frame p95 24.3 ms against the 16 ms budget |
+| **1. Performance, after the flip** | G1 | 52 | M–L | Memory against the 250 MB budget: Aardink 262–290 MB PSS, 414–442 MB RSS (batch 55; sora 308–393 / 420–504) |
+| | G2 | 53 | M | Key to frame against the 16 ms budget: with the input method, Aardink 30 ms median / 36 ms p95, sora 24 / 31 (batch 55) |
 | **2. Guest away, and offline** | G14 | 66 | M, after a walkthrough | Refine the offline experience |
 | | G17 | 69 | S–M | Warn near the phantom process limit, and say so when the guest goes away |
 | | G5 | 62 | S | Recent keeps folders that no longer exist |
-| | – | – | S | The list of files kept offline never drops deleted ones (seen in batch 52); the unsaved dot once seen after saving a restored deleted file (batch 39) |
+| | – | – | S | The list of files kept offline never drops deleted ones (seen in batch 52); the unsaved dot once seen after saving a restored deleted file (batch 39); a notebook tab not restored after a force stop (batch 55, maybe a preview tab) |
 | **3. Backends, and running without Terminal** | G13 | 65 | S–M to explore, L+ to adopt | Other backends: proot, Termux and others |
 | | G16 | 68 | S to try the grant, L+ to do | Bundle the image and use AVF without Terminal: not for store installs |
 | | G18 | 70 | L overall | Mode without Terminal: local backend, ML on another machine, glibc if proven (continuing the glibc test is the user's decision) |
@@ -2342,6 +2378,7 @@ Grouped (11-08) so that what's cheaper done together is done together; the numbe
 | **7. Window and layout** | G6 | 63 | S–M | App can reopen as a partly off-screen floating window |
 | | – | – | S | The terminal's toolbar row at phone width (batch 40) |
 | **On its own** | G12 | 64 | S–M or L | Replace Gemini CLI with Antigravity CLI |
+| | G19 | – | S–M | Debugger: values in the hover while paused, and Copilot's partial accept (word by word): in neither engine (batch 55) |
 | | G11 | – | ? | Copilot exits after a daemon restart (watching) |
 
 Why these groups:
@@ -2361,12 +2398,12 @@ Why these groups:
 
 Until Aardink replaces sora: the remaining phases of the [plan](AARDINK-SWITCH-PLAN.md), which has the details, and
 what the switch is waiting on. Phases 0–5 are done (batches 42–52), on Aardink 0.9.0 (batch 45); A1 was phase 3, and
-A2, A3, A4, A8, A16, A17 and A19 were done in batches 47–54.
+A2, A3, A4, A8, A16, A17 and A19 were done in batches 47–54, and A5's checks in 55.
 
 | Group | # | Item | Size | Description |
 |---|---|------|------|-------------|
 | **A. The flip, then sora out** | A7 | 43 | S, the user's | Try the Aardink engine on the Book Cover itself, and the on-screen keyboard (under way: the user has it on) |
-| | A5 | Phase 6 | S–M, then time | Parity list on the tablet, make Aardink the default, measure the real app (memory, key to frame, guest), use it day to day |
+| | A5 | Phase 6 | Time, yours | Daily use for as long as you choose; the parity check, the default and the measurements are done (batch 55) |
 | | A6 | Phase 7 | S–M | Remove sora: the setting, its classes, the two files in sora's package; carry tm4e as a module (upstream 0.18.0 or sora's copy); licence notes. sora's low inlay hint chip (batch 52) goes with it, not fixed |
 | **B. Popups at their line** | – | – | – | Done in batch 54 (A19): the workbench's cards at their text from Aardink's geometry; A9 would replace the reflection |
 | **C. Asks to Aardink, filed together** | A9 | 71 | S to ask | Public text positions: Next Edit's card, the peek and our suggestion list at their line. Drafted |

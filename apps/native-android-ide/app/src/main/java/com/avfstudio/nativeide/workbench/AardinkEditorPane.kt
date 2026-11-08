@@ -156,6 +156,8 @@ internal fun AardinkEditorView(controller: WorkbenchController, document: Docume
                 lineHeight = (config.fontSizeSp * MONOSPACE_ROW_RATIO).sp,
                 pinchToZoom = config.pinchToZoom,
                 inlayHints = settings.inlayHints,
+                // Tags renamed in pairs (`editor.linkedEditing`); the service answers for markup files only.
+                linkedEditing = settings.linkedEditing,
                 // The service decides: cells and conflicts always, the server's with the Code Lens setting.
                 codeLens = true,
                 // Problems, find matches, a symbol's uses and breakpoints beside the scrollbar; a tap goes there.

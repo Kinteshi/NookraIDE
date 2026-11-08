@@ -81,3 +81,14 @@ internal fun linkedTagEdit(before: String, offset: Int, removed: Int, inserted: 
     val shift = if (other.nameStart > offset) inserted.length - removed else 0
     return LinkedTagEdit(other.nameStart + shift, other.nameEnd + shift, newName)
 }
+
+/**
+ * The name of the tag at [offset] in [text] and its partner's, as ranges (`start until end`), for an editor that
+ * edits linked ranges itself (Aardink's `linkedEditingRanges`); null off a tag's name or for a tag with no partner.
+ */
+internal fun linkedTagRanges(text: String, offset: Int): List<IntRange>? {
+    val all = tags(text)
+    val tag = all.firstOrNull { offset in it.nameStart..it.nameEnd } ?: return null
+    val other = partner(all, tag) ?: return null
+    return listOf(tag.nameStart until tag.nameEnd, other.nameStart until other.nameEnd).sortedBy { it.first }
+}

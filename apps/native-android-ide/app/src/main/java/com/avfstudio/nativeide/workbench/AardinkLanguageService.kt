@@ -152,6 +152,12 @@ internal class AardinkLanguageService(
         }
     }
 
+    /** A tag's name and its partner's (`editor.linkedEditing`), from the workbench's own tag matcher, as in sora. */
+    override suspend fun linkedEditingRanges(document: CodeDocument, offset: Int): com.aardarch.aardink.core.LinkedEditingRanges? {
+        if (!controller.settings.linkedEditing || this.document.languageId !in LINKED_EDITING_LANGUAGES) return null
+        return linkedTagRanges(document.text, offset)?.let { com.aardarch.aardink.core.LinkedEditingRanges(it) }
+    }
+
     // The workbench reports problems itself, and formats through its own command.
     override suspend fun diagnostics(document: CodeDocument): List<com.aardarch.aardink.core.Diagnostic> = emptyList()
 

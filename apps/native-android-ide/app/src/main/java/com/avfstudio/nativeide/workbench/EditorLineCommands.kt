@@ -1,5 +1,7 @@
 package com.avfstudio.nativeide.workbench
 
+import com.avfstudio.nativeide.editor.offsetToPosition
+
 import com.avfstudio.nativeide.document.DocumentSession
 import com.avfstudio.nativeide.editor.EditorSelection
 import com.avfstudio.nativeide.editor.EditorSurface
@@ -51,10 +53,25 @@ internal fun editCurrentLine(
         else -> return false
     }
     val updated = lines.joinToString("\n")
-    document.updateText(updated)
-    editor.setText(updated)
+    // One edit over what changed, as typing makes: the editor keeps its undo history, the language servers hear of it,
+    // and what follows the text (hints, breakpoints, decorations) moves with it. Replacing the whole text did none of that.
+    minimalEdit(document.text, updated)?.let { editor.applyEdits(listOf(it)) }
     editor.moveCursor(LspPosition(targetRow, column.coerceAtMost(lines[targetRow].length)))
     return true
+}
+
+/** The one edit that turns [before] into [after]: what lies between their common start and common end; null when equal. */
+internal fun minimalEdit(before: String, after: String): LspTextEdit? {
+    if (before == after) return null
+    var start = 0
+    val shorter = minOf(before.length, after.length)
+    while (start < shorter && before[start] == after[start]) start++
+    var end = 0
+    while (end < shorter - start && before[before.length - 1 - end] == after[after.length - 1 - end]) end++
+    return LspTextEdit(
+        LspRange(offsetToPosition(before, start), offsetToPosition(before, before.length - end)),
+        after.substring(start, after.length - end),
+    )
 }
 
 internal fun jumpToMatchingBracket(document: DocumentSession, editor: EditorSurface): Boolean {

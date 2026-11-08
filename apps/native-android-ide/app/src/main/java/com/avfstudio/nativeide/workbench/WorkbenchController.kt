@@ -1281,8 +1281,14 @@ class WorkbenchController(private val context: Context) {
             val (text, count) = replaceMatches(document.text, pattern, replacement, only)
             if (count == 0) return@forEach
             replaced += count
-            document.updateText(text)
-            if (path == activePath) editorSurface?.setText(text) else notifyDocumentChanged(path, document.version, text)
+            val surface = editorSurface?.takeIf { path == activePath }
+            if (surface != null) {
+                // An edit, as typing makes: undo keeps it, and the editor tells the servers.
+                minimalEdit(document.text, text)?.let { surface.applyEdits(listOf(it)) }
+            } else {
+                document.updateText(text)
+                notifyDocumentChanged(path, document.version, text)
+            }
             onDocumentEdited(document)
         }
         if (closed.isEmpty()) {
@@ -3096,6 +3102,8 @@ class WorkbenchController(private val context: Context) {
                         document.updateText(fresh.text)
                         document.markSaved(fresh.text)
                         if (activePath == document.path) editorSurface?.setText(fresh.text)
+                        // A reload isn't an edit the editor reports: the servers are told here.
+                        notifyDocumentChanged(document.path, document.version, document.text)
                         documentRevision++
                         status = "Reloaded ${document.path.substringAfterLast('/')}: it changed in the guest"
                     }
@@ -4066,6 +4074,7 @@ class WorkbenchController(private val context: Context) {
                 dialog = null
                 documentRevision++
                 if (activePath == document.path) editorSurface?.setText(document.text)
+                notifyDocumentChanged(document.path, document.version, document.text)
                 status = if (error == null) "Loaded guest version" else "Reload failed: ${error.message}"
             }
         }
@@ -6564,6 +6573,7 @@ class WorkbenchController(private val context: Context) {
         document.updateText(normalized)
         document.eol = replacement
         editorSurface?.setText(normalized)
+        notifyDocumentChanged(document.path, document.version, normalized)
         onDocumentEdited(document)
         dialog = null
         status = "Line endings set to $selected"
@@ -9787,10 +9797,10 @@ class WorkbenchController(private val context: Context) {
         return surface.typePairKey(typed) || surface.typeOutdentKey(typed)
     }
 
-    /** Backspace in a line's leading spaces in the Aardink editor goes back a tab stop, before the input method sees it. */
+    /** Backspace in the Aardink editor: a pair auto-closing made goes whole, leading spaces back a tab stop; before the input method. */
     private fun backspaceToTabStop(event: AndroidKeyEvent): Boolean {
         if (focusArea != FocusArea.Editor || event.keyCode != AndroidKeyEvent.KEYCODE_DEL || event.isCtrlPressed || event.isAltPressed || event.isShiftPressed) return false
-        return (editorSurface as? AardinkEditorSurface)?.backspaceToTabStop() == true
+        return (editorSurface as? AardinkEditorSurface)?.backspace() == true
     }
 
     /** Enter and the moving keys in the Aardink editor skip the input method (see [KeyRouter.bypassesIme]). */

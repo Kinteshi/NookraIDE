@@ -82,7 +82,8 @@ internal class AardinkEditorSurface(val state: CodeEditorState) : EditorSurface 
     override val visibleLines: VisibleLines
         get() = state.viewport.let { VisibleLines(it.firstVisibleLine, it.lastVisibleLine) }
     override val lineCount: Int get() = state.document.lineCount
-    override fun lineText(line: Int): String = state.document.lineText(line)
+    /** Without a CR LF file's `\r`, which Aardink keeps on the line: the workbench's line features count without it, as with sora. */
+    override fun lineText(line: Int): String = state.document.lineText(line).removeSuffix("\r")
     override val selectionOffsets: IntRange get() = state.selection.let { it.min..it.max }
     override fun positionAt(offset: Int): LspPosition =
         state.document.offsetToLineCol(offset.coerceIn(0, state.document.length)).let { LspPosition(it.first, it.second) }
@@ -202,7 +203,7 @@ internal class AardinkEditorSurface(val state: CodeEditorState) : EditorSurface 
         val lines = state.document.lineCount
         state.setDecorations(owner, notes.mapNotNull { (line, note) ->
             if (line !in 0 until lines || note.isBlank()) return@mapNotNull null
-            val end = state.document.lineStart(line) + state.document.lineText(line).length
+            val end = state.document.lineStart(line) + lineText(line).length
             Decoration(end until end, DecorationStyle(after = "    $note", inlineColor = color))
         })
     }
@@ -244,7 +245,7 @@ internal class AardinkEditorSurface(val state: CodeEditorState) : EditorSurface 
     /** From the start of [first] to the end of [last], as a decoration's range. */
     private fun lineRange(first: Int, last: Int): IntRange {
         val start = state.document.lineStart(first)
-        val end = state.document.lineStart(last) + state.document.lineText(last).length
+        val end = state.document.lineStart(last) + lineText(last).length
         return start until end
     }
 
@@ -304,7 +305,7 @@ internal class AardinkEditorSurface(val state: CodeEditorState) : EditorSurface 
         val caret = selection.start
         val line = state.document.offsetToLineCol(caret).first
         val lineStart = state.document.lineStart(line)
-        val before = state.document.lineText(line)
+        val before = lineText(line)
         val column = (caret - lineStart).coerceIn(0, before.length)
         val after = before.substring(0, column) + typed + before.substring(column)
         val current = after.takeWhile { it == ' ' || it == '\t' }
@@ -362,9 +363,24 @@ internal class AardinkEditorSurface(val state: CodeEditorState) : EditorSurface 
     var suggestions: KeyboardSuggestions? = null
 
     /**
-     * Backspace on a hardware keyboard in a line's leading spaces: back to the previous tab stop, as VS Code's
-     * `editor.useTabStops` does (Aardink deletes one space). False otherwise, and the key goes on as usual.
+     * Backspace on a hardware keyboard, where VS Code does more than Aardink's one character: between a pair whose closer
+     * auto-closing inserted, both go (`editor.autoClosingDelete`); in a line's leading spaces, back to the previous tab
+     * stop (`editor.useTabStops`). False otherwise, and the key goes on as usual.
      */
+    fun backspace(): Boolean = deletePair() || backspaceToTabStop()
+
+    private fun deletePair(): Boolean {
+        val selection = state.selection
+        if (!selection.collapsed || selection.start == 0) return false
+        val caret = selection.start
+        val text = state.text
+        val opener = text[caret - 1]
+        val closer = rules?.autoClosingPairs?.firstOrNull { it.open == opener.toString() }?.close ?: return false
+        if (!text.startsWith(closer, caret) || !overtype.autoClosedAt(caret, text)) return false
+        state.executeEdits(listOf(TextEdit(caret - 1 until caret + closer.length, "")), listOf(TextRange(caret - 1)))
+        return true
+    }
+
     fun backspaceToTabStop(): Boolean {
         val config = config
         if (!config.useTabStops || !config.insertSpaces || config.tabSize < 2) return false
@@ -374,7 +390,7 @@ internal class AardinkEditorSurface(val state: CodeEditorState) : EditorSurface 
         val line = state.document.offsetToLineCol(caret).first
         val lineStart = state.document.lineStart(line)
         val column = caret - lineStart
-        if (column == 0 || (0 until column).any { state.document.lineText(line)[it] != ' ' }) return false
+        if (column == 0 || (0 until column).any { lineText(line)[it] != ' ' }) return false
         val target = (column - 1) / config.tabSize * config.tabSize
         state.executeEdits(listOf(TextEdit(lineStart + target until caret, "")), listOf(TextRange(lineStart + target)))
         return true
@@ -476,7 +492,7 @@ internal class AardinkEditorSurface(val state: CodeEditorState) : EditorSurface 
 
     private fun offsetOf(position: LspPosition): Int {
         val line = position.line.coerceIn(0, state.document.lineCount - 1)
-        return state.document.lineColToOffset(line, position.character.coerceIn(0, state.document.lineText(line).length))
+        return state.document.lineColToOffset(line, position.character.coerceIn(0, lineText(line).length))
     }
 }
 

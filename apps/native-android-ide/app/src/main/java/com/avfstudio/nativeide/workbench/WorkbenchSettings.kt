@@ -21,7 +21,8 @@ data class WorkbenchSettings(
     val dynamicColor: Boolean = true,
     val pureBlack: Boolean = false,
     val syntaxColors: SyntaxColors = SyntaxColors.Classic,
-    val editorEngine: EditorEngine = EditorEngine.Sora,
+    /** Aardink by default since the switch's phase 6 (batch 55); sora-editor stays a setting away until phase 7 removes it. */
+    val editorEngine: EditorEngine = EditorEngine.Aardink,
     val editorFontSize: Float = 14f,
     val tabSize: Int = 4,
     val insertSpaces: Boolean = true,

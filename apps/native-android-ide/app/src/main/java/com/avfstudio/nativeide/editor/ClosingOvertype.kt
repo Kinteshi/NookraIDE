@@ -48,6 +48,10 @@ class ClosingOvertype {
         return found
     }
 
+    /** Whether the closer at [caret] in [text] is one auto-closing inserted (so Backspace before it takes the pair). */
+    fun autoClosedAt(caret: Int, text: CharSequence): Boolean =
+        closers.any { (at, c) -> at == caret && text.getOrNull(caret) == c }
+
     fun clear() {
         closers.clear()
         expected.clear()

@@ -7,7 +7,7 @@ Last updated: 2026-11-04 (UTC−3). Read this first when resuming. The batch pla
 
 * **Progress:** batches 1–40 are done, and 41 was exploration with no app change. Each is described in the batch plan.
 * **What's open:** [Open backlog](NATIVE-IDE-BATCHES.md#open-backlog-11-08), in two lists: general, and the Aardink switch's, which replaces this file's old "Remaining" list.
-* **Next large piece:** the switch to Aardink: [AARDINK-SWITCH-PLAN.md](AARDINK-SWITCH-PLAN.md). Phases 0 to 5 are done (batches 42 to 52), on Aardink 0.9.0 (batch 45): Aardink is an experimental choice in Settings → Editor with everything but gutter taps for breakpoints; sora is the default. Phase 6 (the flip) is next. Review each Aardink release against the plan (its "Release reviews"). Requests to Aardink are drafted or listed, not filed.
+* **Next large piece:** the switch to Aardink: [AARDINK-SWITCH-PLAN.md](AARDINK-SWITCH-PLAN.md). Phases 0 to 6 are done (batches 42 to 55), on Aardink 0.9.0 (batch 45): **Aardink is the default editor**, sora-editor a setting away until phase 7 removes it, after the user's period of daily use. The workbench's own Material You cards are drawn over Aardink from its geometry (batch 54). Review each Aardink release against the plan (its "Release reviews"). Requests to Aardink are drafted or listed, not filed.
 * **Waiting on the user:** whether to continue the glibc test (backlog item 70 d). Claude Code's permission system blocked it, so it needs the user's approval.
 * **Tablet:** the latest build is installed, and the guest was rebooted at 16:47 on 11-04. The sections "Reference tablet" and "Done" below mostly date from 10-23, so some of what they describe may have moved on. The batch plan is the record since then.
 
@@ -28,7 +28,7 @@ cargo test -p avf-daemon -p avf-protocol
 PATH=$HOME/.cargo/bin:$PATH cargo zigbuild --release -p avf-daemon --target aarch64-unknown-linux-gnu.2.28
 ```
 
-At last run: 377 app unit tests (on Java 21, installed beside 17) and 7 lab tests on the device (batch 42; `ANDROID_SERIAL=<device> ./gradlew :aardink-lab:connectedDebugAndroidTest`, which uninstalls the lab afterwards) and 124 daemon tests (batch 37, the last daemon change), all passing.
+At last run: 381 app unit tests (on Java 21, installed beside 17) and 7 lab tests on the device (batch 42; `ANDROID_SERIAL=<device> ./gradlew :aardink-lab:connectedDebugAndroidTest`, which uninstalls the lab afterwards) and 124 daemon tests (batch 37, the last daemon change), all passing.
 
 ## Reference tablet (Galaxy Tab S11 Ultra, SM-X930)
 

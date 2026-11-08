@@ -207,4 +207,53 @@ class AardinkEditorSurfaceTest {
         assertEquals(null, wordRange(text, 3))
         assertEquals(null, wordRange(text, 99))
     }
+
+    @Test
+    fun backspaceBetweenAnAutoClosedPairTakesBoth() {
+        val surface = surface("x = ")
+        surface.rules = com.avfstudio.nativeide.editor.LanguageRules.parse(
+            java.io.File("src/main/assets/textmate/python.language-configuration.json").readText(),
+        )
+        // As the pane does: closers follow the edits.
+        surface.state.addContentListener { changes -> changes.forEach { surface.overtype.edited(it.offset, it.deletedLength, it.insertedText) } }
+        surface.state.selection = TextRange(4)
+        assertTrue(surface.typePairKey('('))
+        assertEquals("x = ()", surface.text)
+        assertTrue(surface.backspace())
+        assertEquals("x = ", surface.text)
+        // A closer that was typed, not auto-closed, stays.
+        surface.state.executeEdits(listOf(com.aardarch.aardink.core.TextEdit(4 until 4, "()")), listOf(TextRange(5)))
+        org.junit.Assert.assertFalse(surface.backspace())
+    }
+
+    @Test
+    fun crlfTextComesBackAsItWas() {
+        val surface = surface("a\r\nb\r\n")
+        assertEquals("a\r\nb\r\n", surface.text)
+        surface.applyEdits(listOf(LspTextEdit(LspRange(LspPosition(1, 1), LspPosition(1, 1)), "c")))
+        assertEquals("a\r\nbc\r\n", surface.text)
+        assertEquals("bc", surface.lineText(1))
+    }
+
+    @Test
+    fun aTagsNameAndItsPartnerAreLinked() {
+        val html = "<div class=\"a\"><p>x</p></div>"
+        assertEquals(listOf(1 until 4, 25 until 28), linkedTagRanges(html, 2))
+        assertEquals(listOf(16 until 17, 21 until 22), linkedTagRanges(html, 21))
+        assertEquals(null, linkedTagRanges(html, 8))
+    }
+
+    @Test
+    fun aLineCommandIsOneEditThatUndoes() {
+        val before = "a\nbb\nccc\n"
+        val edit = minimalEdit(before, "a\nccc\nbb\n")!!
+        assertEquals(LspRange(LspPosition(1, 0), LspPosition(2, 3)), edit.range)
+        assertEquals("ccc\nbb", edit.newText)
+        assertEquals(null, minimalEdit(before, before))
+        val surface = surface(before)
+        surface.applyEdits(listOf(edit))
+        assertEquals("a\nccc\nbb\n", surface.text)
+        surface.undo()
+        assertEquals(before, surface.text)
+    }
 }

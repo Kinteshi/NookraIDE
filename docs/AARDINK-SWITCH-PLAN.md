@@ -1,7 +1,7 @@
 # Plan: switching from sora-editor to Aardink
 
-Status: **phases 3 to 5 done** (2026-11-08, batches 46 to 51, checked on the tablet in batch 52) on Aardink 0.9.0; sora stays the
-default. Phase 6, the flip, is next: nothing blocks it now that our own suggestion list stands in for request 8.
+Status: **phase 6 done but the daily use** (2026-11-08, batch 55) on Aardink 0.9.0: **Aardink is the default**, sora-editor a
+setting away. The user uses it day to day for as long as they choose; then phase 7 removes sora.
 
 **Decided by the user:** the switch will happen, for the licence (Apache-2.0 instead of sora's LGPL-2.1).
 On 11-04 they judged the measured memory and scrolling not to be impediments, and expect Aardink's release
@@ -99,7 +99,11 @@ hover and parameter hints (Markdown), fold arrows, snippet stops, find scope.
 Left: Next Edit's card and the definition peek need request 1, or a design on decorations (`before`/`after`, 0.9).
 Aardink hasn't tried ghost text or lenses on a device or with Samsung's keyboard; this phase does.
 
-### Phase 6: flip the default (S-M, then time)
+### Phase 6: flip the default (done 11-08, batch 55, but the daily use)
+Parity checked on the tablet (gaps closed: linked tags, paired delete, CR LF lines, line commands as edits), Aardink the
+default, measured: 262-290 MB PSS (sora 308-393), key to frame 30 ms median and 36 ms p95 through the input method (sora 24
+and 31 the same way). Debug hover values and partial accept aren't in the app with either engine (G19).
+
 * Run through the parity list below on the tablet; `aardink` becomes the default, `sora` stays one setting away.
 * Measure the real app: memory with five files, two terminals and servers (sora today: 420-504 MB), keystroke to
   frame (24.3 ms p95), guest stability. These are recorded for the user to judge, not gates.
