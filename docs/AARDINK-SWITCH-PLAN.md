@@ -7,6 +7,8 @@ On 11-04 they judged the measured memory and scrolling not to be impediments, an
 cadence to deliver what's missing. Measurements and the API review are in
 [native-editor-evaluation.md](native-editor-evaluation.md), "Revisit 2026-11-04".
 
+What's left is listed as the Aardink switch backlog in [NATIVE-IDE-BATCHES.md](NATIVE-IDE-BATCHES.md#aardink-switch-backlog), beside the general one.
+
 ## Approach
 
 Build Aardink beside sora and flip when it reaches parity, so the app stays usable throughout.

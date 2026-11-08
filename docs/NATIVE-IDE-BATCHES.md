@@ -20,7 +20,7 @@ Status values: **done** (committed), **in progress**, **planned**.
 
 This table stops at batch 8. From batch 9 on, each section's heading gives its status. The latest
 is [41](#41-backlog-additions-and-vscodroid-explored-11-04-no-app-change), and what's still open is in
-[Open backlog](#open-backlog-11-04).
+[Open backlog](#open-backlog-11-08).
 
 ## 1. Workbench rewrite (done)
 Material You shell, settings page, VS Code shortcuts, ConnectBot terminal over daemon PTYs,
@@ -2164,35 +2164,57 @@ User's request (11-08): update the Aardink backlog for 0.9, and make it a habit 
   phase 5 unblocked but for those two; details in the plan.
 
 ## Backlog
-### Open backlog (11-04)
-The current list of what's open; the older lists below keep the history and details. "#" is the number
-used when showing the user this table. "Item" is the number in the lists below, where one exists.
+### Open backlog (11-08)
+The current lists of what's open, in two: the general backlog, and the Aardink switch's until it's complete. The older
+lists below keep the history and details. "#" is the number used when showing the user these tables (G for general,
+A for Aardink). "Item" is the number in the lists below, where one exists.
+
+#### General backlog
 
 | # | Item | Size | Description |
 |---|------|------|-------------|
-| 1 | 52 | M–L | Memory 420–504 MB against the 250 MB budget |
-| 2 | 53 | M | Key to frame p95 24.3 ms against the 16 ms budget |
-| 3 | 57 | S | Data viewer filter with the on-screen keyboard |
-| 4 | 61 | S–M | Files beyond Quick Open's 20,000 |
-| 5 | 62 | S | Recent keeps folders that no longer exist |
-| 6 | 63 | S–M | App can reopen as a partly off-screen floating window |
-| 7 | 55 | S | Deep Rust projects on the tablet (about 1 GB of Rust) |
-| 8 | 56 | M–L | Widgets not drawn yet |
-| 9 | 22 | M | Accessibility pass |
-| 10 | 23 | L | Automated on-device tests and screenshot comparisons |
-| 11 | – | L | Aardink switch: phases 0-2 done on 0.9.0, phase 3 next; see [the plan](AARDINK-SWITCH-PLAN.md) |
-| 12 | – | ? | Copilot exits after a daemon restart (watching) |
-| 13 | 64 | S–M or L | Replace Gemini CLI with Antigravity CLI |
-| 14 | 65 | S–M to explore, L+ to adopt | Other backends: proot, Termux and others |
-| 15 | 66 | M, after a walkthrough | Refine the offline experience |
-| 16 | 67 | S–M to answer, XL to do | VS Code port, or a native app and Rust backend from one |
-| 17 | 68 | S to try the grant, L+ to do | Bundle the image and use AVF without Terminal: not for store installs |
-| 18 | 69 | S–M | Warn near the phantom process limit, and say so when the guest goes away |
-| 19 | 70 | L overall | Mode without Terminal: local backend, ML on another machine, glibc if proven |
-| 20 | 71 | S to ask | Ask Aardink for public text positions; since 0.9 only for two overlays; drafted, the user will come back to it |
-| 21 | 72 | S to ask | Ask Aardink for gutter icons and taps (breakpoints); drafted, the user will come back to it |
-| 22 | 73 | S to ask | Tell Aardink about the Samsung keyboard's selection echo (Enter, Shift+arrows); worked around; still in 0.9 |
-| 23 | 74 | S-M | Settings changed offline are lost on reconnect |
+| G1 | 52 | M–L | Memory 420–504 MB against the 250 MB budget |
+| G2 | 53 | M | Key to frame p95 24.3 ms against the 16 ms budget |
+| G3 | 57 | S | Data viewer filter with the on-screen keyboard |
+| G4 | 61 | S–M | Files beyond Quick Open's 20,000 |
+| G5 | 62 | S | Recent keeps folders that no longer exist |
+| G6 | 63 | S–M | App can reopen as a partly off-screen floating window |
+| G7 | 55 | S | Deep Rust projects on the tablet (about 1 GB of Rust) |
+| G8 | 56 | M–L | Widgets not drawn yet |
+| G9 | 22 | M | Accessibility pass |
+| G10 | 23 | L | Automated on-device tests and screenshot comparisons |
+| G11 | – | ? | Copilot exits after a daemon restart (watching) |
+| G12 | 64 | S–M or L | Replace Gemini CLI with Antigravity CLI |
+| G13 | 65 | S–M to explore, L+ to adopt | Other backends: proot, Termux and others |
+| G14 | 66 | M, after a walkthrough | Refine the offline experience |
+| G15 | 67 | S–M to answer, XL to do | VS Code port, or a native app and Rust backend from one |
+| G16 | 68 | S to try the grant, L+ to do | Bundle the image and use AVF without Terminal: not for store installs |
+| G17 | 69 | S–M | Warn near the phantom process limit, and say so when the guest goes away |
+| G18 | 70 | L overall | Mode without Terminal: local backend, ML on another machine, glibc if proven |
+| G19 | 74 | S–M | Settings changed offline are lost on reconnect |
+
+#### Aardink switch backlog
+
+Until Aardink replaces sora: the remaining phases of the [plan](AARDINK-SWITCH-PLAN.md), which has the details, and
+what the switch is waiting on. Phases 0–2 are done (batches 42–44), on Aardink 0.9.0 (batch 45).
+
+| # | Item | Size | Description |
+|---|------|------|-------------|
+| A1 | Phase 3 | M | Language features through `LanguageService` on the app's LSP client: completion with details, Markdown hover and signature help, occurrences, definition, problems and quick fixes, find and replace, snippets, folding, auto-indent and pairs from `language-configuration.json` |
+| A2 | Phase 4 | M | Decorations: paused line, conflict tints, symbol and find highlights, cell rules, problem marks; interim breakpoints (red gutter bar, F9 and a menu); the large-file view and peek on read-only editors |
+| A3 | Phase 5 | M | Aardink's built-in ghost text, inlay hints and code lenses (Python cells, merge conflicts), in place of our overlays; first on a device with Samsung's keyboard |
+| A4 | Phase 5 | S–M, waits on A9 or a design | Next Edit's card and the definition peek, the two overlays with no built-in answer |
+| A5 | Phase 6 | S–M, then time | Parity list on the tablet, make Aardink the default, measure the real app (memory, key to frame, guest), use it day to day |
+| A6 | Phase 7 | S–M | Remove sora: the setting, its classes, the two files in sora's package; carry tm4e as a module (upstream 0.18.0 or sora's copy); licence notes |
+| A7 | 43 | S, the user's | Try the Aardink engine on the Book Cover itself, and the on-screen keyboard |
+| A8 | 44 | S | Line height: Aardink's lines are taller than sora's at the same font size |
+| A9 | 71 | S to ask | Ask Aardink for public text positions (for A4); drafted, the user will come back to it |
+| A10 | 72 | S to ask | Ask Aardink for gutter icons and taps (real breakpoints after A2's interim); drafted, the user will come back to it |
+| A11 | 73 | S to ask | Tell Aardink about the Samsung keyboard issue (Enter, Shift+arrows); our workaround goes when it's fixed |
+| A12 | habit | S per release | Review each Aardink release against the plan and these lists, bump the pin, recheck (plan, "Release reviews") |
+
+Watching, on Aardink's side: the hitch as a gesture starts (its 0.10 performance work), saved view state (1.0),
+ghost text and lenses with Samsung's keyboard (untested by Aardink as of 0.9.0).
 
 Loose ends, not sized:
 * The unsaved dot seen once after saving a restored deleted file (batch 39; not reproduced in three tries).

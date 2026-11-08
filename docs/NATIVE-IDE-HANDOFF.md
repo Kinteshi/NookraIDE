@@ -6,7 +6,7 @@ Last updated: 2026-11-04 (UTC−3). Read this first when resuming. The batch pla
 ## Current state (2026-11-04)
 
 * **Progress:** batches 1–40 are done, and 41 was exploration with no app change. Each is described in the batch plan.
-* **What's open:** [Open backlog](NATIVE-IDE-BATCHES.md#open-backlog-11-04), which replaces this file's old "Remaining" list.
+* **What's open:** [Open backlog](NATIVE-IDE-BATCHES.md#open-backlog-11-08), in two lists: general, and the Aardink switch's, which replaces this file's old "Remaining" list.
 * **Next large piece:** the switch to Aardink: [AARDINK-SWITCH-PLAN.md](AARDINK-SWITCH-PLAN.md). Phases 0 to 2 are done (batches 42 to 44), on Aardink 0.9.0 (batch 45): Aardink is an experimental choice in Settings → Editor, with syntax colours; sora is the default. Review each Aardink release against the plan (its "Release reviews"). Requests to Aardink are drafted or listed, not filed.
 * **Waiting on the user:** whether to continue the glibc test (backlog item 70 d). Claude Code's permission system blocked it, so it needs the user's approval.
 * **Tablet:** the latest build is installed, and the guest was rebooted at 16:47 on 11-04. The sections "Reference tablet" and "Done" below mostly date from 10-23, so some of what they describe may have moved on. The batch plan is the record since then.
@@ -114,7 +114,7 @@ At last run: 344 app unit tests (on Java 21, installed beside 17) and 7 lab test
 
 ## Remaining
 
-See the [Open backlog](NATIVE-IDE-BATCHES.md#open-backlog-11-04). One decision from the old list has no entry there: whether to merge daemon changes with Track A's Supervisor branch. The two branches' `lib.rs` have diverged, and Track A's guest install was lost in the 10-23 reset.
+See the [Open backlog](NATIVE-IDE-BATCHES.md#open-backlog-11-08). One decision from the old list has no entry there: whether to merge daemon changes with Track A's Supervisor branch. The two branches' `lib.rs` have diverged, and Track A's guest install was lost in the 10-23 reset.
 
 ## Device leftovers to clean up
 
