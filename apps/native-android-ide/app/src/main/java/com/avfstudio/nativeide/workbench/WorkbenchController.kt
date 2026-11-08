@@ -9751,7 +9751,7 @@ class WorkbenchController(private val context: Context) {
         ) {
             return false
         }
-        val handled = handleKeyDown(event) || sendTerminalControlKey(event) || typePairKey(event)
+        val handled = backspaceToTabStop(event) || handleKeyDown(event) || sendTerminalControlKey(event) || typePairKey(event)
         if (handled) consumedKeyDowns += event.keyCode
         return handled
     }
@@ -9765,6 +9765,12 @@ class WorkbenchController(private val context: Context) {
         val typed = event.unicodeChar.takeIf { it > 0 }?.toChar() ?: return false
         val surface = editorSurface as? AardinkEditorSurface ?: return false
         return surface.typePairKey(typed) || surface.typeOutdentKey(typed)
+    }
+
+    /** Backspace in a line's leading spaces in the Aardink editor goes back a tab stop, before the input method sees it. */
+    private fun backspaceToTabStop(event: AndroidKeyEvent): Boolean {
+        if (focusArea != FocusArea.Editor || event.keyCode != AndroidKeyEvent.KEYCODE_DEL || event.isCtrlPressed || event.isAltPressed || event.isShiftPressed) return false
+        return (editorSurface as? AardinkEditorSurface)?.backspaceToTabStop() == true
     }
 
     /** Enter and the moving keys in the Aardink editor skip the input method (see [KeyRouter.bypassesIme]). */

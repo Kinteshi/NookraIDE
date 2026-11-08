@@ -7,8 +7,10 @@ rule is the issue's text. Checked against Aardink 0.8.0's sources and roadmap on
 ---
 
 > Note (11-08, after 0.9.0): inline text, inlay hints, code lens, ghost text and Markdown hover are now built in, so
-> this request is down to two cases, a card for an edit suggested elsewhere in the file and a definition peek. Reword
-> the problem around those before filing.
+> this request is down to three cases: a card for an edit suggested elsewhere in the file, a definition peek, and our own
+> completion list for hardware keyboards (until request 8). All three dock at the editor's edge meanwhile (batches 49 and
+> 51), which hides code and loses the eye; the user asked for the list at its line (11-08). Reword the problem around
+> those before filing.
 
 **Title:** [feature] Public text positions for hosts (rect of an offset or line)
 

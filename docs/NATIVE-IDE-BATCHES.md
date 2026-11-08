@@ -2275,6 +2275,19 @@ Not checked on the tablet: the paused line and inline values (no debug session),
 right-click and touch menus' breakpoint items, the large-file view, the on-screen keyboard. Seen in sora, not new: its
 inlay hint chip at a line's end sits half a row low (loose ends).
 
+## 53. Aardink: coloured code in hover, Backspace back a tab stop (11-08; done, checked on the tablet)
+From the user's checks. 376 app unit tests pass.
+* Code in Aardink's hover, signature help and a suggestion's details is coloured by its fence's language, as in sora's hover
+  card: Aardink asks the host for a tokenizer per language (`LocalCodeFenceTokenizers`), which we hadn't given it. The app's
+  grammars now answer (Python and the grammar packs, by language id or extension). Not an Aardink limitation.
+* Backspace in a line's leading spaces goes back to the previous tab stop, as VS Code's `editor.useTabStops` (the app's
+  setting, on by default) does; Aardink deletes one space. On a hardware keyboard, before the input method; the on-screen
+  keyboard still deletes one space (its deletes come through the input method). Backlog A18 asks Aardink for it.
+* Checked in a throwaway `~/Projects/b53` (deleted after): Show Hover on a call shows `def area(…) -> int` in the editor's
+  colours; from 8 spaces of indentation, one Backspace leaves 4. The engine was on Aardink, the user's choice, and stays.
+* The suggestion list at its line is the same limitation as Next Edit's card and the peek (no public caret position, request
+  1, A9); the draft now names all three.
+
 ## Backlog
 ### Open backlog (11-08)
 The current lists of what's open, in two: the general backlog, and the Aardink switch's until it's complete. The older
@@ -2315,13 +2328,14 @@ A2, A3, A4, A8, A16 and A17 were done in batches 47–52.
 | A5 | Phase 6 | S–M, then time | Parity list on the tablet, make Aardink the default, measure the real app (memory, key to frame, guest), use it day to day |
 | A6 | Phase 7 | S–M | Remove sora: the setting, its classes, the two files in sora's package; carry tm4e as a module (upstream 0.18.0 or sora's copy); licence notes |
 | A7 | 43 | S, the user's | Try the Aardink engine on the Book Cover itself, and the on-screen keyboard |
-| A9 | 71 | S to ask | Ask Aardink for public text positions: Next Edit's card, the peek and our list would sit at their line instead of an edge; nothing waits on it. Drafted, the user will come back to it |
+| A9 | 71 | S to ask | Ask Aardink for public text positions: Next Edit's card, the peek and our suggestion list would sit at their line instead of an edge, where they hide code. Drafted, the user will come back to it |
 | A10 | 72 | S to ask | Ask Aardink for gutter icons and taps (real breakpoints after A2's interim); drafted, the user will come back to it |
 | A11 | 73 | S to ask | Tell Aardink about the Samsung keyboard issue (Enter, Shift+arrows); our workaround goes when it's fixed |
 | A12 | habit | S per release | Review each Aardink release against the plan and these lists, bump the pin, recheck (plan, "Release reviews") |
 | A13 | 77 | S to ask | Ask Aardink for the completion list at the caret on Android with a hardware keyboard; drafted. Our list stands in (batch 51), and goes when it ships |
 | A14 | 75 | S to ask | Tell Aardink its `LanguageConfiguration` can't load on Android (regex); ours reads the files meanwhile |
 | A15 | 76 | S to ask | Ask Aardink for typing over auto-inserted closers; ours does it for hardware keys |
+| A18 | – | S to ask | Ask Aardink for Backspace back to a tab stop in leading spaces (VS Code's `useTabStops`); ours does it for hardware keys (batch 53) |
 
 Watching, on Aardink's side: the hitch as a gesture starts (its 0.10 performance work), saved view state (1.0),
 and Samsung's keyboard composing words even from a hardware keyboard (batch 52).

@@ -320,6 +320,25 @@ internal class AardinkEditorSurface(val state: CodeEditorState) : EditorSurface 
     /** Our list for a hardware keyboard while it's in charge (the pane sets it); Aardink's strip otherwise. */
     var suggestions: KeyboardSuggestions? = null
 
+    /**
+     * Backspace on a hardware keyboard in a line's leading spaces: back to the previous tab stop, as VS Code's
+     * `editor.useTabStops` does (Aardink deletes one space). False otherwise, and the key goes on as usual.
+     */
+    fun backspaceToTabStop(): Boolean {
+        val config = config
+        if (!config.useTabStops || !config.insertSpaces || config.tabSize < 2) return false
+        val selection = state.selection
+        if (!selection.collapsed) return false
+        val caret = selection.start
+        val line = state.document.offsetToLineCol(caret).first
+        val lineStart = state.document.lineStart(line)
+        val column = caret - lineStart
+        if (column == 0 || (0 until column).any { state.document.lineText(line)[it] != ' ' }) return false
+        val target = (column - 1) / config.tabSize * config.tabSize
+        state.executeEdits(listOf(TextEdit(lineStart + target until caret, "")), listOf(TextRange(lineStart + target)))
+        return true
+    }
+
     override fun triggerSuggest() {
         suggestions?.let { return it.ask(invoked = true) }
         state.execute(EditorCommand.TriggerSuggest)

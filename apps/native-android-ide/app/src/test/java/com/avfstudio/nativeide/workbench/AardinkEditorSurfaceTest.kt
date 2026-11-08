@@ -180,4 +180,22 @@ class AardinkEditorSurfaceTest {
         surface.undo()
         assertEquals("if x:\n    y = 1\n    else", surface.text)
     }
+
+    @Test
+    fun backspaceInLeadingSpacesGoesBackATabStop() {
+        val surface = surface("if x:\n        y\n      z\n  a = 1")
+        // After Enter's indentation (8): back to 4, then 0.
+        surface.state.selection = TextRange(14)
+        assertTrue(surface.backspaceToTabStop())
+        assertEquals("if x:\n    y\n      z\n  a = 1", surface.text)
+        // Off a tab stop (6): to 4.
+        surface.state.selection = TextRange(18)
+        assertTrue(surface.backspaceToTabStop())
+        assertEquals("if x:\n    y\n    z\n  a = 1", surface.text)
+        // After text, or at the line's start: as usual.
+        surface.state.selection = TextRange(surface.text.length)
+        org.junit.Assert.assertFalse(surface.backspaceToTabStop())
+        surface.state.selection = TextRange(6)
+        org.junit.Assert.assertFalse(surface.backspaceToTabStop())
+    }
 }

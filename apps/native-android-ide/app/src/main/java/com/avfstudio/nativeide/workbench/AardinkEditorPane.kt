@@ -109,7 +109,15 @@ internal fun AardinkEditorView(controller: WorkbenchController, document: Docume
         if (!controller.copilotEnabled) null else InlineCompletionProvider { snapshot, offset -> copilotCompletions(controller, document, state, snapshot, offset) }
     }
     val theme = remember(syntax, registry, colors, dark) { AardinkSyntax.editorTheme(syntax, registry, colors, dark) }
-    CompositionLocalProvider(LocalEditorTheme provides theme) {
+    // Code in hover, signature help and a suggestion's details, coloured by its fence's language as sora's hover card does.
+    val fenceTokenizers = remember(registry) {
+        val made = java.util.concurrent.ConcurrentHashMap<String, java.util.Optional<com.aardarch.aardink.core.IncrementalTokenizer>>()
+        val lookup: (String) -> com.aardarch.aardink.core.IncrementalTokenizer? = { language ->
+            made.getOrPut(language) { java.util.Optional.ofNullable(AardinkSyntax.codeFenceTokenizer(registry, language)) }.orElse(null)
+        }
+        lookup
+    }
+    CompositionLocalProvider(LocalEditorTheme provides theme, com.aardarch.aardink.ui.LocalCodeFenceTokenizers provides fenceTokenizers) {
         CodeEditorLayout(
             state = state,
             modifier = Modifier.fillMaxSize().focusRequester(surface.focusRequester),

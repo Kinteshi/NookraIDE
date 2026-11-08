@@ -88,6 +88,28 @@ internal object AardinkSyntax {
     }
 
     /**
+     * The grammar for a code fence in hover, signature help or a suggestion's details, by the language it's tagged with
+     * (` ```python `, ` ```ts `); null for one no grammar knows, which Aardink shows plain. Without semantic colours: those
+     * are the document's, by its lines.
+     */
+    fun codeFenceTokenizer(registry: Registry, language: String): TextMateTokenizer? {
+        val id = language.trim().lowercase()
+        val scope = when (id) {
+            "python", "py", "python3", "pyi", "pycon" -> PYTHON_SCOPE
+            else -> AssetPackGrammarLoader.scopeNameForExtension(FENCE_EXTENSIONS[id] ?: id)
+        } ?: return null
+        val grammar = runCatching { registry.loadGrammar(scope) }.getOrNull() ?: return null
+        return TextMateTokenizer(grammar, null)
+    }
+
+    /** VS Code's language ids that aren't their files' extension. */
+    private val FENCE_EXTENSIONS = mapOf(
+        "typescript" to "ts", "javascript" to "js", "typescriptreact" to "tsx", "javascriptreact" to "jsx",
+        "shellscript" to "sh", "bash" to "sh", "shell" to "sh", "zsh" to "sh", "rust" to "rs", "golang" to "go",
+        "kotlin" to "kt", "csharp" to "cs", "ruby" to "rb", "markdown" to "md", "yml" to "yaml", "c++" to "cpp",
+    )
+
+    /**
      * The file's `language-configuration.json` (closing pairs, Enter, indentation, comments): the app's
      * own for Python, a grammar pack's for its languages. Null when there's none, or it can't be read.
      */
