@@ -2296,55 +2296,77 @@ A for Aardink). "Item" is the number in the lists below, where one exists.
 
 #### General backlog
 
-| # | Item | Size | Description |
-|---|------|------|-------------|
-| G1 | 52 | M–L | Memory 420–504 MB against the 250 MB budget |
-| G2 | 53 | M | Key to frame p95 24.3 ms against the 16 ms budget |
-| G3 | 57 | S | Data viewer filter with the on-screen keyboard |
-| G4 | 61 | S–M | Files beyond Quick Open's 20,000 |
-| G5 | 62 | S | Recent keeps folders that no longer exist |
-| G6 | 63 | S–M | App can reopen as a partly off-screen floating window |
-| G7 | 55 | S | Deep Rust projects on the tablet (about 1 GB of Rust) |
-| G8 | 56 | M–L | Widgets not drawn yet |
-| G9 | 22 | M | Accessibility pass |
-| G10 | 23 | L | Automated on-device tests and screenshot comparisons |
-| G11 | – | ? | Copilot exits after a daemon restart (watching) |
-| G12 | 64 | S–M or L | Replace Gemini CLI with Antigravity CLI |
-| G13 | 65 | S–M to explore, L+ to adopt | Other backends: proot, Termux and others |
-| G14 | 66 | M, after a walkthrough | Refine the offline experience |
-| G15 | 67 | S–M to answer, XL to do | VS Code port, or a native app and Rust backend from one |
-| G16 | 68 | S to try the grant, L+ to do | Bundle the image and use AVF without Terminal: not for store installs |
-| G17 | 69 | S–M | Warn near the phantom process limit, and say so when the guest goes away |
-| G18 | 70 | L overall | Mode without Terminal: local backend, ML on another machine, glibc if proven |
+Grouped (11-08) so that what's cheaper done together is done together; the numbers stay as they were.
+
+| Group | # | Item | Size | Description |
+|---|---|------|------|-------------|
+| **1. Performance, after the flip** | G1 | 52 | M–L | Memory 420–504 MB against the 250 MB budget |
+| | G2 | 53 | M | Key to frame p95 24.3 ms against the 16 ms budget |
+| **2. Guest away, and offline** | G14 | 66 | M, after a walkthrough | Refine the offline experience |
+| | G17 | 69 | S–M | Warn near the phantom process limit, and say so when the guest goes away |
+| | G5 | 62 | S | Recent keeps folders that no longer exist |
+| | – | – | S | The list of files kept offline never drops deleted ones (seen in batch 52); the unsaved dot once seen after saving a restored deleted file (batch 39) |
+| **3. Backends, and running without Terminal** | G13 | 65 | S–M to explore, L+ to adopt | Other backends: proot, Termux and others |
+| | G16 | 68 | S to try the grant, L+ to do | Bundle the image and use AVF without Terminal: not for store installs |
+| | G18 | 70 | L overall | Mode without Terminal: local backend, ML on another machine, glibc if proven (continuing the glibc test is the user's decision) |
+| | G15 | 67 | S–M to answer, XL to do | VS Code port, or a native app and Rust backend from one |
+| **4. Tests and accessibility** | G9 | 22 | M | Accessibility pass |
+| | G10 | 23 | L | Automated on-device tests and screenshot comparisons |
+| **5. Notebook outputs** | G3 | 57 | S | Data viewer filter with the on-screen keyboard |
+| | G8 | 56 | M–L | Widgets not drawn yet |
+| **6. Large workspaces** | G4 | 61 | S–M | Files beyond Quick Open's 20,000 |
+| | G7 | 55 | S | Deep Rust projects on the tablet (about 1 GB of Rust) |
+| **7. Window and layout** | G6 | 63 | S–M | App can reopen as a partly off-screen floating window |
+| | – | – | S | The terminal's toolbar row at phone width (batch 40) |
+| **On its own** | G12 | 64 | S–M or L | Replace Gemini CLI with Antigravity CLI |
+| | G11 | – | ? | Copilot exits after a daemon restart (watching) |
+
+Why these groups:
+1. Most of the memory and the frame time is the editor's. Tuning sora's would be thrown away, so both wait for the flip (A5),
+   whose measurements become their starting point.
+2. One state machine: the guest stopping or being killed (phantom limit), offline copies, Recent, deleted files. One
+   walkthrough on the tablet with the guest stopped finds them all.
+3. One question: what the app runs on when Terminal's VM isn't there. One exploration and one write-up, then a decision; G15
+   answers the same question from the other side.
+4. The accessibility pass labels the UI, and automated tests find things by those labels: doing the labels first makes the
+   tests cheaper and keeps them stable.
+5. Both are notebook outputs, in the same code and checked with the same notebooks.
+6. Both are about big folders on the tablet (indexing, walking, memory), checked with the same large workspace.
+7. Both are window size and placement, checked by resizing the same window.
 
 #### Aardink switch backlog
 
 Until Aardink replaces sora: the remaining phases of the [plan](AARDINK-SWITCH-PLAN.md), which has the details, and
 what the switch is waiting on. Phases 0–5 are done (batches 42–52), on Aardink 0.9.0 (batch 45); A1 was phase 3, and
-A2, A3, A4, A8, A16 and A17 were done in batches 47–52.
+A2, A3, A4, A8, A16 and A17 were done in batches 47–53.
 
-| # | Item | Size | Description |
-|---|------|------|-------------|
-| A5 | Phase 6 | S–M, then time | Parity list on the tablet, make Aardink the default, measure the real app (memory, key to frame, guest), use it day to day |
-| A6 | Phase 7 | S–M | Remove sora: the setting, its classes, the two files in sora's package; carry tm4e as a module (upstream 0.18.0 or sora's copy); licence notes |
-| A7 | 43 | S, the user's | Try the Aardink engine on the Book Cover itself, and the on-screen keyboard |
-| A9 | 71 | S to ask | Ask Aardink for public text positions: Next Edit's card, the peek and our suggestion list would sit at their line instead of an edge, where they hide code. Drafted, the user will come back to it |
-| A10 | 72 | S to ask | Ask Aardink for gutter icons and taps (real breakpoints after A2's interim); drafted, the user will come back to it |
-| A11 | 73 | S to ask | Tell Aardink about the Samsung keyboard issue (Enter, Shift+arrows); our workaround goes when it's fixed |
-| A12 | habit | S per release | Review each Aardink release against the plan and these lists, bump the pin, recheck (plan, "Release reviews") |
-| A13 | 77 | S to ask | Ask Aardink for the completion list at the caret on Android with a hardware keyboard; drafted. Our list stands in (batch 51), and goes when it ships |
-| A14 | 75 | S to ask | Tell Aardink its `LanguageConfiguration` can't load on Android (regex); ours reads the files meanwhile |
-| A15 | 76 | S to ask | Ask Aardink for typing over auto-inserted closers; ours does it for hardware keys |
-| A18 | – | S to ask | Ask Aardink for Backspace back to a tab stop in leading spaces (VS Code's `useTabStops`); ours does it for hardware keys (batch 53) |
+| Group | # | Item | Size | Description |
+|---|---|------|------|-------------|
+| **A. The flip, then sora out** | A7 | 43 | S, the user's | Try the Aardink engine on the Book Cover itself, and the on-screen keyboard (under way: the user has it on) |
+| | A5 | Phase 6 | S–M, then time | Parity list on the tablet, make Aardink the default, measure the real app (memory, key to frame, guest), use it day to day |
+| | A6 | Phase 7 | S–M | Remove sora: the setting, its classes, the two files in sora's package; carry tm4e as a module (upstream 0.18.0 or sora's copy); licence notes. sora's low inlay hint chip (batch 52) goes with it, not fixed |
+| **B. Popups at their line** | A19 | – | S–M | Meanwhile, Next Edit's card, the peek and our suggestion list at their line from Aardink's internal caret rectangle (read by reflection, as it tells the keyboard), docking at the edge if that fails; keep rules for the release build; checked at each release review. Goes when A9 ships |
+| **C. Asks to Aardink, filed together** | A9 | 71 | S to ask | Public text positions: Next Edit's card, the peek and our suggestion list at their line. Drafted |
+| | A13 | 77 | S to ask | The completion list at the caret on Android with a hardware keyboard; our list stands in (batch 51). Drafted |
+| | A10 | 72 | S to ask | Gutter icons and taps (real breakpoints after the bars). Drafted |
+| | A11 | 73 | S to ask | Samsung's keyboard: Enter, Shift+arrows, and words composed even from a hardware keyboard; our workarounds go when it's fixed |
+| | A14 | 75 | S to ask | `LanguageConfiguration` can't load on Android (regex); ours reads the files meanwhile |
+| | A15 | 76 | S to ask | Typing over auto-inserted closers; ours does it for hardware keys |
+| | A18 | – | S to ask | Backspace back to a tab stop in leading spaces (VS Code's `useTabStops`); ours does it for hardware keys (batch 53) |
+| **D. Each release** | A12 | habit | S per release | Review each Aardink release against the plan and these lists, bump the pin, recheck (plan, "Release reviews"); with A19, check its reflection still works |
+
+Why these groups:
+* A: A7 is the first day of A5's daily use, and A6 follows the period the user picks. The general backlog's group 1 starts
+  from A5's measurements.
+* B: one piece of code puts all three at their line, and one request (A9) replaces it.
+* C: one session drafts the four not yet drafted and files all seven, for the user to post. A15 and A18 could be one issue
+  ("typing as VS Code does"), A9 and A13 cross-reference each other, and A11 now has the composing finding.
+* D: A19 adds a check to every release review.
 
 Watching, on Aardink's side: the hitch as a gesture starts (its 0.10 performance work), saved view state (1.0),
 and Samsung's keyboard composing words even from a hardware keyboard (batch 52).
 
-Loose ends, not sized:
-* The unsaved dot seen once after saving a restored deleted file (batch 39; not reproduced in three tries).
-* The terminal's toolbar row at phone width (batch 40; not looked at).
-* sora's inlay hint chip at a line's end sits half a row low (seen in batch 52).
-* Whether to continue the glibc test (70 d): the user's decision.
+Loose ends: placed in the groups above (11-08).
 
 To investigate (user, 10-28):
 * (Done in batch 16, with a notebook-side finding.) Plotly figures updating in place (the user's private-notebook-1.ipynb: `plot_handle =
