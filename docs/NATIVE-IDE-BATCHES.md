@@ -2439,7 +2439,7 @@ Loose ends: placed in the groups above (11-08).
 
 #### Release backlog (first release)
 
-**Next batch (user, 11-08):** A5, A6, A7, G20, G6 and group 2 of the general backlog (G14, G17, G5 and its loose ends); then
+Decisions and options are in [RELEASE-PLAN.md](RELEASE-PLAN.md). **Next batch (user, 11-08):** A5, A6, A7, G20, G6 and group 2 of the general backlog (G14, G17, G5 and its loose ends); then
 0.1.0. Registered 11-08, from the user: "let us think about releasing… items in the backlog I don't want to sweep under the rug…
 we have to polish the app for an initial release cycle". Nothing here is started. R1 decides which G and A items the first
 release waits for; the rest stay in their lists for later releases.
@@ -2447,8 +2447,8 @@ release waits for; the rest stay in their lists for later releases.
 | Group | # | Size | Description |
 |---|---|---|---|
 | **1. Decide** | R1 | Decided 11-08 | 0.1.0 follows the next batch: A5, A6, A7, G20, G6 and the whole of group 2 (G14, G17, G5 and its loose ends) |
-| | R2 | S, the user's | Name and identity: MaterialCode or AVF Studio for the repository, the app id (`com.avfstudio.nativeide`), the daemon (`avf-native-daemon`); icon and branding |
-| | R3 | S | Licence: a LICENSE file (Cargo says MIT; the app declares none), third-party notices in the app (Aardink Apache-2.0, tm4e EPL-2.0, termlib Apache-2.0…), with sora's LGPL gone first (A6) |
+| | R2 | S, the user's | Name and icon: shortlist Burrow, Quire, Traveler, Clarity, with icon ideas in [RELEASE-PLAN.md](RELEASE-PLAN.md); goes to the repository, app id and daemon |
+| | R3 | S | Licence **Apache-2.0** (decided 11-08): LICENSE and NOTICE files, Cargo's MIT changed, third-party notices in the app (Aardink, tm4e EPL-2.0, termlib…) |
 | **2. Build and ship** | R4 | M | Release builds: a signing key and where it's kept, R8 with keep rules (Aardink's reflection in `AardinkGeometry` needs them), version numbers from tags, APK size |
 | | R5 | M | CI (GitHub Actions): app unit tests (JDK 17 and 21), daemon tests, the arm64 daemon (zigbuild) bundled into the APK, the daemon for Linux and WSL hosts, checksums, a GitHub release from a tag |
 | | R6 | S–M | App and daemon versions: the app checks the guest daemon's version, not only the protocol number, and offers to update it with the one it carries; release notes for both |
