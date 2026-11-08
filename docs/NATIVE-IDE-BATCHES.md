@@ -2347,6 +2347,14 @@ User's pick: A5. 381 app unit tests pass.
   stop; perhaps a preview tab (tapped once), which may not be restored.
 * Left for the user: daily use for as long as they choose (the rest of A5), then phase 7.
 
+## 56. Contribution guidelines (11-08; done, docs only)
+User's pick: "write contribution guidelines so the overall idea stays reinforced". [CONTRIBUTING.md](../CONTRIBUTING.md) at the
+root, for people and coding agents: what MaterialCode is (a native editor with a Linux machine behind it, VS Code's model,
+memory first), Material You as the style guideline with the workbench's cards as the reference, the engine seam (talk to
+`EditorSurface`, internals in one place with a fallback, pinned versions, edits as edits, hardware keyboards first), a
+Settings switch considered per feature, licences, batches and the backlog, commit messages, and testing on the device
+without disturbing the person who uses it. Linked from the handoff, which is brought up to date.
+
 ## Backlog
 ### Open backlog (11-08)
 The current lists of what's open, in two: the general backlog, and the Aardink switch's until it's complete. The older

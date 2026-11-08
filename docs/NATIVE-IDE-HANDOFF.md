@@ -1,15 +1,16 @@
 # Native IDE (Track B) — handoff
 
-Last updated: 2026-11-04 (UTC−3). Read this first when resuming. The batch plan and its status are in [NATIVE-IDE-BATCHES.md](NATIVE-IDE-BATCHES.md). Scope decisions are in
-[NATIVE-ANDROID-IDE-SPEC.md](NATIVE-ANDROID-IDE-SPEC.md) under "Scope reset (2026-10-23)".
+Last updated: 2026-11-08 (UTC−3). Read this first when resuming. The batch plan and its status are in [NATIVE-IDE-BATCHES.md](NATIVE-IDE-BATCHES.md). Scope decisions are in
+[NATIVE-ANDROID-IDE-SPEC.md](NATIVE-ANDROID-IDE-SPEC.md) under "Scope reset (2026-10-23)". How work is done here (Material You,
+the engine seam, batches, testing on the device) is in [CONTRIBUTING.md](../CONTRIBUTING.md).
 
-## Current state (2026-11-04)
+## Current state (2026-11-08)
 
-* **Progress:** batches 1–40 are done, and 41 was exploration with no app change. Each is described in the batch plan.
+* **Progress:** batches 1–56 are done (41 was exploration with no app change). Each is described in the batch plan.
 * **What's open:** [Open backlog](NATIVE-IDE-BATCHES.md#open-backlog-11-08), in two lists: general, and the Aardink switch's, which replaces this file's old "Remaining" list.
 * **Next large piece:** the switch to Aardink: [AARDINK-SWITCH-PLAN.md](AARDINK-SWITCH-PLAN.md). Phases 0 to 6 are done (batches 42 to 55), on Aardink 0.9.0 (batch 45): **Aardink is the default editor**, sora-editor a setting away until phase 7 removes it, after the user's period of daily use. The workbench's own Material You cards are drawn over Aardink from its geometry (batch 54). Review each Aardink release against the plan (its "Release reviews"). Requests to Aardink are drafted or listed, not filed.
 * **Waiting on the user:** whether to continue the glibc test (backlog item 70 d). Claude Code's permission system blocked it, so it needs the user's approval.
-* **Tablet:** the latest build is installed, and the guest was rebooted at 16:47 on 11-04. The sections "Reference tablet" and "Done" below mostly date from 10-23, so some of what they describe may have moved on. The batch plan is the record since then.
+* **Tablet:** the latest build is installed (batch 55, Aardink the default and the user's choice). The sections "Reference tablet" and "Done" below mostly date from 10-23, so some of what they describe may have moved on. The batch plan is the record since then.
 
 ## Where things are
 
