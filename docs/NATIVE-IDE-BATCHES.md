@@ -2224,10 +2224,6 @@ what the switch is waiting on. Phases 0–3 are done (batches 42–46), on Aardi
 
 | # | Item | Size | Description |
 |---|------|------|-------------|
-| A13 | 77 | S to ask, blocks A5 | Ask Aardink for the completion list at the caret on Android with a hardware keyboard; until then suggestions are tap-only |
-| A14 | 75 | S to ask | Tell Aardink its `LanguageConfiguration` can't load on Android (regex); ours reads the files meanwhile |
-| A15 | 76 | S to ask | Ask Aardink for typing over auto-inserted closers; ours does it for hardware keys |
-| A16 | 46 | S | `else:` and the like moving back a level as they're typed, not only at Enter |
 | A2 | Phase 4 | M | Decorations: paused line, conflict tints, symbol and find highlights, cell rules, problem marks; interim breakpoints (red gutter bar, F9 and a menu); the large-file view and peek on read-only editors |
 | A3 | Phase 5 | M | Aardink's built-in ghost text, inlay hints and code lenses (Python cells, merge conflicts), in place of our overlays; first on a device with Samsung's keyboard |
 | A4 | Phase 5 | S–M, waits on A9 or a design | Next Edit's card and the definition peek, the two overlays with no built-in answer |
@@ -2239,6 +2235,11 @@ what the switch is waiting on. Phases 0–3 are done (batches 42–46), on Aardi
 | A10 | 72 | S to ask | Ask Aardink for gutter icons and taps (real breakpoints after A2's interim); drafted, the user will come back to it |
 | A11 | 73 | S to ask | Tell Aardink about the Samsung keyboard issue (Enter, Shift+arrows); our workaround goes when it's fixed |
 | A12 | habit | S per release | Review each Aardink release against the plan and these lists, bump the pin, recheck (plan, "Release reviews") |
+| A13 | 77 | S to ask, blocks A5 (or A17 does) | Ask Aardink for the completion list at the caret on Android with a hardware keyboard; drafted, until then suggestions are tap-only |
+| A14 | 75 | S to ask | Tell Aardink its `LanguageConfiguration` can't load on Android (regex); ours reads the files meanwhile |
+| A15 | 76 | S to ask | Ask Aardink for typing over auto-inserted closers; ours does it for hardware keys |
+| A16 | 46 | S | `else:` and the like moving back a level as they're typed, not only at Enter |
+| A17 | 78 | M | Our own suggestion list for hardware keyboards meanwhile; replaced by Aardink's when A13 ships |
 
 Watching, on Aardink's side: the hitch as a gesture starts (its 0.10 performance work), saved view state (1.0),
 ghost text and lenses with Samsung's keyboard (untested by Aardink as of 0.9.0).
@@ -2639,7 +2640,11 @@ day, L several days.
   76. Ask Aardink for typing over closers it auto-inserted (VS Code's `autoClosingOvertype`). Ours does it for hardware keys. S to ask.
   77. Ask Aardink for the completion list at the caret on Android with a hardware keyboard (`PlatformInfo.hasSoftKeyboard` is
       fixed at true there), with its keys. Until then suggestions can't be chosen from the keyboard: this blocks the default
-      flip. S to ask; M to work around in the app (our own list), not planned.
+      flip. S to ask. Drafted in [AARDINK-UPSTREAM-REQUESTS.md](AARDINK-UPSTREAM-REQUESTS.md) (11-08); not filed.
+  78. Meanwhile, our own suggestion list for hardware keyboards in the Aardink editor (user, 11-08: work around, and replace it
+      when Aardink ships 77): the service's items, filtered and ranked as the app does for sora, Up, Down, Enter and Tab through
+      the window-level key routing, shown where it needs no caret position (docked to the editor's edge) until positions exist
+      (71). Remove it, and use Aardink's, as soon as a release has 77. M.
 * Still left out on purpose: multi-cursor, sticky scroll, minimap (Aardink switch; folding came in batch 31);
   split editor groups and the 3-way merge editor; tasks.json; MCP, other AI providers and the
   built-in chat agent (Copilot, Claude Code and Gemini through ACP instead); foldable postures

@@ -108,3 +108,48 @@ Ranges already follow edits through `TrackedRanges`, so breakpoints would move w
 - [x] Belongs in `editor` (generic, language-agnostic)
 - [ ] Belongs in a consumer app via `LanguageService` / `IncrementalTokenizer` / `FoldingProvider`
 - [ ] Not sure
+
+---
+
+**Title:** [feature] Completion list at the caret on Android when a hardware keyboard is attached
+
+## Problem
+
+On Android tablets with a physical keyboard (ours is a Galaxy Tab S11 Ultra with Samsung's Book Cover Keyboard),
+completions only ever show as the touch strip under the editor. The list at the caret, with Up, Down, Enter and Tab
+to choose an item, is never used, so with a keyboard a suggestion can be tapped but not chosen from the keys.
+
+In 0.9.0, `PlatformInfo.android.kt` has `actual val hasSoftKeyboard: Boolean = true`, and `CodeEditorLayout` reads
+`val completionAtCaret = !PlatformInfo.hasSoftKeyboard`. The key handling for the list (`if (!completionAtCaret || …)
+return@key false`) and the commit characters are tied to the same flag, so they're off on Android whatever is attached.
+
+## Proposed solution
+
+Decide at runtime, and let a host decide too:
+
+```kotlin
+// EditorOptions
+val completionPresentation: CompletionPresentation = CompletionPresentation.Auto
+
+enum class CompletionPresentation { Auto, AtCaret, Strip }
+```
+
+`Auto` on Android could show the list at the caret while `Configuration.keyboard == KEYBOARD_QWERTY` and
+`hardKeyboardHidden == HARDKEYBOARDHIDDEN_NO`, updating when the keyboard is attached or detached, and the strip
+otherwise. A host that knows better (ours routes hardware keys itself) would pass `AtCaret` or `Strip`.
+
+A hardware keyboard's characters may reach the editor through the input method (`commitText`, often composing)
+rather than as key events, so `LocalInputModeManager` alone may stay in touch mode; the configuration check
+doesn't depend on that.
+
+## Alternatives considered
+
+- Drawing our own list from `completions`: we're doing it meanwhile, but it duplicates the editor's filtering,
+  ranking, detail pane and commit characters, and needs a position for the caret, which hosts can't get.
+- A build-time flag: tablets attach and detach keyboards, so it has to follow the device's state.
+
+## Scope
+
+- [x] Belongs in `editor` (generic, language-agnostic)
+- [ ] Belongs in a consumer app via `LanguageService` / `IncrementalTokenizer` / `FoldingProvider`
+- [ ] Not sure

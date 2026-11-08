@@ -35,7 +35,7 @@ Filing them is the user's decision.
 | 4 | Semantic token layer | **Delivered in 0.9** (`semanticTokens`, `semanticHighlighting`). Ours works already (batch 44); theirs can replace it once completion goes through `LanguageService` | Optional |
 | 5 | Saved view state (scroll, folds) | 1.0 | Optional: we can keep it per tab |
 | 6 | The slow frames as a gesture starts | 0.10's performance work (Android gates, baseline profile). Unchanged in 0.9 (measured 11-08) | Better scrolling |
-| 8 | **Completion list at the caret on Android with a hardware keyboard** (backlog 77): `PlatformInfo.hasSoftKeyboard` is fixed at true, so suggestions are a touch strip only | Not on the roadmap | Choosing suggestions from the Book Cover; **blocks phase 6** |
+| 8 | **Completion list at the caret on Android with a hardware keyboard** (backlog 77): `PlatformInfo.hasSoftKeyboard` is fixed at true, so suggestions are a touch strip only | Not on the roadmap | Choosing suggestions from the Book Cover; **blocks phase 6**. Drafted. Meanwhile our own list (backlog 78), removed when it ships |
 | 9 | `LanguageConfiguration` loads on Android (backlog 75): a regex in its initializer is refused there | Bug in 0.9.0 | Dropping our own reader |
 | 10 | Type over auto-inserted closers (backlog 76) | Not on the roadmap | Dropping our key-level type-over, and the on-screen keyboard's doubled closers |
 | 7 | Samsung's keyboard: Enter and Shift+arrows (backlog 73) | Not mentioned; 1.0 plans device validation with Samsung's keyboard. **Still there in 0.9** (lab, 11-08) | Removing our workaround |
