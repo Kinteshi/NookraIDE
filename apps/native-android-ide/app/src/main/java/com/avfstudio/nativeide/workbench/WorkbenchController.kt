@@ -9729,16 +9729,27 @@ class WorkbenchController(private val context: Context) {
         if (dialog != null) return false
         if (event.action == AndroidKeyEvent.ACTION_UP) return consumedKeyDowns.remove(event.keyCode)
         if (event.action != AndroidKeyEvent.ACTION_DOWN) return false
+        // Our suggestion list in the Aardink editor takes its keys first (arrows, Enter, Tab, Escape),
+        // before Tab, Enter and Escape are left to the editor below.
+        if (focusArea == FocusArea.Editor && (editorSurface as? AardinkEditorSurface)?.suggestions?.handleKey(event) == true) {
+            consumedKeyDowns += event.keyCode
+            return true
+        }
+        // Copilot's next edit in the Aardink editor: Tab goes to it or accepts it, Escape dismisses it (sora's view does
+        // this itself). Ghost text Aardink shows at the same time is accepted or dismissed first.
+        if (focusArea == FocusArea.Editor && nextEdit != null && editorSurface is AardinkEditorSurface &&
+            !event.isCtrlPressed && !event.isAltPressed && !event.isShiftPressed &&
+            (event.keyCode == AndroidKeyEvent.KEYCODE_TAB || event.keyCode == AndroidKeyEvent.KEYCODE_ESCAPE)
+        ) {
+            runCommand(if (event.keyCode == AndroidKeyEvent.KEYCODE_TAB) "editor.action.inlineSuggest.commit" else "editor.action.inlineSuggest.hide")
+            consumedKeyDowns += event.keyCode
+            return true
+        }
         val modified = event.isCtrlPressed || event.isAltPressed
         if (focusArea == FocusArea.Editor && !modified &&
             event.keyCode in setOf(AndroidKeyEvent.KEYCODE_TAB, AndroidKeyEvent.KEYCODE_ENTER, AndroidKeyEvent.KEYCODE_ESCAPE)
         ) {
             return false
-        }
-        // Our suggestion list in the Aardink editor takes its keys first (arrows, Enter, Tab, Escape).
-        if (focusArea == FocusArea.Editor && (editorSurface as? AardinkEditorSurface)?.suggestions?.handleKey(event) == true) {
-            consumedKeyDowns += event.keyCode
-            return true
         }
         val handled = handleKeyDown(event) || sendTerminalControlKey(event) || typePairKey(event)
         if (handled) consumedKeyDowns += event.keyCode

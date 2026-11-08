@@ -1,6 +1,7 @@
 # Plan: switching from sora-editor to Aardink
 
-Status: **phase 3 done** (2026-11-08, batch 46) on Aardink 0.9.0; sora stays the default. Phase 4 next; the flip waits on request 8.
+Status: **phases 3 to 5 done** (2026-11-08, batches 46 to 51, checked on the tablet in batch 52) on Aardink 0.9.0; sora stays the
+default. Phase 6, the flip, is next: nothing blocks it now that our own suggestion list stands in for request 8.
 
 **Decided by the user:** the switch will happen, for the licence (Apache-2.0 instead of sora's LGPL-2.1).
 On 11-04 they judged the measured memory and scrolling not to be impediments, and expect Aardink's release
@@ -29,13 +30,13 @@ Filing them is the user's decision.
 
 | # | Request | Where it stands (0.9.0) | Unblocks |
 |---|---|---|---|
-| 1 | Public text positions: pixel rect for an offset or line | Not on the roadmap. **Needed far less since 0.9:** inline text, inlay hints, code lens, ghost text, Markdown hover and signature help are built in | Next Edit's card and the definition peek, the two overlays left without a built-in answer |
-| 2 | Gutter icon in a decoration, and a host callback for gutter taps | Not on the roadmap | Breakpoints |
-| 3 | Ghost text, inlay hints, code lens | **Delivered in 0.9** (`InlineCompletionProvider`, `inlayHints`, `codeLenses`). Not yet tried on a device by Aardink, nor with Samsung's keyboard | Copilot's suggestions, inlay hints, lenses, Python cell and merge conflict actions |
+| 1 | Public text positions: pixel rect for an offset or line | Not on the roadmap. **Needed far less since 0.9:** inline text, inlay hints, code lens, ghost text, Markdown hover and signature help are built in | Nothing since batch 49: Next Edit's card and the peek dock at an edge. With it they'd sit under their line |
+| 2 | Gutter icon in a decoration, and a host callback for gutter taps | Not on the roadmap | Breakpoint icons and taps in the gutter; bars by kind, F9 and the menu meanwhile (batch 47) |
+| 3 | Ghost text, inlay hints, code lens | **Delivered in 0.9** (`InlineCompletionProvider`, `inlayHints`, `codeLenses`). In use since batch 48; ghost text, hints and lenses checked on the tablet with Samsung's keyboard (batch 52) | Copilot's suggestions, inlay hints, lenses, Python cell and merge conflict actions |
 | 4 | Semantic token layer | **Delivered in 0.9** (`semanticTokens`, `semanticHighlighting`). Ours works already (batch 44); theirs can replace it once completion goes through `LanguageService` | Optional |
 | 5 | Saved view state (scroll, folds) | 1.0 | Optional: we can keep it per tab |
 | 6 | The slow frames as a gesture starts | 0.10's performance work (Android gates, baseline profile). Unchanged in 0.9 (measured 11-08) | Better scrolling |
-| 8 | **Completion list at the caret on Android with a hardware keyboard** (backlog 77): `PlatformInfo.hasSoftKeyboard` is fixed at true, so suggestions are a touch strip only | Not on the roadmap | Choosing suggestions from the Book Cover; **blocks phase 6**. Drafted. Meanwhile our own list (backlog 78), removed when it ships |
+| 8 | **Completion list at the caret on Android with a hardware keyboard** (backlog 77): `PlatformInfo.hasSoftKeyboard` is fixed at true, so suggestions are a touch strip only | Not on the roadmap | Choosing suggestions from the Book Cover. Drafted. Our own list stands in since batch 51 (backlog 78, a setting), so it no longer blocks phase 6; removed when it ships |
 | 9 | `LanguageConfiguration` loads on Android (backlog 75): a regex in its initializer is refused there | Bug in 0.9.0 | Dropping our own reader |
 | 10 | Type over auto-inserted closers (backlog 76) | Not on the roadmap | Dropping our key-level type-over, and the on-screen keyboard's doubled closers |
 | 7 | Samsung's keyboard: Enter and Shift+arrows (backlog 73) | Not mentioned; 1.0 plans device validation with Samsung's keyboard. **Still there in 0.9** (lab, 11-08) | Removing our workaround |
@@ -77,14 +78,21 @@ If 1 or 2 are declined, a fork is allowed by the licence but is a real maintenan
 * Left: suggestions can't be chosen from a hardware keyboard (request 8); `else:` dedent as typed; hover and snippets
   unchecked on the tablet.
 
-### Phase 4: decorations (M)
+### Phase 4: decorations (done 11-08, batch 47)
+Done as below, except that the peek moved to phase 5's two overlays. Breakpoints are bars by kind (plain red, conditional
+amber, logpoint violet), and Aardink's overview ruler replaces the app's problem marks.
+
 * Paused line, conflict tints, symbol and find highlights, Python cell rules, problem marks on the scrollbar
   (its overview ruler).
 * Breakpoints, interim: a red gutter bar, toggled by F9 and a menu item (`contextMenuItems`, `touchMenuItems`),
   including conditional ones. No icon or gutter tap until request 2.
 * The large-file view and `PeekView` onto read-only editors.
 
-### Phase 5: what's drawn over the code (M; unblocked by 0.9 except two overlays)
+### Phase 5: what's drawn over the code (done 11-08, batches 48 and 49)
+Done as below. The two overlays dock at the editor's edge (Next Edit's card, the peek), with the edit itself marked in the
+text; inline values and blame are text after the line. Batch 50 matched sora's line height and re-indents `else:` as typed;
+batch 51 added our suggestion list for hardware keyboards.
+
 Built in since 0.9, so these move onto Aardink's own: ghost text (`InlineCompletionProvider`, Tab, Alt+] and Alt+[),
 inlay hints (`inlayHints`), code lenses (`codeLenses`) and through them Python cell actions and merge conflict actions,
 hover and parameter hints (Markdown), fold arrows, snippet stops, find scope.
@@ -125,7 +133,7 @@ Checked on the tablet before phase 6. Features the app has today that the switch
 |---|---|
 | Real keyboards or IME don't hold up | Phase 1 tests them first; stop before the expensive work |
 | Requests 1 and 2 are declined or slow | Interim breakpoints work; two overlays wait; sora stays default meanwhile |
-| Samsung's keyboard and Aardink disagree (Enter, selection; ghost text and lenses untested there) | Our workaround (batch 43); each release rechecked in the lab |
+| Samsung's keyboard and Aardink disagree (Enter, selection; it composes words even from a hardware keyboard) | Our workaround (batch 43); each release rechecked in the lab |
 | Memory pressure destabilises the guest | Not a gate (user's decision). Phase 0 looks good; measured again in phase 6, since it has corrupted the guest before |
 | API breaks in a minor | Pinned version, one bump per batch |
 | One main author | Apache-2.0 allows a fork if the project stops |

@@ -9,7 +9,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -72,6 +74,8 @@ internal fun PeekOverlay(controller: WorkbenchController) {
         border = BorderStroke(1.dp, colors.primary.copy(alpha = 0.6f)),
         shadowElevation = 4.dp,
         modifier = Modifier
+            // Aardink's: at the editor's top or bottom edge, so the height below is the peek's, not the editor's.
+            .then(if (view == null) Modifier.fillMaxSize().wrapContentHeight(if (dockBottom) Alignment.Bottom else Alignment.Top) else Modifier)
             .fillMaxWidth()
             .height(height)
             .padding(horizontal = 8.dp)
@@ -79,7 +83,7 @@ internal fun PeekOverlay(controller: WorkbenchController) {
                 val placeable = measurable.measure(constraints.copy(minHeight = 0))
                 val below = lineBottom.roundToInt() + with(density) { 2.dp.roundToPx() }
                 val top = when {
-                    view == null -> if (dockBottom) constraints.maxHeight - placeable.height else 0
+                    view == null -> 0
                     below + placeable.height <= constraints.maxHeight -> below
                     else -> (lineBottom - view.rowHeight).roundToInt() - placeable.height
                 }

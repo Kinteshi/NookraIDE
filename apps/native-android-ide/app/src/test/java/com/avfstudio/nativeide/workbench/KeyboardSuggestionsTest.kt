@@ -84,6 +84,7 @@ class KeyboardSuggestionsTest {
         list.select(0)
         list.accept(list.shown!!.first())
         assertEquals("import os\nx = os_path", state.text)
+        // What it put in doesn't open the list again.
         assertNull(list.shown)
     }
 
@@ -112,5 +113,29 @@ class KeyboardSuggestionsTest {
         assertEquals(4 to 11, acceptRange(item("x", range = 4 until 11), text, 7, 4, 5))
         assertEquals(4 to 7, acceptRange(item("x"), text, 7, 4, 5))
         assertEquals(4, wordStart(text, 7))
+    }
+
+    @Test
+    fun aComposedWordGrowingCountsAsTyping() {
+        val (state, list, service) = setUp("", listOf(item("print"), item("property")))
+        // As Samsung's keyboard sends it: the composing word replaced by itself and the next letter.
+        state.executeEdits(listOf(TextEdit(0 until 0, "p")), listOf(TextRange(1)))
+        state.executeEdits(listOf(TextEdit(0 until 1, "pr")), listOf(TextRange(2)))
+        state.executeEdits(listOf(TextEdit(0 until 2, "pri")), listOf(TextRange(3)))
+        assertEquals(1, service.asked)
+        assertEquals(listOf("print"), list.shown?.map { it.label })
+        // And shrinking, as a backspace in a composition comes.
+        state.executeEdits(listOf(TextEdit(0 until 3, "pr")), listOf(TextRange(2)))
+        assertEquals(listOf("print", "property"), list.shown?.map { it.label })
+    }
+
+    @Test
+    fun theTypedCaseAndNoImportComeFirst() {
+        val items = listOf(
+            CompletionItem("PrinceEdwardIsland", CompletionKind.Class, "PrinceEdwardIsland", detail = "(import workalendar)"),
+            CompletionItem("principal", CompletionKind.Function, "principal", detail = " (import sympy)"),
+            CompletionItem("print", CompletionKind.Function, "print", detail = "Overload[...]"),
+        )
+        assertEquals(listOf("print", "principal", "PrinceEdwardIsland"), filterSuggestions(items, "prin", 4, 0).map { it.label })
     }
 }

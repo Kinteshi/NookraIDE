@@ -79,17 +79,27 @@ internal class KeyboardSuggestions(private val state: CodeEditorState, private v
     private var anchor = -1
     private var askedAt = -1
     private var request: Job? = null
+    private var applying = false
     private var resolving: Job? = null
 
-    /** An edit Aardink reports, as [offset], what went and what came: typing asks or filters, anything else closes. */
+    /**
+     * An edit Aardink reports, as [offset], what went and what came: typing asks or filters, anything else closes. Samsung's
+     * keyboard composes words even from a hardware keyboard, so a letter often comes as the word so far replaced by itself
+     * and the letter (`pr` → `pri`): an edit that leaves the caret after a word it put there counts as typing.
+     */
     fun edited(offset: Int, deletedLength: Int, inserted: String) {
+        // What accepting an item puts in isn't typing: it would ask again for the word just finished.
+        if (applying) return
         val caret = state.selection.takeIf { it.collapsed }?.start ?: return dismiss()
-        val typedOne = deletedLength == 0 && inserted.length == 1 && offset + 1 == caret
-        val deleted = deletedLength > 0 && inserted.isEmpty() && offset == caret
+        val atEnd = offset + inserted.length == caret
+        val word = atEnd && inserted.isNotEmpty() && inserted.all(::isWordChar) && deletedLength < inserted.length + 1
+        val trigger = atEnd && deletedLength == 0 && inserted.length == 1 && inserted[0] in triggerCharacters
+        val deleted = deletedLength > 0 && (inserted.isEmpty() || (atEnd && inserted.all(::isWordChar))) && caret <= offset + inserted.length
+        val open = shown != null || request?.isActive == true
         when {
-            typedOne && isWordChar(inserted[0]) -> if (shown != null || request?.isActive == true) follow(caret) else if (whileTyping) ask(invoked = false)
-            typedOne && inserted[0] in triggerCharacters -> if (whileTyping) ask(invoked = false) else dismiss()
-            deleted && (shown != null || request?.isActive == true) -> follow(caret)
+            word -> if (open) follow(caret) else if (whileTyping) ask(invoked = false)
+            trigger -> if (whileTyping) ask(invoked = false) else dismiss()
+            deleted && open -> follow(caret)
             else -> dismiss()
         }
     }
@@ -190,18 +200,29 @@ internal class KeyboardSuggestions(private val state: CodeEditorState, private v
         val caret = state.selection.takeIf { it.collapsed }?.start ?: return dismiss()
         val (start, end) = acceptRange(item, state.text, caret, anchor, askedAt)
         dismiss()
-        if (item.isSnippet) {
-            state.selection = androidx.compose.ui.text.TextRange(start, end)
-            state.execute(EditorCommand.InsertSnippet(item.insertText))
-        } else {
-            state.executeEdits(listOf(TextEdit(start until end, item.insertText)), listOf(androidx.compose.ui.text.TextRange(start + item.insertText.length)))
+        applying {
+            if (item.isSnippet) {
+                state.selection = androidx.compose.ui.text.TextRange(start, end)
+                state.execute(EditorCommand.InsertSnippet(item.insertText))
+            } else {
+                state.executeEdits(listOf(TextEdit(start until end, item.insertText)), listOf(androidx.compose.ui.text.TextRange(start + item.insertText.length)))
+            }
         }
         val service = service ?: return
         scope.launch {
             val resolved = withTimeoutOrNull(RESOLVE_TIMEOUT_MS) { withContext(state.computeDispatcher) { runCatching { service.resolveCompletion(item) }.getOrNull() } } ?: item
             // Only edits before the word: above it, the text is as the server saw it.
             val others = resolved.additionalEdits.filter { it.range.last < start }
-            if (others.isNotEmpty()) state.executeEdits(others)
+            if (others.isNotEmpty()) applying { state.executeEdits(others) }
+        }
+    }
+
+    private inline fun applying(edit: () -> Unit) {
+        applying = true
+        try {
+            edit()
+        } finally {
+            applying = false
         }
     }
 
@@ -226,8 +247,8 @@ internal fun wordStart(text: CharSequence, caret: Int): Int {
 }
 
 /**
- * [items] that match what's typed of each, in order: by priority, then those starting with it, otherwise as the server
- * sorted them. What's typed runs from the start of what an item replaces (or the word, [anchor]) to [caret].
+ * [items] that match what's typed of each, in order: by priority, then those starting with it (its case first), then
+ * those needing no import, otherwise as the server sorted them. What's typed runs from the start of what an item replaces (or the word, [anchor]) to [caret].
  */
 internal fun filterSuggestions(items: List<CompletionItem>, text: CharSequence, caret: Int, anchor: Int): List<CompletionItem> =
     items.map { item ->
@@ -235,7 +256,20 @@ internal fun filterSuggestions(items: List<CompletionItem>, text: CharSequence, 
         item to text.subSequence(start, caret).toString()
     }
         .filter { (item, typed) -> suggestionMatches(typed, item.filterText) }
-        .sortedWith(compareBy({ it.first.sortPriority }, { (item, typed) -> if (item.filterText.startsWith(typed, ignoreCase = true)) 0 else 1 }))
+        .sortedWith(
+            compareBy(
+                { it.first.sortPriority },
+                { (item, typed) ->
+                    when {
+                        item.filterText.startsWith(typed) -> 0
+                        item.filterText.startsWith(typed, ignoreCase = true) -> 1
+                        else -> 2
+                    }
+                },
+                // What's there already before what another module would have to be imported for (a server's auto-imports).
+                { (item, _) -> if (item.detail?.trimStart()?.startsWith("(import ") == true) 1 else 0 },
+            ),
+        )
         .map { it.first }
 
 /** Whether [typed] is in [candidate] as VS Code matches a suggestion: its characters in order, from a word's start. */

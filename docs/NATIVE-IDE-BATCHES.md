@@ -2250,6 +2250,31 @@ User's pick: A17, until Aardink shows its list at the caret with a keyboard (req
   strip back. Ctrl+Space opens ours while it's in charge. Without a keyboard, Aardink's strip as before.
 * Goes when an Aardink release has request 8: the backlog's A17 says so.
 
+## 52. Aardink switch: batches 47 to 51 on the tablet, and what that fixed (11-08; done)
+375 app unit tests pass. The engine had been set back to sora by the user; it was switched to Aardink for the check and back
+to sora after. Checked with the Book Cover attached and the test keyboard, guest running, in a throwaway `~/Projects/b52`
+(deleted after, with the staged scripts; breakpoints cleared):
+* Code lenses (Run Cell, Run Above, Run Below; "1 reference"), inlay hints in the line (`: Unknown`, `width=`), cell
+  markers tinted, problem dots and the overview ruler. Rows as tall as sora's.
+* Copilot's ghost text, accepted with Tab; the next edit in the text (green, `⏎` on one row) with its card docked at the top;
+  both at once, Tab takes the ghost text first.
+* `else:` moving back to the `if` as its colon is typed. Breakpoints by F9 as red bars, moving with a line inserted above and
+  back with undo. The merge conflict's tints and lens row; Accept Incoming resolved it. The peek from the reference lens.
+* Our suggestion list: asked as a word is typed, Down and Enter accept, the documentation resolved beside it.
+
+Fixed on the way:
+* **The list never opened at first: Samsung's keyboard composes words even from the Book Cover**, so a letter comes as the
+  word replaced by itself plus the letter (`pr` → `pri`), not as one character typed. Such an edit now counts as typing.
+* Enter and Tab didn't reach the list: the workbench leaves them to the editor, and the list's keys were looked at after that.
+* Accepting an item opened the list again (its own edit looked like typing); our edits are now ignored.
+* Ranking: what's typed in its own case first, then items needing no import (`print` before `PrinceEdwardIsland`).
+* Tab and Escape didn't reach Copilot's next edit in Aardink (sora's view routes them itself); they do now.
+* The peek docked at the top over its own line: its height was set before it was placed. It docks away from the line now.
+
+Not checked on the tablet: the paused line and inline values (no debug session), blame (off in the user's settings), the
+right-click and touch menus' breakpoint items, the large-file view, the on-screen keyboard. Seen in sora, not new: its
+inlay hint chip at a line's end sits half a row low (loose ends).
+
 ## Backlog
 ### Open backlog (11-08)
 The current lists of what's open, in two: the general backlog, and the Aardink switch's until it's complete. The older
@@ -2282,33 +2307,29 @@ A for Aardink). "Item" is the number in the lists below, where one exists.
 #### Aardink switch backlog
 
 Until Aardink replaces sora: the remaining phases of the [plan](AARDINK-SWITCH-PLAN.md), which has the details, and
-what the switch is waiting on. Phases 0–3 are done (batches 42–46), on Aardink 0.9.0 (batch 45); A1 was phase 3.
+what the switch is waiting on. Phases 0–5 are done (batches 42–52), on Aardink 0.9.0 (batch 45); A1 was phase 3, and
+A2, A3, A4, A8, A16 and A17 were done in batches 47–52.
 
 | # | Item | Size | Description |
 |---|------|------|-------------|
-| A2 | Phase 4 | M | Decorations: paused line, conflict tints, symbol and find highlights, cell rules, problem marks; interim breakpoints (red gutter bar, F9 and a menu); the large-file view and peek on read-only editors |
-| A3 | Phase 5 | M | Aardink's built-in ghost text, inlay hints and code lenses (Python cells, merge conflicts), in place of our overlays; first on a device with Samsung's keyboard |
-| A4 | Phase 5 | S–M, waits on A9 or a design | Next Edit's card and the definition peek, the two overlays with no built-in answer |
 | A5 | Phase 6 | S–M, then time | Parity list on the tablet, make Aardink the default, measure the real app (memory, key to frame, guest), use it day to day |
 | A6 | Phase 7 | S–M | Remove sora: the setting, its classes, the two files in sora's package; carry tm4e as a module (upstream 0.18.0 or sora's copy); licence notes |
 | A7 | 43 | S, the user's | Try the Aardink engine on the Book Cover itself, and the on-screen keyboard |
-| A8 | 44 | S | Line height: Aardink's lines are taller than sora's at the same font size |
-| A9 | 71 | S to ask | Ask Aardink for public text positions (for A4); drafted, the user will come back to it |
+| A9 | 71 | S to ask | Ask Aardink for public text positions: Next Edit's card, the peek and our list would sit at their line instead of an edge; nothing waits on it. Drafted, the user will come back to it |
 | A10 | 72 | S to ask | Ask Aardink for gutter icons and taps (real breakpoints after A2's interim); drafted, the user will come back to it |
 | A11 | 73 | S to ask | Tell Aardink about the Samsung keyboard issue (Enter, Shift+arrows); our workaround goes when it's fixed |
 | A12 | habit | S per release | Review each Aardink release against the plan and these lists, bump the pin, recheck (plan, "Release reviews") |
-| A13 | 77 | S to ask, blocks A5 (or A17 does) | Ask Aardink for the completion list at the caret on Android with a hardware keyboard; drafted, until then suggestions are tap-only |
+| A13 | 77 | S to ask | Ask Aardink for the completion list at the caret on Android with a hardware keyboard; drafted. Our list stands in (batch 51), and goes when it ships |
 | A14 | 75 | S to ask | Tell Aardink its `LanguageConfiguration` can't load on Android (regex); ours reads the files meanwhile |
 | A15 | 76 | S to ask | Ask Aardink for typing over auto-inserted closers; ours does it for hardware keys |
-| A16 | 46 | S | `else:` and the like moving back a level as they're typed, not only at Enter |
-| A17 | 78 | M | Our own suggestion list for hardware keyboards meanwhile; replaced by Aardink's when A13 ships |
 
 Watching, on Aardink's side: the hitch as a gesture starts (its 0.10 performance work), saved view state (1.0),
-ghost text and lenses with Samsung's keyboard (untested by Aardink as of 0.9.0).
+and Samsung's keyboard composing words even from a hardware keyboard (batch 52).
 
 Loose ends, not sized:
 * The unsaved dot seen once after saving a restored deleted file (batch 39; not reproduced in three tries).
 * The terminal's toolbar row at phone width (batch 40; not looked at).
+* sora's inlay hint chip at a line's end sits half a row low (seen in batch 52).
 * Whether to continue the glibc test (70 d): the user's decision.
 
 To investigate (user, 10-28):
