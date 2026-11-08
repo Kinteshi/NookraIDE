@@ -2376,7 +2376,6 @@ Grouped (11-08) so that what's cheaper done together is done together; the numbe
 | **3. Backends, and running without Terminal** | G13 | 65 | S–M to explore, L+ to adopt | Other backends: proot, Termux and others |
 | | G16 | 68 | S to try the grant, L+ to do | Bundle the image and use AVF without Terminal: not for store installs |
 | | G18 | 70 | L overall | Mode without Terminal: local backend, ML on another machine, glibc if proven (continuing the glibc test is the user's decision) |
-| | G15 | 67 | S–M to answer, XL to do | VS Code port, or a native app and Rust backend from one |
 | **4. Tests and accessibility** | G9 | 22 | M | Accessibility pass |
 | | G10 | 23 | L | Automated on-device tests and screenshot comparisons |
 | **5. Notebook outputs** | G3 | 57 | S | Data viewer filter with the on-screen keyboard |
@@ -2395,8 +2394,8 @@ Why these groups:
    whose measurements become their starting point.
 2. One state machine: the guest stopping or being killed (phantom limit), offline copies, Recent, deleted files. One
    walkthrough on the tablet with the guest stopped finds them all.
-3. One question: what the app runs on when Terminal's VM isn't there. One exploration and one write-up, then a decision; G15
-   answers the same question from the other side.
+3. One question: what the app runs on when Terminal's VM isn't there. One exploration and one write-up, then a decision.
+   (G15, a VS Code port, was dropped by the user on 11-08: won't do.)
 4. The accessibility pass labels the UI, and automated tests find things by those labels: doing the labels first makes the
    tests cheaper and keeps them stable.
 5. Both are notebook outputs, in the same code and checked with the same notebooks.
@@ -2440,13 +2439,14 @@ Loose ends: placed in the groups above (11-08).
 
 #### Release backlog (first release)
 
-Registered 11-08, from the user: "let us think about releasing… items in the backlog I don't want to sweep under the rug…
+**Next batch (user, 11-08):** A5, A6, A7, G20, G6 and group 2 of the general backlog (G14, G17, G5 and its loose ends); then
+0.1.0. Registered 11-08, from the user: "let us think about releasing… items in the backlog I don't want to sweep under the rug…
 we have to polish the app for an initial release cycle". Nothing here is started. R1 decides which G and A items the first
 release waits for; the rest stay in their lists for later releases.
 
 | Group | # | Size | Description |
 |---|---|---|---|
-| **1. Decide** | R1 | S, the user's | What the first release waits for. Proposal: A5's daily use then A6 (sora out); G5, G6, G17 and group 2's loose ends; G14's walkthrough; the basics of G9 |
+| **1. Decide** | R1 | Decided 11-08 | 0.1.0 follows the next batch: A5, A6, A7, G20, G6 and the whole of group 2 (G14, G17, G5 and its loose ends) |
 | | R2 | S, the user's | Name and identity: MaterialCode or AVF Studio for the repository, the app id (`com.avfstudio.nativeide`), the daemon (`avf-native-daemon`); icon and branding |
 | | R3 | S | Licence: a LICENSE file (Cargo says MIT; the app declares none), third-party notices in the app (Aardink Apache-2.0, tm4e EPL-2.0, termlib Apache-2.0…), with sora's LGPL gone first (A6) |
 | **2. Build and ship** | R4 | M | Release builds: a signing key and where it's kept, R8 with keep rules (Aardink's reflection in `AardinkGeometry` needs them), version numbers from tags, APK size |
@@ -2456,6 +2456,7 @@ release waits for; the rest stay in their lists for later releases.
 | | R8 | M | Material You pass: cards, dialogs and banners consistent (as the large-file banner wasn't), empty states, phone width (the terminal toolbar loose end) |
 | | R9 | S–M | Diagnostics for bug reports: a Copy Diagnostics command (versions, device, guest state, recent errors); no telemetry |
 | | R10 | S | Out of the release: the aardink-lab module, debug probes, Track A's leftovers (SPEC.md, the untracked `android/`), developer docs kept apart from users' |
+| **4. The repository** | R11 | S–M | This branch becomes the definitive `main`; the other branches and trials (old `main`, the four `agents/*` on GitHub) are scrapped, after a check of the history for secrets; release tags from then on (user, 11-08) |
 
 Why these groups: 1 sets the scope and the name, which everything else is labelled with; 2 is one pipeline, built once; 3 is
 one pass through the app as a new user meets it.
