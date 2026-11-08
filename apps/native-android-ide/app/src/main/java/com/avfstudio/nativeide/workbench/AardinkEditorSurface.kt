@@ -196,6 +196,16 @@ internal class AardinkEditorSurface(val state: CodeEditorState) : EditorSurface 
         })
     }
 
+    /** Text after the end of each line in [notes] (line → text) for [owner], in [color]: inline values, blame. */
+    fun setLineEndNotes(owner: String, notes: Map<Int, String>, color: Color) {
+        val lines = state.document.lineCount
+        state.setDecorations(owner, notes.mapNotNull { (line, note) ->
+            if (line !in 0 until lines || note.isBlank()) return@mapNotNull null
+            val end = state.document.lineStart(line) + state.document.lineText(line).length
+            Decoration(end until end, DecorationStyle(after = "    $note", inlineColor = color))
+        })
+    }
+
     /** Find in selection's scope, shaded while the find widget is open (VS Code's `findRangeHighlightBackground`). */
     fun setFindScope(scope: IntRange?, color: Color) {
         val length = state.document.length

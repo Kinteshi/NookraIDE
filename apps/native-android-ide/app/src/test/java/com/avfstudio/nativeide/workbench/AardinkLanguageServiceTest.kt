@@ -83,4 +83,30 @@ class AardinkLanguageServiceTest {
         surface.setProblems(emptyList(), EditorConfig(problemUnderlines = false)) {}
         assertTrue(surface.problems.isEmpty())
     }
+
+    @Test
+    fun cellsAndConflictsGetLensesOnTheirFirstLine() {
+        val text = "# %%\nx = 1\n# %% [markdown]\n# text\n<<<<<<< HEAD\na\n=======\nb\n>>>>>>> other\n"
+        val document = com.aardarch.aardink.core.CodeDocument(text)
+        val lenses = textLenses(text, document, cells = true, controller = null)
+        assertEquals(listOf("Run Cell", "Run Above", "Run Below", "Accept Current", "Accept Incoming", "Accept Both"), lenses.map { it.title })
+        // The markdown cell runs nothing; the conflict's row is above its <<<<<<< line.
+        assertEquals(listOf(0, 0, 0, 34, 34, 34), lenses.map { it.offset })
+        assertEquals(listOf("Accept Current", "Accept Incoming", "Accept Both"), textLenses(text, document, cells = false, controller = null).map { it.title })
+    }
+
+    @Test
+    fun inlayHintsLandAtTheirOffsetsClampedToTheLine() {
+        val document = com.aardarch.aardink.core.CodeDocument("total = f(2)\nx\n")
+        val hints = aardinkInlayHints(
+            listOf(
+                com.avfstudio.nativeide.language.InlayHint(LspPosition(0, 5), ": int", 1),
+                com.avfstudio.nativeide.language.InlayHint(LspPosition(0, 10), "factor=", 2),
+                com.avfstudio.nativeide.language.InlayHint(LspPosition(1, 40), ": str", 1),
+            ),
+            document,
+        )
+        assertEquals(listOf(5, 10, 14), hints.map { it.offset })
+        assertEquals(listOf(": int", "factor=", ": str"), hints.map { it.label })
+    }
 }

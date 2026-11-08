@@ -15,7 +15,10 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.sp
 import com.aardarch.aardink.core.ContentChange
+import com.aardarch.aardink.core.CodeDocument
 import com.aardarch.aardink.core.CodeEditorState
+import com.aardarch.aardink.core.InlineCompletion
+import com.aardarch.aardink.core.InlineCompletionProvider
 import com.aardarch.aardink.core.PlainTextTokenizer
 import com.aardarch.aardink.core.NamedTokenType
 import com.aardarch.aardink.ui.CodeEditorLayout
@@ -25,7 +28,11 @@ import com.aardarch.aardink.ui.LocalEditorTheme
 import com.avfstudio.nativeide.document.DocumentSession
 import com.avfstudio.nativeide.document.isGuestPath
 import com.avfstudio.nativeide.editor.EditorEvent
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.future.await
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 /** The active file in Aardink, made again for each tab as the sora view is: one live editor at a time. */
 @Composable
@@ -43,7 +50,9 @@ internal fun AardinkEditorView(controller: WorkbenchController, document: Docume
     val surface = remember(state) { AardinkEditorSurface(state) }
     // What the language servers know, with the file's closing pairs and Enter rules.
     val overtype = surface.overtype
-    val service = remember(document.path, rules) {
+    // Made again when hints or lenses should be asked for although the text is the same (a server started, a setting).
+    val settings = controller.settings
+    val service = remember(document.path, rules, controller.languageFeaturesRevision, settings.codeLens, settings.interactiveCodeLens) {
         AardinkLanguageService(controller, document, rules, tokenKindAt = { offset ->
             val line = state.document.offsetToLineCol(offset.coerceIn(0, state.document.length)).first
             (state.tokensForLine(line).firstOrNull { it.start <= offset && offset < it.end }?.type as? NamedTokenType)?.name
@@ -75,6 +84,10 @@ internal fun AardinkEditorView(controller: WorkbenchController, document: Docume
         }
     }
     AardinkDecorations(controller, document, surface)
+    // Copilot's ghost text, asked for once typing pauses: Tab accepts, Alt+] and Alt+[ go through it, Esc dismisses.
+    val copilot = remember(document.path, controller.copilotEnabled) {
+        if (!controller.copilotEnabled) null else InlineCompletionProvider { snapshot, offset -> copilotCompletions(controller, document, state, snapshot, offset) }
+    }
     val theme = remember(syntax, registry, colors, dark) { AardinkSyntax.editorTheme(syntax, registry, colors, dark) }
     CompositionLocalProvider(LocalEditorTheme provides theme) {
         CodeEditorLayout(
@@ -95,9 +108,13 @@ internal fun AardinkEditorView(controller: WorkbenchController, document: Docume
                 insertSpaces = config.insertSpaces,
                 fontSize = config.fontSizeSp.sp,
                 pinchToZoom = config.pinchToZoom,
+                inlayHints = settings.inlayHints,
+                // The service decides: cells and conflicts always, the server's with the Code Lens setting.
+                codeLens = true,
                 // Problems, find matches, a symbol's uses and breakpoints beside the scrollbar; a tap goes there.
                 overviewRuler = true,
             ),
+            inlineCompletionProvider = copilot,
             contextMenuItems = breakpointItems,
             touchMenuItems = breakpointItems,
             onFontSizeChange = if (config.pinchToZoom) {
@@ -164,6 +181,17 @@ private fun AardinkDecorations(controller: WorkbenchController, document: Docume
     val cells = controller.activePythonCells()
     val cellColor = colors.outlineVariant.copy(alpha = 0.35f)
     LaunchedEffect(surface, cells, cellColor) { surface.setLineTints("cells", cellTints(cells, cellColor)) }
+    // While paused, the frame's values beside its lines; and git blame for the cursor's line while the file is as saved.
+    val values = controller.debugInlineValues?.takeIf { it.first == document.path }?.second.orEmpty()
+    val valueColor = colors.tertiary
+    LaunchedEffect(surface, values, valueColor) { surface.setLineEndNotes("inline-values", values, valueColor) }
+    controller.documentRevision
+    val blameLine = controller.cursorPosition?.line?.takeIf { controller.settings.gitBlame && !document.dirty }
+    val blame = blameLine?.let { controller.blameLines[it] }?.let { line ->
+        mapOf(blameLine to if (line.uncommitted) "You, not committed yet" else "${line.author}, ${relativeTime(line.time)} • ${line.summary}")
+    }.orEmpty()
+    val blameColor = colors.onSurfaceVariant.copy(alpha = 0.6f)
+    LaunchedEffect(surface, blame, blameColor) { surface.setLineEndNotes("blame", blame, blameColor) }
     val scope = controller.findScope?.takeIf { controller.findVisible && controller.activeNotebook == null }
     val scopeColor = colors.primary.copy(alpha = 0.12f)
     LaunchedEffect(surface, scope, scopeColor) { surface.setFindScope(scope, scopeColor) }
@@ -188,3 +216,29 @@ internal fun AardinkReadOnlyView(text: String, syntaxColors: SyntaxColors, modif
         )
     }
 }
+
+/**
+ * Copilot's suggestions for Aardink's ghost text at [offset] of [snapshot]: none if the file has moved on since, or
+ * Copilot is off. Asked on Aardink's compute thread; the request goes out from the main thread, as the workbench's do.
+ */
+private suspend fun copilotCompletions(
+    controller: WorkbenchController,
+    document: DocumentSession,
+    state: CodeEditorState,
+    snapshot: CodeDocument,
+    offset: Int,
+): List<InlineCompletion> {
+    val (line, column) = snapshot.offsetToLineCol(offset)
+    val request = withContext(Dispatchers.Main) {
+        if (state.text != snapshot.text || document.text != snapshot.text) null
+        else controller.copilotInlineCompletions(document, com.avfstudio.nativeide.editor.LspPosition(line, column))
+    } ?: return emptyList()
+    val suggestions = runCatching { withTimeoutOrNull(COPILOT_TIMEOUT_MS) { request.await() } }.getOrNull().orEmpty()
+    return suggestions.map { suggestion ->
+        val start = offsetIn(snapshot, suggestion.range.start)
+        val end = offsetIn(snapshot, suggestion.range.end).coerceAtLeast(start)
+        InlineCompletion(suggestion.insertText, start until end)
+    }
+}
+
+private const val COPILOT_TIMEOUT_MS = 10_000L

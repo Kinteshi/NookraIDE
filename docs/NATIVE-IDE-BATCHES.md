@@ -2201,6 +2201,21 @@ User's pick: A2, with A3, A4, A8, A16 and A17 after it.
 * The large-file view pages through a read-only Aardink editor when the engine is Aardink.
 * The peek needs a position on screen, so it moved to A4 with Next Edit's card.
 
+## 48. Aardink switch, phase 5: ghost text, inlay hints, code lenses (11-08; built and unit-tested, tablet check in batch 52)
+User's pick: A3.
+* Copilot's ghost text through Aardink's `InlineCompletionProvider`: Aardink asks once typing pauses, the request goes out as
+  the workbench's do (same version and position), and Aardink draws it in the line, with Tab, Alt+] and Alt+[, and Esc. Alt+\\
+  and the inline-suggest commands go to Aardink's. The workbench's own timer and overlay stay for sora.
+* Inlay hints from the language server through `LanguageService.inlayHints`, at their place in the line (sora could only list
+  them at the line's end), with the Inlay Hints setting.
+* Code lenses in a row above their lines through `codeLenses`: a Python file's cells (Run Cell, Run Above, Run Below, with the
+  Interactive window's setting), merge conflicts' Accept Current, Incoming and Both, and the server's (reference counts, or
+  counted from the outline) with the Code Lens setting; a tap finds the cell or conflict again in the text as it is then.
+  The workbench's lens collection is shared with sora's, and Aardink is told to ask again when a server starts or says its
+  hints changed (`languageFeaturesRevision`).
+* Inline values while paused, and git blame for the cursor's line, as text after the line's end (decorations).
+* Parameter hints, hover and fold markers were Aardink's own from phase 3; snippet stops are its own snippet engine's.
+
 ## Backlog
 ### Open backlog (11-08)
 The current lists of what's open, in two: the general backlog, and the Aardink switch's until it's complete. The older

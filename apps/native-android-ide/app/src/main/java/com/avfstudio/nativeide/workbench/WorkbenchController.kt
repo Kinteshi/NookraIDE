@@ -34,6 +34,7 @@ import com.avfstudio.nativeide.document.isDevicePath
 import com.avfstudio.nativeide.document.isGuestPath
 import com.avfstudio.nativeide.language.endOfLineHints
 import com.avfstudio.nativeide.language.parseInlayHints
+import com.aardarch.aardink.core.EditorCommand as AardinkCommand
 import com.avfstudio.nativeide.ai.parseDeviceCodePrompt
 import com.avfstudio.nativeide.assets.AssetPackGrammarLoader
 import com.avfstudio.nativeide.assets.AssetPackInstaller
@@ -733,7 +734,10 @@ class WorkbenchController(private val context: Context) {
         client.messageListener = { message -> post { status = message } }
         client.progressListener = { token, value -> post { onServerProgress(client, token, value) } }
         client.inlayHintRefreshListener = {
-            post { activePath?.takeIf { languageClientFor(it) === client }?.let { scheduleInlayHints(it, delayMs = 100) } }
+            post {
+                activePath?.takeIf { languageClientFor(it) === client }?.let { scheduleInlayHints(it, delayMs = 100) }
+                if (aardinkEditor) languageFeaturesRevision++
+            }
         }
     }
 
@@ -4774,6 +4778,7 @@ class WorkbenchController(private val context: Context) {
                             scheduleInlayHints(document.path, delayMs = 0)
                             scheduleCodeLens(document.path, delayMs = 300)
                             scheduleFoldingRanges(document.path, delayMs = 0)
+                            if (aardinkEditor) languageFeaturesRevision++
                         }
                     }
                 }
@@ -5942,6 +5947,8 @@ class WorkbenchController(private val context: Context) {
 
     private fun scheduleCodeLens(path: String, delayMs: Long = 1500) {
         scheduledCodeLens?.cancel(false)
+        // Aardink asks for lenses itself, after a pause in typing (codeLensesFor).
+        if (aardinkEditor) return
         if (!settings.codeLens) {
             clearCodeLens()
             return
@@ -5962,15 +5969,44 @@ class WorkbenchController(private val context: Context) {
      */
     private fun requestCodeLens(path: String) {
         val document = activeDocument?.takeIf { it.path == path && activeNotebook == null } ?: return
-        val client = languageClientFor(path)?.takeIf { it.isReady } ?: return
         val version = document.version
         val id = ++codeLensRequest
-        fun publish(items: List<Pair<Int, CodeLensItem>>) = post {
-            if (id != codeLensRequest || activePath != path || document.version != version) return@post
-            val current = editorSurface ?: return@post
-            codeLensLineCount = current.lineCount
-            codeLenses = items.filter { it.first < current.lineCount }.groupBy({ it.first }, { it.second })
+        collectCodeLenses(document, isCurrent = { id == codeLensRequest }) { items, _ ->
+            post {
+                if (id != codeLensRequest || activePath != path || document.version != version) return@post
+                val current = editorSurface ?: return@post
+                codeLensLineCount = current.lineCount
+                codeLenses = items.filter { it.position.line < current.lineCount }.groupBy { it.position.line }
+            }
         }
+    }
+
+    /**
+     * [document]'s code lenses, all of them, for the Aardink editor, which asks after a pause in typing; empty when the
+     * setting is off or no server can say. Call on the main thread.
+     */
+    fun codeLensesFor(document: DocumentSession): CompletableFuture<List<CodeLensItem>> {
+        val result = CompletableFuture<List<CodeLensItem>>()
+        if (!settings.codeLens || activeNotebook != null) return result.apply { complete(emptyList()) }
+        if (!collectCodeLenses(document, isCurrent = { !result.isDone }) { items, done -> if (done) result.complete(items) }) {
+            result.complete(emptyList())
+        }
+        return result
+    }
+
+    /**
+     * The server's own lenses (TypeScript's reference counts) when it has them; otherwise the
+     * references of each class, function and method in the outline (ty and basedpyright have
+     * no code lens), asked 16 at a time. [publish] hears what's counted so far, and at the end with
+     * `done`; false when no server can say, and [publish] is never called.
+     */
+    private fun collectCodeLenses(
+        document: DocumentSession,
+        isCurrent: () -> Boolean,
+        publish: (items: List<CodeLensItem>, done: Boolean) -> Unit,
+    ): Boolean {
+        val path = document.path
+        val client = languageClientFor(path)?.takeIf { it.isReady } ?: return false
         if (client.supportsCodeLens) {
             client.codeLens(path).thenCompose { result ->
                 val lenses = result.takeIf { it.isJsonArray }?.asJsonArray?.mapNotNull { it.takeIf { l -> l.isJsonObject }?.asJsonObject }.orEmpty().take(MAX_CODE_LENSES)
@@ -5983,34 +6019,36 @@ class WorkbenchController(private val context: Context) {
                 }
                 CompletableFuture.allOf(*resolved.toTypedArray()).thenApply { resolved.map { it.join() } }
             }.whenComplete { lenses, error ->
-                if (error != null) return@whenComplete
+                if (error != null) return@whenComplete publish(emptyList(), true)
                 publish(
                     lenses.mapNotNull { lens ->
                         val range = lens.getAsJsonObject("range")?.toLspRange() ?: return@mapNotNull null
                         val title = lens.getAsJsonObject("command")?.get("title")?.takeIf { it.isJsonPrimitive }?.asString?.takeIf(String::isNotBlank)
                             ?: return@mapNotNull null
-                        range.start.line to CodeLensItem(title, range.start)
+                        CodeLensItem(title, range.start)
                     },
+                    true,
                 )
             }
-            return
+            return true
         }
-        if (!client.supportsReferences) return
+        if (!client.supportsReferences) return false
+        val text = document.text
         client.documentSymbols(path).whenComplete { response, error ->
-            if (error != null || response == null) return@whenComplete
+            if (error != null || response == null) return@whenComplete publish(emptyList(), true)
             val symbols = flattenOutline(response.toOutlineSymbols()).map { it.first }
                 .filter { it.kind in CODE_LENS_KINDS }
                 .mapNotNull { symbol ->
                     val start = (symbol.selectionRange ?: symbol.range).toLspRange()?.start ?: return@mapNotNull null
                     // Flat symbols (SymbolInformation, ty's) start at `def`/`class`: references want the name.
-                    val line = document.text.lineSequence().elementAtOrNull(start.line) ?: return@mapNotNull start
+                    val line = text.lineSequence().elementAtOrNull(start.line) ?: return@mapNotNull start
                     val column = Regex("\\b" + Regex.escape(symbol.name) + "\\b").find(line, start.character.coerceAtMost(line.length))?.range?.first
                     if (symbol.selectionRange == null && column != null) start.copy(character = column) else start
                 }
                 .take(MAX_CODE_LENSES)
-            val counted = mutableListOf<Pair<Int, CodeLensItem>>()
+            val counted = java.util.Collections.synchronizedList(mutableListOf<CodeLensItem>())
             fun chunk(from: Int) {
-                if (from >= symbols.size || id != codeLensRequest) return publish(counted.toList())
+                if (from >= symbols.size || !isCurrent()) return publish(counted.toList(), true)
                 val batch = symbols.subList(from, minOf(from + 16, symbols.size)).map { position ->
                     client.references(path, position, includeDeclaration = false).handle { value, _ -> position to value }
                 }
@@ -6018,15 +6056,16 @@ class WorkbenchController(private val context: Context) {
                     batch.forEach { future ->
                         val (position, value) = future.join()
                         val count = value?.takeIf { it.isJsonArray }?.asJsonArray?.size() ?: return@forEach
-                        counted += position.line to CodeLensItem(if (count == 1) "1 reference" else "$count references", position)
+                        counted += CodeLensItem(if (count == 1) "1 reference" else "$count references", position)
                     }
                     // Show what is counted so far, then go on.
-                    publish(counted.toList())
+                    publish(counted.toList(), false)
                     chunk(from + 16)
                 }
             }
             chunk(0)
         }
+        return true
     }
 
     /** A tap on a lens: its references in the peek, as VS Code shows them. */
@@ -6067,6 +6106,16 @@ class WorkbenchController(private val context: Context) {
 
     // Inlay hints ---------------------------------------------------------------------------------
 
+    /** Whether the Aardink engine draws the editor: it asks for hints, lenses and ghost text itself. */
+    private val aardinkEditor: Boolean get() = settings.editorEngine == EditorEngine.Aardink
+
+    /**
+     * Bumped when Aardink should ask for hints and lenses again although the text is the same: a server started, said
+     * its hints changed, or a setting for them changed. The Aardink pane makes its language service again.
+     */
+    var languageFeaturesRevision by mutableIntStateOf(0)
+        private set
+
     /** The active file's inlay hints as their line-end text, by line. */
     var inlayHintLines by mutableStateOf<Map<Int, List<String>>>(emptyMap())
         private set
@@ -6078,6 +6127,8 @@ class WorkbenchController(private val context: Context) {
 
     private fun scheduleInlayHints(path: String, delayMs: Long = 400) {
         scheduledInlayHints?.cancel(false)
+        // Aardink asks for hints itself, for the lines around its view.
+        if (aardinkEditor) return
         if (!settings.inlayHints) {
             clearInlayHints()
             return
@@ -6776,7 +6827,8 @@ class WorkbenchController(private val context: Context) {
 
     private fun scheduleInlineSuggestion() {
         clearInlineSuggestion()
-        if (!copilotEnabled || !copilot.language.isReady) return
+        // Aardink asks its inline completion provider (copilotInlineCompletions) once typing pauses.
+        if (aardinkEditor || !copilotEnabled || !copilot.language.isReady) return
         scheduledInlineRequest = timer.schedule(
             { post { requestInlineSuggestion(invoked = false) } },
             settings.inlineSuggestDelayMs.toLong(),
@@ -6795,6 +6847,23 @@ class WorkbenchController(private val context: Context) {
             .substring(suggestion.range.start.character.coerceAtMost(cursor.character), cursor.character)
         return ghostAfterTyped(typed, suggestion.insertText) ?: suggestion.insertText
     }
+
+    /**
+     * Copilot's suggestions at [position] of [document], for Aardink's ghost text, which asks once typing pauses and
+     * shows the first; null when Copilot isn't on. Call on the main thread.
+     */
+    fun copilotInlineCompletions(document: DocumentSession, position: LspPosition): CompletableFuture<List<CopilotSuggestion>>? {
+        if (isDevicePath(document.path) || !copilotEnabled || !copilot.language.isReady) return null
+        val indentation = indentation(document)
+        copilotLog { "aardink request ${document.path.substringAfterLast('/')} ${position.line}:${position.character} v${document.version}" }
+        return copilot.inlineCompletion(document.path, document.version, position, indentation.tabSize, indentation.insertSpaces, false)
+            .thenApply { suggestions ->
+                suggestions.filter { it.insertText.isNotBlank() }.also { shown -> shown.firstOrNull()?.let { post { copilot.didShow(it) } } }
+            }
+    }
+
+    /** The Aardink editor's state while it shows the active file. */
+    private fun aardinkState(): com.aardarch.aardink.core.CodeEditorState? = (editorSurface as? AardinkEditorSurface)?.state
 
     private fun acceptInlineSuggestion() {
         val (path, suggestion) = inlineSuggestion ?: return
@@ -9965,9 +10034,17 @@ class WorkbenchController(private val context: Context) {
             "notebook.cell.showHover" -> selectedCodeCell()?.let { (session, cell) -> showCellHover(session, cell, session.cellCaret, fromPointer = false) }
             "notebook.cell.goToDefinition" -> selectedCodeCell()?.let { (session, cell) -> goToCellDefinition(session, cell, session.cellCaret) }
             "editor.action.quickFix" -> showCodeActions()
-            "editor.action.inlineSuggest.trigger" -> requestInlineSuggestion(invoked = true)
-            "editor.action.inlineSuggest.commit" -> if (inlineSuggestion != null) acceptInlineSuggestion() else jumpOrAcceptNextEdit()
-            "editor.action.inlineSuggest.hide" -> if (inlineSuggestion != null) clearInlineSuggestion() else clearNextEdit()
+            "editor.action.inlineSuggest.trigger" -> aardinkState()?.execute(AardinkCommand.CycleInlineCompletion(forward = true)) ?: requestInlineSuggestion(invoked = true)
+            "editor.action.inlineSuggest.commit" -> when {
+                inlineSuggestion != null -> acceptInlineSuggestion()
+                aardinkState()?.execute(AardinkCommand.AcceptInlineCompletion) == true -> Unit
+                else -> jumpOrAcceptNextEdit()
+            }
+            "editor.action.inlineSuggest.hide" -> when {
+                inlineSuggestion != null -> clearInlineSuggestion()
+                aardinkState()?.execute(AardinkCommand.DismissInlineCompletion) == true -> Unit
+                else -> clearNextEdit()
+            }
             "editor.action.inlineSuggest.acceptNextEdit" -> acceptNextEdit()
             "editor.action.inlineSuggest.triggerNextEdit" -> requestNextEdit(invoked = true)
             "github.copilot.signIn" -> beginCopilotSignIn()

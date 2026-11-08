@@ -1,6 +1,8 @@
 package com.avfstudio.nativeide.workbench
 
 import com.aardarch.aardink.core.CodeDocument
+import com.aardarch.aardink.core.CodeLens
+import com.aardarch.aardink.core.InlayHint
 import com.aardarch.aardink.core.CompletionItem
 import com.aardarch.aardink.core.CompletionKind
 import com.aardarch.aardink.core.FormattingOptions
@@ -14,13 +16,17 @@ import com.avfstudio.nativeide.document.DocumentSession
 import com.avfstudio.nativeide.editor.ClosingOvertype
 import com.avfstudio.nativeide.editor.LanguageRules
 import com.avfstudio.nativeide.editor.LspPosition
+import com.avfstudio.nativeide.editor.LspRange
+import com.avfstudio.nativeide.language.parseInlayHints
 import com.avfstudio.nativeide.editor.LspTextEdit
 import com.avfstudio.nativeide.editor.ParsedSnippet
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.future.await
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
 private const val REQUEST_TIMEOUT_MS = 15_000L
@@ -102,6 +108,30 @@ internal class AardinkLanguageService(
         return parseAardinkSignatureHelp(client.signatureHelp(this.document.path, LspPosition(line, column), context).awaitOrNull())
     }
 
+    /** The server's hints for [range]'s lines, among the characters; Aardink asks around its view after each pause. */
+    override suspend fun inlayHints(document: CodeDocument, range: IntRange): List<InlayHint> {
+        if (!controller.settings.inlayHints) return emptyList()
+        val client = controller.languageClientFor(this.document.path)?.takeIf { it.isReady && it.supportsInlayHints } ?: return emptyList()
+        val (startLine, startColumn) = document.offsetToLineCol(range.first.coerceIn(0, document.length))
+        val (endLine, endColumn) = document.offsetToLineCol((range.last + 1).coerceIn(0, document.length))
+        val reply = client.inlayHints(this.document.path, LspRange(LspPosition(startLine, startColumn), LspPosition(endLine, endColumn))).awaitOrNull()
+        return aardinkInlayHints(parseInlayHints(reply), document)
+    }
+
+    /**
+     * Rows above lines: a Python file's cells (Run Cell, Run Above, Run Below, with the Interactive window's setting),
+     * merge conflicts' Accept Current, Incoming and Both, and the server's lenses (reference counts) with the setting.
+     * Aardink asks after a pause in typing; what's tapped is found again in the text as it is then.
+     */
+    override suspend fun codeLenses(document: CodeDocument): List<CodeLens> {
+        val text = document.text
+        val local = textLenses(text, document, this.document.languageId == "py" && controller.settings.interactiveCodeLens, controller)
+        val fromServer = withContext(Dispatchers.Main) { controller.codeLensesFor(this@AardinkLanguageService.document) }.awaitOrNull().orEmpty()
+        return local + fromServer.map { item ->
+            CodeLens(offsetIn(document, item.position), item.title) { controller.post { controller.openCodeLens(item) } }
+        }
+    }
+
     // The workbench reports problems itself, and formats through its own command.
     override suspend fun diagnostics(document: CodeDocument): List<com.aardarch.aardink.core.Diagnostic> = emptyList()
 
@@ -138,6 +168,45 @@ internal class AardinkLanguageService(
 
     private suspend fun <T> CompletableFuture<T>.awaitOrNull(): T? =
         runCatching { withTimeoutOrNull(REQUEST_TIMEOUT_MS) { await() } }.getOrNull()
+}
+
+/** LSP hints as Aardink shows them, at their offsets in [document]. */
+internal fun aardinkInlayHints(hints: List<com.avfstudio.nativeide.language.InlayHint>, document: CodeDocument): List<InlayHint> =
+    hints.map { InlayHint(offsetIn(document, it.position), it.label) }
+
+/** [position] in [document], clamped to its lines and their lengths. */
+internal fun offsetIn(document: CodeDocument, position: LspPosition): Int {
+    val line = position.line.coerceIn(0, document.lineCount - 1)
+    return document.lineColToOffset(line, position.character.coerceIn(0, document.lineText(line).length))
+}
+
+/**
+ * The lenses the text itself gives: each Python cell's runs ([cells]), and each merge conflict's choices. A tap finds the
+ * cell or conflict again by its place in the text as it is then, since lines may have moved.
+ */
+internal fun textLenses(text: String, document: CodeDocument, cells: Boolean, controller: WorkbenchController?): List<CodeLens> {
+    val lenses = mutableListOf<CodeLens>()
+    if (cells) {
+        pythonCells(text).withIndex().filter { !it.value.markdown }.forEach { (index, cell) ->
+            val at = document.lineStart(cell.marker)
+            listOf("Run Cell" to CellRange.Current, "Run Above" to CellRange.Above, "Run Below" to CellRange.CurrentAndBelow).forEach { (title, range) ->
+                lenses += CodeLens(at, title) {
+                    controller?.post { controller.activePythonCells().getOrNull(index)?.let { controller.runPythonCell(it, range) } }
+                }
+            }
+        }
+    }
+    if ("<<<<<<<" in text) {
+        findConflicts(text).forEachIndexed { index, conflict ->
+            val at = document.lineStart(conflict.start)
+            listOf("Accept Current" to ConflictChoice.Current, "Accept Incoming" to ConflictChoice.Incoming, "Accept Both" to ConflictChoice.Both).forEach { (title, choice) ->
+                lenses += CodeLens(at, title) {
+                    controller?.post { controller.activeConflicts().getOrNull(index)?.let { controller.resolveConflict(it, choice) } }
+                }
+            }
+        }
+    }
+    return lenses
 }
 
 /** A server's completion item as Aardink lists it; [document] places its edits. */
