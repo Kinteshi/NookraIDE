@@ -12,14 +12,14 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.sp
 import com.aardarch.aardink.core.ContentChange
-import com.aardarch.aardink.core.EditorTheme
-import com.aardarch.aardink.core.rememberCodeEditorState
+import com.aardarch.aardink.core.CodeEditorState
+import com.aardarch.aardink.core.PlainTextTokenizer
 import com.aardarch.aardink.ui.CodeEditorLayout
 import com.aardarch.aardink.ui.EditorOptions
 import com.aardarch.aardink.ui.LocalEditorTheme
-import com.aardarch.aardink.ui.fromColorScheme
 import com.avfstudio.nativeide.document.DocumentSession
 import com.avfstudio.nativeide.editor.EditorEvent
 import kotlinx.coroutines.launch
@@ -27,13 +27,23 @@ import kotlinx.coroutines.launch
 /** The active file in Aardink, made again for each tab as the sora view is: one live editor at a time. */
 @Composable
 internal fun AardinkEditorView(controller: WorkbenchController, document: DocumentSession) {
-    val state = rememberCodeEditorState(initialText = document.text)
-    val surface = remember(state) { AardinkEditorSurface(state) }
-    surface.applyConfig(controller.editorConfig(document))
-    val config = surface.config
+    val context = LocalContext.current
     val colors = MaterialTheme.colorScheme
     val dark = LocalDarkTheme.current
-    val theme = remember(colors, dark) { EditorTheme.fromColorScheme(colors, dark) }
+    val syntaxColors = controller.settings.syntaxColors
+    val syntax = remember(colors, dark, syntaxColors, controller.editorThemeRevision) { syntaxTheme(context, colors, dark, syntaxColors) }
+    val registry = remember(syntax.key) { AardinkSyntax.registry(context, syntax) }
+    val grammar = remember(registry, document.path, controller.grammarRevision) { AardinkSyntax.tokenizerFor(registry, document) }
+    // Made once per file: a new theme or grammar changes its tokenizer, and keeps its text and undo.
+    val state = remember { CodeEditorState(document.text, grammar ?: PlainTextTokenizer) }
+    val surface = remember(state) { AardinkEditorSurface(state) }
+    SideEffect {
+        surface.tokenizer = grammar
+        state.tokenizer = grammar ?: PlainTextTokenizer
+    }
+    surface.applyConfig(controller.editorConfig(document))
+    val config = surface.config
+    val theme = remember(syntax, registry, colors, dark) { AardinkSyntax.editorTheme(syntax, registry, colors, dark) }
     CompositionLocalProvider(LocalEditorTheme provides theme) {
         CodeEditorLayout(
             state = state,

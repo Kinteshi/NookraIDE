@@ -15,6 +15,8 @@ object AssetPackGrammarLoader {
     /** Extension or exact file name → the pack and grammar scope that colours it. */
     private val extensionScopes = mutableMapOf<String, Pair<String, String>>()
     private val filenameScopes = mutableMapOf<String, Pair<String, String>>()
+    /** Scope → the pack and grammar file, for registries other than sora's (the Aardink editor's). */
+    private val grammarFiles = mutableMapOf<String, Pair<String, File>>()
 
     @Synchronized
     fun loadInstalled(context: Context) {
@@ -54,7 +56,11 @@ object AssetPackGrammarLoader {
      * restarts (the registry can't drop them), but no new editor uses them.
      */
     @Synchronized
+    fun grammarFile(scopeName: String): File? = grammarFiles[scopeName]?.second
+
+    @Synchronized
     fun forgetPack(packId: String) {
+        grammarFiles.values.removeAll { it.first == packId }
         extensionScopes.values.removeAll { it.first == packId }
         filenameScopes.values.removeAll { it.first == packId }
         loadedPacks -= packId
@@ -86,6 +92,7 @@ object AssetPackGrammarLoader {
             val scopeName = grammar.get("scopeName")?.takeUnless { it.isJsonNull }?.asString
                 ?: throw IOException("Asset-pack grammar contribution has no scopeName")
             val resolvedGrammar = validateContributionFile(extensionRoot, grammarFile)
+            grammarFiles[scopeName] = packId to resolvedGrammar
             val languageId = grammar.get("language")?.takeUnless { it.isJsonNull }?.asString
             val language = languageId?.let(languages::get)
             language?.extensions?.forEach { extension ->

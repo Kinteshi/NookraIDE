@@ -2130,6 +2130,24 @@ User's go-ahead (11-05), with leave to install toolchains: Java 21 now sits besi
   the on-screen keyboard, selection handles, saving to the guest (it was off). The cursor isn't kept per tab, as with sora.
 * Left on the tablet: the engine back on sora; the scratch tab closed without saving.
 
+## 44. Aardink switch, phase 2: syntax colours (11-08; done, semantic colours not seen on the tablet)
+User's go-ahead (11-08). 343 app unit tests pass (6 new for the tokenizer, on Java 21).
+* The lab's TextMate adapter is now the app's (`editor/TextMateTokenizer.kt`), with two additions: a language server's
+  semantic colours drawn over the grammar's (`semantic`; Aardink's decorations can't colour text), and the same text
+  coloured again without a new scan when only those change.
+* `AardinkSyntax`: a tm4e registry of the Aardink editor's own, fed from the same files as sora's: the Python grammar,
+  grammar packs by scope (`AssetPackGrammarLoader.grammarFile`, so a grammar's embedded languages resolve), and the theme
+  in effect (an imported VS Code theme with its background, else Material You's generated one, else the built-in light or
+  dark). Bracket pair and semantic colours are the app's (`semanticColorsByKind`, shared with sora's colorizer). A new theme
+  or grammar swaps the tokenizer and keeps the text and undo. A theme tm4e can't read leaves the code plain, not a crash.
+* Checked on the tablet, offline: `example.py` coloured as sora colours it (Material You), Classic after switching
+  Syntax colours, the Markdown and SQL packs (`b34/README.md`, `b34/q.sql`). The first build crashed on opening the editor:
+  tm4e reads a theme's format from its name, and Material You's had no `.json`; fixed, and guarded.
+* Not checked: semantic colours on the tablet (they need the guest's language server; the guest was off), an imported VS
+  Code theme. Different from sora: Aardink's lines are taller at the same font size.
+* tm4e still comes inside sora's `language-textmate`. Upstream 0.18.0 builds with Java 21, now installed, so phase 7 can carry it.
+* Left on the tablet: engine sora, Material You colours, the two test tabs closed.
+
 ## Backlog
 ### Open backlog (11-04)
 The current list of what's open; the older lists below keep the history and details. "#" is the number

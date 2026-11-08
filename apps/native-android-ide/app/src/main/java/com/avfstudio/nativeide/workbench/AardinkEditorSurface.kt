@@ -17,13 +17,15 @@ import com.avfstudio.nativeide.editor.EditorSelection
 import com.avfstudio.nativeide.editor.EditorSurface
 import com.avfstudio.nativeide.editor.LspPosition
 import com.avfstudio.nativeide.editor.LspTextEdit
+import com.avfstudio.nativeide.editor.SemanticSpan
+import com.avfstudio.nativeide.editor.TextMateTokenizer
 import com.avfstudio.nativeide.editor.VisibleLines
 import java.io.Closeable
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**
  * Aardink behind [EditorSurface], beside `SoraEditorSurface`, while the switch's phases fill it in
- * (see docs/AARDINK-SWITCH-PLAN.md). The text, the selection, undo and the events work; colours,
+ * (see docs/AARDINK-SWITCH-PLAN.md). The text, the selection, undo, the events and colours work;
  * problems, folding and the rest take the interface's do-nothing defaults for now.
  */
 internal class AardinkEditorSurface(val state: CodeEditorState) : EditorSurface {
@@ -107,7 +109,18 @@ internal class AardinkEditorSurface(val state: CodeEditorState) : EditorSurface 
         runCatching { focusRequester.requestFocus() }
     }
 
-    override fun setDecorations(decorations: List<EditorDecoration>) {}
+    /** The file's grammar, when one knows it; semantic colours are drawn through it. */
+    var tokenizer: TextMateTokenizer? = null
+
+    override fun setDecorations(decorations: List<EditorDecoration>) {
+        val grammar = tokenizer ?: return
+        grammar.semantic = decorations.mapNotNull { decoration ->
+            val (start, end) = decoration.range
+            if (start.line != end.line || end.character <= start.character) return@mapNotNull null
+            SemanticSpan(start.line, start.character, end.character, AardinkSyntax.semanticType(decoration.kind))
+        }.groupBy { it.line }.mapValues { (_, spans) -> spans.sortedBy { it.start } }
+        state.scheduleTokenization()
+    }
 
     override fun applyConfig(config: EditorConfig) {
         if (this.config != config) this.config = config

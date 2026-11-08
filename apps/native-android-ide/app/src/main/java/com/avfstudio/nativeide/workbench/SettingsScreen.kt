@@ -296,7 +296,7 @@ private fun LazyListScope.editor(settings: WorkbenchSettings, set: SetSetting) {
         ChoiceRow(
             Icons.Outlined.Science,
             "Editor engine",
-            "Experimental: Aardink is the app's next editor. For now it only edits plain text, with no colours, problems or suggestions",
+            "Experimental: Aardink is the app's next editor. It has syntax colours, but no problems, suggestions or folding yet",
             EditorEngine.entries.map { it.key to it.label },
             settings.editorEngine.key,
         ) { set(WorkbenchSettings.EDITOR_ENGINE, it) }

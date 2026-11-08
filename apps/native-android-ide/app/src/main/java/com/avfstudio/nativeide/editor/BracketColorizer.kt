@@ -115,9 +115,9 @@ fun bracketColorTokens(text: String, languageId: String): List<BracketColorToken
 
 private const val BRACKET_COLOR_COUNT = 3
 private val BRACKET_COLOR_IDS = intArrayOf(500_001, 500_002, 500_003)
-private val BRACKET_COLORS = intArrayOf(0xFF7FC8FF.toInt(), 0xFFFFC66D.toInt(), 0xFFC792EA.toInt())
+internal val BRACKET_COLORS = intArrayOf(0xFF7FC8FF.toInt(), 0xFFFFC66D.toInt(), 0xFFC792EA.toInt())
 // VS Code Light+ bracket-pair and semantic colours, used when the app theme is light.
-private val LIGHT_BRACKET_COLORS = intArrayOf(0xFF0431FA.toInt(), 0xFF319331.toInt(), 0xFF7B3814.toInt())
+internal val LIGHT_BRACKET_COLORS = intArrayOf(0xFF0431FA.toInt(), 0xFF319331.toInt(), 0xFF7B3814.toInt())
 private val LIGHT_SEMANTIC_COLORS = mapOf(
     500_010 to 0xFF267F99.toInt(),
     500_011 to 0xFF795E26.toInt(),
@@ -137,6 +137,21 @@ const val SYMBOL_WRITE_HIGHLIGHT_COLOR_ID = 500_092
 /** Backgrounds of the find widget's matches (VS Code's findMatchHighlightBackground) and of the current one. */
 const val FIND_MATCH_COLOR_ID = 500_093
 const val FIND_CURRENT_COLOR_ID = 500_094
+
+/**
+ * Each semantic token type's colour, as sora's editor gets them in `configureColors`: VS Code's,
+ * Light+ ones on a light theme, then a theme's own by type (which colours every type sharing its slot).
+ */
+internal fun semanticColorsByKind(light: Boolean, overrides: Map<String, String>): Map<String, Int> {
+    val slots = HashMap<Int, Int>()
+    SEMANTIC_TOKEN_COLORS.values.forEach { (slot, color) -> slots[slot] = if (light) LIGHT_SEMANTIC_COLORS[slot] ?: color else color }
+    overrides.forEach { (tokenType, value) ->
+        val slot = SEMANTIC_TOKEN_COLORS[tokenType.substringBefore('.')]?.first ?: return@forEach
+        val normalized = if (value.matches(Regex("#[0-9a-fA-F]{8}"))) "#${value.substring(7, 9)}${value.substring(1, 7)}" else value
+        runCatching { AndroidColor.parseColor(normalized) }.getOrNull()?.let { slots[slot] = it }
+    }
+    return SEMANTIC_TOKEN_COLORS.mapValues { (_, slotAndColor) -> slots.getValue(slotAndColor.first) }
+}
 
 private val SEMANTIC_TOKEN_COLORS = mapOf(
     "class" to (500_010 to 0xFF4EC9B0.toInt()),

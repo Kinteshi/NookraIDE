@@ -1,6 +1,6 @@
 # Plan: switching from sora-editor to Aardink
 
-Status: **phase 1 done** (2026-11-08) except the user's own keyboard check; sora stays the default. Phase 2 is next.
+Status: **phase 2 done** (2026-11-08); sora stays the default. Phase 3 (language features) is next.
 
 **Decided by the user:** the switch will happen, for the licence (Apache-2.0 instead of sora's LGPL-2.1).
 On 11-04 they judged the measured memory and scrolling not to be impediments, and expect Aardink's release
@@ -55,13 +55,12 @@ If 1 or 2 are declined, a fork is allowed by the licence but is a real maintenan
 * Tests touching Aardink run on Java 21 (installed beside 17).
 * **Still for the user:** the Book Cover itself, and the on-screen keyboard (hidden while the Book Cover is attached).
 
-### Phase 2: colours (L)
-* The adapter from phase 0, for all grammar packs, in the background and cancellable.
-* tm4e as our own module, since it has no official Maven package and leaves with sora: `org.eclipse.tm4e.core`, EPL-2.0.
-  Upstream 0.18.0 needs Java 21 to build, so either that or the 110 files from sora's sources jar. Decide here.
-* Themes through `EditorTheme`: built-in light and dark, Material You syntax colours
-  (`fromColorScheme`), imported VS Code themes.
-* Built-in bracket pair colours replace `BracketColorizer.kt`. Semantic tokens merged in the adapter.
+### Phase 2: colours (done 11-08, batch 44)
+* `editor/TextMateTokenizer.kt` with semantic colours over the grammar's; `AardinkSyntax` with its own tm4e registry from the
+  same grammar files and themes as sora's (Python, grammar packs with embedded languages, imported, Material You, built-in).
+* Bracket pair and semantic colours from the app's tables. Checked on the tablet except semantic colours and imported themes.
+* tm4e: still from sora's package; for phase 7, upstream 0.18.0 (builds with Java 21, now installed) or sora's 110 files.
+* Parity note: Aardink's lines are taller at the same font size (`EditorOptions.lineHeight` can match sora's).
 
 ### Phase 3: language features (M-L)
 * Through `LanguageService`, backed by the app's existing LSP client rather than Aardink's: completion
