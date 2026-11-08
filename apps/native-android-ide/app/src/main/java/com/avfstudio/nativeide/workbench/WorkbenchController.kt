@@ -5101,6 +5101,12 @@ class WorkbenchController(private val context: Context) {
         showHoverAt(document, position, fromPointer = false)
     }
 
+    /** The card at [position] of [path], when it's the active file (Aardink's touch menu's Info). */
+    fun showHoverAt(path: String, position: LspPosition) {
+        val document = activeDocument?.takeIf { it.path == path } ?: return
+        showHoverAt(document, position, fromPointer = false)
+    }
+
     private fun onPointerRested(path: String, position: LspPosition?) {
         if (path != activePath) return
         // Off its word: the card stays a moment, so the pointer can go onto it (VS Code's hiding delay).
@@ -9735,6 +9741,20 @@ class WorkbenchController(private val context: Context) {
             consumedKeyDowns += event.keyCode
             return true
         }
+        // The workbench's cards over the Aardink editor close with Escape, as sora's view closes them: the peek, the hover
+        // card, then parameter hints (Copilot's next edit just below).
+        if (focusArea == FocusArea.Editor && editorSurface is AardinkEditorSurface && nextEdit == null &&
+            event.keyCode == AndroidKeyEvent.KEYCODE_ESCAPE && !event.isCtrlPressed && !event.isAltPressed && !event.isShiftPressed &&
+            (peek != null || hoverCard != null || signatureHint != null)
+        ) {
+            when {
+                peek != null -> closePeek()
+                hoverCard != null -> hideHoverCard()
+                else -> closeParameterHints()
+            }
+            consumedKeyDowns += event.keyCode
+            return true
+        }
         // Copilot's next edit in the Aardink editor: Tab goes to it or accepts it, Escape dismisses it (sora's view does
         // this itself). Ghost text Aardink shows at the same time is accepted or dismissed first.
         if (focusArea == FocusArea.Editor && nextEdit != null && editorSurface is AardinkEditorSurface &&
@@ -10048,7 +10068,8 @@ class WorkbenchController(private val context: Context) {
             "editor.action.triggerSuggest" -> surface?.triggerSuggest()
             "editor.action.triggerParameterHints" -> activePath?.let { requestSignature(it, trigger = null, invoked = true) }
             "closeParameterHints" -> closeParameterHints()
-            "editor.action.showHover" -> if (aardinkState()?.execute(AardinkCommand.ShowHover) != true) showHover()
+            // Aardink's own hover only when the workbench's card can't be placed over it.
+            "editor.action.showHover" -> if (aardinkGeometry() != null || aardinkState()?.execute(AardinkCommand.ShowHover) != true) showHover()
             "editor.action.insertSnippet" -> showInsertSnippet()
             "git.viewFileHistory" -> showFileHistory()
             "git.blame.toggleEditorDecoration" -> toggleBlame()

@@ -198,4 +198,13 @@ class AardinkEditorSurfaceTest {
         surface.state.selection = TextRange(6)
         org.junit.Assert.assertFalse(surface.backspaceToTabStop())
     }
+
+    @Test
+    fun theWordUnderThePointerIsWholeAndNoneOffAWord() {
+        val text = "x = area(width_2)"
+        assertEquals(4 until 8, wordRange(text, 6))
+        assertEquals(9 until 16, wordRange(text, 9))
+        assertEquals(null, wordRange(text, 3))
+        assertEquals(null, wordRange(text, 99))
+    }
 }

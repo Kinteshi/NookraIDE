@@ -37,6 +37,7 @@ import com.avfstudio.nativeide.editor.SemanticSpan
 import com.avfstudio.nativeide.editor.TextMateTokenizer
 import com.avfstudio.nativeide.editor.VisibleLines
 import java.io.Closeable
+import kotlinx.coroutines.launch
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**
@@ -317,6 +318,46 @@ internal class AardinkEditorSurface(val state: CodeEditorState) : EditorSurface 
         return true
     }
 
+    /**
+     * Where text is on screen, from Aardink's internals (A19); null until the editor is laid out, or when they
+     * can't be reached. With it, the workbench's own cards are drawn at their text, and Aardink's hover and
+     * signature popups give way to them.
+     */
+    var geometry by mutableStateOf<AardinkGeometry?>(null)
+
+    /** The word the mouse rests on, so moving within it asks nothing new; cleared once a card closes. */
+    private var restingOn: IntRange? = null
+    private var restJob: kotlinx.coroutines.Job? = null
+
+    /**
+     * The mouse at [rootPoint] over the text (null: off the text), from what Aardink's hover tracking saw: once it
+     * rests on a word for the hover delay, the workbench is told, as sora's view tells it.
+     */
+    fun pointerAt(rootPoint: androidx.compose.ui.geometry.Offset?, scope: kotlinx.coroutines.CoroutineScope) {
+        val offset = rootPoint?.let { geometry?.offsetAt(it) }
+        val word = offset?.let { wordRange(state.text, it) }
+        if (word == restingOn) return
+        restJob?.cancel()
+        if (restingOn != null) emit(EditorEvent.PointerRested("", null))
+        restingOn = word
+        if (word == null || !config.hover) return
+        restJob = scope.launch {
+            kotlinx.coroutines.delay(config.hoverDelayMs.toLong())
+            emit(EditorEvent.PointerRested("", positionAt(offset)))
+        }
+    }
+
+    /** The mouse left the editor. */
+    fun pointerLeft() {
+        restJob?.cancel()
+        if (restingOn != null) emit(EditorEvent.PointerRested("", null, left = true))
+        restingOn = null
+    }
+
+    override fun resetPointerRest() {
+        restingOn = null
+    }
+
     /** Our list for a hardware keyboard while it's in charge (the pane sets it); Aardink's strip otherwise. */
     var suggestions: KeyboardSuggestions? = null
 
@@ -437,6 +478,17 @@ internal class AardinkEditorSurface(val state: CodeEditorState) : EditorSurface 
         val line = position.line.coerceIn(0, state.document.lineCount - 1)
         return state.document.lineColToOffset(line, position.character.coerceIn(0, state.document.lineText(line).length))
     }
+}
+
+/** The word (letters, digits, `_`) at [offset] in [text], or null when there's none under it. */
+internal fun wordRange(text: CharSequence, offset: Int): IntRange? {
+    fun word(char: Char) = char.isLetterOrDigit() || char == '_'
+    if (offset !in text.indices || !word(text[offset])) return null
+    var start = offset
+    while (start > 0 && word(text[start - 1])) start--
+    var end = offset
+    while (end < text.length && word(text[end])) end++
+    return start until end
 }
 
 /** [keyed] again when [now] is the same range with its ends swapped; null for any other selection. */

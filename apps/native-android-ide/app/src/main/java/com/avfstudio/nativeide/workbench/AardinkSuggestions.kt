@@ -306,8 +306,8 @@ internal fun acceptRange(item: CompletionItem, text: CharSequence, caret: Int, a
 }
 
 /**
- * The list, docked at the editor's bottom edge, or the top when the caret is in the lower half of the view: Aardink
- * can't say where the caret is on screen (request 1). The selected item's detail and documentation beside it.
+ * The list, under the caret's line from Aardink's geometry (A19), or docked at the editor's bottom edge, or the top when
+ * the caret is in the lower half of the view, when that can't be reached (request 1).
  */
 @Composable
 internal fun AardinkSuggestionList(controller: WorkbenchController) {
@@ -326,16 +326,38 @@ internal fun AardinkSuggestionList(controller: WorkbenchController) {
             list.scrollToItem((suggestions.selected - 3).coerceAtLeast(0))
         }
     }
+    // Under the caret's line (over it when there's no room), the label under the word, as VS Code's; docked at an
+    // edge when Aardink's geometry can't be reached.
+    val caret = surface.geometry?.let { geometry ->
+        geometry.caretAt(wordStart(surface.state.text, surface.state.selection.end))?.takeIf(geometry::visible)
+    }
+    val card: @Composable (Modifier) -> Unit = { placement -> SuggestionCard(suggestions, items, list, fontSize, placement) }
+    if (caret != null) {
+        AtText(caret, shiftX = (-30).dp) { card(Modifier) }
+        return
+    }
     Box(Modifier.fillMaxSize()) {
+        card(Modifier.align(if (dockTop) Alignment.TopStart else Alignment.BottomStart).padding(horizontal = 56.dp, vertical = 8.dp))
+    }
+}
+
+/** The list's card: the items, and the selected one's detail and documentation beside them. */
+@Composable
+private fun SuggestionCard(
+    suggestions: KeyboardSuggestions,
+    items: List<CompletionItem>,
+    list: androidx.compose.foundation.lazy.LazyListState,
+    fontSize: androidx.compose.ui.unit.TextUnit,
+    placement: Modifier,
+) {
+    val colors = MaterialTheme.colorScheme
+    run {
         Surface(
             color = colors.surfaceContainerHigh,
             shape = RoundedCornerShape(8.dp),
             shadowElevation = 4.dp,
             border = androidx.compose.foundation.BorderStroke(1.dp, colors.outlineVariant),
-            modifier = Modifier
-                .align(if (dockTop) Alignment.TopStart else Alignment.BottomStart)
-                .padding(horizontal = 56.dp, vertical = 8.dp)
-                .widthIn(max = 760.dp),
+            modifier = placement.widthIn(max = 760.dp),
         ) {
             Row(Modifier.heightIn(max = 260.dp)) {
                 LazyColumn(Modifier.width(380.dp), state = list) {

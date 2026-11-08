@@ -16,6 +16,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.sp
 import com.aardarch.aardink.core.ContentChange
@@ -61,7 +62,7 @@ internal fun AardinkEditorView(controller: WorkbenchController, document: Docume
         AardinkLanguageService(controller, document, rules, tokenKindAt = { offset ->
             val line = state.document.offsetToLineCol(offset.coerceIn(0, state.document.length)).first
             (state.tokensForLine(line).firstOrNull { it.start <= offset && offset < it.end }?.type as? NamedTokenType)?.name
-        }, overtype = overtype)
+        }, overtype = overtype, ownCards = { surface.geometry != null })
     }
     // With a hardware keyboard, our list in place of Aardink's touch strip, which the keys can't choose from (request 8).
     val configuration = androidx.compose.ui.platform.LocalConfiguration.current
@@ -117,10 +118,26 @@ internal fun AardinkEditorView(controller: WorkbenchController, document: Docume
         }
         lookup
     }
+    // The mouse resting on a word: what Aardink's hover tracking saw is taken (so it shows no card of its own) and the
+    // workbench's card shows there. After the editor's own pointer handling, which runs first in this pass.
+    val pointerScope = androidx.compose.runtime.rememberCoroutineScope()
+    val hoverWatch = Modifier.pointerInput(surface) {
+        awaitPointerEventScope {
+            while (true) {
+                val event = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Main)
+                val geometry = surface.geometry ?: continue
+                when {
+                    event.type == androidx.compose.ui.input.pointer.PointerEventType.Exit -> surface.pointerLeft()
+                    event.changes.firstOrNull()?.type != androidx.compose.ui.input.pointer.PointerType.Mouse -> Unit
+                    else -> surface.pointerAt(geometry.takeHover(), pointerScope)
+                }
+            }
+        }
+    }
     CompositionLocalProvider(LocalEditorTheme provides theme, com.aardarch.aardink.ui.LocalCodeFenceTokenizers provides fenceTokenizers) {
         CodeEditorLayout(
             state = state,
-            modifier = Modifier.fillMaxSize().focusRequester(surface.focusRequester),
+            modifier = Modifier.fillMaxSize().focusRequester(surface.focusRequester).then(hoverWatch),
             languageService = service,
             foldState = surface.foldState,
             foldingProvider = surface.foldingProvider,
@@ -192,6 +209,8 @@ internal fun AardinkEditorView(controller: WorkbenchController, document: Docume
     LaunchedEffect(surface) {
         // As the sora view does when a file opens: typing goes to the file, not to whatever had focus.
         withFrameNanos {}
+        // Laid out now: where its text is on screen, if Aardink's internals let us see (A19).
+        surface.geometry = AardinkGeometry.of(state)
         surface.focus()
         launch { snapshotFlow { state.viewport }.collect { surface.emit(EditorEvent.ViewportChanged("", surface.visibleLines)) } }
         launch { snapshotFlow { state.isFocused }.collect { surface.emit(EditorEvent.FocusChanged("", it)) } }
@@ -313,16 +332,15 @@ internal fun AardinkNextEditCard(controller: WorkbenchController) {
             addStyle(androidx.compose.ui.text.SpanStyle(background = NEXT_EDIT_ADDED.copy(alpha = 0.3f)), preview.newChange.first, preview.newChange.last + 1)
         }
     }
-    androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
+    // Under the edit's last line, as sora's card is, when Aardink's geometry can be reached and the edit is on screen.
+    val under = if (onScreen) surface.rectOnScreen(com.avfstudio.nativeide.editor.LspPosition(preview.lastLine, 0)) else null
+    val card: @Composable (Modifier) -> Unit = { placement ->
         androidx.compose.material3.Surface(
             color = colors.surfaceContainerHigh,
             shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
             shadowElevation = 4.dp,
             border = androidx.compose.foundation.BorderStroke(1.dp, NEXT_EDIT_ADDED.copy(alpha = 0.6f)),
-            modifier = Modifier
-                .align(if (dockTop) androidx.compose.ui.Alignment.TopCenter else androidx.compose.ui.Alignment.BottomCenter)
-                .padding(horizontal = 16.dp, vertical = 8.dp)
-                .widthIn(max = 720.dp),
+            modifier = placement.widthIn(max = 720.dp),
         ) {
             androidx.compose.foundation.layout.Column(Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
                 androidx.compose.foundation.layout.Row(
@@ -366,6 +384,17 @@ internal fun AardinkNextEditCard(controller: WorkbenchController) {
                 )
             }
         }
+    }
+    if (under != null) {
+        AtText(under) { card(Modifier) }
+        return
+    }
+    androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
+        card(
+            Modifier
+                .align(if (dockTop) androidx.compose.ui.Alignment.TopCenter else androidx.compose.ui.Alignment.BottomCenter)
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+        )
     }
 }
 

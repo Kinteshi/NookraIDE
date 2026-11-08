@@ -30,7 +30,7 @@ Filing them is the user's decision.
 
 | # | Request | Where it stands (0.9.0) | Unblocks |
 |---|---|---|---|
-| 1 | Public text positions: pixel rect for an offset or line | Not on the roadmap. **Needed far less since 0.9:** inline text, inlay hints, code lens, ghost text, Markdown hover and signature help are built in | Nothing since batch 49: Next Edit's card and the peek dock at an edge. With it they'd sit under their line |
+| 1 | Public text positions: pixel rect for an offset or line | Not on the roadmap. **Needed far less since 0.9:** inline text, inlay hints, code lens, ghost text, Markdown hover and signature help are built in | Our reflection into Aardink's internals (batch 54, A19), which puts the workbench's cards at their text; with it, that goes |
 | 2 | Gutter icon in a decoration, and a host callback for gutter taps | Not on the roadmap | Breakpoint icons and taps in the gutter; bars by kind, F9 and the menu meanwhile (batch 47) |
 | 3 | Ghost text, inlay hints, code lens | **Delivered in 0.9** (`InlineCompletionProvider`, `inlayHints`, `codeLenses`). In use since batch 48; ghost text, hints and lenses checked on the tablet with Samsung's keyboard (batch 52) | Copilot's suggestions, inlay hints, lenses, Python cell and merge conflict actions |
 | 4 | Semantic token layer | **Delivered in 0.9** (`semanticTokens`, `semanticHighlighting`). Ours works already (batch 44); theirs can replace it once completion goes through `LanguageService` | Optional |

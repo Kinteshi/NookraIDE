@@ -2288,6 +2288,29 @@ From the user's checks. 376 app unit tests pass.
 * The suggestion list at its line is the same limitation as Next Edit's card and the peek (no public caret position, request
   1, A9); the draft now names all three.
 
+## 54. Aardink: the workbench's Material You cards at their text (A19), in place of Aardink's popups (11-08; done, checked on the tablet)
+User's pick: refine Aardink's hover ("Material You is the style guideline; I like what sora's tooltips do") and A19. 377 app
+unit tests pass.
+* Aardink's hover card takes its colours from the editor theme (grey steps off pure black), not the app's Material You scheme,
+  and always draws a title row with a line under it, which was empty. No option changes either, so the workbench's own cards
+  now go over Aardink as they go over sora, which needs to know where text is.
+* `AardinkGeometry` (A19): where text is on screen, from Aardink's internals by reflection (the controller the layout's command
+  handler holds: the caret rect, character bounds, the point-to-offset hit test, and the resting mouse). Version pinned and
+  checked at each release review; when anything is missing it answers null, and everything falls back to batch 49-51's
+  docking and Aardink's own popups (whose hover then gets the word as its title, not an empty row). Not minified, so no keep
+  rules today.
+* Hover: the mouse resting on a word for the hover delay shows the workbench's card (problems, then the server's Markdown with
+  coloured code) above it; what Aardink's own tracking saw is taken, so it shows no card of its own. Show Hover (Ctrl+K Ctrl+I)
+  and the touch menu's Info show the same card. Parameter hints are the workbench's card above the caret, and Aardink's
+  signature popup gives way.
+* At their line: the suggestion list under the word being typed (labels under it), Next Edit's card under the edit, the peek
+  under its line, as with sora. Off screen, Next Edit still points up or down from the edge.
+* Escape closes the peek, the hover card and parameter hints over Aardink (sora's view did this itself; Aardink's didn't
+  pass it on).
+* Checked in a throwaway `~/Projects/b54` with a virtual mouse: hover at the word (and none past a line's end), Show Hover,
+  parameter hints with the active parameter in bold, the list under `pri`, Next Edit's card under its line, the peek under
+  line 4 and Escape closing it.
+
 ## Backlog
 ### Open backlog (11-08)
 The current lists of what's open, in two: the general backlog, and the Aardink switch's until it's complete. The older
@@ -2338,14 +2361,14 @@ Why these groups:
 
 Until Aardink replaces sora: the remaining phases of the [plan](AARDINK-SWITCH-PLAN.md), which has the details, and
 what the switch is waiting on. Phases 0–5 are done (batches 42–52), on Aardink 0.9.0 (batch 45); A1 was phase 3, and
-A2, A3, A4, A8, A16 and A17 were done in batches 47–53.
+A2, A3, A4, A8, A16, A17 and A19 were done in batches 47–54.
 
 | Group | # | Item | Size | Description |
 |---|---|------|------|-------------|
 | **A. The flip, then sora out** | A7 | 43 | S, the user's | Try the Aardink engine on the Book Cover itself, and the on-screen keyboard (under way: the user has it on) |
 | | A5 | Phase 6 | S–M, then time | Parity list on the tablet, make Aardink the default, measure the real app (memory, key to frame, guest), use it day to day |
 | | A6 | Phase 7 | S–M | Remove sora: the setting, its classes, the two files in sora's package; carry tm4e as a module (upstream 0.18.0 or sora's copy); licence notes. sora's low inlay hint chip (batch 52) goes with it, not fixed |
-| **B. Popups at their line** | A19 | – | S–M | Meanwhile, Next Edit's card, the peek and our suggestion list at their line from Aardink's internal caret rectangle (read by reflection, as it tells the keyboard), docking at the edge if that fails; keep rules for the release build; checked at each release review. Goes when A9 ships |
+| **B. Popups at their line** | – | – | – | Done in batch 54 (A19): the workbench's cards at their text from Aardink's geometry; A9 would replace the reflection |
 | **C. Asks to Aardink, filed together** | A9 | 71 | S to ask | Public text positions: Next Edit's card, the peek and our suggestion list at their line. Drafted |
 | | A13 | 77 | S to ask | The completion list at the caret on Android with a hardware keyboard; our list stands in (batch 51). Drafted |
 | | A10 | 72 | S to ask | Gutter icons and taps (real breakpoints after the bars). Drafted |
@@ -2358,7 +2381,7 @@ A2, A3, A4, A8, A16 and A17 were done in batches 47–53.
 Why these groups:
 * A: A7 is the first day of A5's daily use, and A6 follows the period the user picks. The general backlog's group 1 starts
   from A5's measurements.
-* B: one piece of code puts all three at their line, and one request (A9) replaces it.
+* B: done (batch 54); A9 replaces its reflection when it ships.
 * C: one session drafts the four not yet drafted and files all seven, for the user to post. A15 and A18 could be one issue
   ("typing as VS Code does"), A9 and A13 cross-reference each other, and A11 now has the composing finding.
 * D: A19 adds a check to every release review.

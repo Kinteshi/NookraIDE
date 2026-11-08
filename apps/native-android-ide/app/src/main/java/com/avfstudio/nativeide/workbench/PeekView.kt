@@ -1,5 +1,7 @@
 package com.avfstudio.nativeide.workbench
 
+import com.avfstudio.nativeide.editor.LspPosition
+
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
@@ -68,13 +70,19 @@ internal fun PeekOverlay(controller: WorkbenchController) {
     val height = 280.dp
     val selected = peek.locations.getOrNull(peek.selected) ?: return
     val fontSize = (controller.settings.editorFontSize * 0.9f).sp
-    Surface(
-        color = colors.surfaceContainerHigh,
-        shape = MaterialTheme.shapes.small,
-        border = BorderStroke(1.dp, colors.primary.copy(alpha = 0.6f)),
-        shadowElevation = 4.dp,
-        modifier = Modifier
-            // Aardink's: at the editor's top or bottom edge, so the height below is the peek's, not the editor's.
+    // Aardink's: under its line from Aardink's geometry (A19), or else at the editor's edge away from it.
+    val under = aardink?.rectOnScreen(LspPosition(line, 0))
+    if (under != null) {
+        AtText(under, gap = 2.dp) { PeekCard(controller, peek, selected, fontSize, Modifier.fillMaxWidth().height(height).padding(horizontal = 8.dp)) }
+        return
+    }
+    PeekCard(
+        controller,
+        peek,
+        selected,
+        fontSize,
+        Modifier
+            // At the editor's top or bottom edge, so the height below is the peek's, not the editor's.
             .then(if (view == null) Modifier.fillMaxSize().wrapContentHeight(if (dockBottom) Alignment.Bottom else Alignment.Top) else Modifier)
             .fillMaxWidth()
             .height(height)
@@ -89,6 +97,25 @@ internal fun PeekOverlay(controller: WorkbenchController) {
                 }
                 layout(constraints.maxWidth, constraints.maxHeight) { placeable.place(0, top.coerceAtLeast(0)) }
             },
+    )
+}
+
+/** The peek's card, wherever it's placed ([modifier]): the location's file, and the list when there are several. */
+@Composable
+private fun PeekCard(
+    controller: WorkbenchController,
+    peek: PeekView,
+    selected: LanguageLocation,
+    fontSize: androidx.compose.ui.unit.TextUnit,
+    modifier: Modifier,
+) {
+    val colors = MaterialTheme.colorScheme
+    Surface(
+        color = colors.surfaceContainerHigh,
+        shape = MaterialTheme.shapes.small,
+        border = BorderStroke(1.dp, colors.primary.copy(alpha = 0.6f)),
+        shadowElevation = 4.dp,
+        modifier = modifier,
     ) {
         Column {
             Row(

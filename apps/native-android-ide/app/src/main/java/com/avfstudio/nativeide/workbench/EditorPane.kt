@@ -243,6 +243,8 @@ private fun EditorOverlays(controller: WorkbenchController) {
     AardinkSuggestionList(controller)
     ParameterHints(controller)
     HoverCardOverlay(controller)
+    AardinkParameterHints(controller)
+    AardinkHoverCard(controller)
     PeekOverlay(controller)
     if (controller.findVisible) {
         Box(Modifier.fillMaxSize()) { FindWidget(controller, Modifier.align(Alignment.TopEnd)) }
@@ -766,6 +768,22 @@ private fun ParameterHints(controller: WorkbenchController) {
     val x = view.getCharOffsetX(cursor.leftLine, cursor.leftColumn)
     val lineTop = view.getCharOffsetY(cursor.leftLine, cursor.leftColumn) - view.rowHeight
     val gap = with(density) { 4.dp.roundToPx() }
+    ParameterHintsCard(
+        hint,
+        Modifier.layout { measurable, constraints ->
+            val placeable = measurable.measure(constraints.copy(minWidth = 0, minHeight = 0))
+            val left = x.roundToInt().coerceIn(0, (constraints.maxWidth - placeable.width).coerceAtLeast(0))
+            val above = lineTop.roundToInt() - placeable.height - gap
+            val top = if (above >= 0) above else (lineTop + view.rowHeight).roundToInt() + gap
+            layout(constraints.maxWidth, constraints.maxHeight) { placeable.place(left, top) }
+        },
+    )
+}
+
+/** The parameter hints' card, wherever it's placed ([modifier]); both editor engines draw this one. */
+@Composable
+internal fun ParameterHintsCard(hint: com.avfstudio.nativeide.language.SignatureHint, modifier: Modifier = Modifier) {
+    val colors = MaterialTheme.colorScheme
     val label = remember(hint) {
         buildAnnotatedString {
             append(hint.label)
@@ -778,15 +796,7 @@ private fun ParameterHints(controller: WorkbenchController) {
         color = colors.surfaceContainerHigh,
         shape = RoundedCornerShape(8.dp),
         shadowElevation = 3.dp,
-        modifier = Modifier
-            .widthIn(max = 560.dp)
-            .layout { measurable, constraints ->
-                val placeable = measurable.measure(constraints.copy(minWidth = 0, minHeight = 0))
-                val left = x.roundToInt().coerceIn(0, (constraints.maxWidth - placeable.width).coerceAtLeast(0))
-                val above = lineTop.roundToInt() - placeable.height - gap
-                val top = if (above >= 0) above else (lineTop + view.rowHeight).roundToInt() + gap
-                layout(constraints.maxWidth, constraints.maxHeight) { placeable.place(left, top) }
-            },
+        modifier = Modifier.widthIn(max = 560.dp).then(modifier),
     ) {
         Column(Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -910,6 +920,26 @@ private fun HoverCardOverlay(controller: WorkbenchController) {
     val x = view.getCharOffsetX(line, column)
     val lineTop = view.getCharOffsetY(line, column) - view.rowHeight
     val gap = with(density) { 4.dp.roundToPx() }
+    HoverCardSurface(
+        controller,
+        card,
+        Modifier.layout { measurable, constraints ->
+            val placeable = measurable.measure(constraints.copy(minWidth = 0, minHeight = 0))
+            val left = x.roundToInt().coerceIn(0, (constraints.maxWidth - placeable.width).coerceAtLeast(0))
+            val above = lineTop.roundToInt() - placeable.height - gap
+            val top = if (above >= 0) above else (lineTop + view.rowHeight).roundToInt() + gap
+            layout(constraints.maxWidth, constraints.maxHeight) { placeable.place(left, top) }
+        },
+    )
+}
+
+/**
+ * The hover card itself, wherever it's placed ([placement], before the pointer handling so only the card takes
+ * the pointer): problems, then the server's Markdown. Both editor engines draw this one.
+ */
+@Composable
+internal fun HoverCardSurface(controller: WorkbenchController, card: HoverCard, placement: Modifier) {
+    val colors = MaterialTheme.colorScheme
     Surface(
         color = colors.surfaceContainerHigh,
         shape = RoundedCornerShape(8.dp),
@@ -918,13 +948,7 @@ private fun HoverCardOverlay(controller: WorkbenchController) {
         modifier = Modifier
             .widthIn(max = 560.dp)
             .heightIn(max = 320.dp)
-            .layout { measurable, constraints ->
-                val placeable = measurable.measure(constraints.copy(minWidth = 0, minHeight = 0))
-                val left = x.roundToInt().coerceIn(0, (constraints.maxWidth - placeable.width).coerceAtLeast(0))
-                val above = lineTop.roundToInt() - placeable.height - gap
-                val top = if (above >= 0) above else (lineTop + view.rowHeight).roundToInt() + gap
-                layout(constraints.maxWidth, constraints.maxHeight) { placeable.place(left, top) }
-            }
+            .then(placement)
             // After the placement, so only the card itself (not the whole pane) takes the pointer.
             .pointerInput(card) {
                 awaitPointerEventScope {

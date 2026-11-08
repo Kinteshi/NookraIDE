@@ -47,6 +47,8 @@ internal class AardinkLanguageService(
     val tokenKindAt: (Int) -> String?,
     /** Told of each closer this inserts, so typing it again steps over it. */
     private val overtype: ClosingOvertype? = null,
+    /** Whether the workbench's own cards are in charge (Aardink's geometry is reachable): its hover and signature help then. */
+    private val ownCards: () -> Boolean = { false },
 ) : LanguageService {
     private val provider = controller.completionProvider(document)
     /** The server's item behind each one shown, for `completionItem/resolve`. */
@@ -99,14 +101,24 @@ internal class AardinkLanguageService(
 
     override suspend fun hoverDoc(document: CodeDocument, offset: Int): HoverDoc? {
         if (!controller.settings.editorHover) return null
+        // The touch menu's Info, while the workbench's card is in charge: that card, at the word.
+        if (ownCards()) {
+            val (line, column) = document.offsetToLineCol(offset)
+            withContext(Dispatchers.Main) { controller.showHoverAt(this@AardinkLanguageService.document.path, LspPosition(line, column)) }
+            return null
+        }
         val client = controller.languageClientFor(this.document.path)?.takeIf { it.isReady } ?: return null
         val (line, column) = document.offsetToLineCol(offset)
         val reply = client.hover(this.document.path, LspPosition(line, column)).awaitOrNull()
         val markdown = reply?.takeIf { it.isJsonObject }?.asJsonObject?.get("contents")?.let(::hoverContents)
-        return markdown?.takeIf { it.isNotBlank() }?.let { HoverDoc(title = "", content = it) }
+        // Aardink's card always draws a title with a line under it: the word, rather than an empty row.
+        val word = wordRange(document, offset)?.let { document.subSequence(it.first, it.last + 1).toString() }.orEmpty()
+        return markdown?.takeIf { it.isNotBlank() }?.let { HoverDoc(title = word, content = it) }
     }
 
     override suspend fun signatureHelp(document: CodeDocument, offset: Int): SignatureHelp? {
+        // The workbench asks for parameter hints itself after `(` and `,`, and draws them at the caret.
+        if (ownCards()) return null
         val client = controller.languageClientFor(this.document.path)?.takeIf { it.isReady } ?: return null
         val (line, column) = document.offsetToLineCol(offset)
         val context = JsonObject().apply {
