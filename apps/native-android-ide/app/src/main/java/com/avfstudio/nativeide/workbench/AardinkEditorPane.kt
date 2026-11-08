@@ -63,6 +63,21 @@ internal fun AardinkEditorView(controller: WorkbenchController, document: Docume
             (state.tokensForLine(line).firstOrNull { it.start <= offset && offset < it.end }?.type as? NamedTokenType)?.name
         }, overtype = overtype)
     }
+    // With a hardware keyboard, our list in place of Aardink's touch strip, which the keys can't choose from (request 8).
+    val configuration = androidx.compose.ui.platform.LocalConfiguration.current
+    val hardwareKeyboard = configuration.keyboard == android.content.res.Configuration.KEYBOARD_QWERTY &&
+        configuration.hardKeyboardHidden == android.content.res.Configuration.HARDKEYBOARDHIDDEN_NO
+    val ownList = settings.keyboardSuggestionList && hardwareKeyboard
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val keyboardSuggestions = remember(state) { KeyboardSuggestions(state, scope) }
+    SideEffect {
+        keyboardSuggestions.service = service
+        keyboardSuggestions.triggerCharacters = service.serverTriggerCharacters
+        keyboardSuggestions.whileTyping = settings.quickSuggestions
+        service.ownList = ownList
+        surface.suggestions = if (ownList) keyboardSuggestions else null
+        if (!ownList) keyboardSuggestions.dismiss()
+    }
     SideEffect {
         surface.rules = rules
         surface.tokenKindAt = service.tokenKindAt
@@ -108,7 +123,7 @@ internal fun AardinkEditorView(controller: WorkbenchController, document: Docume
                 showLineNumbers = config.lineNumbers,
                 showFoldMarkers = config.folding,
                 showDiffMarkers = false,
-                quickSuggestions = controller.settings.quickSuggestions,
+                quickSuggestions = settings.quickSuggestions && !ownList,
                 tabSize = config.tabSize,
                 insertSpaces = config.insertSpaces,
                 fontSize = config.fontSizeSp.sp,
@@ -133,7 +148,11 @@ internal fun AardinkEditorView(controller: WorkbenchController, document: Docume
     }
     DisposableEffect(surface) {
         val edited: (List<ContentChange>) -> Unit = { changes ->
-            if (changes.any { it.isReset }) overtype.clear()
+            if (changes.any { it.isReset }) {
+                overtype.clear()
+                keyboardSuggestions.dismiss()
+            }
+            surface.suggestions?.let { list -> changes.filter { !it.isReset }.forEach { list.edited(it.offset, it.deletedLength, it.insertedText) } }
             changes.filter { !it.isReset }.forEach { change ->
                 overtype.edited(change.offset, change.deletedLength, change.insertedText)
                 // Breakpoints move with the lines they're on, as sora's edits move them.
@@ -151,9 +170,14 @@ internal fun AardinkEditorView(controller: WorkbenchController, document: Docume
             }
         }
         state.addContentListener(edited)
+        val moved: (List<androidx.compose.ui.text.TextRange>, com.aardarch.aardink.core.SelectionChangeReason) -> Unit = { _, reason ->
+            if (reason != com.aardarch.aardink.core.SelectionChangeReason.Edit) surface.suggestions?.selectionMoved()
+        }
+        state.addSelectionListener(moved)
         controller.editorHost.open(document, surface)
         onDispose {
             state.removeContentListener(edited)
+            state.removeSelectionListener(moved)
             controller.editorHost.close(document.path, surface)
         }
     }

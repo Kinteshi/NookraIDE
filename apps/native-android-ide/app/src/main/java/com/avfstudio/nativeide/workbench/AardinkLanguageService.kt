@@ -56,8 +56,16 @@ internal class AardinkLanguageService(
     override var completionsAreIncomplete: Boolean = false
         private set
 
-    override val triggerCharacters: Set<Char>
+    /** What typed after a word asks the server for suggestions. */
+    val serverTriggerCharacters: Set<Char>
         get() = provider.triggerCharacters.mapNotNull { it.singleOrNull() }.toSet()
+
+    /** Our list for a hardware keyboard is in charge ([KeyboardSuggestions]): Aardink's strip isn't opened by typing then. */
+    @Volatile
+    var ownList = false
+
+    override val triggerCharacters: Set<Char>
+        get() = if (ownList) emptySet() else serverTriggerCharacters
 
     override val supportsRename: Boolean = false
 

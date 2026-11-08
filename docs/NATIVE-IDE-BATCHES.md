@@ -2236,6 +2236,20 @@ User's pick: A8 and A16.
   method (as pairs are). Only a line still where Enter put it moves; one placed by hand stays. With the on-screen keyboard it
   still happens at Enter only (the input method's path; an edit behind its back is what made Samsung's keyboard drift).
 
+## 51. Aardink switch: our own suggestion list for hardware keyboards (11-08; built and unit-tested, tablet check in batch 52)
+User's pick: A17, until Aardink shows its list at the caret with a keyboard (request 8, A13). 373 app unit tests pass.
+* While a hardware keyboard is attached (`Configuration.keyboard` QWERTY, not hidden), suggestions show in our list
+  (`KeyboardSuggestions`, `AardinkSuggestionList`) instead of Aardink's touch strip: asked for as a word is typed or after a
+  trigger character (`.`), filtered as VS Code filters (in order, from word starts, prefixes first) or asked again when the
+  server says its answer is incomplete; Up, Down, Page Up and Down, Enter and Tab to accept, Escape to close; taps too.
+  Accepting replaces the word (the server's range, stretched by what was typed since), a snippet through Aardink's snippet
+  engine, then the item's other edits (an import), once resolved. The selected item's detail and documentation beside it.
+* Docked at the editor's bottom edge, or the top when the caret is in the lower half of the view: there's no caret position
+  to put it under (request 1).
+* Settings → Editor → "Suggestion list with a keyboard" (shown with the Aardink engine; on by default): off gives Aardink's
+  strip back. Ctrl+Space opens ours while it's in charge. Without a keyboard, Aardink's strip as before.
+* Goes when an Aardink release has request 8: the backlog's A17 says so.
+
 ## Backlog
 ### Open backlog (11-08)
 The current lists of what's open, in two: the general backlog, and the Aardink switch's until it's complete. The older

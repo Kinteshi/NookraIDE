@@ -296,10 +296,13 @@ private fun LazyListScope.editor(settings: WorkbenchSettings, set: SetSetting) {
         ChoiceRow(
             Icons.Outlined.Science,
             "Editor engine",
-            "Experimental: Aardink is the app's next editor. Colours, suggestions, problems and folding work; breakpoints, inlay hints and Copilot's suggestions don't yet",
+            "Experimental: Aardink is the app's next editor. Breakpoints show as bars and are set from F9 or the menu, not by tapping the gutter",
             EditorEngine.entries.map { it.key to it.label },
             settings.editorEngine.key,
         ) { set(WorkbenchSettings.EDITOR_ENGINE, it) }
+    }
+    if (settings.editorEngine == EditorEngine.Aardink) {
+        item { SwitchRow(Icons.Outlined.Keyboard, "Suggestion list with a keyboard", "With a hardware keyboard, suggestions in a list chosen with the arrows, Enter and Tab; off, Aardink's strip under the editor, which you tap", settings.keyboardSuggestionList) { set(WorkbenchSettings.KEYBOARD_SUGGESTION_LIST, it) } }
     }
     item { SliderRow(Icons.Outlined.FormatSize, "Font size", settings.editorFontSize, 8f..32f, "%.0f sp") { set(WorkbenchSettings.EDITOR_FONT_SIZE, it.roundToInt()) } }
     item { SwitchRow(Icons.Outlined.ZoomIn, "Pinch to zoom", "Two fingers on the screen or the touchpad change the font size of the editor and notebooks, kept as the font size above", settings.pinchToZoom) { set(WorkbenchSettings.PINCH_TO_ZOOM, it) } }

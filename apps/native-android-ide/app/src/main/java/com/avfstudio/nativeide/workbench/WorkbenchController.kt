@@ -9735,6 +9735,11 @@ class WorkbenchController(private val context: Context) {
         ) {
             return false
         }
+        // Our suggestion list in the Aardink editor takes its keys first (arrows, Enter, Tab, Escape).
+        if (focusArea == FocusArea.Editor && (editorSurface as? AardinkEditorSurface)?.suggestions?.handleKey(event) == true) {
+            consumedKeyDowns += event.keyCode
+            return true
+        }
         val handled = handleKeyDown(event) || sendTerminalControlKey(event) || typePairKey(event)
         if (handled) consumedKeyDowns += event.keyCode
         return handled

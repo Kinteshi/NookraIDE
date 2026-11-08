@@ -317,7 +317,11 @@ internal class AardinkEditorSurface(val state: CodeEditorState) : EditorSurface 
         return true
     }
 
+    /** Our list for a hardware keyboard while it's in charge (the pane sets it); Aardink's strip otherwise. */
+    var suggestions: KeyboardSuggestions? = null
+
     override fun triggerSuggest() {
+        suggestions?.let { return it.ask(invoked = true) }
         state.execute(EditorCommand.TriggerSuggest)
     }
 
