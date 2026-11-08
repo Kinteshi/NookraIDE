@@ -2128,7 +2128,8 @@ User's go-ahead (11-05), with leave to install toolchains: Java 21 now sits besi
   Text keys still go through it, which dead keys need. Backlog 73 asks upstream.
 * Not checked: the user's Book Cover itself (attached, so the on-screen keyboard stays hidden, by Android's setting),
   the on-screen keyboard, selection handles, saving to the guest (it was off). The cursor isn't kept per tab, as with sora.
-* Left on the tablet: the engine back on sora; the scratch tab closed without saving.
+* Left on the tablet: the scratch tab closed without saving. **Correction (11-08):** the engine went back to sora only
+  offline; the guest's settings kept Aardink, so the app opened in Aardink whenever it was connected, until batch 45.
 
 ## 44. Aardink switch, phase 2: syntax colours (11-08; done, semantic colours not seen on the tablet)
 User's go-ahead (11-08). 343 app unit tests pass (6 new for the tokenizer, on Java 21).
@@ -2146,7 +2147,21 @@ User's go-ahead (11-08). 343 app unit tests pass (6 new for the tokenizer, on Ja
 * Not checked: semantic colours on the tablet (they need the guest's language server; the guest was off), an imported VS
   Code theme. Different from sora: Aardink's lines are taller at the same font size.
 * tm4e still comes inside sora's `language-textmate`. Upstream 0.18.0 builds with Java 21, now installed, so phase 7 can carry it.
-* Left on the tablet: engine sora, Material You colours, the two test tabs closed.
+* Left on the tablet: Material You colours, the two test tabs closed; the engine as in batch 43's correction.
+
+## 45. Aardink 0.9.0 reviewed and adopted (11-08; done)
+User's request (11-08): update the Aardink backlog for 0.9, and make it a habit with every release (now a section of the
+[plan](AARDINK-SWITCH-PLAN.md), "Release reviews"). 344 app unit tests pass.
+* Pinned to 0.9.0 in the app and the lab; it built with no source change. One contract was new: a tokenizer asked with an
+  empty `previousTokens` must answer for those lines and keep nothing (0.9's code fences ask that way). Ours rescanned
+  the whole document and kept it; now it scans aside (`standalone`), with a test.
+* Lab, release build, guest running: the Samsung keyboard issue is still there (Enter, Shift+Left; backlog 73). The gesture
+  hitch is unchanged (23-24 missed of about 2,000 frames, 24 swipes); p99 16 ms, from 18-19; memory as before.
+* App: semantic colours seen at last, with the guest's language server (`pandas`, `pd`, `DataFrame`), closing batch 44's gap.
+* Found: the engine setting changed offline in batches 43 and 44 never reached the guest's settings, so the app ran Aardink
+  whenever connected (corrections above). Set to sora while connected; it held across a restart. Backlog 74.
+* What 0.9 changes for the switch: requests 3 and 4 delivered, request 1 narrowed to two overlays, phase 3 smaller,
+  phase 5 unblocked but for those two; details in the plan.
 
 ## Backlog
 ### Open backlog (11-04)
@@ -2165,7 +2180,7 @@ used when showing the user this table. "Item" is the number in the lists below, 
 | 8 | 56 | M–L | Widgets not drawn yet |
 | 9 | 22 | M | Accessibility pass |
 | 10 | 23 | L | Automated on-device tests and screenshot comparisons |
-| 11 | – | XL | Aardink switch: decided, planning started; see [the plan](AARDINK-SWITCH-PLAN.md) |
+| 11 | – | L | Aardink switch: phases 0-2 done on 0.9.0, phase 3 next; see [the plan](AARDINK-SWITCH-PLAN.md) |
 | 12 | – | ? | Copilot exits after a daemon restart (watching) |
 | 13 | 64 | S–M or L | Replace Gemini CLI with Antigravity CLI |
 | 14 | 65 | S–M to explore, L+ to adopt | Other backends: proot, Termux and others |
@@ -2174,9 +2189,10 @@ used when showing the user this table. "Item" is the number in the lists below, 
 | 17 | 68 | S to try the grant, L+ to do | Bundle the image and use AVF without Terminal: not for store installs |
 | 18 | 69 | S–M | Warn near the phantom process limit, and say so when the guest goes away |
 | 19 | 70 | L overall | Mode without Terminal: local backend, ML on another machine, glibc if proven |
-| 20 | 71 | S to ask | Ask Aardink for public text positions (overlays); drafted, the user will come back to it |
+| 20 | 71 | S to ask | Ask Aardink for public text positions; since 0.9 only for two overlays; drafted, the user will come back to it |
 | 21 | 72 | S to ask | Ask Aardink for gutter icons and taps (breakpoints); drafted, the user will come back to it |
-| 22 | 73 | S to ask | Tell Aardink about the Samsung keyboard's selection echo (Enter, Shift+arrows); worked around |
+| 22 | 73 | S to ask | Tell Aardink about the Samsung keyboard's selection echo (Enter, Shift+arrows); worked around; still in 0.9 |
+| 23 | 74 | S-M | Settings changed offline are lost on reconnect |
 
 Loose ends, not sized:
 * The unsaved dot seen once after saving a restored deleted file (batch 39; not reproduced in three tries).
@@ -2253,14 +2269,14 @@ To investigate (user, 10-28):
     2. Scrolling: p95 12 ms, as sora (p99 17 vs 12); 23-24 missed deadlines of ~1,600 against 1 of ~5,000, from two
        slow frames (18-50 ms) at the start of each gesture.
   * What the switch needs:
-    3. Ghost text, inlay hints, code lens, semantic tokens: planned for 0.9 (§7.3), no date. The app draws
+    3. (Delivered in 0.9.0, 11-08: ghost text, inlay hints, code lens, semantic tokens, Markdown hover.) Was: planned for 0.9. The app draws
        the first three as overlays on sora, but Aardink gives no pixel position for a line or caret
        (`ViewportInfo` has only scroll offsets and line numbers), so that route is closed too.
     4. Breakpoints: `DecorationStyle` has only a coloured gutter bar, and the host gets no gutter tap.
        Icons and taps aren't on its roadmap, so this needs asking upstream, a fork or a different design.
-    5. Keyboards: our own pass with the Book Cover (ABNT2 dead keys), Gboard and Samsung's keyboard. Its
-       manual IME passes haven't been run; they're planned for 1.0.
-    6. TextMate: our adapter works with VS Code grammar packs and imported themes. Possible now: the
+    5. Keyboards: our own pass with the Book Cover (ABNT2 dead keys), Gboard and Samsung's keyboard. Batch 43 did it
+       with a virtual ABNT2 keyboard and found the Samsung issue (worked around; still in 0.9). The user's own check is left.
+    6. (Done in batch 44.) TextMate: our adapter works with VS Code grammar packs and imported themes. Possible now: the
        `IncrementalTokenizer` interface and `NamedTokenType` scopes are public. It adds tm4e (EPL-2.0).
     7. (Done in batch 42.) `minSdk`: Aardink needs 26; the app is on 34.
   * No longer blockers (0.7, 0.8): change and selection events, commands and keybindings as data,
@@ -2558,7 +2574,8 @@ day, L several days.
       An app of our own wouldn't need this: a loader packed as `lib*.so` can be executed directly. Prove it with one
       manylinux wheel before planning on it. Settings: a backend picker (AVF guest, local, remote). L overall.
   71. Ask Aardink for public text positions: a pixel rect for an offset or line, updated on scroll and layout
-      (user, 11-04: yes, draft first). Ten of the app's overlays need them, and they aren't on its roadmap. S to
+      (user, 11-04: yes, draft first). Ten of the app's overlays needed them; since 0.9 only two do (Next Edit's card, the
+      definition peek), the rest having built-in answers. Still not on its roadmap. S to
       ask; the answer decides phase 5 of the [switch plan](AARDINK-SWITCH-PLAN.md). Drafted in
       [AARDINK-UPSTREAM-REQUESTS.md](AARDINK-UPSTREAM-REQUESTS.md); not filed: the user will come back to it (11-05).
   72. Ask Aardink for a gutter icon in a decoration and a host callback for gutter taps (user, 11-04: yes, draft
@@ -2566,6 +2583,9 @@ day, L several days.
   73. Tell Aardink: with Samsung's keyboard, a hardware Enter leaves the cursor before the line break, and a keyboard
       selection is turned round by the input method's `setSelection` (11-08, batch 43; worked around in the app). Its
       `setSelection` could ignore a range equal to the current one. S to ask; not drafted yet. The user will come back to it.
+      Still there in 0.9.0 (lab, 11-08).
+  74. A setting changed while the guest is off is lost when it comes back: the guest's settings file wins (batches 43-45,
+      the editor engine). Keep offline changes and write them on reconnect, or say they won't last. S-M. Found 11-08.
 * Still left out on purpose: multi-cursor, sticky scroll, minimap (Aardink switch; folding came in batch 31);
   split editor groups and the 3-way merge editor; tasks.json; MCP, other AI providers and the
   built-in chat agent (Copilot, Claude Code and Gemini through ACP instead); foldable postures

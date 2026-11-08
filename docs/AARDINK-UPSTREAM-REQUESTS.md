@@ -6,6 +6,10 @@ rule is the issue's text. Checked against Aardink 0.8.0's sources and roadmap on
 
 ---
 
+> Note (11-08, after 0.9.0): inline text, inlay hints, code lens, ghost text and Markdown hover are now built in, so
+> this request is down to two cases, a card for an edit suggested elsewhere in the file and a definition peek. Reword
+> the problem around those before filing.
+
 **Title:** [feature] Public text positions for hosts (rect of an offset or line)
 
 ## Problem

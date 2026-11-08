@@ -1,6 +1,6 @@
 # Plan: switching from sora-editor to Aardink
 
-Status: **phase 2 done** (2026-11-08); sora stays the default. Phase 3 (language features) is next.
+Status: **phase 2 done** (2026-11-08) on Aardink **0.9.0**; sora stays the default. Phase 3 (language features) is next.
 
 **Decided by the user:** the switch will happen, for the licence (Apache-2.0 instead of sora's LGPL-2.1).
 On 11-04 they judged the measured memory and scrolling not to be impediments, and expect Aardink's release
@@ -22,17 +22,18 @@ Build Aardink beside sora and flip when it reaches parity, so the app stays usab
 
 ## Requests to Aardink
 
-The app's biggest dependencies aren't all on Aardink's roadmap, so the release cadence alone won't deliver them.
-These are ordered by how much they unblock. Filing them is the user's decision.
+Reviewed against each release (see [Release reviews](#release-reviews)); last against 0.9.0 on 11-08.
+Filing them is the user's decision.
 
-| # | Request | On its roadmap? | Unblocks |
+| # | Request | Where it stands (0.9.0) | Unblocks |
 |---|---|---|---|
-| 1 | Public text positions: pixel rect for an offset or line, updated on scroll and layout | No | The ten overlays in phase 5, as interim or permanent answers |
-| 2 | Gutter icon in a decoration, and a host callback for gutter taps | No: the planned glyph was built as a bar | Breakpoints |
-| 3 | Ghost text, inlay hints, code lens | 0.9, after a layout spike | Copilot's suggestions, inlay hints, lenses, Python cell actions |
-| 4 | Semantic token layer | 0.9 | Optional: our tokenizer adapter can merge them |
+| 1 | Public text positions: pixel rect for an offset or line | Not on the roadmap. **Needed far less since 0.9:** inline text, inlay hints, code lens, ghost text, Markdown hover and signature help are built in | Next Edit's card and the definition peek, the two overlays left without a built-in answer |
+| 2 | Gutter icon in a decoration, and a host callback for gutter taps | Not on the roadmap | Breakpoints |
+| 3 | Ghost text, inlay hints, code lens | **Delivered in 0.9** (`InlineCompletionProvider`, `inlayHints`, `codeLenses`). Not yet tried on a device by Aardink, nor with Samsung's keyboard | Copilot's suggestions, inlay hints, lenses, Python cell and merge conflict actions |
+| 4 | Semantic token layer | **Delivered in 0.9** (`semanticTokens`, `semanticHighlighting`). Ours works already (batch 44); theirs can replace it once completion goes through `LanguageService` | Optional |
 | 5 | Saved view state (scroll, folds) | 1.0 | Optional: we can keep it per tab |
-| 6 | The slow frames as a gesture starts; a note on the declarative tokenizer's native memory | Android gates in 0.10 | Better numbers; the app avoids the second through its adapter |
+| 6 | The slow frames as a gesture starts | 0.10's performance work (Android gates, baseline profile). Unchanged in 0.9 (measured 11-08) | Better scrolling |
+| 7 | Samsung's keyboard: Enter and Shift+arrows (backlog 73) | Not mentioned; 1.0 plans device validation with Samsung's keyboard. **Still there in 0.9** (lab, 11-08) | Removing our workaround |
 
 If 1 or 2 are declined, a fork is allowed by the licence but is a real maintenance cost; ask the user before going there.
 
@@ -62,12 +63,15 @@ If 1 or 2 are declined, a fork is allowed by the licence but is a real maintenan
 * tm4e: still from sora's package; for phase 7, upstream 0.18.0 (builds with Java 21, now installed) or sora's 110 files.
 * Parity note: Aardink's lines are taller at the same font size (`EditorOptions.lineHeight` can match sora's).
 
-### Phase 3: language features (M-L)
+### Phase 3: language features (M; was M-L before 0.9)
 * Through `LanguageService`, backed by the app's existing LSP client rather than Aardink's: completion
-  (replaces `SoraCompletion.kt`), hover with the app's hiding delay, signature help, occurrences, go to definition.
+  (replaces `SoraCompletion.kt`) with 0.9's detail pane and `resolveCompletion`, hover and signature help as Markdown
+  (0.9), occurrences, go to definition. Aardink's own `LspLanguageService` (0.9) stays unused: our client serves sora too.
+* Auto-indent, closing pairs and surrounding a selection from VS Code's `language-configuration.json` (0.9's
+  `LanguageConfiguration`); grammar packs ship one. Python's indentation after `:` comes from here.
 * Problems onto its diagnostics, with tags and quick fixes.
 * Find and replace, keeping the find widget and scope. Snippets, with stops and mirrors.
-* Folding onto `FoldingProvider` with the existing LSP and indentation ranges.
+* Folding onto `FoldingProvider` with the existing LSP and indentation ranges (`requestFoldableRanges` can wait on the server, 0.9).
 * Auto-pairing, tab stops, comment and line commands, linked tag edits.
 
 ### Phase 4: decorations (M)
@@ -77,12 +81,12 @@ If 1 or 2 are declined, a fork is allowed by the licence but is a real maintenan
   including conditional ones. No icon or gutter tap until request 2.
 * The large-file view and `PeekView` onto read-only editors.
 
-### Phase 5: what's drawn over the code (M; depends on requests 1 and 3)
-Ghost text, inlay hints, parameter hints, hover card, fold arrows, snippet stops, find scope, merge conflict
-actions, Python cell actions and Next Edit are drawn at positions read from sora.
-
-For each: use Aardink's own version where it has one (parameter hints, hover and fold markers now; ghost text,
-inlays and lenses in 0.9), otherwise an overlay through request 1.
+### Phase 5: what's drawn over the code (M; unblocked by 0.9 except two overlays)
+Built in since 0.9, so these move onto Aardink's own: ghost text (`InlineCompletionProvider`, Tab, Alt+] and Alt+[),
+inlay hints (`inlayHints`), code lenses (`codeLenses`) and through them Python cell actions and merge conflict actions,
+hover and parameter hints (Markdown), fold arrows, snippet stops, find scope.
+Left: Next Edit's card and the definition peek need request 1, or a design on decorations (`before`/`after`, 0.9).
+Aardink hasn't tried ghost text or lenses on a device or with Samsung's keyboard; this phase does.
 
 ### Phase 6: flip the default (S-M, then time)
 * Run through the parity list below on the tablet; `aardink` becomes the default, `sora` stays one setting away.
@@ -117,12 +121,25 @@ Checked on the tablet before phase 6. Features the app has today that the switch
 | Risk | Answer |
 |---|---|
 | Real keyboards or IME don't hold up | Phase 1 tests them first; stop before the expensive work |
-| Requests 1 and 2 are declined or slow | Interim breakpoints work; overlays wait; sora stays default meanwhile |
+| Requests 1 and 2 are declined or slow | Interim breakpoints work; two overlays wait; sora stays default meanwhile |
+| Samsung's keyboard and Aardink disagree (Enter, selection; ghost text and lenses untested there) | Our workaround (batch 43); each release rechecked in the lab |
 | Memory pressure destabilises the guest | Not a gate (user's decision). Phase 0 looks good; measured again in phase 6, since it has corrupted the guest before |
 | API breaks in a minor | Pinned version, one bump per batch |
 | One main author | Apache-2.0 allows a fork if the project stops |
 
+## Release reviews
+
+The user's habit (11-08): with each Aardink release, read its changelog, migration notes and roadmap against this plan
+and the backlog; bump the pinned version in a batch of its own; build, run the tests, recheck in the lab what it touches
+(keyboard, scrolling, memory) and in the app what we use; then update the requests, the phases and the backlog, and show
+the user the full backlog and what changed in coverage.
+
+| Release | Reviewed | What changed for us |
+| --- | --- | --- |
+| 0.8.0 | 11-04 | Decorations, change events, commands, keybindings, Material 3 themes (batch 41 revisit). |
+| 0.9.0 | 11-08, batch 45 | Requests 3 and 4 delivered; phase 3 smaller, phase 5 unblocked but for two overlays; request 1 narrowed. Our tokenizer broke the new rule for an empty `previousTokens` (fixed). No source change needed. Samsung keyboard issue and gesture hitch unchanged. |
+
 ## Size
 
-Still XL: about 2-3 weeks of batches, with phase 5 and the flip depending on Aardink's releases.
+About 1.5-2 weeks of batches left after phase 2 (was 2-3 weeks for all of it); breakpoints and two overlays still depend on Aardink.
 Sizes: S about half a day, M about a day, L several days.

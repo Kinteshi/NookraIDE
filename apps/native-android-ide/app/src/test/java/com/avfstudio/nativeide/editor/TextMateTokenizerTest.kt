@@ -95,6 +95,18 @@ class TextMateTokenizerTest {
     }
 
     @Test
+    fun askedWithNothingBeforeItAnswersForTheLinesAndKeepsItsOwnState() {
+        val tokenizer = tokenizer()
+        tokenizer.tokenizeFull("a = 1\nb = 2\n")
+        val kept = tokenizer.grammarTokens()
+        val snippet = "x = '''\ny\nz = 3"
+        val lines = tokenizer.tokenizeLines(snippet, 1..2, emptyList())
+        assertEquals(tokenizer().tokenizeFull(snippet).filter { it.start >= snippet.indexOf("y") }, lines)
+        assertTrue(lines.all { (it.type as NamedTokenType).name.startsWith("string.") || it.isEmpty })
+        assertEquals(kept, tokenizer.grammarTokens())
+    }
+
+    @Test
     fun anIncrementalPassReturnsItsLinesWithSemanticColours() {
         val tokenizer = tokenizer()
         val text = "a = 1\nb = f(a)\nc = 3"

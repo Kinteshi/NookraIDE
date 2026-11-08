@@ -242,3 +242,11 @@ Other facts for the switch:
 
 Limits: sample lines rather than real code, a smaller window, no editing in the editor itself yet (the adapter's edits were tested
 directly), and no real app around it. Phase 6 measures that.
+
+## Aardink 0.9.0, 2026-11-08
+
+Read against the plan; details in `docs/AARDINK-SWITCH-PLAN.md`, "Release reviews". Built with no source change. Lab, release
+build compiled with `speed`, floating window, guest running, 2,000 lines: sora 1 missed of 5,224 frames, p95 10 ms; Aardink with
+the TextMate adapter 23 missed of 1,997, p90 9, p95 10, p99 16 ms (p99 18-19 on 0.8.0). At 10,000 lines 24 of 2,075. Memory as
+on 0.8.0: 60-61 MB at 2,000 lines (sora 63), 69-78 MB at 10,000. The hitch at each gesture's start is unchanged; the Samsung
+keyboard issue (Enter, Shift+Left) is still there.

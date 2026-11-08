@@ -71,7 +71,9 @@ class TextMateTokenizer(
 
     @Synchronized
     override fun tokenizeLines(text: String, dirtyRange: IntRange, previousTokens: List<Token>): List<Token> {
-        if (lines.isEmpty() || previousTokens.isEmpty()) return tokenizeFull(text)
+        // Asked with nothing before: a snippet, or a quick look at some lines. Answer for them and keep nothing.
+        if (previousTokens.isEmpty()) return standalone(text, dirtyRange)
+        if (lines.isEmpty()) return tokenizeFull(text)
         val split = splitLines(text)
         val delta = split.size - lines.size
         // Lines before the first that differs keep everything; the dirty range only narrows the search.
@@ -125,6 +127,21 @@ class TextMateTokenizer(
     }
 
     override fun canSpanLines(lineIndex: Int, tokens: List<Token>): Boolean = false
+
+    /** Tokens for [range] from a scan of [text] that leaves this tokenizer's own state alone. */
+    private fun standalone(text: String, range: IntRange): List<Token> {
+        val split = splitLines(text)
+        val starts = lineStarts(split)
+        val last = range.last.coerceAtMost(split.size - 1)
+        val out = ArrayList<Token>()
+        var state: IStateStack? = null
+        for (line in 0..last) {
+            val scanned = scanLine(split[line], state, starts[line])
+            if (line >= range.first) out += scanned.first
+            state = scanned.second
+        }
+        return out
+    }
 
     /** The grammar's tokens on every line, with no semantic colours: for checking passes against each other. */
     @Synchronized

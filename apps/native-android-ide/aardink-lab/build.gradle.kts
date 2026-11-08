@@ -41,8 +41,8 @@ android {
 dependencies {
     implementation("androidx.activity:activity-compose:1.10.1")
     implementation(platform("androidx.compose:compose-bom:2026.09.00"))
-    implementation("com.aardarch:aardink:0.8.0")
-    implementation("com.aardarch:aardink-languages:0.8.0")
+    implementation("com.aardarch:aardink:0.9.0")
+    implementation("com.aardarch:aardink-languages:0.9.0")
     // sora-editor as the app uses it, measured side by side with aardink (SoraLabActivity).
     implementation("io.github.Rosemoe.sora-editor:editor:0.23.6")
     implementation("io.github.Rosemoe.sora-editor:language-textmate:0.23.6")
