@@ -2387,6 +2387,7 @@ Grouped (11-08) so that what's cheaper done together is done together; the numbe
 | | – | – | S | The terminal's toolbar row at phone width (batch 40) |
 | **On its own** | G12 | 64 | S–M or L | Replace Gemini CLI with Antigravity CLI |
 | | G19 | – | S–M | Debugger: values in the hover while paused, and Copilot's partial accept (word by word): in neither engine (batch 55) |
+| | G20 | – | S–M | Hover card: an expand button that shows the whole of it in a split panel, or in a docs tab in the bottom panel (user's idea, 11-08) |
 | | G11 | – | ? | Copilot exits after a daemon restart (watching) |
 
 Why these groups:
@@ -2421,6 +2422,7 @@ A2, A3, A4, A8, A16, A17 and A19 were done in batches 47–54, and A5's checks i
 | | A14 | 75 | S to ask | `LanguageConfiguration` can't load on Android (regex); ours reads the files meanwhile |
 | | A15 | 76 | S to ask | Typing over auto-inserted closers; ours does it for hardware keys |
 | | A18 | – | S to ask | Backspace back to a tab stop in leading spaces (VS Code's `useTabStops`); ours does it for hardware keys (batch 53) |
+| **E. After sora is out** | A20 | – | M–L | Notebook cells in Aardink: today they're the app's own text fields, so they lack the editor's features (folding, hints, lenses, multi-cursor…); decide, then move them (the plan's phase 7 note) |
 | **D. Each release** | A12 | habit | S per release | Review each Aardink release against the plan and these lists, bump the pin, recheck (plan, "Release reviews"); with A19, check its reflection still works |
 
 Why these groups:
@@ -2435,6 +2437,28 @@ Watching, on Aardink's side: the hitch as a gesture starts (its 0.10 performance
 and Samsung's keyboard composing words even from a hardware keyboard (batch 52).
 
 Loose ends: placed in the groups above (11-08).
+
+#### Release backlog (first release)
+
+Registered 11-08, from the user: "let us think about releasing… items in the backlog I don't want to sweep under the rug…
+we have to polish the app for an initial release cycle". Nothing here is started. R1 decides which G and A items the first
+release waits for; the rest stay in their lists for later releases.
+
+| Group | # | Size | Description |
+|---|---|---|---|
+| **1. Decide** | R1 | S, the user's | What the first release waits for. Proposal: A5's daily use then A6 (sora out); G5, G6, G17 and group 2's loose ends; G14's walkthrough; the basics of G9 |
+| | R2 | S, the user's | Name and identity: MaterialCode or AVF Studio for the repository, the app id (`com.avfstudio.nativeide`), the daemon (`avf-native-daemon`); icon and branding |
+| | R3 | S | Licence: a LICENSE file (Cargo says MIT; the app declares none), third-party notices in the app (Aardink Apache-2.0, tm4e EPL-2.0, termlib Apache-2.0…), with sora's LGPL gone first (A6) |
+| **2. Build and ship** | R4 | M | Release builds: a signing key and where it's kept, R8 with keep rules (Aardink's reflection in `AardinkGeometry` needs them), version numbers from tags, APK size |
+| | R5 | M | CI (GitHub Actions): app unit tests (JDK 17 and 21), daemon tests, the arm64 daemon (zigbuild) bundled into the APK, the daemon for Linux and WSL hosts, checksums, a GitHub release from a tag |
+| | R6 | S–M | App and daemon versions: the app checks the guest daemon's version, not only the protocol number, and offers to update it with the one it carries; release notes for both |
+| **3. Polish** | R7 | M | First run and setup: what's needed (Android version, Linux Terminal, AVF), Set up guest, pairing, offline; a README for users, apart from the specs |
+| | R8 | M | Material You pass: cards, dialogs and banners consistent (as the large-file banner wasn't), empty states, phone width (the terminal toolbar loose end) |
+| | R9 | S–M | Diagnostics for bug reports: a Copy Diagnostics command (versions, device, guest state, recent errors); no telemetry |
+| | R10 | S | Out of the release: the aardink-lab module, debug probes, Track A's leftovers (SPEC.md, the untracked `android/`), developer docs kept apart from users' |
+
+Why these groups: 1 sets the scope and the name, which everything else is labelled with; 2 is one pipeline, built once; 3 is
+one pass through the app as a new user meets it.
 
 To investigate (user, 10-28):
 * (Done in batch 16, with a notebook-side finding.) Plotly figures updating in place (the user's private-notebook-1.ipynb: `plot_handle =
