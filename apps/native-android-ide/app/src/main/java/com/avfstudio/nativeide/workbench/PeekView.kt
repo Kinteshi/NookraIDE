@@ -53,12 +53,16 @@ private fun LanguageLocation.endLine(): Int = range.getAsJsonObject("end")?.get(
 internal fun PeekOverlay(controller: WorkbenchController) {
     controller.editorViewportTick
     val peek = controller.peek?.takeIf { it.path == controller.activePath } ?: return
-    val view = controller.soraEditor() ?: return
-    LaunchedEffect(peek.kind, peek.position) { view.problemTooltip?.dismiss() }
+    val view = controller.soraEditor()
+    // Aardink can't say where a line is on screen (request 1): the peek docks at the edge away from its line.
+    val aardink = controller.editorSurface as? AardinkEditorSurface
+    if (view == null && aardink == null) return
+    LaunchedEffect(peek.kind, peek.position) { view?.problemTooltip?.dismiss() }
     val colors = MaterialTheme.colorScheme
     val density = LocalDensity.current
-    val line = peek.position.line.coerceIn(0, view.text.lineCount - 1)
-    val lineBottom = view.getCharOffsetY(line, 0)
+    val line = peek.position.line.coerceIn(0, (view?.text?.lineCount ?: aardink!!.lineCount) - 1)
+    val lineBottom = view?.getCharOffsetY(line, 0) ?: 0f
+    val dockBottom = aardink?.visibleLines?.let { visible -> line - visible.first < (visible.last - visible.first) / 2 } ?: true
     val height = 280.dp
     val selected = peek.locations.getOrNull(peek.selected) ?: return
     val fontSize = (controller.settings.editorFontSize * 0.9f).sp
@@ -74,7 +78,11 @@ internal fun PeekOverlay(controller: WorkbenchController) {
             .layout { measurable, constraints ->
                 val placeable = measurable.measure(constraints.copy(minHeight = 0))
                 val below = lineBottom.roundToInt() + with(density) { 2.dp.roundToPx() }
-                val top = if (below + placeable.height <= constraints.maxHeight) below else (lineBottom - view.rowHeight).roundToInt() - placeable.height
+                val top = when {
+                    view == null -> if (dockBottom) constraints.maxHeight - placeable.height else 0
+                    below + placeable.height <= constraints.maxHeight -> below
+                    else -> (lineBottom - view.rowHeight).roundToInt() - placeable.height
+                }
                 layout(constraints.maxWidth, constraints.maxHeight) { placeable.place(0, top.coerceAtLeast(0)) }
             },
     ) {

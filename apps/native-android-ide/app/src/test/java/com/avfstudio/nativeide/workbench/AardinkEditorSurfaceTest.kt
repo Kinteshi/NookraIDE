@@ -149,4 +149,19 @@ class AardinkEditorSurfaceTest {
         surface.setFindScope(null, shade)
         assertTrue(surface.state.decorations("find-scope").isEmpty())
     }
+
+    @Test
+    fun aNextEditMarksWhatGoesAndShowsWhatComesAfterIt() {
+        val surface = surface("x = 1\ny = old(2)\n")
+        val preview = nextEditPreview(surface.text.split('\n'), LspRange(LspPosition(1, 4), LspPosition(1, 7)), "new")!!
+        surface.setNextEdit(preview)
+        val marks = surface.state.decorations("next-edit")
+        assertEquals(listOf(10 until 13, 13 until 13), marks.map { it.range })
+        assertEquals("new", marks[1].style.after)
+        // An insertion across lines shows on one row.
+        surface.setNextEdit(nextEditPreview(surface.text.split('\n'), LspRange(LspPosition(0, 5), LspPosition(0, 5)), "\nz = 3"))
+        assertEquals(listOf(" ⏎ z = 3"), surface.state.decorations("next-edit").mapNotNull { it.style.after })
+        surface.setNextEdit(null)
+        assertTrue(surface.state.decorations("next-edit").isEmpty())
+    }
 }

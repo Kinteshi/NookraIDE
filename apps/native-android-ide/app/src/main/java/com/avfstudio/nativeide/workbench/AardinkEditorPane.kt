@@ -1,6 +1,10 @@
 package com.avfstudio.nativeide.workbench
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.unit.dp
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -27,6 +31,7 @@ import com.aardarch.aardink.ui.EditorOptions
 import com.aardarch.aardink.ui.LocalEditorTheme
 import com.avfstudio.nativeide.document.DocumentSession
 import com.avfstudio.nativeide.document.isGuestPath
+import com.avfstudio.nativeide.editor.selectionStart
 import com.avfstudio.nativeide.editor.EditorEvent
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.future.await
@@ -192,6 +197,10 @@ private fun AardinkDecorations(controller: WorkbenchController, document: Docume
     }.orEmpty()
     val blameColor = colors.onSurfaceVariant.copy(alpha = 0.6f)
     LaunchedEffect(surface, blame, blameColor) { surface.setLineEndNotes("blame", blame, blameColor) }
+    // Copilot's next edit, in the text; the card is AardinkNextEditCard. Tab goes to it, or accepts it there.
+    val nextEdit = controller.shownNextEdit()
+    LaunchedEffect(surface, nextEdit) { surface.setNextEdit(nextEdit) }
+    SideEffect { surface.inlineSuggestionShown = controller.nextEdit != null }
     val scope = controller.findScope?.takeIf { controller.findVisible && controller.activeNotebook == null }
     val scopeColor = colors.primary.copy(alpha = 0.12f)
     LaunchedEffect(surface, scope, scopeColor) { surface.setFindScope(scope, scopeColor) }
@@ -242,3 +251,86 @@ private suspend fun copilotCompletions(
 }
 
 private const val COPILOT_TIMEOUT_MS = 10_000L
+
+/**
+ * Copilot's next edit as a card docked at the editor's edge, the lines as they'd read afterwards: at the bottom unless the
+ * edit is in the lower half of the view, and pointing up or down when it's off screen. Aardink can't say where a line is
+ * (request 1), so the card isn't under the edit as sora's is; the edit itself is marked in the text.
+ */
+@Composable
+internal fun AardinkNextEditCard(controller: WorkbenchController) {
+    val surface = controller.editorSurface as? AardinkEditorSurface ?: return
+    controller.cursorPosition
+    val preview = controller.shownNextEdit() ?: return
+    val visible = surface.state.viewport.let { it.firstVisibleLine..it.lastVisibleLine }
+    val onScreen = preview.lastLine >= visible.first && preview.firstLine <= visible.last
+    val below = preview.firstLine > visible.last
+    val dockTop = if (onScreen) (preview.firstLine + preview.lastLine) / 2 - visible.first > (visible.last - visible.first) / 2 else !below
+    val cursorLine = surface.selectionStart().line
+    val range = com.avfstudio.nativeide.editor.LspRange(
+        com.avfstudio.nativeide.editor.LspPosition(preview.firstLine, 0),
+        com.avfstudio.nativeide.editor.LspPosition(preview.lastLine, 0),
+    )
+    val atCursor = nextEditTab(cursorLine, range) == NextEditTab.Accept
+    val colors = MaterialTheme.colorScheme
+    val text = androidx.compose.ui.text.buildAnnotatedString {
+        append(preview.newText)
+        if (!preview.newChange.isEmpty()) {
+            addStyle(androidx.compose.ui.text.SpanStyle(background = NEXT_EDIT_ADDED.copy(alpha = 0.3f)), preview.newChange.first, preview.newChange.last + 1)
+        }
+    }
+    androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
+        androidx.compose.material3.Surface(
+            color = colors.surfaceContainerHigh,
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+            shadowElevation = 4.dp,
+            border = androidx.compose.foundation.BorderStroke(1.dp, NEXT_EDIT_ADDED.copy(alpha = 0.6f)),
+            modifier = Modifier
+                .align(if (dockTop) androidx.compose.ui.Alignment.TopCenter else androidx.compose.ui.Alignment.BottomCenter)
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .widthIn(max = 720.dp),
+        ) {
+            androidx.compose.foundation.layout.Column(Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
+                androidx.compose.foundation.layout.Row(
+                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                    horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp),
+                ) {
+                    val where = when {
+                        onScreen -> ""
+                        below -> "↓ "
+                        else -> "↑ "
+                    }
+                    androidx.compose.material3.Text(
+                        "${where}Copilot's next edit · line ${preview.firstLine + 1}",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = colors.onSurfaceVariant,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    androidx.compose.material3.Text(
+                        if (atCursor) "Tab accept" else "Tab go to it",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = colors.primary,
+                        modifier = Modifier.clickable {
+                            controller.runCommand(if (atCursor) "editor.action.inlineSuggest.acceptNextEdit" else "editor.action.inlineSuggest.commit")
+                        },
+                    )
+                    androidx.compose.material3.Text(
+                        "Esc dismiss",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = colors.onSurfaceVariant,
+                        modifier = Modifier.clickable { controller.runCommand("editor.action.inlineSuggest.hide") },
+                    )
+                }
+                androidx.compose.material3.Text(
+                    text,
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                    fontSize = surface.config.fontSizeSp.sp,
+                    color = colors.onSurface,
+                    softWrap = false,
+                    maxLines = 12,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
+        }
+    }
+}

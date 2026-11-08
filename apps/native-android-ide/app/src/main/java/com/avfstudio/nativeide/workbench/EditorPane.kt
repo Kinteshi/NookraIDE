@@ -239,6 +239,7 @@ private fun EditorOverlays(controller: WorkbenchController) {
     InlayHintsOverlay(controller)
     InlineGhostText(controller)
     NextEditOverlay(controller)
+    AardinkNextEditCard(controller)
     ParameterHints(controller)
     HoverCardOverlay(controller)
     PeekOverlay(controller)

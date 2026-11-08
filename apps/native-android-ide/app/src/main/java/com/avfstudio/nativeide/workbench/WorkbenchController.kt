@@ -10022,7 +10022,7 @@ class WorkbenchController(private val context: Context) {
             "editor.action.triggerSuggest" -> surface?.triggerSuggest()
             "editor.action.triggerParameterHints" -> activePath?.let { requestSignature(it, trigger = null, invoked = true) }
             "closeParameterHints" -> closeParameterHints()
-            "editor.action.showHover" -> showHover()
+            "editor.action.showHover" -> if (aardinkState()?.execute(AardinkCommand.ShowHover) != true) showHover()
             "editor.action.insertSnippet" -> showInsertSnippet()
             "git.viewFileHistory" -> showFileHistory()
             "git.blame.toggleEditorDecoration" -> toggleBlame()

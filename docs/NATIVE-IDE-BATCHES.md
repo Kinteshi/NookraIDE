@@ -2216,6 +2216,16 @@ User's pick: A3.
 * Inline values while paused, and git blame for the cursor's line, as text after the line's end (decorations).
 * Parameter hints, hover and fold markers were Aardink's own from phase 3; snippet stops are its own snippet engine's.
 
+## 49. Aardink switch: Next Edit's card and the peek, without text positions (11-08; built and unit-tested, tablet check in batch 52)
+User's pick: A4, by a design on decorations rather than waiting on request 1 (A9).
+* Copilot's next edit in the text: what it takes out tinted red and underlined, what it puts in after it in green on the same
+  row (line breaks as ⏎), and a mark in the overview ruler. The whole of the new lines is in a card docked at the editor's
+  bottom edge, or the top when the edit is in the lower half of the view, with ↑ or ↓ when it's off screen, and Tab accept /
+  Tab go to it and Esc dismiss as before (taps too). Tab reaches the workbench while one is shown.
+* The peek (definition, references, a code lens's count) docks at the edge away from its line, at the same height as sora's.
+* Show Hover (Ctrl+K Ctrl+I) opens Aardink's own hover at the cursor.
+* Request 1 would put both under their line; it's still worth filing, but nothing waits on it now.
+
 ## Backlog
 ### Open backlog (11-08)
 The current lists of what's open, in two: the general backlog, and the Aardink switch's until it's complete. The older

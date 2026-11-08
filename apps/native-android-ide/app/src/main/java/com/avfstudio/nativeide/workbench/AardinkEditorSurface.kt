@@ -206,6 +206,33 @@ internal class AardinkEditorSurface(val state: CodeEditorState) : EditorSurface 
         })
     }
 
+    /**
+     * Copilot's next edit in the text: what it takes out tinted red and underlined, and what it puts in after it in green, on
+     * one row (line breaks show as ⏎). The whole of it is in the card the pane docks at an edge.
+     */
+    fun setNextEdit(preview: NextEditPreview?) {
+        val decorations = preview?.let { nextEditDecorations(it) }.orEmpty()
+        state.setDecorations("next-edit", decorations)
+    }
+
+    private fun nextEditDecorations(preview: NextEditPreview): List<Decoration> {
+        if (preview.firstLine !in 0 until state.document.lineCount) return emptyList()
+        val base = state.document.lineStart(preview.firstLine)
+        val length = state.document.length
+        val removedStart = (base + preview.oldChange.first).coerceIn(0, length)
+        val removedEnd = if (preview.oldChange.isEmpty()) removedStart else (base + preview.oldChange.last + 1).coerceIn(removedStart, length)
+        val added = if (preview.newChange.isEmpty()) "" else preview.newText.substring(preview.newChange.first, preview.newChange.last + 1)
+        return buildList {
+            if (removedEnd > removedStart) {
+                add(Decoration(removedStart until removedEnd, DecorationStyle(background = NEXT_EDIT_REMOVED.copy(alpha = 0.22f), underline = NEXT_EDIT_REMOVED, overviewRulerColor = NEXT_EDIT_ADDED)))
+            }
+            if (added.isNotEmpty()) {
+                val shown = added.replace("\r", "").replace("\n", " ⏎ ").let { if (it.length > 80) it.take(79) + "…" else it }
+                add(Decoration(removedEnd until removedEnd, DecorationStyle(after = shown, inlineColor = NEXT_EDIT_ADDED, overviewRulerColor = NEXT_EDIT_ADDED)))
+            }
+        }
+    }
+
     /** Find in selection's scope, shaded while the find widget is open (VS Code's `findRangeHighlightBackground`). */
     fun setFindScope(scope: IntRange?, color: Color) {
         val length = state.document.length
@@ -375,6 +402,8 @@ internal val BREAKPOINT_COLOR = Color(0xFFE51400)
 internal val CONDITIONAL_BREAKPOINT_COLOR = Color(0xFFFF8C00)
 internal val LOGPOINT_COLOR = Color(0xFFB180D7)
 private val PAUSED_LINE_COLOR = Color(0x40FFCC00)
+internal val NEXT_EDIT_REMOVED = Color(0xFFE5534B)
+internal val NEXT_EDIT_ADDED = Color(0xFF3FB950)
 private val PAUSED_GUTTER_COLOR = Color(0xFFFFCC00)
 
 /**
