@@ -63,6 +63,21 @@ class LanguageRules(
         return pair.close
     }
 
+    /**
+     * The indentation a line takes as a key makes it match the decrease-indent rule (`else:`, `except:` at the end of a
+     * block), as VS Code re-indents while typing; null to leave it. [before] and [after] are the line without and with the
+     * key, [above] the nearest line above with text. Only a line still where Enter put it moves: one placed by hand stays.
+     */
+    fun outdentAsTyped(before: String, after: String, above: String?, unit: String): String? {
+        val pattern = decreaseIndent ?: return null
+        if (above == null || pattern.containsMatchIn(before) || !pattern.containsMatchIn(after)) return null
+        val indentation = after.takeWhile { it == ' ' || it == '\t' }
+        val aboveIndentation = above.takeWhile { it == ' ' || it == '\t' }
+        val expected = if (increaseIndent?.containsMatchIn(above) == true) aboveIndentation + unit else aboveIndentation
+        if (indentation.isEmpty() || indentation != expected) return null
+        return outdent(indentation, unit).takeIf { it != indentation }
+    }
+
     private fun outdent(indentation: String, unit: String): String = when {
         indentation.endsWith(unit) -> indentation.dropLast(unit.length)
         indentation.endsWith('\t') -> indentation.dropLast(1)

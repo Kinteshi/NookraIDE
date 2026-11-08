@@ -291,6 +291,32 @@ internal class AardinkEditorSurface(val state: CodeEditorState) : EditorSurface 
         return true
     }
 
+    /**
+     * A key typed on a hardware keyboard that makes its line match the language's decrease-indent rule (`else:` after a
+     * block): the line moves back a level as the key goes in, one edit and one undo. Before the input method, as with
+     * [typePairKey]. False when it doesn't apply, and the key goes on as usual.
+     */
+    fun typeOutdentKey(typed: Char): Boolean {
+        val language = rules ?: return false
+        val selection = state.selection
+        if (!selection.collapsed || typed == '\n') return false
+        val caret = selection.start
+        val line = state.document.offsetToLineCol(caret).first
+        val lineStart = state.document.lineStart(line)
+        val before = state.document.lineText(line)
+        val column = (caret - lineStart).coerceIn(0, before.length)
+        val after = before.substring(0, column) + typed + before.substring(column)
+        val current = after.takeWhile { it == ' ' || it == '\t' }
+        if (column < current.length) return false
+        val above = (line - 1 downTo maxOf(0, line - MAX_LINES_ABOVE)).asSequence().map(state.document::lineText).firstOrNull { it.isNotBlank() }
+        val indentation = language.outdentAsTyped(before, after, above, indentUnit) ?: return false
+        state.executeEdits(
+            listOf(TextEdit(caret until caret, typed.toString()), TextEdit(lineStart until lineStart + current.length, indentation)),
+            listOf(TextRange(caret + 1 - current.length + indentation.length)),
+        )
+        return true
+    }
+
     override fun triggerSuggest() {
         state.execute(EditorCommand.TriggerSuggest)
     }
@@ -398,6 +424,9 @@ internal fun turnedRound(keyed: TextRange?, now: TextRange): TextRange? =
 internal data class LineTint(val first: Int, val last: Int, val color: Color, val ruler: Color = Color.Unspecified)
 
 /** VS Code's breakpoint red; the other kinds get their own colour while the gutter shows bars, not icons. */
+/** How far up a typed `else:` looks for the line it lines up against. */
+private const val MAX_LINES_ABOVE = 200
+
 internal val BREAKPOINT_COLOR = Color(0xFFE51400)
 internal val CONDITIONAL_BREAKPOINT_COLOR = Color(0xFFFF8C00)
 internal val LOGPOINT_COLOR = Color(0xFFB180D7)

@@ -164,4 +164,20 @@ class AardinkEditorSurfaceTest {
         surface.setNextEdit(null)
         assertTrue(surface.state.decorations("next-edit").isEmpty())
     }
+
+    @Test
+    fun aTypedElseColonMovesTheLineBackInOneUndo() {
+        val surface = surface("if x:\n    y = 1\n    else")
+        surface.rules = com.avfstudio.nativeide.editor.LanguageRules.parse(
+            java.io.File("src/main/assets/textmate/python.language-configuration.json").readText(),
+        )
+        surface.state.selection = TextRange(surface.text.length)
+        assertTrue(surface.typeOutdentKey(':'))
+        assertEquals("if x:\n    y = 1\nelse:", surface.text)
+        assertEquals(surface.text.length..surface.text.length, surface.selectionOffsets)
+        // Any other key goes on as usual.
+        org.junit.Assert.assertFalse(surface.typeOutdentKey(' '))
+        surface.undo()
+        assertEquals("if x:\n    y = 1\n    else", surface.text)
+    }
 }

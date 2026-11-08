@@ -112,6 +112,8 @@ internal fun AardinkEditorView(controller: WorkbenchController, document: Docume
                 tabSize = config.tabSize,
                 insertSpaces = config.insertSpaces,
                 fontSize = config.fontSizeSp.sp,
+                // sora's rows: as tall as the font, no more (Aardink's default is about a fifth taller).
+                lineHeight = (config.fontSizeSp * MONOSPACE_ROW_RATIO).sp,
                 pinchToZoom = config.pinchToZoom,
                 inlayHints = settings.inlayHints,
                 // The service decides: cells and conflicts always, the server's with the Code Lens setting.
@@ -333,4 +335,13 @@ internal fun AardinkNextEditCard(controller: WorkbenchController) {
             }
         }
     }
+}
+
+/** A row of monospace text as sora lays it out, as a multiple of the font size: the font's ascent and descent, no spacing. */
+private val MONOSPACE_ROW_RATIO: Float by lazy {
+    val metrics = android.graphics.Paint().apply {
+        typeface = android.graphics.Typeface.MONOSPACE
+        textSize = 100f
+    }.fontMetrics
+    ((metrics.descent - metrics.ascent) / 100f).takeIf { it in 1f..2f } ?: 1.2f
 }

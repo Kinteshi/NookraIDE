@@ -9740,11 +9740,15 @@ class WorkbenchController(private val context: Context) {
         return handled
     }
 
-    /** Pairs on a hardware keyboard in the Aardink editor (closing, stepping over, surrounding), before the input method sees the key. */
+    /**
+     * Pairs on a hardware keyboard in the Aardink editor (closing, stepping over, surrounding), and `else:` moving back a
+     * level as it's typed, before the input method sees the key.
+     */
     private fun typePairKey(event: AndroidKeyEvent): Boolean {
         if (focusArea != FocusArea.Editor || event.isCtrlPressed || event.isAltPressed) return false
         val typed = event.unicodeChar.takeIf { it > 0 }?.toChar() ?: return false
-        return (editorSurface as? AardinkEditorSurface)?.typePairKey(typed) == true
+        val surface = editorSurface as? AardinkEditorSurface ?: return false
+        return surface.typePairKey(typed) || surface.typeOutdentKey(typed)
     }
 
     /** Enter and the moving keys in the Aardink editor skip the input method (see [KeyRouter.bypassesIme]). */

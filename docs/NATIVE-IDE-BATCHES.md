@@ -2226,6 +2226,16 @@ User's pick: A4, by a design on decorations rather than waiting on request 1 (A9
 * Show Hover (Ctrl+K Ctrl+I) opens Aardink's own hover at the cursor.
 * Request 1 would put both under their line; it's still worth filing, but nothing waits on it now.
 
+## 50. Aardink switch: line height, `else:` moving back as typed (11-08; built and unit-tested, tablet check in batch 52)
+User's pick: A8 and A16.
+* Line height: Aardink's rows were about a fifth taller than sora's at the same size (its default is 20 sp at 14 sp). They're
+  now as tall as the monospace font, as sora's are, following pinch and the font size setting. No setting of its own: VS
+  Code's `editor.lineHeight` could come later if wanted.
+* `else:`, `elif …:`, `except …:` and `finally:` move back a level as their `:` is typed on a hardware keyboard, from the
+  language configuration's decrease-indent rule, as VS Code re-indents while typing: one edit, one undo, before the input
+  method (as pairs are). Only a line still where Enter put it moves; one placed by hand stays. With the on-screen keyboard it
+  still happens at Enter only (the input method's path; an edit behind its back is what made Samsung's keyboard drift).
+
 ## Backlog
 ### Open backlog (11-08)
 The current lists of what's open, in two: the general backlog, and the Aardink switch's until it's complete. The older

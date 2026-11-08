@@ -59,4 +59,18 @@ class LanguageRulesTest {
         assertEquals(")", rules.autoClose("(", 0, '(', noTokens))
         assertEquals(emptyList<LanguageRules.OnEnterRule>(), rules.onEnterRules)
     }
+
+    @Test
+    fun elseMovesBackALevelAsItsColonIsTyped() {
+        val unit = "    "
+        // After a block's last line, and right under its header.
+        assertEquals("", python.outdentAsTyped("    else", "    else:", "    x = 1", unit))
+        assertEquals("    ", python.outdentAsTyped("        except ValueError", "        except ValueError:", "        pass", unit))
+        assertEquals("", python.outdentAsTyped("    else", "    else:", "if x:", unit))
+        // Placed by hand, already matching, not the rule, or nothing above: left alone.
+        assertNull(python.outdentAsTyped("else", "else:", "    x = 1", unit))
+        assertNull(python.outdentAsTyped("    else:", "    else: ", "    x = 1", unit))
+        assertNull(python.outdentAsTyped("    elsewhere = {a", "    elsewhere = {a:", "    x = 1", unit))
+        assertNull(python.outdentAsTyped("    else", "    else:", null, unit))
+    }
 }
