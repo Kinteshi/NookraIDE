@@ -21,6 +21,7 @@ data class WorkbenchSettings(
     val dynamicColor: Boolean = true,
     val pureBlack: Boolean = false,
     val syntaxColors: SyntaxColors = SyntaxColors.Classic,
+    val editorEngine: EditorEngine = EditorEngine.Sora,
     val editorFontSize: Float = 14f,
     val tabSize: Int = 4,
     val insertSpaces: Boolean = true,
@@ -193,6 +194,7 @@ data class WorkbenchSettings(
         const val DYNAMIC_COLOR = "avf.theme.dynamicColor"
         const val PURE_BLACK = "avf.theme.pureBlack"
         const val SYNTAX_COLORS = "avf.theme.syntaxColors"
+        const val EDITOR_ENGINE = "avf.editor.engine"
         const val EDITOR_FONT_SIZE = "editor.fontSize"
         const val TAB_SIZE = "editor.tabSize"
         const val INSERT_SPACES = "editor.insertSpaces"
@@ -310,6 +312,7 @@ data class WorkbenchSettings(
                 dynamicColor = bool(DYNAMIC_COLOR, defaults.dynamicColor),
                 pureBlack = bool(PURE_BLACK, defaults.pureBlack),
                 syntaxColors = SyntaxColors.entries.firstOrNull { it.key == string(SYNTAX_COLORS) } ?: defaults.syntaxColors,
+                editorEngine = EditorEngine.entries.firstOrNull { it.key == string(EDITOR_ENGINE) } ?: defaults.editorEngine,
                 editorFontSize = number(EDITOR_FONT_SIZE)?.toFloat()?.coerceIn(8f, 40f) ?: defaults.editorFontSize,
                 tabSize = number(TAB_SIZE)?.toInt()?.coerceIn(1, 8) ?: defaults.tabSize,
                 insertSpaces = bool(INSERT_SPACES, defaults.insertSpaces),

@@ -11,6 +11,12 @@ import kotlin.math.max
 import kotlin.math.min
 
 /** `avf.theme.syntaxColors`: where code colours come from. An imported VS Code theme wins over both. */
+/** What draws the code; see docs/AARDINK-SWITCH-PLAN.md. Aardink is partial until the switch's last phases. */
+enum class EditorEngine(val key: String, val label: String) {
+    Sora("sora", "sora-editor"),
+    Aardink("aardink", "Aardink"),
+}
+
 enum class SyntaxColors(val key: String, val label: String) {
     /** VS Code's Dark+ and Light+. */
     Classic("classic", "Classic"),

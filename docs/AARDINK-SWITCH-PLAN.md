@@ -1,6 +1,6 @@
 # Plan: switching from sora-editor to Aardink
 
-Status: **phase 0 done** (2026-11-05), phase 1 not started. The app itself still runs on sora.
+Status: **phase 1 done** (2026-11-08) except the user's own keyboard check; sora stays the default. Phase 2 is next.
 
 **Decided by the user:** the switch will happen, for the licence (Apache-2.0 instead of sora's LGPL-2.1).
 On 11-04 they judged the measured memory and scrolling not to be impediments, and expect Aardink's release
@@ -46,16 +46,14 @@ If 1 or 2 are declined, a fork is allowed by the licence but is a real maintenan
 * The controller no longer touches sora; what's left is sora-only code. `minSdk` is 34.
 * Still open: the user filing requests 1 and 2, drafted in [AARDINK-UPSTREAM-REQUESTS.md](AARDINK-UPSTREAM-REQUESTS.md).
 
-### Phase 1: a working editor behind the setting (L)
-* Dependency, the setting, `AardinkEditorSurface` and a Compose pane. (`minSdk` is already 34, from phase 0.)
-* Open, edit, save, undo, selection, word wrap, line numbers, zoom, read-only; events to the controller
-  (content, selection, viewport, focus, zoom).
-* Keys: the window-level `KeyRouter` keeps first say; `EditorOptions.keyBindings` removes what the app handles.
-* Tests touching Aardink run on the device: its classes are Java 21 bytecode and Gradle here runs Java 17. Tests against
-  `EditorSurface` stay on the JVM.
-* **Exit: real keyboards on the tablet.** Book Cover with ABNT2 dead keys, Gboard, Samsung's keyboard, touch
-  selection, touchpad and pointer. This comes early on purpose: its own manual IME passes aren't due until 1.0,
-  and this could stop the plan.
+### Phase 1: a working editor behind the setting (done 11-08, batch 43)
+* Settings → Editor → Editor engine (`avf.editor.engine`), `AardinkEditorSurface` and `AardinkEditorPane`. `minSdk` 34 from phase 0.
+* Text, selection, undo, events, font size, wrap, line numbers, tab size, focus on opening a file.
+* Keys: the window-level `KeyRouter` keeps first say. Enter and the moving keys skip the input method for this editor, and
+  a keyboard selection the input method turns round is turned back: Samsung's keyboard and Aardink 0.8.0 lost the cursor
+  and the selection's direction otherwise (backlog 73).
+* Tests touching Aardink run on Java 21 (installed beside 17).
+* **Still for the user:** the Book Cover itself, and the on-screen keyboard (hidden while the Book Cover is attached).
 
 ### Phase 2: colours (L)
 * The adapter from phase 0, for all grammar packs, in the background and cancellable.

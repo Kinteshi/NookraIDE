@@ -14,6 +14,15 @@ object KeyRouter {
     var handler: ((KeyEvent) -> Boolean)? = null
 
     fun route(event: KeyEvent): Boolean = handler?.invoke(event) ?: false
+
+    /**
+     * Keys that go straight to the focused view, before the input method. With Aardink 0.8.0's editor,
+     * Samsung's keyboard handles Enter and Shift+arrows from a hardware keyboard with a cursor it
+     * hasn't caught up with: a line break left the cursor before it, and Shift+Left moved without
+     * selecting. Text keys still go through it, which dead keys need.
+     */
+    @Volatile
+    var bypassesIme: ((KeyEvent) -> Boolean)? = null
 }
 
 private val arrowKeys = setOf(

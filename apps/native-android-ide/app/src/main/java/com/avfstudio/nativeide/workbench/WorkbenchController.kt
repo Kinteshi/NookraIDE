@@ -217,6 +217,12 @@ private val CODE_LENS_KINDS = setOf(5, 6, 9, 10, 11, 12, 23)
 private const val UNDO_WINDOW_MS = 9_500L
 /** A finished action's buzz (CONFIRM since Android 11). */
 internal val HAPTIC_CONFIRM = HapticFeedbackConstants.CONFIRM
+
+private val IME_BYPASS_KEYS = setOf(
+    AndroidKeyEvent.KEYCODE_ENTER, AndroidKeyEvent.KEYCODE_NUMPAD_ENTER,
+    AndroidKeyEvent.KEYCODE_DPAD_LEFT, AndroidKeyEvent.KEYCODE_DPAD_RIGHT, AndroidKeyEvent.KEYCODE_DPAD_UP, AndroidKeyEvent.KEYCODE_DPAD_DOWN,
+    AndroidKeyEvent.KEYCODE_MOVE_HOME, AndroidKeyEvent.KEYCODE_MOVE_END, AndroidKeyEvent.KEYCODE_PAGE_UP, AndroidKeyEvent.KEYCODE_PAGE_DOWN,
+)
 private val KEYBINDINGS_TEMPLATE = """
     // Keyboard shortcuts, in VS Code's keybindings.json format. A command starting with "-"
     // removes that default shortcut. "when" clauses are kept but not evaluated here.
@@ -9664,6 +9670,11 @@ class WorkbenchController(private val context: Context) {
         if (handled) consumedKeyDowns += event.keyCode
         return handled
     }
+
+    /** Enter and the moving keys in the Aardink editor skip the input method (see [KeyRouter.bypassesIme]). */
+    fun bypassesIme(event: AndroidKeyEvent): Boolean =
+        settings.editorEngine == EditorEngine.Aardink && focusArea == FocusArea.Editor && dialog == null &&
+            event.keyCode in IME_BYPASS_KEYS
 
     private fun sendTerminalControlKey(event: AndroidKeyEvent): Boolean {
         if (focusArea != FocusArea.Terminal || !event.isCtrlPressed || event.isAltPressed || event.isShiftPressed) return false

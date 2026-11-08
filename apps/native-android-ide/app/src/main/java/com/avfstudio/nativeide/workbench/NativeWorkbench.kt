@@ -134,9 +134,11 @@ fun NativeWorkbench() {
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         KeyRouter.handler = controller::routeHardwareKey
+        KeyRouter.bypassesIme = controller::bypassesIme
         IntentRouter.handler = controller::handleIntent
         onDispose {
             KeyRouter.handler = null
+            KeyRouter.bypassesIme = null
             IntentRouter.handler = null
             controller.pickLocalFile = null
             lifecycleOwner.lifecycle.removeObserver(observer)

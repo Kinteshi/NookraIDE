@@ -2109,6 +2109,27 @@ User's go-ahead (11-04) on the [plan](AARDINK-SWITCH-PLAN.md). 329 app unit test
   classes are Java 21 bytecode and Gradle here runs Java 17.
 * tm4e has no official Maven package and leaves with sora, so phase 2 carries it as a module.
 
+## 43. Aardink switch, phase 1: a working editor behind a setting (11-05 to 11-08; done, except checks only the user can do)
+User's go-ahead (11-05), with leave to install toolchains: Java 21 now sits beside 17 (Arch's `jdk21-openjdk`;
+17 stays the default), and the app's JVM tests run on 21, which Aardink's classes need. 337 app unit tests pass.
+* Settings → Editor → **Editor engine**: `avf.editor.engine`, sora (default) or Aardink, marked experimental. Aardink
+  0.8.0 behind `EditorSurface` (`AardinkEditorSurface`, `AardinkEditorPane`): text, selection, undo, edits applied as one
+  step, events to the workbench (content, selection, focus, viewport, zoom), font size, wrap, line numbers, tab size, Material
+  You colours for the chrome. One live editor, made again per tab, as with sora. No syntax colours, problems, completion,
+  folding or overlays yet (phases 2 to 5).
+* Checked on the tablet with a virtual ABNT2 keyboard, in a scratch tab: typing, dead keys (ã, é), Enter, Tab, arrows,
+  Home/End, Shift and Ctrl+Shift selection both ways and across lines, Backspace/Delete, select all, undo/redo,
+  zoom, tapping to place the cursor, tabs keeping their text. The editor takes focus when a file opens (it didn't at first).
+* Found: Aardink 0.8.0 with Samsung's keyboard (`honeyboard`) loses the cursor on a hardware Enter (the line breaks, the
+  cursor stays before it) and the direction of a keyboard selection (Shift+Left twice selected one character, then nothing).
+  The lab shows the first too, so it isn't the app. Logged: each keyboard selection comes back at once as the same range
+  turned round, an input method's `setSelection(start, end)`. Worked around in the app: Enter and the moving keys skip the
+  input method for this editor (`KeyRouter.bypassesIme`), and that echo is turned back once per key (`turnedRound`).
+  Text keys still go through it, which dead keys need. Backlog 73 asks upstream.
+* Not checked: the user's Book Cover itself (attached, so the on-screen keyboard stays hidden, by Android's setting),
+  the on-screen keyboard, selection handles, saving to the guest (it was off). The cursor isn't kept per tab, as with sora.
+* Left on the tablet: the engine back on sora; the scratch tab closed without saving.
+
 ## Backlog
 ### Open backlog (11-04)
 The current list of what's open; the older lists below keep the history and details. "#" is the number
@@ -2137,6 +2158,7 @@ used when showing the user this table. "Item" is the number in the lists below, 
 | 19 | 70 | L overall | Mode without Terminal: local backend, ML on another machine, glibc if proven |
 | 20 | 71 | S to ask | Ask Aardink for public text positions (overlays); drafted, the user will come back to it |
 | 21 | 72 | S to ask | Ask Aardink for gutter icons and taps (breakpoints); drafted, the user will come back to it |
+| 22 | 73 | S to ask | Tell Aardink about the Samsung keyboard's selection echo (Enter, Shift+arrows); worked around |
 
 Loose ends, not sized:
 * The unsaved dot seen once after saving a restored deleted file (batch 39; not reproduced in three tries).
@@ -2523,6 +2545,9 @@ day, L several days.
       [AARDINK-UPSTREAM-REQUESTS.md](AARDINK-UPSTREAM-REQUESTS.md); not filed: the user will come back to it (11-05).
   72. Ask Aardink for a gutter icon in a decoration and a host callback for gutter taps (user, 11-04: yes, draft
       first). Breakpoints need them; the roadmap's glyph was built as a bar. S to ask. Drafted in the same file; not filed: the user will come back to it (11-05).
+  73. Tell Aardink: with Samsung's keyboard, a hardware Enter leaves the cursor before the line break, and a keyboard
+      selection is turned round by the input method's `setSelection` (11-08, batch 43; worked around in the app). Its
+      `setSelection` could ignore a range equal to the current one. S to ask; not drafted yet. The user will come back to it.
 * Still left out on purpose: multi-cursor, sticky scroll, minimap (Aardink switch; folding came in batch 31);
   split editor groups and the 3-way merge editor; tasks.json; MCP, other AI providers and the
   built-in chat agent (Copilot, Claude Code and Gemini through ACP instead); foldable postures

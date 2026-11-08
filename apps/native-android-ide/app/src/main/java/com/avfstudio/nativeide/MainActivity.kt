@@ -58,7 +58,9 @@ class MainActivity : ComponentActivity() {
         val root = object : FrameLayout(this) {
             override fun dispatchKeyEventPreIme(event: KeyEvent): Boolean {
                 com.avfstudio.nativeide.workbench.Perf.keyDown(event)
-                return KeyRouter.route(event) || super.dispatchKeyEventPreIme(event.asPlainKeyboardArrow())
+                if (KeyRouter.route(event)) return true
+                if (KeyRouter.bypassesIme?.invoke(event) == true) return super.dispatchKeyEvent(event.asPlainKeyboardArrow())
+                return super.dispatchKeyEventPreIme(event.asPlainKeyboardArrow())
             }
         }
         root.addView(ComposeView(this).apply { setContent { NativeWorkbench() } })

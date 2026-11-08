@@ -68,6 +68,7 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material:material-icons-extended:1.7.8")
     implementation("org.connectbot:termlib:0.3.14")
+    implementation("com.aardarch:aardink:0.8.0")
     implementation("io.github.Rosemoe.sora-editor:editor:0.23.6")
     implementation("io.github.Rosemoe.sora-editor:language-textmate:0.23.6")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
@@ -87,3 +88,7 @@ dependencies {
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
     testImplementation("com.google.code.gson:gson:2.13.1")
 }
+
+// Aardink's classes are Java 21 bytecode, so the JVM that runs the tests must be at least that.
+val testJvm = extensions.getByType<JavaToolchainService>().launcherFor { languageVersion.set(JavaLanguageVersion.of(21)) }
+tasks.withType<Test>().configureEach { javaLauncher.set(testJvm) }

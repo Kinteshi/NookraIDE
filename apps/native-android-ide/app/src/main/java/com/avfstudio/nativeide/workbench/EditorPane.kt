@@ -150,7 +150,7 @@ fun EditorArea(controller: WorkbenchController, modifier: Modifier = Modifier) {
                 activeDocument != null && preview == MarkdownPreviewMode.Side -> key(activeDocument.path) {
                     Row(Modifier.fillMaxSize()) {
                         Box(Modifier.weight(1f).fillMaxHeight()) {
-                            key(controller.grammarRevision) { NativeEditorView(controller, activeDocument) }
+                            key(controller.grammarRevision) { EngineEditorView(controller, activeDocument) }
                             EditorOverlays(controller)
                         }
                         androidx.compose.material3.VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -167,7 +167,7 @@ fun EditorArea(controller: WorkbenchController, modifier: Modifier = Modifier) {
                     }
                 }
                 // A grammar that arrives (or goes) makes the editor again with its colours.
-                activeDocument != null -> key(activeDocument.path, controller.grammarRevision) { NativeEditorView(controller, activeDocument) }
+                activeDocument != null -> key(activeDocument.path, controller.grammarRevision) { EngineEditorView(controller, activeDocument) }
                 else -> EmptyEditor(controller)
             }
             val image = activeDocument?.binary == true
@@ -584,6 +584,17 @@ private fun LargeFileView(controller: WorkbenchController) {
             },
             update = { view -> if (view.text.toString() != paged.text) view.setText(paged.text) },
         )
+    }
+}
+
+@Composable
+private fun EngineEditorView(controller: WorkbenchController, document: DocumentSession) {
+    // The other engine replaces the editor as a tab switch does: the file's text is in its session.
+    key(controller.settings.editorEngine) {
+        when (controller.settings.editorEngine) {
+            EditorEngine.Sora -> NativeEditorView(controller, document)
+            EditorEngine.Aardink -> AardinkEditorView(controller, document)
+        }
     }
 }
 
