@@ -34,7 +34,7 @@ cargo test -p avf-daemon -p avf-protocol
 PATH=$HOME/.cargo/bin:$PATH cargo zigbuild --release -p avf-daemon --target aarch64-unknown-linux-gnu.2.28
 ```
 
-At last run (batch 61): 379 app unit tests (on Java 21, installed beside 17) and 128 daemon tests, all passing; CI runs both on every push.
+At last run (batch 63): 386 app unit tests (on Java 21, installed beside 17) and 134 daemon tests, all passing; CI runs both on every push.
 
 ## Reference tablet (Galaxy Tab S11 Ultra, SM-X930)
 

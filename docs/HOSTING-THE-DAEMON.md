@@ -15,10 +15,16 @@ with its CPU and memory.
   The app **pins** that fingerprint: it trusts that certificate and nothing else, so another
   machine can't impersonate the daemon even on an untrusted network.
 * The **code** is a one-time pairing code: valid for 10 minutes, 5 wrong attempts, single use. The
-  app trades it for the daemon's session token, which it stores encrypted (Android Keystore).
-* Anyone with the token has your user account's access to the workspace folder and a shell. Keep
-  the daemon on networks you trust; to reach it from elsewhere, use a VPN (for example Tailscale or
-  WireGuard) rather than exposing the port to the internet.
+  app trades it for a **token of its own**, which it stores encrypted (Android Keystore). The daemon
+  keeps only a digest of each device's token, so one device can be revoked without touching the
+  others (see [Paired devices and the connection log](#paired-devices-and-the-connection-log)).
+* The installer's shared token (in `~/.config/quirecode/env`) works **only from the machine itself**
+  (the tablet's own guest, behind Linux Terminal). From the network, only paired devices connect.
+* An address that fails 10 times in 10 minutes (wrong tokens or codes) is refused until the oldest
+  failure is 10 minutes old; the app says how long to wait.
+* Anyone with a device's token has your user account's access to the workspace folder and a shell.
+  Keep the daemon on networks you trust; to reach it from elsewhere, use a private network such as
+  Tailscale ([below](#away-from-home-tailscale)) rather than exposing the port to the internet.
 
 ## Linux computer
 
@@ -57,6 +63,46 @@ Need a new code later (another tablet, or a reinstall of the app)?
 ```sh
 quirecode-daemon pair --remote 192.168.1.10:19870
 ```
+
+## Away from home: Tailscale
+
+To use the computer from anywhere (a café, another city) without opening anything to the internet,
+put the computer and the tablet on the same [Tailscale](https://tailscale.com) network (a "tailnet":
+a private network between your own devices, free for personal use). The daemon then listens only
+on the computer's tailnet address: other devices on your tailnet reach it, nothing on the LAN or
+the internet does. TLS, the pinned certificate and the device tokens work as above.
+
+1. Install Tailscale on the computer and sign in: `curl -fsSL https://tailscale.com/install.sh | sh`,
+   then `sudo tailscale up`.
+2. Install Tailscale on the tablet (Google Play) and sign in to the same account.
+3. On the computer, install the daemon with `--tailscale` instead of `--remote`:
+
+   ```sh
+   bash install-native-daemon.sh --tailscale
+   ```
+
+   It binds to the address `tailscale ip -4` gives (100.x.y.z), keeps retrying at boot until
+   Tailscale is up, and prints the connection string with that address (and the machine's
+   MagicDNS name, if you'd rather type that).
+4. In QuireCode: the connection chip → **Add a connection → A computer on your network**, paste it.
+
+The tablet reaches the computer whenever Tailscale is on, on any network. A new code later:
+`quirecode-daemon pair --remote 100.x.y.z:19870`.
+
+On Windows, run Tailscale inside the WSL distro (it needs systemd, as the daemon does) and install
+the daemon there with `--tailscale`; the PowerShell script isn't needed then.
+
+## Paired devices and the connection log
+
+```sh
+quirecode-daemon devices               # the devices paired with codes: id, name, when, last seen, from where
+quirecode-daemon devices revoke 3fa9c1 # unpair one (by id, or by its name); it's disconnected within 15 s
+quirecode-daemon log                   # the last 40 connections, pairings and refusals (-n 200 for more)
+```
+
+A device's name is what the app sends when it pairs: "QuireCode on" and the tablet's name. The
+log is `~/.config/quirecode/connections.log`, kept under 256 KB. A device paired before these
+existed has the shared token: from the network it's refused, so pair it again.
 
 ## Windows computer (WSL2)
 
@@ -109,7 +155,9 @@ exposes it on your network.
 | "Can't reach HOST:PORT" | Different network, firewall closed, the daemon isn't running (`systemctl --user status quirecode`), or on Windows the WSL distro stopped (run the logon task: `Start-ScheduledTask "AVF Studio daemon (WSL)"`). |
 | "doesn't match the connection string" | The certificate changed (for example `~/.config/quirecode/tls` was deleted). Run `pair --remote` again and paste the new string. |
 | "No pairing code is active" | The code expired, was used, or ran out of attempts. Run `pair --remote` again. |
-| "The guest rejected the saved token" | The daemon was reinstalled with a new token. Pair again. |
+| "The guest rejected the saved token" | The daemon was reinstalled with a new token, the device was revoked, or it was paired before device tokens existed (the shared token works only on the machine itself). Pair again. |
+| "Too many failed attempts from this device" | Ten wrong tokens or codes from this address in 10 minutes. Wait the minutes the app says; `quirecode-daemon log` shows what failed. |
+| Can't reach a 100.x.y.z address | Tailscale is off on the tablet or the computer, or they're signed in to different tailnets. |
 | Connected, but Search finds nothing | ripgrep is missing: `quirecode-daemon tools install ripgrep`. |
 
 ## Removing it

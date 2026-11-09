@@ -58,6 +58,13 @@ async fn run(disk_tmpdir: Option<std::path::PathBuf>) -> Result<(), Box<dyn Erro
         }
         return Ok(());
     }
+    if let Some(command) = args.first().filter(|arg| *arg == "devices" || *arg == "log") {
+        if let Err(error) = avf_daemon::run_devices_cli(command, &args[1..]) {
+            eprintln!("avf-daemon: {error}");
+            std::process::exit(2);
+        }
+        return Ok(());
+    }
     if args.first().is_some_and(|arg| arg == "tools") {
         if let Err(error) = tools::run_cli(&args[1..]) {
             eprintln!("avf-daemon: {error}");

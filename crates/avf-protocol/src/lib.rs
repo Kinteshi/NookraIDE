@@ -203,6 +203,8 @@ pub enum RejectReason {
     PairingFailed { attempts_left: u32 },
     VersionMismatch { daemon_version: u32 },
     HandshakeTimeout,
+    /// This address failed too often lately (wrong tokens or codes); it may try again after the wait.
+    TooManyAttempts { retry_after_secs: u32 },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

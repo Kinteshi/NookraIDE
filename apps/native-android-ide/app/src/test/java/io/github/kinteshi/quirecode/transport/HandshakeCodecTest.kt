@@ -35,6 +35,28 @@ class HandshakeCodecTest {
             packInt(3)
         }
         assertEquals(IncomingPacket.Rejected("PairingFailed", 3), MessagePackVfsCodec.decode(failed))
+
+        val limited = system("Rejected") {
+            packMapHeader(1)
+            packString("reason")
+            packMapHeader(1)
+            packString("TooManyAttempts")
+            packMapHeader(1)
+            packString("retry_after_secs")
+            packInt(541)
+        }
+        val rejected = MessagePackVfsCodec.decode(limited) as IncomingPacket.Rejected
+        assertEquals(IncomingPacket.Rejected("TooManyAttempts", null, 541), rejected)
+        assertEquals(
+            "Too many failed attempts from this device; try again in 10 minutes",
+            GuestRejectedException(rejected.reason, rejected.attemptsLeft, rejected.retryAfterSecs).message,
+        )
+    }
+
+    @Test
+    fun pairingSendsTheDeviceName() {
+        val packet = MessagePack.newDefaultUnpacker(MessagePackVfsCodec.pair("ABCD-EFGH", "QuireCode on Galaxy Tab")).unpackValue().toString()
+        assert(packet.contains("QuireCode on Galaxy Tab")) { packet }
     }
 
     @Test

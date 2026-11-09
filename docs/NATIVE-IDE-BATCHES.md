@@ -2774,6 +2774,42 @@ suggestions, as group 10.
   (example.py, main.ipynb, private-notebook-2.ipynb, two unsaved), and installing a build restarts it. Left
   alone until the user says; the staged test files were removed.
 
+## 63. The daemon reachable from anywhere over Tailscale, and hardened (G30 steps 1 and 4) (11-09; built and tested on this machine, tablet check pending)
+User's request (11-09): "Go for suggestion 2" (G30's private network and hardening).
+
+* **Device tokens.** Pairing now gives each device a token of its own (`devices.json` in `~/.config/quirecode`, only
+  SHA-256 digests kept, 0600), named after what the app sends: "QuireCode on" and the tablet's name from Android's
+  settings (else its model). The installer's shared token (`AVF_TOKEN`) still works, **from loopback only**: the
+  tablet's own guest is reached through Linux Terminal's forwarding on 127.0.0.1, so the installed apps keep working
+  without pairing again; from the network only paired devices connect.
+* **Revoking:** `quirecode-daemon devices` lists them (id, name, paired, last seen, from where);
+  `quirecode-daemon devices revoke ID` (or a unique name) unpairs one, and its open connection is closed within 15 s
+  (each device's connection checks its pairing every 15 s).
+* **Limits:** an address with 10 failures (wrong token, wrong code, the shared token from the network) in 10 minutes
+  is refused until the oldest is 10 minutes old, with the wait in a new `RejectReason::TooManyAttempts
+  { retry_after_secs }`; the app says "Too many failed attempts from this device; try again in N minutes". Loopback
+  is never limited (a stale token retrying on the tablet mustn't lock it out of pairing again).
+* **The connection log:** `~/.config/quirecode/connections.log` (cut back past 256 KB): connections (by device or the
+  shared token), pairings, refusals and their reason, revocations, with the address and UTC time;
+  `quirecode-daemon log [-n N]` shows the last lines.
+* **Tailscale:** `install-native-daemon.sh --tailscale` binds to the machine's tailnet address only (`tailscale ip -4`),
+  with TLS as `--remote`, retries at boot until Tailscale is up (`StartLimitIntervalSec=0`), and prints the connection
+  string with that address and the MagicDNS name. The hosting guide has "Away from home: Tailscale" and "Paired devices
+  and the connection log"; the README and the app's computer pairing and troubleshooting mention it. The pairing
+  command's instructions now follow the connection chip (batch 61).
+* The daemon serves with peer addresses (`into_make_service_with_connect_info`), read by a `PeerAddr` extractor
+  that tolerates their absence.
+* Tests: 134 daemon tests (devices: issue, authenticate, revoke by id or name, digests only; the loopback rule; the
+  limiter; UTC times; the log's size), the pairing test now checks a device token, revoking it, and the log, and a new
+  end-to-end test over this machine's own network address: a device token connects, the shared token is refused from
+  the network, and ten failures bring "too many attempts". The app: 386 tests (the new reason decoded and said, the
+  device name sent).
+* **Not done on the tablet:** updating the guest's daemon restarts it, which would end the terminals and kernels of the
+  dev app the user was working in (batch 62's note); and Tailscale needs a computer. Nothing changes for the tablet's
+  apps until the daemon is updated, and then they keep their pairing (loopback).
+* G30 left: steps 2 (Cloudflare Tunnel, checking a public certificate) and 3 (port forwarding), and managing devices
+  from the app (list and revoke over the protocol) rather than the command line.
+
 ## Backlog
 ### Open backlog (11-08)
 The current lists of what's open, in two: the general backlog, and the Aardink switch's until it's complete. The older
@@ -2808,7 +2844,7 @@ Grouped (11-08) so that what's cheaper done together is done together; the numbe
 | | G27 | – | M | **Download to the device's storage**: files or folders from Explorer to a place the user picks (Android's file picker), kept there; the option to zip them into one archive (a setting for the default). Progress and the size before starting, as large folders come from the guest over the connection |
 | | G28 | – | M | **Import into Explorer**: files or a whole folder from the device (Android's file picker) into the folder chosen in Explorer, with replace or keep both on name clashes. Builds on receiving shared files (the share sheet into the workspace) and Open from device |
 | **10. Beyond the tablet's guest** (user, 11-09) | G29 | – | L overall, in steps | **Fully usable offline, without a guest** (user: "where possible"). What can be: (a) **a device folder as the workspace** (Android's folder picker: Documents, a synced folder), with Explorer, tabs, editing, Quick Open, find and replace in files done in the app and saves straight to the device (M–L, the first step); (b) **"Keep available offline"** for a guest folder: all of it copied to the device and synced back with conflict checks, beyond today's copies of opened files (M–L); (c) what already needs no guest, made whole: colours, snippets, previews (Markdown, SVG, images, hex), notebooks edited with their saved outputs (no kernel). What can't be without some machine: language servers, debuggers, kernels, terminals, Copilot and the agents (they run in the guest). Later, research: a Python kernel in the browser engine (Pyodide in a WebView) for notebooks (L+). Overlaps G18 |
-| | G30 | – | S–M first step | **The daemon reachable over the internet.** Suggested, in order: (1) **a private network** (Tailscale, or ZeroTier or WireGuard) on the computer and the tablet: the daemon listens on that network's address, nothing is open to the internet, and today's pinned certificate and token work as they are; an installer option that puts that address in the connection string, and a guide (S–M). (2) **A public address through Cloudflare Tunnel** (or similar), behind Cloudflare Access: the app then checks a public certificate instead of pinning one (a per-connection setting) (M). (3) **Router port forwarding with dynamic DNS**: works with pinning today but exposes the daemon; not without (4). (4) **Hardening first**, for any of them: limits on handshake attempts, revoking a paired device, a log of connections (S–M) |
+| | G30 | – | Steps 1 and 4 done (63); M left | **The daemon reachable over the internet.** Done in batch 63: Tailscale (`--tailscale`), device tokens, revoking, limits, the connection log. Left: (2) Cloudflare Tunnel with a public certificate, (3) port forwarding, and the paired devices listed and revoked from the app. The original suggestions: Suggested, in order: (1) **a private network** (Tailscale, or ZeroTier or WireGuard) on the computer and the tablet: the daemon listens on that network's address, nothing is open to the internet, and today's pinned certificate and token work as they are; an installer option that puts that address in the connection string, and a guide (S–M). (2) **A public address through Cloudflare Tunnel** (or similar), behind Cloudflare Access: the app then checks a public certificate instead of pinning one (a per-connection setting) (M). (3) **Router port forwarding with dynamic DNS**: works with pinning today but exposes the daemon; not without (4). (4) **Hardening first**, for any of them: limits on handshake attempts, revoking a paired device, a log of connections (S–M) |
 
 Why these groups:
 1. Most of the memory and the frame time is the editor's. Tuning sora's would be thrown away, so both wait for the flip (A5),

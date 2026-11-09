@@ -39,7 +39,9 @@ Terminal.
 
 The daemon also runs on a Linux computer, or on Windows through WSL2. Your files, tools and CPU are then the computer's.
 The release includes the daemon for both (`quirecode-daemon-<version>-linux-x86_64` and `-linux-arm64`). See
-[Hosting the daemon on a computer](docs/HOSTING-THE-DAEMON.md).
+[Hosting the daemon on a computer](docs/HOSTING-THE-DAEMON.md). To use the computer from anywhere without opening it to
+the internet, put both on [Tailscale](https://tailscale.com) and install with `--tailscale`. Each paired device has its
+own token, so one can be revoked (`quirecode-daemon devices`), and the daemon logs every connection.
 
 ## Updating
 

@@ -3139,6 +3139,15 @@ class WorkbenchController(private val context: Context) {
         }
     }
 
+    /**
+     * What the daemon lists this device as when it pairs ("QuireCode on Galaxy Tab S11 Ultra"), to tell devices apart and
+     * revoke one (`quirecode-daemon devices`, G30): the device's own name from Android's settings, else its model.
+     */
+    private fun pairingDeviceName(): String {
+        val named = runCatching { android.provider.Settings.Global.getString(context.contentResolver, "device_name") }.getOrNull()
+        return "${DevBuild.appName} on ${named?.takeIf(String::isNotBlank) ?: android.os.Build.MODEL}"
+    }
+
     /** Trades the code the installer printed for the token, saves it in the profile and connects. */
     fun pairAndConnect(code: String) {
         // The tablet's own guest, whatever connection is current: its saved connection is updated, or one is added.
@@ -3147,7 +3156,7 @@ class WorkbenchController(private val context: Context) {
         busy = true
         pairingError = null
         status = "Pairing with the guest"
-        vfs.pair(target, code).whenComplete { newToken, error ->
+        vfs.pair(target, code, deviceName = pairingDeviceName()).whenComplete { newToken, error ->
             post {
                 busy = false
                 if (error != null) {
@@ -3186,7 +3195,7 @@ class WorkbenchController(private val context: Context) {
         busy = true
         pairingError = null
         status = "Pairing with ${parsed.host}"
-        vfs.pair(parsed.endpoint, parsed.code, parsed.fingerprint).whenComplete { newToken, error ->
+        vfs.pair(parsed.endpoint, parsed.code, parsed.fingerprint, pairingDeviceName()).whenComplete { newToken, error ->
             post {
                 busy = false
                 if (error != null) {

@@ -7,6 +7,7 @@ mod probe;
 pub mod tmpdir;
 pub mod forwarder;
 mod pairing;
+mod devices;
 mod tls;
 mod pty;
 #[cfg(feature = "native-protocol")]
@@ -52,7 +53,7 @@ use std::{
     env,
     error::Error,
     io,
-    net::SocketAddr,
+    net::{IpAddr, SocketAddr},
     path::{Path, PathBuf},
     process::Stdio,
     sync::{
@@ -73,6 +74,8 @@ use vfs::{Vfs, VfsFailure};
 /// How long a client that pings may stay silent before the daemon drops its connection.
 const SILENT_CLIENT_TIMEOUT: Duration = Duration::from_secs(60);
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
+/// How often a paired device's connection checks it hasn't been revoked.
+const DEVICE_RECHECK: Duration = Duration::from_secs(15);
 const OUTBOUND_CAPACITY: usize = 128;
 const WATCH_EVENT_CAPACITY: usize = 128;
 const WATCH_DEBOUNCE: Duration = Duration::from_millis(150);
@@ -98,6 +101,11 @@ pub fn git_askpass_helper() -> Result<(), String> {
 /// `avf-daemon pair [--minutes N] [--remote HOST[:PORT]]`: issues a one-time code. With
 /// `--remote` (a TLS host on a LAN) it prints a connection string carrying the certificate
 /// fingerprint for the app's "Pair with a computer".
+/// `quirecode-daemon devices [revoke ID]` and `quirecode-daemon log [-n N]` (G30).
+pub fn run_devices_cli(command: &str, args: &[String]) -> Result<(), String> {
+    devices::run_cli(command, args, &pairing::config_dir()?)
+}
+
 pub fn print_pairing_code(args: &[String]) -> Result<(), String> {
     const USAGE: &str = "usage: avf-daemon pair [--minutes N] [--remote HOST[:PORT]]";
     let mut minutes = pairing::PAIRING_TTL.as_secs() / 60;
@@ -124,7 +132,8 @@ pub fn print_pairing_code(args: &[String]) -> Result<(), String> {
         None => {
             println!("    Pairing code:  {code}");
             println!();
-            println!("In QuireCode, open Connect and choose \"Set up or pair\". The code works once,");
+            println!("In QuireCode, tap the connection chip, then Add a connection > This tablet's Linux guest,");
+            println!("and enter it. The code works once,");
         }
         Some(host) => {
             let (host, port) = match host.rsplit_once(':').filter(|(name, _)| !name.contains(':') || name.ends_with(']')) {
@@ -134,8 +143,8 @@ pub fn print_pairing_code(args: &[String]) -> Result<(), String> {
             let material = tls::load_or_create(&pairing::config_dir()?)?;
             println!("    {}", tls::connection_string(&host, port, &material.fingerprint, &code));
             println!();
-            println!("In QuireCode, open Connect, choose \"Set up or pair\" and paste this under");
-            println!("\"Pair with a computer\". The code in it works once,");
+            println!("In QuireCode, tap the connection chip, then Add a connection > A computer on your network,");
+            println!("and paste this. The code in it works once,");
         }
     }
     println!("for {minutes} minutes, and allows {} wrong attempts.", pairing::MAX_ATTEMPTS);
@@ -154,6 +163,10 @@ pub struct AppConfig {
     /// Serve TLS with the self-signed certificate in the config directory (`AVF_TLS=1`).
     /// Required for any non-loopback bind address.
     pub tls: bool,
+    /// Paired devices' tokens (as digests); None hands pairing devices the shared token, as before.
+    pub devices_file: Option<PathBuf>,
+    /// The connection log; None logs nothing.
+    pub log_file: Option<PathBuf>,
 }
 
 impl AppConfig {
@@ -217,6 +230,8 @@ impl AppConfig {
             lsp_hibernation_secs,
             pairing_file: pairing::pairing_path().ok(),
             tls,
+            devices_file: pairing::config_dir().ok().map(|dir| devices::devices_path(&dir)),
+            log_file: pairing::config_dir().ok().map(|dir| devices::log_path(&dir)),
         })
     }
 }
@@ -275,6 +290,8 @@ struct AppState {
     tool_registry_home: Option<PathBuf>,
     ports: PortScanner,
     telemetry: Arc<Telemetry>,
+    /// Failed attempts per address (G30): one that keeps failing is refused for a while.
+    limiter: Arc<devices::AttemptLimiter>,
 }
 
 #[derive(Serialize)]
@@ -316,11 +333,13 @@ pub async fn serve(config: AppConfig) -> io::Result<()> {
         info!(fingerprint = %material.fingerprint, "serving TLS");
         let bind_addr = config.bind_addr;
         let app = app(config)?;
-        return axum_server::bind_rustls(bind_addr, tls).serve(app.into_make_service()).await;
+        return axum_server::bind_rustls(bind_addr, tls)
+            .serve(app.into_make_service_with_connect_info::<SocketAddr>())
+            .await;
     }
     let listener = TcpListener::bind(config.bind_addr).await?;
     let app = app(config)?;
-    axum::serve(listener, app).await
+    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await
 }
 
 fn app(config: AppConfig) -> io::Result<Router> {
@@ -343,6 +362,7 @@ fn app(config: AppConfig) -> io::Result<Router> {
         pty: PtyManager::default(),
         ports,
         telemetry: Arc::new(Telemetry::default()),
+        limiter: Arc::new(devices::AttemptLimiter::default()),
     };
     Ok(Router::new()
         .route("/health", get(health))
@@ -357,8 +377,34 @@ async fn health() -> Json<HealthResponse> {
     })
 }
 
+/// The client's address when the server was started with it (always, outside tests).
+struct PeerAddr(Option<IpAddr>);
+
+impl<S: Send + Sync> axum::extract::FromRequestParts<S> for PeerAddr {
+    type Rejection = std::convert::Infallible;
+
+    async fn from_request_parts(parts: &mut axum::http::request::Parts, _: &S) -> Result<Self, Self::Rejection> {
+        Ok(PeerAddr(
+            parts
+                .extensions
+                .get::<axum::extract::ConnectInfo<SocketAddr>>()
+                .map(|info| info.0.ip().to_canonical()),
+        ))
+    }
+}
+
+impl AppState {
+    fn log_connection(&self, peer: Option<IpAddr>, what: &str) {
+        info!(peer = ?peer, "{what}");
+        if let Some(path) = &self.config.log_file {
+            devices::log(path, peer, what);
+        }
+    }
+}
+
 async fn websocket(
     State(state): State<AppState>,
+    PeerAddr(peer): PeerAddr,
     headers: HeaderMap,
     upgrade: WebSocketUpgrade,
 ) -> Response {
@@ -372,11 +418,19 @@ async fn websocket(
     upgrade
         .max_message_size(MAX_FRAME_SIZE)
         .max_frame_size(MAX_FRAME_SIZE)
-        .on_upgrade(move |socket| handle_socket(socket, state))
+        .on_upgrade(move |socket| handle_socket(socket, state, peer))
 }
 
-/// Trades a one-time pairing code for the session token, then closes the connection.
-async fn pair_client(socket: &mut WebSocket, state: &AppState, protocol_version: u32, code: &str) {
+/// Trades a one-time pairing code for a token of the device's own (G30; the shared one without a device file),
+/// then closes the connection.
+async fn pair_client(
+    socket: &mut WebSocket,
+    state: &AppState,
+    peer: Option<IpAddr>,
+    protocol_version: u32,
+    code: &str,
+    client_name: &str,
+) {
     if protocol_version != PROTOCOL_VERSION {
         reject(
             socket,
@@ -398,17 +452,36 @@ async fn pair_client(socket: &mut WebSocket, state: &AppState, protocol_version:
         .unwrap_or_else(|error| Err(pairing::PairingError::Io(error.to_string())));
     match outcome {
         Ok(()) => {
-            info!("a client paired with a one-time code");
-            let _ = send_packet(
-                socket,
-                &MultiplexedPacket::System(SystemMessage::Paired {
-                    token: state.config.token.clone(),
-                }),
-            )
-            .await;
+            let token = match state.config.devices_file.clone() {
+                Some(path) => {
+                    let name = client_name.to_owned();
+                    let issued = tokio::task::spawn_blocking(move || devices::issue(&path, &name))
+                        .await
+                        .map_err(|error| error.to_string())
+                        .and_then(|issued| issued);
+                    match issued {
+                        Ok((device, token)) => {
+                            state.log_connection(peer, &format!("paired device {} ({})", device.id, device.name));
+                            token
+                        }
+                        Err(error) => {
+                            error!(%error, "the paired device could not be saved");
+                            reject(socket, RejectReason::PairingUnavailable, "pairing is unavailable").await;
+                            return;
+                        }
+                    }
+                }
+                None => {
+                    state.log_connection(peer, "paired a client with the shared token");
+                    state.config.token.clone()
+                }
+            };
+            let _ = send_packet(socket, &MultiplexedPacket::System(SystemMessage::Paired { token })).await;
             let _ = socket.send(Message::Close(None)).await;
         }
         Err(pairing::PairingError::WrongCode { attempts_left }) => {
+            state.limiter.failed(peer);
+            state.log_connection(peer, &format!("refused: wrong pairing code ({attempts_left} attempts left)"));
             reject(socket, RejectReason::PairingFailed { attempts_left }, "wrong pairing code").await;
         }
         Err(pairing::PairingError::Unavailable) => {
@@ -421,7 +494,13 @@ async fn pair_client(socket: &mut WebSocket, state: &AppState, protocol_version:
     }
 }
 
-async fn handle_socket(mut socket: WebSocket, state: AppState) {
+async fn handle_socket(mut socket: WebSocket, state: AppState, peer: Option<IpAddr>) {
+    if let Some(wait) = state.limiter.blocked_for(peer) {
+        state.log_connection(peer, "refused: too many failed attempts");
+        let retry_after_secs = u32::try_from(wait.as_secs().max(1)).unwrap_or(u32::MAX);
+        reject(&mut socket, RejectReason::TooManyAttempts { retry_after_secs }, "too many failed attempts").await;
+        return;
+    }
     let first_message = match timeout(HANDSHAKE_TIMEOUT, socket.recv()).await {
         Err(_) => {
             reject(
@@ -461,9 +540,9 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
             ..
         }) => (protocol_version, auth_token),
         MultiplexedPacket::System(SystemMessage::Pair {
-            protocol_version, code, ..
+            protocol_version, code, client_name,
         }) => {
-            pair_client(&mut socket, &state, protocol_version, &code).await;
+            pair_client(&mut socket, &state, peer, protocol_version, &code, &client_name).await;
             return;
         }
         _ => {
@@ -472,17 +551,36 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
         }
     };
 
-    if !is_valid_token(&auth_token)
-        || state
-            .config
-            .token
-            .as_bytes()
-            .ct_eq(auth_token.as_bytes())
-            .unwrap_u8()
-            != 1
-    {
+    // The shared token from this machine; from anywhere, a paired device's own (G30).
+    let shared = is_valid_token(&auth_token) && state.config.token.as_bytes().ct_eq(auth_token.as_bytes()).unwrap_u8() == 1;
+    let device = if !is_valid_token(&auth_token) || shared {
+        None
+    } else if let Some(path) = state.config.devices_file.clone() {
+        let token = auth_token.clone();
+        tokio::task::spawn_blocking(move || devices::authenticate(&path, &token, peer))
+            .await
+            .ok()
+            .and_then(Result::ok)
+            .flatten()
+    } else {
+        None
+    };
+    if shared && !devices::shared_token_allowed(peer) {
+        state.limiter.failed(peer);
+        state.log_connection(peer, "refused: the shared token works only from this machine; pair this device instead");
+        reject(&mut socket, RejectReason::InvalidToken, "the shared token is for loopback only").await;
+        return;
+    }
+    if !shared && device.is_none() {
+        state.limiter.failed(peer);
+        state.log_connection(peer, "refused: invalid token");
         reject(&mut socket, RejectReason::InvalidToken, "invalid token").await;
         return;
+    }
+    let device_id = device.as_ref().map(|device| device.id.clone());
+    match &device {
+        Some(device) => state.log_connection(peer, &format!("connected: device {} ({})", device.id, device.name)),
+        None => state.log_connection(peer, "connected with the shared token"),
     }
     if protocol_version != PROTOCOL_VERSION {
         reject(
@@ -574,9 +672,20 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
     // held, so a language server it shared isn't handed, already initialized, to the next client.
     let mut pinging = false;
     let mut last_heard = tokio::time::Instant::now();
+    // A revoked device is cut off: its pairing is checked again every few seconds.
+    let mut pairing_check = tokio::time::interval(DEVICE_RECHECK);
+    pairing_check.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         let silence_deadline = last_heard + SILENT_CLIENT_TIMEOUT;
         tokio::select! {
+            _ = pairing_check.tick(), if device_id.is_some() => {
+                let (Some(id), Some(path)) = (device_id.clone(), state.config.devices_file.clone()) else { continue };
+                let paired = tokio::task::spawn_blocking(move || devices::is_paired(&path, &id)).await.unwrap_or(true);
+                if !paired {
+                    state.log_connection(peer, &format!("disconnected revoked device {}", device_id.as_deref().unwrap_or("?")));
+                    break;
+                }
+            }
             result = &mut writer => {
                 if let Err(error) = result {
                     debug!(%error, "websocket writer task failed");
@@ -2631,6 +2740,8 @@ mod tests {
             lsp_hibernation_secs: 30 * 60,
             pairing_file: None,
             tls: false,
+            devices_file: None,
+            log_file: None,
         };
         let listener = TcpListener::bind(config.bind_addr).await.unwrap();
         let address = listener.local_addr().unwrap();
@@ -2667,6 +2778,8 @@ mod tests {
                 lsp_hibernation_secs: 30 * 60,
                 pairing_file: None,
             tls: false,
+            devices_file: None,
+            log_file: None,
             }),
             vfs: Vfs::new(std::slice::from_ref(&project)).unwrap(),
             pty: PtyManager::default(),
@@ -2688,6 +2801,7 @@ mod tests {
             tool_registry_home: None,
             ports: PortScanner::default(),
             telemetry: Arc::new(Telemetry::default()),
+            limiter: Arc::new(devices::AttemptLimiter::default()),
         };
         let (outbound, mut received) = mpsc::channel(8);
         let bridge_id = uuid::Uuid::new_v4();
@@ -2972,6 +3086,8 @@ mod tests {
             lsp_hibernation_secs: 30 * 60,
             pairing_file: None,
             tls: false,
+            devices_file: None,
+            log_file: None,
         };
         let listener = TcpListener::bind(config.bind_addr).await.unwrap();
         let address = listener.local_addr().unwrap();
@@ -3269,6 +3385,8 @@ mod tests {
             lsp_hibernation_secs: 30 * 60,
             pairing_file: None,
             tls: false,
+            devices_file: None,
+            log_file: None,
         };
         let listener = TcpListener::bind(config.bind_addr).await.unwrap();
         let address = listener.local_addr().unwrap();
@@ -3492,6 +3610,8 @@ mod tests {
             lsp_hibernation_secs: 30 * 60,
             pairing_file: Some(pairing_file),
             tls: false,
+            devices_file: Some(temp.path().join("devices.json")),
+            log_file: Some(temp.path().join("connections.log")),
         };
         let listener = TcpListener::bind(config.bind_addr).await.unwrap();
         let address = listener.local_addr().unwrap();
@@ -3528,13 +3648,19 @@ mod tests {
         let MultiplexedPacket::System(SystemMessage::Paired { token }) = exchange(pair(&code)).await else {
             panic!("the right code should pair");
         };
-        assert_eq!(token, "c".repeat(64));
+        // A token of the device's own, not the shared one (G30).
+        assert_ne!(token, "c".repeat(64));
+        assert!(is_valid_token(&token));
+        let paired = devices::list(&temp.path().join("devices.json")).unwrap();
+        assert_eq!(paired.len(), 1);
+        assert_eq!(paired[0].name, "test");
         assert!(matches!(
             exchange(pair(&code)).await,
             MultiplexedPacket::System(SystemMessage::Rejected {
                 reason: RejectReason::PairingUnavailable
             })
         ));
+        let paired_token = token.clone();
         assert!(matches!(
             exchange(SystemMessage::Hello {
                 protocol_version: PROTOCOL_VERSION,
@@ -3544,6 +3670,104 @@ mod tests {
             .await,
             MultiplexedPacket::System(SystemMessage::Welcome { .. })
         ));
+        // Revoked, its token no longer connects; the shared one still does from this machine.
+        devices::revoke(&temp.path().join("devices.json"), &paired[0].id).unwrap();
+        let hello = |auth_token: String| SystemMessage::Hello {
+            protocol_version: PROTOCOL_VERSION,
+            auth_token,
+            client_name: "test".into(),
+        };
+        assert!(matches!(
+            exchange(hello(paired_token)).await,
+            MultiplexedPacket::System(SystemMessage::Rejected { reason: RejectReason::InvalidToken })
+        ));
+        assert!(matches!(
+            exchange(hello("c".repeat(64))).await,
+            MultiplexedPacket::System(SystemMessage::Welcome { .. })
+        ));
+        let log = std::fs::read_to_string(temp.path().join("connections.log")).unwrap();
+        assert!(log.contains("refused: wrong pairing code (4 attempts left)"));
+        assert!(log.contains(&format!("paired device {} (test)", paired[0].id)));
+        assert!(log.contains("refused: invalid token"));
+        assert!(log.contains("connected with the shared token"));
+        server.abort();
+    }
+
+    /// G30 end to end, over this machine's own network address (not loopback): the shared token is refused from the
+    /// network, a paired device's token works, and an address that keeps failing is told to wait.
+    #[tokio::test]
+    async fn from_the_network_only_paired_devices_connect_and_failures_are_limited() {
+        let Some(local_ip) = std::net::UdpSocket::bind("0.0.0.0:0")
+            .and_then(|socket| socket.connect("192.0.2.1:9").map(|_| socket))
+            .and_then(|socket| socket.local_addr())
+            .ok()
+            .map(|address| address.ip())
+            .filter(|ip| !ip.is_loopback() && !ip.is_unspecified())
+        else {
+            return; // No network address here to test from.
+        };
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path().join("project");
+        std::fs::create_dir(&project).unwrap();
+        let devices_file = temp.path().join("devices.json");
+        let (_, device_token) = devices::issue(&devices_file, "test device").unwrap();
+        let config = AppConfig {
+            bind_addr: "0.0.0.0:0".parse().unwrap(),
+            token: "d".repeat(64),
+            allowed_origins: HashSet::from(["avf-native-android://localhost".to_owned()]),
+            workspace_roots: vec![project],
+            lsp_hibernation_secs: 30 * 60,
+            pairing_file: None,
+            tls: false,
+            devices_file: Some(devices_file),
+            log_file: Some(temp.path().join("connections.log")),
+        };
+        let listener = TcpListener::bind(config.bind_addr).await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app(config).unwrap().into_make_service_with_connect_info::<SocketAddr>()).await.unwrap();
+        });
+        let hello = |token: String| async move {
+            let mut request = format!("ws://{}/ws", SocketAddr::new(local_ip, port)).into_client_request().unwrap();
+            request
+                .headers_mut()
+                .insert(WS_ORIGIN, HeaderValue::from_static("avf-native-android://localhost"));
+            let (mut socket, _) = tokio_tungstenite::connect_async(request).await.unwrap();
+            socket
+                .send(WsMessage::Binary(
+                    encode(&MultiplexedPacket::System(SystemMessage::Hello {
+                        protocol_version: PROTOCOL_VERSION,
+                        auth_token: token,
+                        client_name: "test".into(),
+                    }))
+                    .into(),
+                ))
+                .await
+                .unwrap();
+            let WsMessage::Binary(bytes) = socket.next().await.unwrap().unwrap() else {
+                panic!("expected a binary reply");
+            };
+            decode(&bytes).unwrap()
+        };
+        assert!(matches!(
+            hello(device_token.clone()).await,
+            MultiplexedPacket::System(SystemMessage::Welcome { .. })
+        ));
+        assert!(matches!(
+            hello("d".repeat(64)).await,
+            MultiplexedPacket::System(SystemMessage::Rejected { reason: RejectReason::InvalidToken })
+        ));
+        for _ in 1..devices::MAX_FAILURES {
+            hello("e".repeat(64)).await;
+        }
+        assert!(matches!(
+            hello(device_token).await,
+            MultiplexedPacket::System(SystemMessage::Rejected { reason: RejectReason::TooManyAttempts { .. } })
+        ));
+        let log = std::fs::read_to_string(temp.path().join("connections.log")).unwrap();
+        assert!(log.contains(&format!("{local_ip} connected: device")));
+        assert!(log.contains("refused: the shared token works only from this machine"));
+        assert!(log.contains("refused: too many failed attempts"));
         server.abort();
     }
 
@@ -3563,6 +3787,8 @@ mod tests {
             lsp_hibernation_secs: 30 * 60,
             pairing_file: None,
             tls: false,
+            devices_file: None,
+            log_file: None,
         };
         let listener = TcpListener::bind(config.bind_addr).await.unwrap();
         let address = listener.local_addr().unwrap();

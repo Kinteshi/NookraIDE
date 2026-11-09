@@ -340,7 +340,7 @@ private fun Troubleshooting(controller: WorkbenchController) {
                         "Terminal; if it's open already, force stop it in App info and open it again. If Android asks to open port " +
                         "19870, accept it."
                 } else {
-                    "Nothing answers at $target: is the computer on, on the same network, with its daemon running and the port open in its firewall?"
+                    "Nothing answers at $target: is the computer on, on the same network (or both on Tailscale), with its daemon running and the port open in its firewall?"
                 },
             )
         }
@@ -439,7 +439,8 @@ internal fun ComputerPairingDialog(controller: WorkbenchController) {
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
-                    "Your files, tools and CPU are then the computer's: Linux, or Windows through WSL2, on the same network.",
+                    "Your files, tools and CPU are then the computer's: Linux, or Windows through WSL2, on the same network. " +
+                        "Away from home too, without opening anything to the internet: put both on Tailscale and install with --tailscale.",
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 Text(

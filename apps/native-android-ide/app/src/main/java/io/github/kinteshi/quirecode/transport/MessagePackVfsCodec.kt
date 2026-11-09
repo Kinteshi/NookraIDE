@@ -26,12 +26,15 @@ internal object MessagePackVfsCodec {
         names.forEach(::packString)
     }
 
-    /** First packet of a pairing connection: trades a one-time code for the session token. */
-    fun pair(code: String): ByteArray = packet("System", "Pair") {
+    /**
+     * First packet of a pairing connection: trades a one-time code for a token. [deviceName] is what the daemon lists
+     * this device as (`quirecode-daemon devices`), to revoke it by.
+     */
+    fun pair(code: String, deviceName: String = "avf-native-android-ide"): ByteArray = packet("System", "Pair") {
         packMapHeader(3)
         stringField("protocol_version", 2)
         stringField("code", code)
-        stringField("client_name", "avf-native-android-ide")
+        stringField("client_name", deviceName)
     }
 
     fun searchStart(requestId: Long, search: SearchQuery): ByteArray = packet("Search", "StartReq") {
@@ -398,7 +401,11 @@ internal object MessagePackVfsCodec {
                 } else {
                     val entry = reason.singleEntry()
                     val fields = entry.value.asMapValue().map().mapKeys { it.key.asString() }
-                    IncomingPacket.Rejected(entry.key.asString(), fields["attempts_left"]?.asLong()?.toInt())
+                    IncomingPacket.Rejected(
+                        entry.key.asString(),
+                        fields["attempts_left"]?.asLong()?.toInt(),
+                        fields["retry_after_secs"]?.asLong(),
+                    )
                 }
             }
             "Pong" -> {
@@ -536,7 +543,7 @@ sealed interface IncomingPacket {
     ) : IncomingPacket
     /** Each probed command's path in the guest, or null when it isn't installed. */
     data class CommandsProbed(val requestId: Long, val paths: Map<String, String?>) : IncomingPacket
-    data class Rejected(val reason: String, val attemptsLeft: Int? = null) : IncomingPacket
+    data class Rejected(val reason: String, val attemptsLeft: Int? = null, val retryAfterSecs: Long? = null) : IncomingPacket
     data class Paired(val token: String) : IncomingPacket
     data class Stats(val stats: GuestStats) : IncomingPacket
     data class Search(val event: SearchEvent) : IncomingPacket

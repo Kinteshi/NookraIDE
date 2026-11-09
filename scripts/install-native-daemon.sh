@@ -5,6 +5,8 @@
 #     bash install-native-daemon.sh [/path/to/quirecode-daemon] [workspace]
 #   Linux computer or WSL distro on the network (see docs/HOSTING-THE-DAEMON.md):
 #     bash install-native-daemon.sh --remote [--port 19870] [--address HOST] [/path/to/quirecode-daemon] [workspace]
+#   Reachable only over your Tailscale network (from anywhere, nothing opened to the internet or the LAN):
+#     bash install-native-daemon.sh --tailscale [--port 19870] [/path/to/quirecode-daemon] [workspace]
 #
 # Without a daemon path it uses the quirecode-daemon next to this script, as QuireCode's "Set up
 # guest" places it. It ends by printing a one-time pairing code (guest) or a connection string
@@ -21,17 +23,19 @@ declare -A UV_SHA256=(
 )
 
 usage() {
-  echo "usage: $0 [--remote [--port N] [--address HOST]] [/path/to/quirecode-daemon] [workspace]" >&2
+  echo "usage: $0 [--remote [--port N] [--address HOST] | --tailscale [--port N]] [/path/to/quirecode-daemon] [workspace]" >&2
   exit 2
 }
 
 remote=false
+tailscale=false
 port=19870
 address=""
 positional=()
 while (($#)); do
   case "$1" in
     --remote) remote=true ;;
+    --tailscale) remote=true; tailscale=true ;;
     --port) port=${2:?}; shift ;;
     --address) address=${2:?}; shift ;;
     -h | --help) usage ;;
@@ -59,7 +63,18 @@ if ! $remote && [[ "$workspace" != "$HOME" ]]; then
   roots="$workspace:$HOME"
 fi
 
-if $remote; then
+unit_extra=""
+if $tailscale; then
+  # Listen on the tailnet's address only: other devices on your Tailscale network reach it from anywhere,
+  # and nothing is opened on the LAN or the internet. TLS and the pinned certificate stay as for --remote.
+  command -v tailscale >/dev/null || { echo "Tailscale isn't installed here: see https://tailscale.com/download, then 'sudo tailscale up'" >&2; exit 1; }
+  address=$(tailscale ip -4 2>/dev/null | head -1)
+  [[ -n "$address" ]] || { echo "Tailscale isn't connected: run 'sudo tailscale up', then this again" >&2; exit 1; }
+  bind="$address:$port"
+  tls_line="Environment=AVF_TLS=1"
+  # The tailnet address may come up after the daemon at boot: keep retrying instead of giving up.
+  unit_extra="StartLimitIntervalSec=0"
+elif $remote; then
   # Beyond loopback the daemon requires TLS; it creates a self-signed certificate on first start
   # and the connection string carries its fingerprint for the app to pin.
   bind="0.0.0.0:$port"
@@ -107,6 +122,7 @@ fi
 cat >"$unit" <<UNIT
 [Unit]
 Description=QuireCode daemon
+$unit_extra
 
 [Service]
 Type=simple
@@ -206,7 +222,14 @@ for tool in ty ruff ripgrep jupyter debugpy typescript copilot-language-server c
 done
 quirecode-daemon tools list
 echo
-if $remote; then
+if $tailscale; then
+  name=$(tailscale status --peers=false --json 2>/dev/null | sed -n 's/.*"DNSName": *"\([^"]*\)\.".*/\1/p' | head -1)
+  echo "The daemon listens on $address:$port, on your Tailscale network only, over TLS. Install Tailscale on"
+  echo "the tablet too and sign in to the same network; then pair with the string below."
+  [[ -n "$name" ]] && echo "(This machine is also $name on your tailnet.)"
+  echo "Run 'quirecode-daemon pair --remote $address:$port' again whenever you need a new code."
+  quirecode-daemon pair --remote "$address:$port"
+elif $remote; then
   if [[ -z "$address" ]]; then
     # The address other machines reach this one on (the source address of the default route).
     address=$(ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p' | head -1)

@@ -30,11 +30,14 @@ interface GuestVfs {
 class GuestVfsException(val code: String, message: String) : IOException(message)
 
 /** The guest refused the handshake: `InvalidToken` usually means it was reset or re-installed. */
-class GuestRejectedException(val reason: String, val attemptsLeft: Int? = null) : IOException(
+class GuestRejectedException(val reason: String, val attemptsLeft: Int? = null, val retryAfterSecs: Long? = null) : IOException(
     when (reason) {
         "InvalidToken" -> "The guest rejected the saved token"
         "PairingUnavailable" -> "No pairing code is active on the guest; run the installer or `quirecode-daemon pair` again"
         "PairingFailed" -> "Wrong pairing code" + (attemptsLeft?.let { "; $it attempts left" } ?: "")
+        // The daemon refuses an address that failed too often lately (G30).
+        "TooManyAttempts" -> "Too many failed attempts from this device; try again in " +
+            ((retryAfterSecs ?: 600L) + 59L).div(60L).let { if (it == 1L) "a minute" else "$it minutes" }
         else -> "Guest rejected connection: $reason"
     },
 )
@@ -89,7 +92,7 @@ class GuestVfsClient(
      * Exchanges a one-time pairing code for the guest's session token over a short-lived
      * connection; the caller then connects normally with the token.
      */
-    fun pair(url: String, code: String, fingerprint: String? = null): CompletableFuture<String> {
+    fun pair(url: String, code: String, fingerprint: String? = null, deviceName: String = "avf-native-android-ide"): CompletableFuture<String> {
         validateUrl(url, fingerprint)
         val result = CompletableFuture<String>()
         val request = Request.Builder().url(url).header("Origin", NATIVE_APP_ORIGIN).build()
@@ -97,7 +100,7 @@ class GuestVfsClient(
             request,
             object : WebSocketListener() {
                 override fun onOpen(webSocket: WebSocket, response: Response) {
-                    if (!webSocket.send(ByteString.of(*MessagePackVfsCodec.pair(code.trim())))) {
+                    if (!webSocket.send(ByteString.of(*MessagePackVfsCodec.pair(code.trim(), deviceName)))) {
                         result.completeExceptionally(IOException("Could not send the pairing request"))
                     }
                 }
@@ -105,7 +108,7 @@ class GuestVfsClient(
                 override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
                     when (val packet = runCatching { MessagePackVfsCodec.decode(bytes.toByteArray()) }.getOrNull()) {
                         is IncomingPacket.Paired -> result.complete(packet.token)
-                        is IncomingPacket.Rejected -> result.completeExceptionally(GuestRejectedException(packet.reason, packet.attemptsLeft))
+                        is IncomingPacket.Rejected -> result.completeExceptionally(GuestRejectedException(packet.reason, packet.attemptsLeft, packet.retryAfterSecs))
                         else -> result.completeExceptionally(IOException("Unexpected reply to the pairing request"))
                     }
                     webSocket.close(1000, null)
@@ -185,7 +188,7 @@ class GuestVfsClient(
                             }
                         }
                         is IncomingPacket.Rejected ->
-                            handshake.completeExceptionally(GuestRejectedException(packet.reason, packet.attemptsLeft))
+                            handshake.completeExceptionally(GuestRejectedException(packet.reason, packet.attemptsLeft, packet.retryAfterSecs))
                         is IncomingPacket.Paired -> Unit
                         is IncomingPacket.ReadFile -> complete(packet.requestId, packet)
                         is IncomingPacket.Ack -> complete(packet.requestId, packet)
