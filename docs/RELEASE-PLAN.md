@@ -91,7 +91,20 @@ development, never for releases. Steps, run by the user so the password never pa
 
 This branch (`agents/reset-and-implement-native-android-ide`) becomes the definitive `main`; everything else is scrapped
 (user, 11-08). On 11-08 the repository had `main` (Track A's history) and four `agents/*` branches on GitHub besides this one.
-Suggested order, each destructive step confirmed with the user right before it:
+Order agreed with the user (11-08): **ownership first, then the name, then the history**, so every step happens once,
+at the repository's final address:
+
+* **Needed before the rename in the code** (nothing on GitHub has to happen yet): the main account's username, for the
+  app id (`io.github.<username>.quirecode`) and the links in NOTICE, the tm4e notice and the README; and its private
+  commit address (GitHub, Settings > Emails: `<id>+<username>@users.noreply.github.com`), for the history rewrite and
+  later commits.
+* **On GitHub, by the user:** transfer the repository to the main account (Settings > Danger zone > Transfer; the main
+  account accepts it). GitHub redirects the old address. Then rename it to `quirecode` (redirects again).
+* **Then, here:** point `origin` at the new address; rewrite the history's author emails to the main account's private
+  address; force-push this branch as `main`; delete the other branches; protect `main`. Then the release key's secrets
+  are set on the final repository, and `v0.1.0` is tagged.
+
+Suggested order of the clean-up itself, each destructive step confirmed with the user right before it:
 
 1. Scan the whole history for secrets (gitleaks or similar): batches handled tokens and pairing codes. **Done 11-08
    (batch 58)**, with a pattern scan of every commit on every branch (GitHub, Google, AWS, Slack and OpenAI-style tokens,
