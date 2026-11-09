@@ -40,7 +40,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
-/** The active file in Aardink, made again for each tab as the sora view is: one live editor at a time. */
+/** The active file in Aardink, made again for each tab: one live editor at a time. */
 @Composable
 internal fun AardinkEditorView(controller: WorkbenchController, document: DocumentSession) {
     val context = LocalContext.current
@@ -110,7 +110,7 @@ internal fun AardinkEditorView(controller: WorkbenchController, document: Docume
         if (!controller.copilotEnabled) null else InlineCompletionProvider { snapshot, offset -> copilotCompletions(controller, document, state, snapshot, offset) }
     }
     val theme = remember(syntax, registry, colors, dark) { AardinkSyntax.editorTheme(syntax, registry, colors, dark) }
-    // Code in hover, signature help and a suggestion's details, coloured by its fence's language as sora's hover card does.
+    // Code in hover, signature help and a suggestion's details, coloured by its fence's language.
     val fenceTokenizers = remember(registry) {
         val made = java.util.concurrent.ConcurrentHashMap<String, java.util.Optional<com.aardarch.aardink.core.IncrementalTokenizer>>()
         val lookup: (String) -> com.aardarch.aardink.core.IncrementalTokenizer? = { language ->
@@ -152,7 +152,7 @@ internal fun AardinkEditorView(controller: WorkbenchController, document: Docume
                 tabSize = config.tabSize,
                 insertSpaces = config.insertSpaces,
                 fontSize = config.fontSizeSp.sp,
-                // sora's rows: as tall as the font, no more (Aardink's default is about a fifth taller).
+                // Rows as tall as the font, no more, as the editor's were before Aardink (its default is about a fifth taller).
                 lineHeight = (config.fontSizeSp * MONOSPACE_ROW_RATIO).sp,
                 pinchToZoom = config.pinchToZoom,
                 inlayHints = settings.inlayHints,
@@ -182,7 +182,7 @@ internal fun AardinkEditorView(controller: WorkbenchController, document: Docume
             surface.suggestions?.let { list -> changes.filter { !it.isReset }.forEach { list.edited(it.offset, it.deletedLength, it.insertedText) } }
             changes.filter { !it.isReset }.forEach { change ->
                 overtype.edited(change.offset, change.deletedLength, change.insertedText)
-                // Breakpoints move with the lines they're on, as sora's edits move them.
+                // Breakpoints move with the lines they're on.
                 if (change.deletedLength > 0) {
                     controller.moveBreakpoints(document.path, insertion = false, change.startLine, change.startColumn, change.oldEndLine)
                 }
@@ -209,7 +209,7 @@ internal fun AardinkEditorView(controller: WorkbenchController, document: Docume
         }
     }
     LaunchedEffect(surface) {
-        // As the sora view does when a file opens: typing goes to the file, not to whatever had focus.
+        // When a file opens, typing goes to the file, not to whatever had focus.
         withFrameNanos {}
         // Laid out now: where its text is on screen, if Aardink's internals let us see (A19).
         surface.geometry = AardinkGeometry.of(state)
@@ -310,7 +310,7 @@ private const val COPILOT_TIMEOUT_MS = 10_000L
 /**
  * Copilot's next edit as a card docked at the editor's edge, the lines as they'd read afterwards: at the bottom unless the
  * edit is in the lower half of the view, and pointing up or down when it's off screen. Aardink can't say where a line is
- * (request 1), so the card isn't under the edit as sora's is; the edit itself is marked in the text.
+ * (request 1), so the card isn't under the edit; the edit itself is marked in the text.
  */
 @Composable
 internal fun AardinkNextEditCard(controller: WorkbenchController) {
@@ -334,7 +334,7 @@ internal fun AardinkNextEditCard(controller: WorkbenchController) {
             addStyle(androidx.compose.ui.text.SpanStyle(background = NEXT_EDIT_ADDED.copy(alpha = 0.3f)), preview.newChange.first, preview.newChange.last + 1)
         }
     }
-    // Under the edit's last line, as sora's card is, when Aardink's geometry can be reached and the edit is on screen.
+    // Under the edit's last line when Aardink's geometry can be reached and the edit is on screen.
     val under = if (onScreen) surface.rectOnScreen(com.avfstudio.nativeide.editor.LspPosition(preview.lastLine, 0)) else null
     val card: @Composable (Modifier) -> Unit = { placement ->
         androidx.compose.material3.Surface(
@@ -400,7 +400,7 @@ internal fun AardinkNextEditCard(controller: WorkbenchController) {
     }
 }
 
-/** A row of monospace text as sora lays it out, as a multiple of the font size: the font's ascent and descent, no spacing. */
+/** A row of monospace text with no line spacing, as a multiple of the font size: the font's ascent and descent, no spacing. */
 private val MONOSPACE_ROW_RATIO: Float by lazy {
     val metrics = android.graphics.Paint().apply {
         typeface = android.graphics.Typeface.MONOSPACE

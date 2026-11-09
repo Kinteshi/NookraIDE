@@ -41,9 +41,8 @@ import kotlinx.coroutines.launch
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**
- * Aardink behind [EditorSurface], beside `SoraEditorSurface`, while the switch's phases fill it in
- * (see docs/AARDINK-SWITCH-PLAN.md). The text, the selection, undo, the events and colours work;
- * problems, folding and the rest take the interface's do-nothing defaults for now.
+ * The Aardink editor behind [EditorSurface] (see docs/AARDINK-SWITCH-PLAN.md): what the workbench reads and changes
+ * in the editor goes through here.
  */
 internal class AardinkEditorSurface(val state: CodeEditorState) : EditorSurface {
     val focusRequester = FocusRequester()
@@ -82,7 +81,7 @@ internal class AardinkEditorSurface(val state: CodeEditorState) : EditorSurface 
     override val visibleLines: VisibleLines
         get() = state.viewport.let { VisibleLines(it.firstVisibleLine, it.lastVisibleLine) }
     override val lineCount: Int get() = state.document.lineCount
-    /** Without a CR LF file's `\r`, which Aardink keeps on the line: the workbench's line features count without it, as with sora. */
+    /** Without a CR LF file's `\r`, which Aardink keeps on the line: the workbench's line features count without it. */
     override fun lineText(line: Int): String = state.document.lineText(line).removeSuffix("\r")
     override val selectionOffsets: IntRange get() = state.selection.let { it.min..it.max }
     override fun positionAt(offset: Int): LspPosition =
@@ -332,7 +331,7 @@ internal class AardinkEditorSurface(val state: CodeEditorState) : EditorSurface 
 
     /**
      * The mouse at [rootPoint] over the text (null: off the text), from what Aardink's hover tracking saw: once it
-     * rests on a word for the hover delay, the workbench is told, as sora's view tells it.
+     * rests on a word for the hover delay, the workbench is told.
      */
     fun pointerAt(rootPoint: androidx.compose.ui.geometry.Offset?, scope: kotlinx.coroutines.CoroutineScope) {
         val offset = rootPoint?.let { geometry?.offsetAt(it) }
@@ -528,7 +527,7 @@ private val PAUSED_GUTTER_COLOR = Color(0xFFFFCC00)
 
 /**
  * Merge conflicts tinted as VS Code does (current changes green, incoming blue, the marker lines
- * stronger), and each Python cell's `# %%` line, faintly, where sora drew a rule above it.
+ * stronger), and each Python cell's `# %%` line, faintly, as a rule above the cell.
  */
 internal fun conflictTints(conflicts: List<MergeConflict>): List<LineTint> {
     val current = Color(0xFF40C8AE)

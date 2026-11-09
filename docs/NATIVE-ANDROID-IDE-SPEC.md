@@ -209,7 +209,7 @@ Round-trips cover the v2 packet/message/result variants, with targeted confineme
 
 ### 4.1 Decision
 
-**Evaluate `sora-editor`** (`io.github.Rosemoe.sora-editor`, published 0.23.6 artifacts declare LGPL-2.1: keep it isolated until redistribution is approved): a mature native Android code editor view with TextMate grammar support, tree-sitter support, an LSP client module, and proven performance on large files. Wrap it in Compose with `AndroidView`. Rationale: it provides the hardest 60 % (text layout, selection handles, IME integration, incremental highlighting, large-file rendering) that would otherwise take a year. Verify the pinned version's feature set in Phase N0 **[VERIFY]**.
+*(Superseded 2026-11-08: the editor is Aardink, Apache-2.0, and sora-editor was removed in batch 57; see [AARDINK-SWITCH-PLAN.md](AARDINK-SWITCH-PLAN.md). Kept as the original plan.)* **Evaluate `sora-editor`** (`io.github.Rosemoe.sora-editor`, published 0.23.6 artifacts declare LGPL-2.1: keep it isolated until redistribution is approved): a mature native Android code editor view with TextMate grammar support, tree-sitter support, an LSP client module, and proven performance on large files. Wrap it in Compose with `AndroidView`. Rationale: it provides the hardest 60 % (text layout, selection handles, IME integration, incremental highlighting, large-file rendering) that would otherwise take a year. Verify the pinned version's feature set in Phase N0 **[VERIFY]**.
 
 **Rejected:** a from-scratch Compose text editor (`BasicTextField` cannot handle code-sized documents with decorations at 120 Hz); embedding Monaco in a WebView (that is Track A); a Rust editor core through UniFFI (adds NDK and FFI complexity without a rendering solution).
 

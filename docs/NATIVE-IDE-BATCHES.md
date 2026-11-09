@@ -2355,6 +2355,38 @@ memory first), Material You as the style guideline with the workbench's cards as
 Settings switch considered per feature, licences, batches and the backlog, commit messages, and testing on the device
 without disturbing the person who uses it. Linked from the handoff, which is brought up to date.
 
+## 57. The next batch before 0.1.0 (11-08; in progress)
+User's pick (11-08): A5, A6, A7, G20, G6 and group 2 of the general backlog (G14, G17, G5 and its loose ends); then 0.1.0
+([RELEASE-PLAN.md](RELEASE-PLAN.md)). Done so far, in order:
+
+### A6: sora-editor removed (the Aardink switch's phase 7) (done; checked on the tablet)
+The user started this batch, which ends A5's daily use. 362 app unit tests pass (381 before: the 19 gone tested removed code).
+* **sora-editor is out of the app**: both dependencies, the engine setting (`avf.editor.engine`, now ignored if it's still in
+  someone's settings), `SoraEditorSurface`, `SoraCompletion`, `NativeCodeEditor` and its view, `BracketColorizer`, the two files
+  in sora's package (`FoldingLayout`, `EditorLayoutAccess`), sora's ten overlays in `EditorPane` (hints, ghost text, lenses,
+  find scope, snippet stops, folds, conflicts, cells, Next Edit, hover and parameter hints placed at sora's positions), its
+  scrollbar marks, its theme code (`applyEditorTheme`), its grammar registry and the N0 lab screen in `MainActivity`.
+* **tm4e is the app's own `tm4e` module** (plain Java, EPL-2.0): sora 0.23.6's copy of tm4e core, 92 files taken unchanged
+  from sora's tag, so colours are exactly as before. sora's `Logger` and `MatcherUtils`, which seven of them used, are
+  sora's code (LGPL), so they were rewritten for the module rather than copied. The `languageconfiguration` package was left
+  out (the app reads those files itself). The module's README says where it came from and what changed. Dependencies: gson,
+  joni and jcodings (MIT), snakeyaml-engine (Apache-2.0).
+* The controller lost the sora-only scheduling it kept for those overlays: inlay hints, code lenses and Copilot's ghost text
+  by request. Aardink asks for them itself, as it has since batch 48. Ctrl+Shift+L (Select All Occurrences) now goes to
+  Aardink; Ctrl+D and adding cursors above or below say they aren't available yet, as before.
+* Grammar packs are read when the app starts (they were read when sora's registry was first made), so a file's colours and
+  the "Colour … files?" offer don't wait for an editor.
+* Removed with sora, as nothing uses them now: the app's own auto-pairing on text changes (Aardink pairs with the language's
+  configuration, batch 46), the old linked-edit path (Aardink's `linkedEditingRanges` since batch 55), the fold state behind
+  sora's folding layout, the line-end hint text, and the problem fade/strike-through ranges.
+* The debug APK is 7 MB smaller (110.9 → 103.9 MB).
+* Docs: the switch plan says done, the evaluation and spec say the LGPL question is closed, CONTRIBUTING describes the tm4e
+  module.
+* On the tablet: the app starts, and `example.py` opens with its colours from the new module. The guest wasn't running,
+  so nothing that needs it was checked here.
+* Left: the aardink-lab module still has sora for its comparison screen; it isn't in the app and goes in R10. Settings'
+  "Word wrap" still says folding needs it off, which was sora's limit; to check with Aardink.
+
 ## Backlog
 ### Open backlog (11-08)
 The current lists of what's open, in two: the general backlog, and the Aardink switch's until it's complete. The older
@@ -2406,14 +2438,12 @@ Why these groups:
 #### Aardink switch backlog
 
 Until Aardink replaces sora: the remaining phases of the [plan](AARDINK-SWITCH-PLAN.md), which has the details, and
-what the switch is waiting on. Phases 0–5 are done (batches 42–52), on Aardink 0.9.0 (batch 45); A1 was phase 3, and
+what the switch is waiting on. Phases 0–7 are done (batches 42–57: sora was removed in 57), on Aardink 0.9.0 (batch 45); A1 was phase 3, and
 A2, A3, A4, A8, A16, A17 and A19 were done in batches 47–54, and A5's checks in 55.
 
 | Group | # | Item | Size | Description |
 |---|---|------|------|-------------|
-| **A. The flip, then sora out** | A7 | 43 | S, the user's | Try the Aardink engine on the Book Cover itself, and the on-screen keyboard (under way: the user has it on) |
-| | A5 | Phase 6 | Time, yours | Daily use for as long as you choose; the parity check, the default and the measurements are done (batch 55) |
-| | A6 | Phase 7 | S–M | Remove sora: the setting, its classes, the two files in sora's package; carry tm4e as a module (upstream 0.18.0 or sora's copy); licence notes. sora's low inlay hint chip (batch 52) goes with it, not fixed |
+| **A. The flip, then sora out** | A7 | 43 | S, the user's | Try the Aardink engine on the Book Cover itself, and the on-screen keyboard (under way: the user has it on). A5 and A6 are done (batch 57) |
 | **B. Popups at their line** | – | – | – | Done in batch 54 (A19): the workbench's cards at their text from Aardink's geometry; A9 would replace the reflection |
 | **C. Asks to Aardink, filed together** | A9 | 71 | S to ask | Public text positions: Next Edit's card, the peek and our suggestion list at their line. Drafted |
 | | A13 | 77 | S to ask | The completion list at the caret on Android with a hardware keyboard; our list stands in (batch 51). Drafted |

@@ -57,25 +57,18 @@ private fun LanguageLocation.endLine(): Int = range.getAsJsonObject("end")?.get(
 internal fun PeekOverlay(controller: WorkbenchController) {
     controller.editorViewportTick
     val peek = controller.peek?.takeIf { it.path == controller.activePath } ?: return
-    val view = controller.soraEditor()
-    // Aardink can't say where a line is on screen (request 1): the peek docks at the edge away from its line.
-    val aardink = controller.editorSurface as? AardinkEditorSurface
-    if (view == null && aardink == null) return
-    LaunchedEffect(peek.kind, peek.position) { view?.problemTooltip?.dismiss() }
-    val colors = MaterialTheme.colorScheme
-    val density = LocalDensity.current
-    val line = peek.position.line.coerceIn(0, (view?.text?.lineCount ?: aardink!!.lineCount) - 1)
-    val lineBottom = view?.getCharOffsetY(line, 0) ?: 0f
-    val dockBottom = aardink?.visibleLines?.let { visible -> line - visible.first < (visible.last - visible.first) / 2 } ?: true
+    val aardink = controller.editorSurface as? AardinkEditorSurface ?: return
+    val line = peek.position.line.coerceIn(0, aardink.lineCount - 1)
     val height = 280.dp
     val selected = peek.locations.getOrNull(peek.selected) ?: return
     val fontSize = (controller.settings.editorFontSize * 0.9f).sp
-    // Aardink's: under its line from Aardink's geometry (A19), or else at the editor's edge away from it.
-    val under = aardink?.rectOnScreen(LspPosition(line, 0))
+    // Under its line, from Aardink's geometry (A19); without it, at the editor's edge away from the line.
+    val under = aardink.rectOnScreen(LspPosition(line, 0))
     if (under != null) {
         AtText(under, gap = 2.dp) { PeekCard(controller, peek, selected, fontSize, Modifier.fillMaxWidth().height(height).padding(horizontal = 8.dp)) }
         return
     }
+    val dockBottom = aardink.visibleLines.let { visible -> line - visible.first < (visible.last - visible.first) / 2 }
     PeekCard(
         controller,
         peek,
@@ -83,20 +76,11 @@ internal fun PeekOverlay(controller: WorkbenchController) {
         fontSize,
         Modifier
             // At the editor's top or bottom edge, so the height below is the peek's, not the editor's.
-            .then(if (view == null) Modifier.fillMaxSize().wrapContentHeight(if (dockBottom) Alignment.Bottom else Alignment.Top) else Modifier)
+            .fillMaxSize()
+            .wrapContentHeight(if (dockBottom) Alignment.Bottom else Alignment.Top)
             .fillMaxWidth()
             .height(height)
-            .padding(horizontal = 8.dp)
-            .layout { measurable, constraints ->
-                val placeable = measurable.measure(constraints.copy(minHeight = 0))
-                val below = lineBottom.roundToInt() + with(density) { 2.dp.roundToPx() }
-                val top = when {
-                    view == null -> 0
-                    below + placeable.height <= constraints.maxHeight -> below
-                    else -> (lineBottom - view.rowHeight).roundToInt() - placeable.height
-                }
-                layout(constraints.maxWidth, constraints.maxHeight) { placeable.place(0, top.coerceAtLeast(0)) }
-            },
+            .padding(horizontal = 8.dp),
     )
 }
 

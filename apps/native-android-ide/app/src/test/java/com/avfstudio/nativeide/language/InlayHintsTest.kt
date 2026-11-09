@@ -20,31 +20,4 @@ class InlayHintsTest {
             hints,
         )
     }
-
-    @Test
-    fun typeHintsFollowTheirNameAndParameterNamesLeadTheirArgument() {
-        val line = "total = scale(xs, factor=2, offset=[1, 2])"
-        val hints = listOf(
-            InlayHint(LspPosition(0, 5), ": list[int]", 1),
-            InlayHint(LspPosition(0, 14), "values=", 2),
-        )
-        assertEquals(listOf("total: list[int]", "values=xs"), endOfLineHints(line, hints))
-    }
-
-    @Test
-    fun argumentsStopAtTheirBracketAndLongOnesAreShortened() {
-        val line = "f(g(a, b), \"x,y\", averyveryverylongname)"
-        val hints = listOf(
-            InlayHint(LspPosition(0, 2), "first=", 2),
-            InlayHint(LspPosition(0, 11), "second=", 2),
-            InlayHint(LspPosition(0, 18), "third:", 2),
-        )
-        assertEquals(listOf("first=g(a, b)", "second=\"x,y\"", "third: averyveryverylo…"), endOfLineHints(line, hints))
-    }
-
-    @Test
-    fun returnTypesAndUnknownHintsShowAsTheyAre() {
-        val hints = listOf(InlayHint(LspPosition(0, 11), "-> None", 1), InlayHint(LspPosition(0, 0), "label", null))
-        assertEquals(listOf("label", "-> None"), endOfLineHints("def main():", hints))
-    }
 }

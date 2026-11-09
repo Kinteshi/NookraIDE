@@ -33,9 +33,9 @@ private const val REQUEST_TIMEOUT_MS = 15_000L
 
 /**
  * What the app's language servers know, for the Aardink editor: completion (with the file's snippets),
- * hover and signature help as Markdown, through the same client the sora editor uses. What the
+ * hover and signature help as Markdown, through the workbench's language clients. What the
  * workbench does itself stays there (go to definition, rename, code actions, format, problems,
- * occurrences); Aardink's built-in popups show the rest, so the sora-only overlays aren't needed.
+ * occurrences), and draws its own cards over the editor (hover, parameter hints).
  * The file's `language-configuration.json` ([LanguageRules]) gives closing pairs and Enter's indentation.
  */
 internal class AardinkLanguageService(
@@ -152,7 +152,7 @@ internal class AardinkLanguageService(
         }
     }
 
-    /** A tag's name and its partner's (`editor.linkedEditing`), from the workbench's own tag matcher, as in sora. */
+    /** A tag's name and its partner's (`editor.linkedEditing`), from the workbench's own tag matcher. */
     override suspend fun linkedEditingRanges(document: CodeDocument, offset: Int): com.aardarch.aardink.core.LinkedEditingRanges? {
         if (!controller.settings.linkedEditing || this.document.languageId !in LINKED_EDITING_LANGUAGES) return null
         return linkedTagRanges(document.text, offset)?.let { com.aardarch.aardink.core.LinkedEditingRanges(it) }

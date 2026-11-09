@@ -63,39 +63,6 @@ private fun JsonElement.codeText(): String? = when {
     else -> null
 }
 
-/** Per-line fade/strike-through ranges for tagged problems; a multi-line range covers each line. */
-fun tagDecorations(
-    problems: List<EditorProblem>,
-    lineLengths: List<Int>,
-    showUnused: Boolean,
-    showDeprecated: Boolean,
-): List<TagDecoration> = problems.flatMap { problem ->
-    val faded = showUnused && problem.unnecessary
-    val struck = showDeprecated && problem.deprecated
-    if (!faded && !struck) return@flatMap emptyList()
-    (problem.startLine..problem.endLine).map { line ->
-        TagDecoration(
-            line,
-            if (line == problem.startLine) problem.startColumn else 0,
-            if (line == problem.endLine) problem.endColumn else lineLengths[line],
-            faded,
-            struck,
-        )
-    }
-}
-
-/** Where a problem sits along the scrollbar (0 top, 1 bottom) and its severity, worst first per line. */
-data class ProblemMark(val fraction: Float, val line: Int, val column: Int, val severity: Int)
-
-fun problemMarks(problems: List<EditorProblem>, lineCount: Int): List<ProblemMark> =
-    problems.filter { it.severity <= 3 }
-        .groupBy { it.startLine }
-        .map { (line, onLine) ->
-            val worst = onLine.minBy { it.severity }
-            ProblemMark(line.toFloat() / lineCount.coerceAtLeast(1), line, worst.startColumn, worst.severity)
-        }
-        .sortedBy { it.line }
-
 /** What the line-number margin shows, all by 0-based line: breakpoints, the paused line, and each line's worst problem. */
 data class LineMarks(
     val breakpoints: Set<Int> = emptySet(),

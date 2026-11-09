@@ -25,7 +25,7 @@ class TextEditorHostTest {
     fun hostKeepsDocumentAndSurfaceInSyncAndPublishesEvents() {
         val document = DocumentSession("/workspace/a.py", "one", 1, dirty = false)
         val surface = FakeEditorSurface("one")
-        val host = SoraTextEditorHost()
+        val host = EditorSurfaceHost()
         val events = mutableListOf<EditorEvent>()
         val subscription = host.observe(events::add)
         host.open(document, surface)
@@ -47,7 +47,7 @@ class TextEditorHostTest {
     fun hostForwardsDecorationsToTheOpenSurface() {
         val document = DocumentSession("/workspace/a.py", "value", 1, dirty = false)
         val surface = FakeEditorSurface("value")
-        val host = SoraTextEditorHost()
+        val host = EditorSurfaceHost()
         val decorations = listOf(
             EditorDecoration(
                 LspRange(LspPosition(0, 0), LspPosition(0, 5)),

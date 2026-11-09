@@ -5,9 +5,6 @@ import androidx.compose.ui.graphics.Color
 import com.avfstudio.nativeide.assets.ImportedTheme
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
-import io.github.rosemoe.sora.langs.textmate.registry.ThemeRegistry
-import org.eclipse.tm4e.core.registry.IThemeSource
-import java.io.ByteArrayInputStream
 
 internal fun saveImportedTheme(context: Context, theme: ImportedTheme) {
     val workbenchColors = JsonObject().apply {
@@ -29,21 +26,6 @@ internal fun loadSavedSemanticColors(context: Context): Map<String, String> {
     return JsonParser.parseString(json).asJsonObject.entrySet().mapNotNull { (name, value) ->
         if (value.isJsonPrimitive && value.asJsonPrimitive.isString) name to value.asString else null
     }.toMap()
-}
-
-internal fun restoreImportedTheme(context: Context) {
-    val json = context.getSharedPreferences("native-ide-assets", Context.MODE_PRIVATE)
-        .getString("theme-json", null) ?: return
-    loadTextMateTheme(json)
-}
-
-internal fun loadTextMateTheme(json: String) {
-    val source = IThemeSource.fromInputStream(
-        ByteArrayInputStream(json.toByteArray(Charsets.UTF_8)),
-        "imported-theme.tmTheme.json",
-        Charsets.UTF_8,
-    )
-    ThemeRegistry.getInstance().loadTheme(source)
 }
 
 internal fun parseThemeColor(value: String): Color {

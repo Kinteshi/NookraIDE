@@ -5,9 +5,6 @@ internal val LINKED_EDITING_LANGUAGES = setOf("html", "htm", "xhtml", "xml", "sv
 
 private fun isTagNameChar(char: Char) = char.isLetterOrDigit() || char == '-' || char == '_' || char == ':' || char == '.'
 
-/** The partner tag's name to rewrite, as offsets in the text after the edit. */
-internal data class LinkedTagEdit(val start: Int, val end: Int, val name: String)
-
 private data class Tag(val nameStart: Int, val nameEnd: Int, val name: String, val closing: Boolean, val selfClosing: Boolean)
 
 /** Every tag in [text] in order, skipping comments; a `<` that doesn't start a name isn't one. */
@@ -55,31 +52,6 @@ private fun partner(all: List<Tag>, tag: Tag): Tag? {
         }
     }
     return null
-}
-
-/**
- * VS Code's linked editing for tags: an edit at [offset] in [before] that removed [removed]
- * characters and inserted [inserted] inside a tag's name changes its partner the same way.
- * Null when the edit isn't inside a tag name or the tag has no partner.
- */
-internal fun linkedTagEdit(before: String, offset: Int, removed: Int, inserted: String): LinkedTagEdit? {
-    if (inserted.any { !isTagNameChar(it) }) return null
-    val editEnd = offset + removed
-    if (offset < 1 || editEnd > before.length || before.substring(offset, editEnd).any { !isTagNameChar(it) }) return null
-    var nameStart = offset
-    while (nameStart > 0 && isTagNameChar(before[nameStart - 1])) nameStart--
-    if (nameStart == 0 || (before[nameStart - 1] != '<' && !(before[nameStart - 1] == '/' && nameStart >= 2 && before[nameStart - 2] == '<'))) return null
-    val all = tags(before)
-    val tag = all.firstOrNull { it.nameStart == nameStart } ?: return null
-    if (editEnd > tag.nameEnd) return null
-    // Only a finished tag: one being typed (`<di`) has no `>` yet and no partner to follow.
-    val gt = before.indexOf('>', tag.nameEnd)
-    val lt = before.indexOf('<', tag.nameEnd)
-    if (gt < 0 || (lt in 0 until gt)) return null
-    val other = partner(all, tag) ?: return null
-    val newName = tag.name.substring(0, offset - nameStart) + inserted + tag.name.substring(editEnd - nameStart)
-    val shift = if (other.nameStart > offset) inserted.length - removed else 0
-    return LinkedTagEdit(other.nameStart + shift, other.nameEnd + shift, newName)
 }
 
 /**

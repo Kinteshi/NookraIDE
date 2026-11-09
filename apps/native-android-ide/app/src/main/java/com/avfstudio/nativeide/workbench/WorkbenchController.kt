@@ -32,8 +32,6 @@ import com.avfstudio.nativeide.document.ContentResolverFileStore
 import com.avfstudio.nativeide.document.devicePath
 import com.avfstudio.nativeide.document.isDevicePath
 import com.avfstudio.nativeide.document.isGuestPath
-import com.avfstudio.nativeide.language.endOfLineHints
-import com.avfstudio.nativeide.language.parseInlayHints
 import com.aardarch.aardink.core.EditorCommand as AardinkCommand
 import com.avfstudio.nativeide.ai.parseDeviceCodePrompt
 import com.avfstudio.nativeide.assets.AssetPackGrammarLoader
@@ -96,7 +94,7 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import com.avfstudio.nativeide.editor.LspRange
 import com.avfstudio.nativeide.editor.LspTextEdit
-import com.avfstudio.nativeide.editor.SoraTextEditorHost
+import com.avfstudio.nativeide.editor.EditorSurfaceHost
 import com.avfstudio.nativeide.editor.applyLspTextEdits
 import com.avfstudio.nativeide.editor.positionToOffset
 import com.avfstudio.nativeide.editor.endAfterInsert
@@ -110,10 +108,8 @@ import com.avfstudio.nativeide.editor.EditorConfig
 import com.avfstudio.nativeide.editor.EditorSelection
 import com.avfstudio.nativeide.editor.EditorSurface
 import com.avfstudio.nativeide.editor.LineMarks
-import com.avfstudio.nativeide.editor.ProblemMark
 import com.avfstudio.nativeide.editor.editorProblems
 import com.avfstudio.nativeide.editor.problemLines
-import com.avfstudio.nativeide.editor.problemMarks
 import com.avfstudio.nativeide.editor.selectionStart
 import com.avfstudio.nativeide.editor.selectionEnd
 import com.avfstudio.nativeide.language.lspDocumentUri
@@ -294,7 +290,7 @@ class WorkbenchController(private val context: Context) {
     private val preferences = context.getSharedPreferences("native-ide-settings", Context.MODE_PRIVATE)
     private val cache = EncryptedDocumentCache(context)
     val repository = DocumentRepository(vfs, cache, ContentResolverFileStore(context))
-    val editorHost = SoraTextEditorHost()
+    val editorHost = EditorSurfaceHost()
     private val io = Executors.newSingleThreadExecutor()
     private val timer = Executors.newSingleThreadScheduledExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -369,7 +365,6 @@ class WorkbenchController(private val context: Context) {
     private var lastHandledKey: Pair<Long, Int>? = null
     private val scheduledDraftWrites = mutableMapOf<String, ScheduledFuture<*>>()
     private val scheduledOutlineRefreshes = mutableMapOf<String, ScheduledFuture<*>>()
-    private var scheduledInlineRequest: ScheduledFuture<*>? = null
     private var scheduledServerStop: ScheduledFuture<*>? = null
     private var scheduledChatStop: ScheduledFuture<*>? = null
     private var scheduledAutoSave: ScheduledFuture<*>? = null
@@ -495,8 +490,6 @@ class WorkbenchController(private val context: Context) {
     var editorSurface by mutableStateOf<EditorSurface?>(null)
         private set
     private var pendingNavigation: EditorNavigationTarget? = null
-    var inlineSuggestion by mutableStateOf<Pair<String, CopilotSuggestion>?>(null)
-        private set
     /** Copilot's next edit suggestion for a file: a change anywhere in it, drawn over the editor. */
     var nextEdit by mutableStateOf<Pair<String, com.avfstudio.nativeide.language.CopilotNextEdit>?>(null)
         private set
@@ -641,6 +634,8 @@ class WorkbenchController(private val context: Context) {
         // Untitled files come back with their text (VS Code's hot exit); saved files reopen once a
         // workspace connects (restoreSession). Nothing opens by default: the empty editor offers
         // folders and files.
+        // Installed grammar packs: which files have colours, before any editor opens.
+        AssetPackGrammarLoader.loadInstalledOnce(context)
         recentWorkspaces = loadRecentWorkspaces()
         refreshLauncherShortcuts()
         restoreUntitledFiles()
@@ -682,7 +677,6 @@ class WorkbenchController(private val context: Context) {
                     notebooks.values.forEach { it.cellSuggestion = null }
                     chatAgent.onDisconnected()
                     notebooks.values.forEach { it.kernel.onDisconnected(); it.kernelState = "Disconnected" }
-                    inlineSuggestion = null
                     chatBusy = false
                     copilotStatus = if (copilotEnabled) "Disconnected" else "Off"
                 }
@@ -735,8 +729,7 @@ class WorkbenchController(private val context: Context) {
         client.progressListener = { token, value -> post { onServerProgress(client, token, value) } }
         client.inlayHintRefreshListener = {
             post {
-                activePath?.takeIf { languageClientFor(it) === client }?.let { scheduleInlayHints(it, delayMs = 100) }
-                if (aardinkEditor) languageFeaturesRevision++
+                languageFeaturesRevision++
             }
         }
     }
@@ -839,8 +832,6 @@ class WorkbenchController(private val context: Context) {
         if (settings.pythonLintRules != previousLintRules) restartLanguageServer("python-format")
         if (settings.typescriptLanguageServer != previousTypescriptServer) restartLanguageServer("typescript")
         if (settings.chatAgent != chatAgentKind) switchChatAgent(settings.chatAgent)
-        if (settings.inlayHints != previousInlayHints) activePath?.let { scheduleInlayHints(it, delayMs = 0) }
-        if (settings.codeLens != previousCodeLens) activePath?.let { scheduleCodeLens(it, delayMs = 0) }
         activePath?.let { scheduleFoldingRanges(it, delayMs = 0) }
         refreshLauncherShortcuts()
     }
@@ -4525,10 +4516,6 @@ class WorkbenchController(private val context: Context) {
         }
     }
 
-    /** Problems of the active file, for the marks beside the editor's scrollbar. */
-    var editorProblemMarks by mutableStateOf<List<ProblemMark>>(emptyList())
-        private set
-
     private var editorProblemLines: Map<Int, Int> = emptyMap()
 
     /** Redraws the active file's problems in the editor (underlines, tooltips, faded code, marks). */
@@ -4542,7 +4529,6 @@ class WorkbenchController(private val context: Context) {
             showCodeActions()
         }
         editorProblemLines = problemLines(problems)
-        editorProblemMarks = if (settings.problemUnderlines) problemMarks(problems, surface.lineCount) else emptyList()
         refreshLineMarks()
         // A problem dot can widen the gutter, which moves the text: the overlays drawn at text
         // positions (inlay hints, ghost text) follow once the editor has laid it out again.
@@ -4554,13 +4540,6 @@ class WorkbenchController(private val context: Context) {
 
     /** Maps a path from a language server back to the open document, untitled ones included. */
     fun documentPathFor(lspPath: String): String = untitledPathFor(lspPath, workspaceRoot) ?: lspPath
-
-    /** A tap on a scrollbar mark: put the cursor on that problem. */
-    fun goToProblemMark(mark: ProblemMark) {
-        val surface = editorSurface ?: return
-        surface.moveCursor(LspPosition(mark.line, mark.column))
-        surface.focus()
-    }
 
     private fun onEditorEvent(event: EditorEvent) {
         when (event) {
@@ -4580,12 +4559,6 @@ class WorkbenchController(private val context: Context) {
                     // The cursor left the call, or moved to another argument.
                     if (signatureHint != null) requestSignature(event.uri, trigger = null, delayMs = 80)
                 }
-                val shown = inlineSuggestion
-                if (shown != null && (shown.first != event.uri || event.selection.active != shown.second.range.end &&
-                        !cursorWithinSuggestion(shown.second, event.selection.active))
-                ) {
-                    clearInlineSuggestion()
-                }
             }
             is EditorEvent.ContentChanged -> run {
                 notifyDocumentChanged(event.uri, event.version, event.text)
@@ -4593,15 +4566,9 @@ class WorkbenchController(private val context: Context) {
                     hideHoverCard()
                     if (activePath == event.uri) {
                         scheduleOutlineRefresh(event.uri)
-                        scheduleInlineSuggestion()
                         scheduleNextEdit()
                         scheduleFindRefresh()
                         afterEditForHints(event.uri)
-                        // Hints are kept by line; once lines come or go they'd sit on the wrong ones.
-                        if (editorSurface?.lineCount != inlayHintLineCount) inlayHintLines = emptyMap()
-                        scheduleInlayHints(event.uri)
-                        if (editorSurface?.lineCount != codeLensLineCount) codeLenses = emptyMap()
-                        scheduleCodeLens(event.uri)
                         scheduleFoldingRanges(event.uri)
                     }
                 }
@@ -4609,13 +4576,6 @@ class WorkbenchController(private val context: Context) {
             is EditorEvent.ViewportChanged -> post {
                 editorViewportTick++
                 hideHoverCard()
-                // Hints are asked for around the visible lines; scrolling past them asks again.
-                val window = inlayHintWindow
-                if (event.uri == activePath && settings.inlayHints && (window == null ||
-                        event.visibleLines.first < window.first || event.visibleLines.last > window.last)
-                ) {
-                    scheduleInlayHints(event.uri, delayMs = 150)
-                }
             }
             is EditorEvent.FocusChanged -> post {
                 if (event.focused) focusArea = FocusArea.Editor else if (focusArea == FocusArea.Editor) focusArea = FocusArea.Other
@@ -4639,9 +4599,6 @@ class WorkbenchController(private val context: Context) {
     }
 
     private var scheduledZoomSave: ScheduledFuture<*>? = null
-
-    private fun cursorWithinSuggestion(suggestion: CopilotSuggestion, position: LspPosition): Boolean =
-        position.line == suggestion.range.start.line && position.character >= suggestion.range.start.character
 
     // Language servers ------------------------------------------------------------------------
 
@@ -4784,10 +4741,8 @@ class WorkbenchController(private val context: Context) {
                         if (activePath == document.path) {
                             refreshOutline(document)
                             refreshSemanticTokens(document)
-                            scheduleInlayHints(document.path, delayMs = 0)
-                            scheduleCodeLens(document.path, delayMs = 300)
                             scheduleFoldingRanges(document.path, delayMs = 0)
-                            if (aardinkEditor) languageFeaturesRevision++
+                            languageFeaturesRevision++
                         }
                     }
                 }
@@ -4841,19 +4796,14 @@ class WorkbenchController(private val context: Context) {
         outlineSymbols = emptyList()
         blameLines = emptyMap()
         closeFind()
-        clearInlineSuggestion()
         clearNextEdit()
         closeParameterHints()
         clearSymbolHighlights()
-        clearInlayHints()
-        clearCodeLens()
         refreshEditorProblems()
         activeDocument?.let { document ->
             ensureLanguageServers(document.path)
             refreshOutline(document)
             refreshSemanticTokens(document)
-            scheduleInlayHints(document.path, delayMs = 0)
-            scheduleCodeLens(document.path, delayMs = 300)
             scheduleFoldingRanges(document.path, delayMs = 0)
         }
         if (copilot.language.isReady) copilot.didFocus(activePath)
@@ -4951,7 +4901,7 @@ class WorkbenchController(private val context: Context) {
             post { resolveAcceptedCompletion(document, item) }
         }
 
-        // Read on sora's thread: plain reads of lists the main thread replaces whole.
+        // May be read off the main thread: plain reads of lists the main thread replaces whole.
         override fun snippets(): List<Snippet> = snippetsFor(document.path)
 
         override val snippetSuggestions: SnippetSuggestions
@@ -5909,8 +5859,6 @@ class WorkbenchController(private val context: Context) {
 
     // Folding ranges --------------------------------------------------------------------------------
 
-    /** Bumped when folds open or close, so the fold arrows and the overlays redraw. */
-    var foldRevision by mutableIntStateOf(0)
     private var scheduledFoldingRanges: ScheduledFuture<*>? = null
     private var foldingRequest = 0L
 
@@ -5953,51 +5901,8 @@ class WorkbenchController(private val context: Context) {
     /** A line's lens: "3 references" above a function in VS Code, here after its line. */
     data class CodeLensItem(val title: String, val position: LspPosition)
 
-    /** The active file's code lenses, by line. */
-    var codeLenses by mutableStateOf<Map<Int, List<CodeLensItem>>>(emptyMap())
-        private set
-    private var scheduledCodeLens: ScheduledFuture<*>? = null
-    private var codeLensRequest = 0L
-    private var codeLensLineCount = 0
-
-    private fun scheduleCodeLens(path: String, delayMs: Long = 1500) {
-        scheduledCodeLens?.cancel(false)
-        // Aardink asks for lenses itself, after a pause in typing (codeLensesFor).
-        if (aardinkEditor) return
-        if (!settings.codeLens) {
-            clearCodeLens()
-            return
-        }
-        scheduledCodeLens = timer.schedule({ post { requestCodeLens(path) } }, delayMs, TimeUnit.MILLISECONDS)
-    }
-
-    private fun clearCodeLens() {
-        scheduledCodeLens?.cancel(false)
-        codeLensRequest++
-        codeLenses = emptyMap()
-    }
-
     /**
-     * The server's own lenses (TypeScript's reference counts) when it has them; otherwise the
-     * references of each class, function and method in the outline (ty and basedpyright have
-     * no code lens), asked 16 at a time.
-     */
-    private fun requestCodeLens(path: String) {
-        val document = activeDocument?.takeIf { it.path == path && activeNotebook == null } ?: return
-        val version = document.version
-        val id = ++codeLensRequest
-        collectCodeLenses(document, isCurrent = { id == codeLensRequest }) { items, _ ->
-            post {
-                if (id != codeLensRequest || activePath != path || document.version != version) return@post
-                val current = editorSurface ?: return@post
-                codeLensLineCount = current.lineCount
-                codeLenses = items.filter { it.position.line < current.lineCount }.groupBy { it.position.line }
-            }
-        }
-    }
-
-    /**
-     * [document]'s code lenses, all of them, for the Aardink editor, which asks after a pause in typing; empty when the
+     * [document]'s code lenses, all of them, for the editor, which asks after a pause in typing; empty when the
      * setting is off or no server can say. Call on the main thread.
      */
     fun codeLensesFor(document: DocumentSession): CompletableFuture<List<CodeLensItem>> {
@@ -6119,10 +6024,7 @@ class WorkbenchController(private val context: Context) {
         else -> OtherLanguageServer.byId(language)?.label ?: language
     }
 
-    // Inlay hints ---------------------------------------------------------------------------------
-
-    /** Whether the Aardink engine draws the editor: it asks for hints, lenses and ghost text itself. */
-    private val aardinkEditor: Boolean get() = settings.editorEngine == EditorEngine.Aardink
+    // Language features -----------------------------------------------------------------------------
 
     /**
      * Bumped when Aardink should ask for hints and lenses again although the text is the same: a server started, said
@@ -6130,60 +6032,6 @@ class WorkbenchController(private val context: Context) {
      */
     var languageFeaturesRevision by mutableIntStateOf(0)
         private set
-
-    /** The active file's inlay hints as their line-end text, by line. */
-    var inlayHintLines by mutableStateOf<Map<Int, List<String>>>(emptyMap())
-        private set
-    /** The lines the shown hints were asked for. */
-    private var inlayHintWindow: IntRange? = null
-    private var scheduledInlayHints: ScheduledFuture<*>? = null
-    private var inlayHintRequest = 0L
-    private var inlayHintLineCount = 0
-
-    private fun scheduleInlayHints(path: String, delayMs: Long = 400) {
-        scheduledInlayHints?.cancel(false)
-        // Aardink asks for hints itself, for the lines around its view.
-        if (aardinkEditor) return
-        if (!settings.inlayHints) {
-            clearInlayHints()
-            return
-        }
-        scheduledInlayHints = timer.schedule({ post { requestInlayHints(path) } }, delayMs, TimeUnit.MILLISECONDS)
-    }
-
-    /** Asks for the visible lines and 100 on either side, so a short scroll needs no new request. */
-    private fun requestInlayHints(path: String) {
-        val document = activeDocument?.takeIf { it.path == path && activeNotebook == null } ?: return
-        val client = languageClientFor(path)?.takeIf { it.isReady && it.supportsInlayHints } ?: return
-        val surface = editorSurface ?: return
-        val visible = surface.visibleLines
-        val lastLine = surface.lineCount - 1
-        val first = (visible.first - 100).coerceIn(0, lastLine)
-        val last = (visible.last + 100).coerceIn(first, lastLine)
-        val range = LspRange(LspPosition(first, 0), LspPosition(last, surface.lineText(last).length))
-        val version = document.version
-        val id = ++inlayHintRequest
-        client.inlayHints(path, range).whenComplete { result, error ->
-            post {
-                if (id != inlayHintRequest || activePath != path) return@post
-                // ContentModified: a newer edit is on its way, and so is the request after it.
-                if (error != null || document.version != version) return@post
-                val current = editorSurface ?: return@post
-                inlayHintWindow = first..last
-                inlayHintLineCount = current.lineCount
-                inlayHintLines = parseInlayHints(result).groupBy { it.position.line }
-                    .filterKeys { it < current.lineCount }
-                    .mapValues { (line, hints) -> endOfLineHints(current.lineText(line), hints) }
-            }
-        }
-    }
-
-    private fun clearInlayHints() {
-        scheduledInlayHints?.cancel(false)
-        inlayHintRequest++
-        inlayHintWindow = null
-        inlayHintLines = emptyMap()
-    }
 
     private fun clearSymbolHighlights() {
         scheduledHighlights?.cancel(false)
@@ -6725,7 +6573,6 @@ class WorkbenchController(private val context: Context) {
         preferences.edit().putBoolean("copilot-enabled", enabled).apply()
         when {
             !enabled -> {
-                inlineSuggestion = null
                 copilotStatus = "Off"
                 copilot.language.close()
             }
@@ -6802,68 +6649,6 @@ class WorkbenchController(private val context: Context) {
         }
     }
 
-    fun clearInlineSuggestion() {
-        scheduledInlineRequest?.cancel(false)
-        if (inlineSuggestion != null) inlineSuggestion = null
-    }
-
-    private fun requestInlineSuggestion(invoked: Boolean) {
-        if (activePath?.let(::isDevicePath) == true) return
-        val document = activeDocument ?: return
-        val surface = editorSurface ?: return
-        if (!copilotEnabled || !copilot.language.isReady) {
-            if (invoked) status = "Copilot is not ready; run GitHub Copilot: Sign In"
-            return
-        }
-        if (surface.selectionOffsets.let { it.first != it.last }) return
-        val version = document.version
-        val position = surface.selectionStart()
-        copilotLog { "request ${document.path.substringAfterLast('/')} ${position.line}:${position.character} v$version invoked=$invoked" }
-        copilot.inlineCompletion(document.path, version, position, indentation(document).tabSize, indentation(document).insertSpaces, invoked)
-            .whenComplete { suggestions, error ->
-                post {
-                    val current = editorSurface?.selectionStart()
-                    val stillCurrent = activePath == document.path && document.version == version && current == position
-                    val suggestion = suggestions?.firstOrNull { it.insertText.isNotBlank() }
-                    copilotLog {
-                        "reply ${suggestions?.size} current=$stillCurrent (v${document.version} ${current?.line}:${current?.character}) " +
-                            "range=${suggestion?.range} text=${suggestion?.insertText?.take(60)?.replace("\n", "⏎")} error=${error?.cause?.message ?: error?.message}"
-                    }
-                    when {
-                        error != null -> if (invoked) status = "Copilot: ${error.cause?.message ?: error.message}"
-                        stillCurrent && suggestion != null -> {
-                            inlineSuggestion = document.path to suggestion
-                            copilot.didShow(suggestion)
-                        }
-                        invoked -> status = "Copilot has no suggestion here"
-                    }
-                }
-            }
-    }
-
-    private fun scheduleInlineSuggestion() {
-        clearInlineSuggestion()
-        // Aardink asks its inline completion provider (copilotInlineCompletions) once typing pauses.
-        if (aardinkEditor || !copilotEnabled || !copilot.language.isReady) return
-        scheduledInlineRequest = timer.schedule(
-            { post { requestInlineSuggestion(invoked = false) } },
-            settings.inlineSuggestDelayMs.toLong(),
-            TimeUnit.MILLISECONDS,
-        )
-    }
-
-    /** The part of the suggestion after the cursor, which is what the editor shows as ghost text. */
-    fun inlineGhostText(): String? {
-        val (path, suggestion) = inlineSuggestion ?: return null
-        val surface = editorSurface ?: return null
-        if (path != activePath) return null
-        val cursor = surface.selectionStart()
-        if (cursor.line != suggestion.range.start.line) return suggestion.insertText
-        val typed = surface.lineText(cursor.line)
-            .substring(suggestion.range.start.character.coerceAtMost(cursor.character), cursor.character)
-        return ghostAfterTyped(typed, suggestion.insertText) ?: suggestion.insertText
-    }
-
     /**
      * Copilot's suggestions at [position] of [document], for Aardink's ghost text, which asks once typing pauses and
      * shows the first; null when Copilot isn't on. Call on the main thread.
@@ -6880,26 +6665,6 @@ class WorkbenchController(private val context: Context) {
 
     /** The Aardink editor's state while it shows the active file. */
     private fun aardinkState(): com.aardarch.aardink.core.CodeEditorState? = (editorSurface as? AardinkEditorSurface)?.state
-
-    private fun acceptInlineSuggestion() {
-        val (path, suggestion) = inlineSuggestion ?: return
-        val surface = editorSurface ?: return
-        inlineSuggestion = null
-        if (activePath != path) return
-        val range = suggestion.range
-        try {
-            val endLine = range.end.line.coerceAtMost(surface.lineCount - 1)
-            val endColumn = range.end.character.coerceAtMost(surface.lineText(endLine).length)
-            val edit = LspTextEdit(LspRange(range.start, LspPosition(endLine, endColumn)), suggestion.insertText)
-            surface.applyEdits(listOf(edit))
-            surface.moveCursor(edit.endAfterInsert(), reveal = false)
-            copilot.accepted(suggestion)
-        } catch (error: RuntimeException) {
-            status = "Could not apply the Copilot suggestion: ${error.message}"
-        }
-    }
-
-    // Next edit suggestions -----------------------------------------------------------------------
 
     fun clearNextEdit() {
         scheduledNextEdit?.cancel(false)
@@ -6960,7 +6725,7 @@ class WorkbenchController(private val context: Context) {
     fun shownNextEdit(): NextEditPreview? {
         val (path, edit) = nextEdit ?: return null
         val surface = editorSurface ?: return null
-        if (path != activePath || inlineSuggestion != null) return null
+        if (path != activePath) return null
         return nextEditPreviewOf(surface, edit)
     }
 
@@ -9454,7 +9219,6 @@ class WorkbenchController(private val context: Context) {
                 post {
                     if (theme != null) {
                         saveImportedTheme(context, theme)
-                        loadTextMateTheme(theme.textMateThemeJson)
                         editorThemeRevision++
                         status = if (installed == null) "Applied syntax theme ${theme.name}" else {
                             "Installed ${installed.displayName} and applied syntax theme ${theme.name}"
@@ -9751,8 +9515,8 @@ class WorkbenchController(private val context: Context) {
             consumedKeyDowns += event.keyCode
             return true
         }
-        // The workbench's cards over the Aardink editor close with Escape, as sora's view closes them: the peek, the hover
-        // card, then parameter hints (Copilot's next edit just below).
+        // The workbench's cards over the editor close with Escape, as in VS Code: the peek, the hover card, then
+        // parameter hints (Copilot's next edit just below).
         if (focusArea == FocusArea.Editor && editorSurface is AardinkEditorSurface && nextEdit == null &&
             event.keyCode == AndroidKeyEvent.KEYCODE_ESCAPE && !event.isCtrlPressed && !event.isAltPressed && !event.isShiftPressed &&
             (peek != null || hoverCard != null || signatureHint != null)
@@ -9765,8 +9529,8 @@ class WorkbenchController(private val context: Context) {
             consumedKeyDowns += event.keyCode
             return true
         }
-        // Copilot's next edit in the Aardink editor: Tab goes to it or accepts it, Escape dismisses it (sora's view does
-        // this itself). Ghost text Aardink shows at the same time is accepted or dismissed first.
+        // Copilot's next edit: Tab goes to it or accepts it, Escape dismisses it. Ghost text Aardink shows at the same
+        // time is accepted or dismissed first.
         if (focusArea == FocusArea.Editor && nextEdit != null && editorSurface is AardinkEditorSurface &&
             !event.isCtrlPressed && !event.isAltPressed && !event.isShiftPressed &&
             (event.keyCode == AndroidKeyEvent.KEYCODE_TAB || event.keyCode == AndroidKeyEvent.KEYCODE_ESCAPE)
@@ -9805,7 +9569,7 @@ class WorkbenchController(private val context: Context) {
 
     /** Enter and the moving keys in the Aardink editor skip the input method (see [KeyRouter.bypassesIme]). */
     fun bypassesIme(event: AndroidKeyEvent): Boolean =
-        settings.editorEngine == EditorEngine.Aardink && focusArea == FocusArea.Editor && dialog == null &&
+        focusArea == FocusArea.Editor && dialog == null &&
             event.keyCode in IME_BYPASS_KEYS
 
     private fun sendTerminalControlKey(event: AndroidKeyEvent): Boolean {
@@ -10091,17 +9855,12 @@ class WorkbenchController(private val context: Context) {
             "notebook.cell.showHover" -> selectedCodeCell()?.let { (session, cell) -> showCellHover(session, cell, session.cellCaret, fromPointer = false) }
             "notebook.cell.goToDefinition" -> selectedCodeCell()?.let { (session, cell) -> goToCellDefinition(session, cell, session.cellCaret) }
             "editor.action.quickFix" -> showCodeActions()
-            "editor.action.inlineSuggest.trigger" -> aardinkState()?.execute(AardinkCommand.CycleInlineCompletion(forward = true)) ?: requestInlineSuggestion(invoked = true)
-            "editor.action.inlineSuggest.commit" -> when {
-                inlineSuggestion != null -> acceptInlineSuggestion()
-                aardinkState()?.execute(AardinkCommand.AcceptInlineCompletion) == true -> Unit
-                else -> jumpOrAcceptNextEdit()
+            "editor.action.inlineSuggest.trigger" -> when {
+                !copilotEnabled || !copilot.language.isReady -> status = "Copilot is not ready; run GitHub Copilot: Sign In"
+                else -> aardinkState()?.execute(AardinkCommand.CycleInlineCompletion(forward = true))
             }
-            "editor.action.inlineSuggest.hide" -> when {
-                inlineSuggestion != null -> clearInlineSuggestion()
-                aardinkState()?.execute(AardinkCommand.DismissInlineCompletion) == true -> Unit
-                else -> clearNextEdit()
-            }
+            "editor.action.inlineSuggest.commit" -> if (aardinkState()?.execute(AardinkCommand.AcceptInlineCompletion) != true) jumpOrAcceptNextEdit()
+            "editor.action.inlineSuggest.hide" -> if (aardinkState()?.execute(AardinkCommand.DismissInlineCompletion) != true) clearNextEdit()
             "editor.action.inlineSuggest.acceptNextEdit" -> acceptNextEdit()
             "editor.action.inlineSuggest.triggerNextEdit" -> requestNextEdit(invoked = true)
             "github.copilot.signIn" -> beginCopilotSignIn()
@@ -10177,11 +9936,11 @@ class WorkbenchController(private val context: Context) {
                 val matched = activeDocument?.let { document -> surface?.let { jumpToMatchingBracket(document, it) } } ?: false
                 if (!matched) status = "No matching bracket"
             }
+            "editor.action.selectHighlights" -> if (aardinkState()?.execute(AardinkCommand.SelectAllOccurrences) != true) status = "Select All Occurrences needs the editor"
             "editor.action.addSelectionToNextFindMatch",
-            "editor.action.selectHighlights",
             "editor.action.insertCursorAbove",
             "editor.action.insertCursorBelow",
-            -> status = "Multi-cursor is not available in the pinned Sora editor yet"
+            -> status = "${EditorCommands.all.firstOrNull { it.id == commandId }?.title ?: commandId} is not available yet"
             "editor.action.toggleWordWrap" -> updateSetting(WorkbenchSettings.WORD_WRAP, if (settings.wordWrap) "off" else "on")
             else -> status = "${EditorCommands.all.firstOrNull { it.id == commandId }?.title ?: commandId} is not available yet"
         }

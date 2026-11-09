@@ -22,8 +22,7 @@ import kotlin.math.roundToInt
 /**
  * [content] at a place in the text, [anchor] (a rect in root coordinates, from [AardinkGeometry]): under it, or
  * over it with [above] or when there's no room below, from its left edge shifted by [shiftX] and kept inside. The
- * cards drawn over the Aardink editor (hover, parameter hints, suggestions, Next Edit, the peek) go through this, as
- * sora's are placed at its text positions.
+ * cards drawn over the Aardink editor (hover, parameter hints, suggestions, Next Edit, the peek) go through this.
  */
 @Composable
 internal fun AtText(
@@ -57,7 +56,7 @@ internal fun AtText(
     }
 }
 
-/** The Aardink editor's geometry while it shows the active file, or null (sora, or Aardink's internals unreachable). */
+/** The Aardink editor's geometry while it shows the active file, or null (no editor, or Aardink's internals unreachable). */
 internal fun WorkbenchController.aardinkGeometry(): AardinkGeometry? = (editorSurface as? AardinkEditorSurface)?.geometry
 
 /** Where [position] is in the Aardink editor, as a caret's rect; null when it isn't on screen. */

@@ -10,7 +10,6 @@ import com.aardarch.aardink.core.TokenType
 import com.aardarch.aardink.ui.fromColorScheme
 import com.avfstudio.nativeide.DARK_SYNTAX_THEME
 import com.avfstudio.nativeide.LIGHT_SYNTAX_THEME
-import com.avfstudio.nativeide.PythonTextMate
 import com.avfstudio.nativeide.assets.AssetPackGrammarLoader
 import com.avfstudio.nativeide.document.DocumentSession
 import com.avfstudio.nativeide.editor.BRACKET_COLORS
@@ -26,10 +25,7 @@ import org.eclipse.tm4e.core.registry.IRegistryOptions
 import org.eclipse.tm4e.core.registry.IThemeSource
 import org.eclipse.tm4e.core.registry.Registry
 
-/**
- * The syntax colours in effect, as the sora editor gets them (`applyEditorTheme`): an imported VS Code
- * theme, else the Material You palette, else the built-in light or dark one.
- */
+/** The syntax colours in effect: an imported VS Code theme, else the Material You palette, else the built-in light or dark one. */
 internal class SyntaxTheme(
     /** A file name: tm4e tells the theme's format by its extension. */
     val name: String,
@@ -53,7 +49,7 @@ internal fun syntaxTheme(context: Context, colors: ColorScheme, dark: Boolean, s
     return SyntaxTheme(file, json, loadSavedSemanticColors(context), !dark, imported = false)
 }
 
-/** Grammars and colours for the Aardink editor from the same files as sora's, through a tm4e registry of its own. */
+/** Grammars and colours for the editor, through a tm4e registry. */
 internal object AardinkSyntax {
     private const val PYTHON_SCOPE = "source.python"
     private var registry: Pair<String, Registry>? = null
@@ -66,8 +62,7 @@ internal object AardinkSyntax {
     fun registry(context: Context, theme: SyntaxTheme): Registry {
         registry?.takeIf { it.first == theme.key }?.let { return it.second }
         val app = context.applicationContext
-        // Grammar packs are read in when sora's registry is first set up.
-        PythonTextMate.initialize(app)
+        AssetPackGrammarLoader.loadInstalledOnce(app)
         val made = Registry(
             object : IRegistryOptions {
                 override fun getGrammarSource(scopeName: String): IGrammarSource? = grammarSource(app, scopeName)
@@ -137,7 +132,7 @@ internal object AardinkSyntax {
             .toMap()
         val base = EditorTheme.fromColorScheme(colors, dark)
         return base.copy(
-            // An imported theme brings its own background, as it does in the sora editor.
+            // An imported theme brings its own background.
             background = if (theme.imported) themeBackground(theme.json) ?: base.background else base.background,
             tokenColors = tokenColors + semantic,
             tokenFontStyles = tokenStyles,

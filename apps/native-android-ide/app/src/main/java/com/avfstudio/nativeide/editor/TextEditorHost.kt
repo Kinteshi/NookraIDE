@@ -26,9 +26,8 @@ sealed interface EditorEvent {
 }
 
 /**
- * What the workbench needs from a code editor, whichever engine draws it (sora-editor today,
- * see `SoraEditorSurface`). The defaults work from [text] alone; engines override them with their
- * own, cheaper versions.
+ * What the workbench needs from the code editor (`AardinkEditorSurface`), so that workbench code doesn't depend on the
+ * engine. The defaults work from [text] alone; the engine overrides them with cheaper versions.
  */
 interface EditorSurface {
     val text: String
@@ -134,7 +133,7 @@ interface TextEditorHost {
     fun observe(listener: (EditorEvent) -> Unit): Closeable
 }
 
-class SoraTextEditorHost : TextEditorHost {
+class EditorSurfaceHost : TextEditorHost {
     private val bindings = ConcurrentHashMap<String, Binding>()
     private val listeners = CopyOnWriteArraySet<(EditorEvent) -> Unit>()
 

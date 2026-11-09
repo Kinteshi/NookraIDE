@@ -292,18 +292,7 @@ private fun LazyListScope.appearance(controller: WorkbenchController, settings: 
 
 private fun LazyListScope.editor(settings: WorkbenchSettings, set: SetSetting) {
     item { Section("Text") }
-    item {
-        ChoiceRow(
-            Icons.Outlined.Science,
-            "Editor engine",
-            "Aardink is the editor. sora-editor, the previous one, stays here for a while in case something is missing. With Aardink, breakpoints show as bars and are set from F9 or the menu, not by tapping the gutter",
-            EditorEngine.entries.map { it.key to it.label },
-            settings.editorEngine.key,
-        ) { set(WorkbenchSettings.EDITOR_ENGINE, it) }
-    }
-    if (settings.editorEngine == EditorEngine.Aardink) {
-        item { SwitchRow(Icons.Outlined.Keyboard, "Suggestion list with a keyboard", "With a hardware keyboard, suggestions in a list chosen with the arrows, Enter and Tab; off, Aardink's strip under the editor, which you tap", settings.keyboardSuggestionList) { set(WorkbenchSettings.KEYBOARD_SUGGESTION_LIST, it) } }
-    }
+    item { SwitchRow(Icons.Outlined.Keyboard, "Suggestion list with a keyboard", "With a hardware keyboard, suggestions in a list chosen with the arrows, Enter and Tab; off, a strip under the editor, which you tap", settings.keyboardSuggestionList) { set(WorkbenchSettings.KEYBOARD_SUGGESTION_LIST, it) } }
     item { SliderRow(Icons.Outlined.FormatSize, "Font size", settings.editorFontSize, 8f..32f, "%.0f sp") { set(WorkbenchSettings.EDITOR_FONT_SIZE, it.roundToInt()) } }
     item { SwitchRow(Icons.Outlined.ZoomIn, "Pinch to zoom", "Two fingers on the screen or the touchpad change the font size of the editor and notebooks, kept as the font size above", settings.pinchToZoom) { set(WorkbenchSettings.PINCH_TO_ZOOM, it) } }
     item { SwitchRow(Icons.Outlined.Mouse, "Ctrl + wheel zooms", "Ctrl and the mouse wheel change the font size (editor.mouseWheelZoom)", settings.mouseWheelZoom) { set(WorkbenchSettings.MOUSE_WHEEL_ZOOM, it) } }

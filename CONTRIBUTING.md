@@ -44,12 +44,14 @@ Material You is the style guideline for the whole UI.
 
 ## The editor engine
 
-The editor is [Aardink](https://github.com/aardarch/aardink) (Apache-2.0), behind the `EditorSurface` interface.
-sora-editor (LGPL-2.1) is still available in Settings until phase 7 of
-[the switch plan](docs/AARDINK-SWITCH-PLAN.md) removes it.
+The editor is [Aardink](https://github.com/aardarch/aardink) (Apache-2.0), behind the `EditorSurface` interface. It
+replaced sora-editor (LGPL-2.1) in 2026 ([the switch plan](docs/AARDINK-SWITCH-PLAN.md)). Code is coloured by TextMate
+grammars through Eclipse tm4e (EPL-2.0), carried as the `tm4e` module: its files keep their licence, and its README
+says what was changed.
 
 * **Workbench code talks to `EditorSurface`, not to engine classes.** The engine's own code lives in its surface and pane
-  files (`AardinkEditorSurface`, `AardinkEditorPane`, `AardinkLanguageService` and their neighbours).
+  files (`AardinkEditorSurface`, `AardinkEditorPane`, `AardinkLanguageService` and their neighbours), so a later engine
+  change stays as contained as this one was.
 * **Reach into an engine's internals in one place only, and always with a fallback.** `AardinkGeometry` reads Aardink's text
   positions by reflection, and the app must work, docked and plainer, when that answers null. Every such workaround has a
   backlog item asking upstream for the real API.

@@ -17,3 +17,4 @@ dependencyResolutionManagement {
 rootProject.name = "avf-native-android-ide"
 include(":app")
 include(":aardink-lab")
+include(":tm4e")

@@ -5,8 +5,6 @@ import android.util.Log
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
-import io.github.rosemoe.sora.langs.textmate.registry.GrammarRegistry
-import io.github.rosemoe.sora.langs.textmate.registry.dsl.languages
 import java.io.File
 import java.io.IOException
 
@@ -15,10 +13,20 @@ object AssetPackGrammarLoader {
     /** Extension or exact file name → the pack and grammar scope that colours it. */
     private val extensionScopes = mutableMapOf<String, Pair<String, String>>()
     private val filenameScopes = mutableMapOf<String, Pair<String, String>>()
-    /** Scope → the pack and grammar file, for registries other than sora's (the Aardink editor's). */
+    /** Scope → the pack and grammar file. */
     private val grammarFiles = mutableMapOf<String, Pair<String, File>>()
     /** Scope → the pack and its language's `language-configuration.json`, where it has one. */
     private val configurationFiles = mutableMapOf<String, Pair<String, File>>()
+
+    private var installedLoaded = false
+
+    /** Reads the installed packs once per process; [loadPack] adds one installed later. */
+    @Synchronized
+    fun loadInstalledOnce(context: Context) {
+        if (installedLoaded) return
+        installedLoaded = true
+        loadInstalled(context)
+    }
 
     @Synchronized
     fun loadInstalled(context: Context) {
@@ -53,16 +61,14 @@ object AssetPackGrammarLoader {
         return null
     }
 
-    /**
-     * Forgets a removed pack's file types. Its grammars stay registered in sora until the app
-     * restarts (the registry can't drop them), but no new editor uses them.
-     */
+    /** The grammar file for [scopeName], from an installed pack. */
     @Synchronized
     fun grammarFile(scopeName: String): File? = grammarFiles[scopeName]?.second
 
     @Synchronized
     fun configurationFile(scopeName: String): File? = configurationFiles[scopeName]?.second
 
+    /** Forgets a removed pack's grammars and file types. */
     @Synchronized
     fun forgetPack(packId: String) {
         grammarFiles.values.removeAll { it.first == packId }
@@ -90,7 +96,7 @@ object AssetPackGrammarLoader {
             loadedPacks += packId
             return
         }
-        val definitions = grammarEntries.mapNotNull { entry ->
+        grammarEntries.forEach { entry ->
             if (!entry.isJsonObject) throw IOException("Asset-pack grammar contribution must be an object")
             val grammar = entry.asJsonObject
             val grammarFile = grammar.get("path")?.takeUnless { it.isJsonNull }?.asString
@@ -109,26 +115,6 @@ object AssetPackGrammarLoader {
                 validateContributionFile(extensionRoot, path)
             }
             configuration?.let { configurationFiles[scopeName] = packId to it }
-            GrammarDefinition(
-                languageId = languageId ?: scopeName,
-                grammarPath = "asset-packs/$packId/extension/${resolvedGrammar.relativeTo(extensionRoot).invariantSeparatorsPath}",
-                scopeName = scopeName,
-                configurationPath = configuration?.let {
-                    "asset-packs/$packId/extension/${it.relativeTo(extensionRoot).invariantSeparatorsPath}"
-                },
-            )
-        }
-        if (definitions.isNotEmpty()) {
-            val registryDefinitions = languages {
-                definitions.forEach { definition ->
-                    language(definition.languageId) {
-                        grammar = definition.grammarPath
-                        scopeName = definition.scopeName
-                        definition.configurationPath?.let { languageConfiguration = it }
-                    }
-                }
-            }.build()
-            GrammarRegistry.getInstance().loadGrammars(registryDefinitions)
         }
         loadedPacks += packId
     }
@@ -163,12 +149,6 @@ object AssetPackGrammarLoader {
     }
 
     private data class LanguageConfig(val extensions: List<String>, val filenames: List<String>, val configurationPath: String?)
-    private data class GrammarDefinition(
-        val languageId: String,
-        val grammarPath: String,
-        val scopeName: String,
-        val configurationPath: String?,
-    )
 
     private const val TAG = "AssetPackGrammarLoader"
 }

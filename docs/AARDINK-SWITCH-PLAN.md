@@ -1,7 +1,8 @@
 # Plan: switching from sora-editor to Aardink
 
-Status: **phase 6 done but the daily use** (2026-11-08, batch 55) on Aardink 0.9.0: **Aardink is the default**, sora-editor a
-setting away. The user uses it day to day for as long as they choose; then phase 7 removes sora.
+Status: **done** (2026-11-08, batch 57) on Aardink 0.9.0: **Aardink is the editor**; sora-editor and its setting were removed
+in phase 7. tm4e, which colours code, is carried in the app's `tm4e` module. Left: the user's own try on the Book Cover (A7),
+the asks to Aardink, and a review of each release.
 
 **Decided by the user:** the switch will happen, for the licence (Apache-2.0 instead of sora's LGPL-2.1).
 On 11-04 they judged the measured memory and scrolling not to be impediments, and expect Aardink's release
@@ -99,7 +100,7 @@ hover and parameter hints (Markdown), fold arrows, snippet stops, find scope.
 Left: Next Edit's card and the definition peek need request 1, or a design on decorations (`before`/`after`, 0.9).
 Aardink hasn't tried ghost text or lenses on a device or with Samsung's keyboard; this phase does.
 
-### Phase 6: flip the default (done 11-08, batch 55, but the daily use)
+### Phase 6: flip the default (done 11-08, batch 55; the daily use ended when the user started phase 7)
 Parity checked on the tablet (gaps closed: linked tags, paired delete, CR LF lines, line commands as edits), Aardink the
 default, measured: 262-290 MB PSS (sora 308-393), key to frame 30 ms median and 36 ms p95 through the input method (sora 24
 and 31 the same way). Debug hover values and partial accept aren't in the app with either engine (G19).
@@ -109,7 +110,11 @@ and 31 the same way). Debug hover values and partial accept aren't in the app wi
   frame (24.3 ms p95), guest stability. These are recorded for the user to judge, not gates.
 * Use it day to day for a period the user chooses, with notebooks and the guest running.
 
-### Phase 7: remove sora (S-M)
+### Phase 7: remove sora (done 11-08, batch 57)
+Done as below. tm4e is sora-editor 0.23.6's copy of tm4e core (EPL-2.0), as a plain Java module (`tm4e`, its README says
+what changed); sora's two helpers it used were rewritten. sora's line-end hints, scrollbar marks and its overlays went
+with it. The aardink-lab module still has sora for its comparison screen; it isn't part of the app, and goes in R10.
+
 * Remove the setting, `SoraEditorSurface`, `SoraCompletion`, `NativeCodeEditor`, `BracketColorizer`, the
   `FoldingLayout` and `EditorLayoutAccess` files in sora's package, and both sora dependencies.
 * Licences: tm4e (EPL-2.0) notices, with the LGPL question closed in the spec and evaluation.

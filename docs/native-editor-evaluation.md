@@ -85,7 +85,8 @@ lack the multi-cursor, IME and 10k-line behavior required.
 
 **Result: no alternative meets every sora requirement, so sora-editor stays.**
 The licensing question (LGPL-2.1 vs the Apache/MIT rule) remains open and must
-be settled before shipping. Aardink is the fallback to revisit if LGPL is
+be settled before shipping. *(Settled 2026-11-08: the app moved to Aardink and sora-editor was removed in batch 57,
+the Aardink switch's phase 7; see [AARDINK-SWITCH-PLAN.md](AARDINK-SWITCH-PLAN.md).)* Aardink is the fallback to revisit if LGPL is
 rejected, once it gains TextMate-compatible grammars and passes the scroll and
 memory budgets.
 
@@ -237,6 +238,7 @@ Other facts for the switch:
 * tm4e has no official Maven Central package; it reaches the app inside sora's LGPL `language-textmate`. Removing sora
   means carrying `org.eclipse.tm4e.core` ourselves, EPL-2.0, as a module. Its dependencies (gson, joni, jcodings,
   snakeyaml-engine) are on Central. Upstream 0.18.0 needs Java 21 to build; sora's sources jar has 110 tm4e files.
+  *(Done in batch 57: the app's `tm4e` module carries sora 0.23.6's 92 tm4e core files.)*
 * Aardink's classes are Java 21 bytecode. Android builds are fine, but JVM unit tests run on this machine's Java 17 can't load
   them, so tests touching Aardink run on the device, as the adapter's do.
 
