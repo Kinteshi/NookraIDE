@@ -41,8 +41,8 @@ trademarks before choosing.
 the user's: plain "Quire" is taken in nearby places (quire.io, a project-management app on Google Play as `io.quire.app`
 since 2018, with a VS Code extension and the tagline "Unfold your ideas"; and Getty's Quire, an open-source publishing
 framework edited in VS Code, `@thegetty/quire-cli`). No app or repository named QuireCode or Quire IDE was found
-(web search, 11-08; not a trademark search). Recommended: **QuireCode** as the app's name, `quirecode` for the
-repository, the app id and the daemon (`quirecode-daemon`); check trademarks (INPI, USPTO, class 9) before the store.
+(web search, 11-08; not a trademark search). Recommended: **QuireCode** as the app's name, and for the
+repository (`Kinteshi/QuireCode`, transferred and renamed by the user on 11-08), the app id and the daemon (`quirecode-daemon`); check trademarks (INPI, USPTO, class 9) before the store.
 
 **The user's shortlist (11-08):**
 
@@ -99,7 +99,7 @@ at the repository's final address:
   commit address (GitHub, Settings > Emails: `<id>+<username>@users.noreply.github.com`), for the history rewrite and
   later commits.
 * **On GitHub, by the user:** transfer the repository to the main account (Settings > Danger zone > Transfer; the main
-  account accepts it). GitHub redirects the old address. Then rename it to `quirecode` (redirects again).
+  account accepts it). GitHub redirects the old address. Then rename it to `QuireCode` (redirects again). **Done by the user, 11-08**: the repository is `Kinteshi/QuireCode`, private, and `origin` points there.
 * **Then, here:** point `origin` at the new address; rewrite the history's author emails to the main account's private
   address; force-push this branch as `main`; delete the other branches; protect `main`. Then the release key's secrets
   are set on the final repository, and `v0.1.0` is tagged.
