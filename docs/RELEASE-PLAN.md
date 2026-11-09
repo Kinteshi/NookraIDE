@@ -78,6 +78,12 @@ development, never for releases. Steps, run by the user so the password never pa
    switch), which clears its settings, connections and offline copies on the device (the guest's files are untouched).
    Export settings.json first. The new app id from R2 makes it a separate app anyway.
 
+**Set up by the user, 11-08**: the keystore is `~/keys/android-release.jks` (mode 0600 now), and the four secrets are on
+`Kinteshi/QuireCode`. Checked with the release workflow's dry run (run 42550650913, manual): everything built, and the
+APK is signed by `CN=Kinteshi`, certificate SHA-256 `3553139293d0c4514898daa2294db0b05a19960be7479d71fb7902fa49f6db4c`
+(compare with `keytool -list -v -keystore ~/keys/android-release.jks`). GitHub hides the alias's value wherever it appears
+in the logs, so the word "release" shows as `***` there.
+
 ## How releases work (recommended, not yet decided)
 
 * **One repository** for the app and the daemon: the APK carries the arm64 daemon and installs it, and both share
