@@ -2495,6 +2495,18 @@ app id and the icon, so the work that doesn't depend on it goes first. 368 app u
   * **Left, the user's: the release key.** Creating it (`keytool -genkeypair -keystore release.jks -alias materialcode
     -keyalg RSA -keysize 4096 -validity 10000`) and keeping it: a password manager and a backup, as a lost key means
     users can't update; CI gets it base64-encoded in a GitHub secret. Its name can wait for R2.
+* **R5, CI and releases** (GitHub Actions; written, not run: they run once pushed, the user's call):
+  * `.github/workflows/ci.yml`, on pushes to `main` and pull requests: the daemon's tests; the app's unit tests (JDK 17
+    and 21) and a debug build; and the third-party notices regenerated and compared with the committed file.
+  * `.github/workflows/release.yml`, on a tag `v*`: checks the tag against the daemon's version and that
+    `docs/releases/<version>.md` exists; builds the daemon for the tablet's guest and for Linux and WSL hosts (arm64 and
+    x86_64, glibc 2.28, cargo-zigbuild 0.23.4 and Zig 0.17.0 as here); the signed APK with the arm64 daemon inside and
+    the tests; checksums; and the GitHub release with the notes. It needs four secrets: the keystore (base64) and its
+    passwords and alias.
+  * Rehearsed here: the x86_64 daemon builds; the notices script leaves the committed file unchanged; a release build
+    with `-Pavf.version=0.1.0` is version 0.1.0, code 100.
+  * `docs/releases/0.1.0.md`: the first release notes, a draft for people reading the release page (what it is, what
+    you need, installing, what's in it, known limits). The name in it waits for R2.
 * Left for later release items: CI checking that `notices.json` is current (R5); the version shown is the build's fixed
   `0.1.0` until versions come from tags (R4); the repository link in tm4e's notice points at `main`, which this branch
   becomes (R11).
@@ -2588,7 +2600,7 @@ release waits for; the rest stay in their lists for later releases.
 | | R2 | S, the user's | Name and icon: shortlist Burrow, Quire, Traveler, Clarity, with icon ideas in [RELEASE-PLAN.md](RELEASE-PLAN.md); goes to the repository, app id and daemon |
 | | R3 | Done (58) | Licence **Apache-2.0**: LICENSE and NOTICE, Cargo changed, notices generated from what ships and shown in Settings > About |
 | **2. Build and ship** | R4 | Done but the key (58) | Release builds: version from the tag, signing from the environment, R8 (25 MB). Left: the user creates and keeps the release key |
-| | R5 | M | CI (GitHub Actions): app unit tests (JDK 17 and 21), daemon tests, the arm64 daemon (zigbuild) bundled into the APK, the daemon for Linux and WSL hosts, checksums, a GitHub release from a tag |
+| | R5 | Written (58), runs once pushed | CI and releases (GitHub Actions): tests, notices check, daemon for the guest and hosts, signed APK, checksums, release from a tag; notes in docs/releases/ |
 | | R6 | S–M | App and daemon versions: the app checks the guest daemon's version, not only the protocol number, and offers to update it with the one it carries; release notes for both |
 | **3. Polish** | R7 | M | First run and setup: what's needed (Android version, Linux Terminal, AVF), Set up guest, pairing, offline; a README for users, apart from the specs |
 | | R8 | M | Material You pass: cards, dialogs and banners consistent (as the large-file banner wasn't), empty states, phone width (the terminal toolbar loose end) |
