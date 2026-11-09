@@ -19,7 +19,7 @@ the engine seam, batches, testing on the device) is in [CONTRIBUTING.md](../CONT
 * **App:** `apps/native-android-ide`, app id and package `io.github.kinteshi.quirecode` (QuireCode; `com.avfstudio.nativeide` before 11-08).
   Debug builds are a separate app, `io.github.kinteshi.quirecode.dev` ("QuireCode Dev"), so testing on the tablet never
   replaces the release-signed app (signed builds come only from CI, whose key's password never enters a session). The
-  dev app pairs with the guest like any client (`quirecode-daemon pair`); uninstall it when a batch's checks end. It
+  dev app pairs with the guest like any client (`quirecode-daemon pair`); it stays installed beside the release app (user, 11-09); remove test files when a batch's checks end. It
   looks different on purpose (batch 60): an orange palette by default, a DEV badge by its name, its own launcher icon.
 * **Guest daemon:** `crates/avf-daemon` with protocol `crates/avf-protocol`. The guest tool catalog is `guest/tools/catalog.json`, and the Jupyter bridge is `guest/tools/avf-jupyter-bridge.py`; the daemon embeds both.
 * **Guest install script:** `scripts/install-native-daemon.sh`.
@@ -34,7 +34,7 @@ cargo test -p avf-daemon -p avf-protocol
 PATH=$HOME/.cargo/bin:$PATH cargo zigbuild --release -p avf-daemon --target aarch64-unknown-linux-gnu.2.28
 ```
 
-At last run (batch 60): 375 app unit tests (on Java 21, installed beside 17) and 128 daemon tests, all passing; CI runs both on every push.
+At last run (batch 61): 379 app unit tests (on Java 21, installed beside 17) and 128 daemon tests, all passing; CI runs both on every push.
 
 ## Reference tablet (Galaxy Tab S11 Ultra, SM-X930)
 

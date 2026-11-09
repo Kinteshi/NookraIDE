@@ -36,6 +36,7 @@ import androidx.compose.material.icons.outlined.AutoFixHigh
 import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.BugReport
 import androidx.compose.material.icons.outlined.Cable
+import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.CleaningServices
 import androidx.compose.material.icons.outlined.Code
@@ -282,6 +283,14 @@ private fun LazyListScope.appearance(controller: WorkbenchController, settings: 
     item { ActionRow(Icons.Outlined.FileOpen, "Import VS Code theme", "Syntax colours from a .vsix or theme JSON") { controller.pickAssetPack?.invoke("vsix") } }
     item { ActionRow(Icons.Outlined.Restore, "Use app syntax colours", "Drop an imported theme and follow light and dark mode") { controller.clearImportedTheme() } }
     item { Section("Panel") }
+    item {
+        SwitchRow(
+            Icons.Outlined.Keyboard,
+            "Make room while typing",
+            "Hide the panel while the on-screen keyboard is up in the editor or a notebook; it comes back with the keyboard down",
+            settings.panelHideWhileTyping,
+        ) { set(WorkbenchSettings.PANEL_HIDE_WHILE_TYPING, it) }
+    }
     WorkbenchSettings.AUTO_HIDING_PANEL_TABS.forEach { tab ->
         item {
             SwitchRow(
@@ -671,7 +680,15 @@ private fun LazyListScope.ai(controller: WorkbenchController, settings: Workbenc
 
 private fun LazyListScope.guest(controller: WorkbenchController, settings: WorkbenchSettings, set: SetSetting) {
     item { Section("Connection") }
-    item { ActionRow(Icons.Outlined.Cable, "Connections", controller.profileName.ifEmpty { "Manage guest connection profiles" }) { controller.dialog = WorkbenchDialog.Connect } }
+    item { ActionRow(Icons.Outlined.Cable, "Connections", controller.connection.title) { controller.openConnect() } }
+    item {
+        SwitchRow(
+            Icons.Outlined.CloudOff,
+            "Banner while away",
+            "A note under the top bar while the connection is away, with what helps; the connection chip says it either way",
+            settings.connectionBanner,
+        ) { set(WorkbenchSettings.CONNECTION_BANNER, it) }
+    }
     item {
         SwitchRow(Icons.Outlined.Memory, "Guest resources in the status bar", "Memory the Linux guest costs the tablet, its CPU and its storage", settings.statusBarGuestResources) {
             set(WorkbenchSettings.STATUS_BAR_GUEST, it)

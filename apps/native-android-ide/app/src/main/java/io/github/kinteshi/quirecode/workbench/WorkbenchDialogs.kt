@@ -102,7 +102,9 @@ import androidx.compose.ui.graphics.vector.ImageVector
 fun WorkbenchDialogHost(controller: WorkbenchController) {
     when (val dialog = controller.dialog) {
         null -> Unit
-        WorkbenchDialog.Connect -> ConnectDialog(controller)
+        WorkbenchDialog.Connect -> ConnectionsDialog(controller)
+        WorkbenchDialog.ComputerPairing -> ComputerPairingDialog(controller)
+        is WorkbenchDialog.ConnectionEditor -> ConnectionEditorDialog(controller, dialog)
         WorkbenchDialog.QuickOpen -> QuickOpenDialog(controller)
         WorkbenchDialog.GotoLine -> AlertDialog(
             onDismissRequest = { controller.dialog = null },
@@ -1081,84 +1083,26 @@ private fun IndentationDialog(controller: WorkbenchController, document: io.gith
 }
 
 @Composable
-private fun ConnectDialog(controller: WorkbenchController) {
-    AlertDialog(
-        onDismissRequest = { controller.dialog = null },
-        title = { Text("Connect to guest") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(
-                    "Profiles are saved on this device; tokens are encrypted with the Android Keystore.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                if (controller.profiles.isNotEmpty()) {
-                    LazyColumn(Modifier.heightIn(max = 160.dp)) {
-                        items(controller.profiles) { profile ->
-                            ListItem(
-                                headlineContent = { Text(profile.name) },
-                                supportingContent = { Text(profile.endpoint) },
-                                leadingContent = { RadioButton(selected = profile.id == controller.profileId, onClick = { controller.selectProfile(profile) }) },
-                                trailingContent = {
-                                    Tooltip("Delete profile") { IconButton(onClick = { controller.deleteProfile(profile.id) }) {
-                                        Icon(Icons.Outlined.Delete, contentDescription = "Delete profile")
-                                    } }
-                                },
-                                modifier = Modifier.clickable { controller.selectProfile(profile) },
-                            )
-                        }
-                    }
-                    TextButton(onClick = controller::newProfile) { Text("New profile") }
-                }
-                OutlinedTextField(
-                    value = controller.profileName,
-                    onValueChange = { controller.profileName = it },
-                    label = { Text("Profile name") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                )
-                OutlinedTextField(
-                    value = controller.endpoint,
-                    onValueChange = { controller.endpoint = it },
-                    label = { Text("WebSocket URL") },
-                    placeholder = { Text("ws://127.0.0.1:19870/ws") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                )
-                OutlinedTextField(
-                    value = controller.token,
-                    onValueChange = { controller.token = it },
-                    label = { Text("Session token") },
-                    visualTransformation = PasswordVisualTransformation(),
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                )
-            }
-        },
-        confirmButton = { TextButton(onClick = controller::requestGuestConnection, enabled = !controller.busy) { Text(if (controller.busy) "Connecting…" else "Connect") } },
-        dismissButton = {
-            Row {
-                TextButton(onClick = { controller.beginGuestSetup() }) { Text("Set up or pair…") }
-                TextButton(onClick = { controller.dialog = null }) { Text("Cancel") }
-            }
-        },
-    )
-}
-
-@Composable
 private fun GuestSetupDialog(controller: WorkbenchController, setup: WorkbenchDialog.GuestSetup) {
     var code by remember { mutableStateOf("") }
-    var connectionString by remember { mutableStateOf("") }
     val colors = MaterialTheme.colorScheme
     AlertDialog(
         onDismissRequest = { controller.dialog = null },
-        title = { Text("Set up the Linux guest") },
+        title = { Text("Set up this tablet's Linux guest") },
         text = {
             Column(
                 Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                setup.reason?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = colors.error) }
+                setup.reason?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant) }
+                if (!controller.linuxTerminalAvailable()) {
+                    Text(
+                        "Linux Terminal isn't available yet. Turn on Linux development environment in Developer options, open " +
+                            "Linux Terminal once so it installs its Debian guest, then come back here.",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    FilledTonalButton(onClick = controller::openDeveloperOptions) { Text("Developer options") }
+                }
                 Text("1. Run this in Linux Terminal. It installs the QuireCode daemon and its tools, then prints a pairing code.", style = MaterialTheme.typography.bodyMedium)
                 when {
                     controller.setupError != null -> Text(controller.setupError!!, style = MaterialTheme.typography.bodySmall, color = colors.error)
@@ -1198,29 +1142,7 @@ private fun GuestSetupDialog(controller: WorkbenchController, setup: WorkbenchDi
                     keyboardActions = KeyboardActions(onDone = { if (code.count(Char::isLetterOrDigit) == 8) controller.pairAndConnect(code) }),
                     modifier = Modifier.fillMaxWidth(),
                 )
-                HorizontalDivider()
-                Text("Or pair with a computer (Linux, or Windows through WSL)", style = MaterialTheme.typography.titleSmall)
-                Text(
-                    "On the computer, run the release's install-native-daemon.sh with --remote (on Windows, " +
-                        "install-host-daemon-wsl.ps1; see docs/HOSTING-THE-DAEMON.md on GitHub). It prints a connection " +
-                        "string starting with avf://: paste it here.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = colors.onSurfaceVariant,
-                )
-                OutlinedTextField(
-                    value = connectionString,
-                    onValueChange = { connectionString = it.trim() },
-                    label = { Text("Connection string") },
-                    placeholder = { Text("avf://192.168.1.10:19870?fp=…&code=…") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, imeAction = ImeAction.Go),
-                    keyboardActions = KeyboardActions(onGo = { controller.pairWithConnectionString(connectionString) }),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                FilledTonalButton(
-                    onClick = { controller.pairWithConnectionString(connectionString) },
-                    enabled = !controller.busy && connectionString.startsWith("avf://"),
-                ) { Text("Pair with computer") }
+                TextButton(onClick = { controller.dialog = WorkbenchDialog.ComputerPairing }) { Text("Pairing a computer instead?") }
             }
         },
         confirmButton = {
@@ -1229,7 +1151,7 @@ private fun GuestSetupDialog(controller: WorkbenchController, setup: WorkbenchDi
                 enabled = !controller.busy && code.count(Char::isLetterOrDigit) == 8,
             ) { Text(if (controller.busy) "Pairing…" else "Pair and connect") }
         },
-        dismissButton = { TextButton(onClick = { controller.dialog = null }) { Text("Close") } },
+        dismissButton = { TextButton(onClick = { controller.dialog = WorkbenchDialog.Connect }) { Text("Back") } },
     )
 }
 

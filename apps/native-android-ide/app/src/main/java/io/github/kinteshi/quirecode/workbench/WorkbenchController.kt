@@ -552,8 +552,31 @@ class WorkbenchController(private val context: Context) {
         get() = panelVisibleState.value
         set(value) {
             panelVisibleState.value = value
+            // Opened while typing: it shows, keyboard or not, until the keyboard goes down (G23).
+            if (value) panelShownWhileTyping = keyboardUp
             saveLayout("layout-panel", if (value) "shown" else "")
         }
+
+    /** The on-screen keyboard is up, a real one rather than a hardware keyboard's suggestion strip (G23). */
+    var keyboardUp by mutableStateOf(false)
+        private set
+    private var panelShownWhileTyping by mutableStateOf(false)
+
+    /**
+     * The panel steps aside while the on-screen keyboard is up and the editor or a notebook has the focus
+     * (`avf.panel.hideWhileTyping`, G23): with both, the text being typed was left a few lines.
+     */
+    val panelMakingRoom: Boolean
+        get() = panelVisible && keyboardUp && settings.panelHideWhileTyping && !panelShownWhileTyping &&
+            (focusArea == FocusArea.Editor || focusArea == FocusArea.Notebook)
+
+    /** The panel is on screen: open, and not stepping aside for the keyboard. */
+    val panelShown: Boolean get() = panelVisible && !panelMakingRoom
+
+    fun onKeyboard(up: Boolean) {
+        keyboardUp = up
+        if (!up) panelShownWhileTyping = false
+    }
     private val panelTabState = mutableStateOf(
         // Docs has nothing to show after a restart.
         PanelTab.entries.firstOrNull { restoreLayout && it != PanelTab.Docs && it.name == layoutValue("layout-panel-tab", "") } ?: PanelTab.Terminal,
@@ -698,10 +721,13 @@ class WorkbenchController(private val context: Context) {
                     GuestConnectionService.stop(context)
                     if (!failure.isNullOrBlank()) status = "Guest disconnected: $failure"
                     // The daemon restarts on updates and the VM may pause; come back by ourselves.
-                    if (wasConnected) scheduleReconnect()
+                    if (wasConnected && !replacingConnection) scheduleReconnect()
                 }
-                // Connected, then gone: the guest stopped or its daemon did. Said when reconnecting fails.
-                if (wasConnected && !isConnected) guestStoppedAt = System.currentTimeMillis()
+                // Connected, then gone: the guest stopped or its daemon did. Said when reconnecting fails. Not when
+                // the user switched connections: the old one closing is theirs.
+                if (wasConnected && !isConnected) {
+                    if (replacingConnection) replacingConnection = false else guestStoppedAt = System.currentTimeMillis()
+                }
                 wasConnected = isConnected
             }
         }
@@ -1059,7 +1085,15 @@ class WorkbenchController(private val context: Context) {
     fun deleteProfile(id: String) {
         profileStore.delete(id)
         profiles = profileStore.profiles()
-        if (profileId == id) newProfile()
+        if (profileId == id) {
+            newProfile()
+            // Its problems go with it; away, the next saved connection is the one to connect to.
+            resetConnectionProblems()
+            if (!connected) {
+                guestStoppedAt = null
+                profiles.firstOrNull()?.let(::selectProfile)
+            }
+        }
     }
 
     fun requestGuestConnection() {
@@ -1103,9 +1137,10 @@ class WorkbenchController(private val context: Context) {
                 startKeepAlive("Connected")
                 startStatsPolling()
                 checkGuestTools()
-                guestUnreachable = false
-                unreachableFailures = 0
-                guestForwardingSuspected = false
+                resetConnectionProblems()
+                connectionCheck = null
+                connectionBannerHiddenFor = null
+                replacingConnection = false
                 guestStoppedAt = null
                 checkDaemonVersion()
                 reconnectAttempt = 0
@@ -2745,7 +2780,110 @@ class WorkbenchController(private val context: Context) {
 
 
     private var wasConnected = false
-    private var guestUnreachable = false
+    private var guestUnreachable by mutableStateOf(false)
+    /** The daemon refused this device's token at the last attempt (G22): pairing again is the way back. */
+    var pairingRejected by mutableStateOf(false)
+        private set
+    /** The last attempt's failure when it was neither unreachable nor a refused token. */
+    private var connectFailure by mutableStateOf<String?>(null)
+    /** The banner said "Hide" to this state; it comes back when the state changes (G22). */
+    var connectionBannerHiddenFor by mutableStateOf<ConnectionState?>(null)
+
+    /** Where the app stands with its connection, for the chip, the banner and the Connections dialog (G22). */
+    val connectionFacts: ConnectionFacts
+        get() = ConnectionFacts(
+            hasConnections = profiles.isNotEmpty(),
+            connected = connected,
+            // busy is any operation; without a connection, one with somewhere to connect to is the connecting.
+            connecting = busy && !connected && endpoint.isNotBlank(),
+            name = profileName.ifBlank { if (isTabletGuestEndpoint(endpoint)) "Linux guest" else endpointHost(endpoint) ?: "the computer" },
+            tabletGuest = isTabletGuestEndpoint(endpoint),
+            stoppedAt = guestStoppedAt?.let { java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(it)) },
+            unreachable = guestUnreachable,
+            forwardingStuck = guestForwardingSuspected,
+            pairingRejected = pairingRejected,
+            failure = connectFailure,
+            workingOffline = offline,
+        )
+    val connection: ConnectionSummary get() = connectionSummary(connectionFacts)
+
+    /** The Connections dialog's check of the current connection (G22); null until asked. */
+    var connectionCheck by mutableStateOf<ConnectionCheck?>(null)
+        private set
+
+    /** Checks what can be checked from here: Linux Terminal turned on, and the daemon's port answering. */
+    fun checkConnection() {
+        val target = endpointHostPort(endpoint.ifBlank { GUEST_DAEMON_ENDPOINT })
+        val tablet = isTabletGuestEndpoint(endpoint)
+        connectionCheck = ConnectionCheck(
+            terminalAvailable = if (tablet) linuxTerminalAvailable() else null,
+            daemonAnswers = null,
+            target = target?.let { "${it.first}:${it.second}" },
+            checking = true,
+        )
+        io.execute {
+            val answers = target?.let { (host, port) ->
+                runCatching { java.net.Socket().use { it.connect(java.net.InetSocketAddress(host, port), 2_000) } }.isSuccess
+            }
+            post { connectionCheck = connectionCheck?.copy(daemonAnswers = answers, checking = false) }
+        }
+    }
+
+    /** Connects to [profile] instead of the current connection. */
+    fun switchConnection(profile: io.github.kinteshi.quirecode.transport.ConnectionProfile) {
+        replacingConnection = connected
+        selectProfile(profile)
+        resetConnectionProblems()
+        guestStoppedAt = null
+        connectionCheck = null
+        requestGuestConnection()
+    }
+
+    /** A switch to another connection closes the current one on purpose: not the guest stopping. */
+    private var replacingConnection = false
+
+    private fun resetConnectionProblems() {
+        pairingRejected = false
+        connectFailure = null
+        guestUnreachable = false
+        unreachableFailures = 0
+        guestForwardingSuspected = false
+    }
+
+    /** Saves a connection's name, URL and token (blank keeps the saved one); connects if [connect]. */
+    fun saveConnection(id: String?, name: String, url: String, newToken: String, connect: Boolean) {
+        val keptToken = newToken.ifBlank { id?.let(profileStore::token).orEmpty() }
+        val fingerprint = profiles.firstOrNull { it.id == id }?.fingerprint?.takeIf { url.trim().startsWith("wss://") }
+        io.execute {
+            val saved = profileStore.save(id, name.trim().ifBlank { endpointHost(url) ?: "Connection" }, url.trim(), keptToken, fingerprint)
+            post {
+                profiles = profileStore.profiles()
+                if (connect || saved.id == profileId) {
+                    profiles.firstOrNull { it.id == saved.id }?.let(::selectProfile)
+                }
+                dialog = WorkbenchDialog.Connect
+                if (connect) {
+                    replacingConnection = connected
+                    resetConnectionProblems()
+                    guestStoppedAt = null
+                    requestGuestConnection()
+                }
+            }
+        }
+    }
+
+    /** The token typed into the editor, for a connection being edited: the saved one stays unless replaced. */
+    fun connectionHasToken(id: String?): Boolean = id != null && profiles.firstOrNull { it.id == id }?.hasToken == true
+
+    /** Pair again: the tablet's setup for its guest, the connection string for a computer. */
+    fun pairAgain(profile: io.github.kinteshi.quirecode.transport.ConnectionProfile? = profiles.firstOrNull { it.id == profileId }) {
+        if (profile == null || isTabletGuestEndpoint(profile.endpoint)) {
+            beginGuestSetup()
+        } else {
+            pairingError = null
+            dialog = WorkbenchDialog.ComputerPairing
+        }
+    }
     /** Connection refusals in a row; after two, Linux Terminal itself is the likely culprit. */
     private var unreachableFailures = 0
     /** Set when the guest probably runs but Linux Terminal stopped forwarding its port. */
@@ -2867,13 +3005,10 @@ class WorkbenchController(private val context: Context) {
         autoConnecting = false
         when {
             rejected?.reason == "InvalidToken" -> {
-                guestProblem = "The guest no longer accepts this device's token. Was Linux Terminal reset?"
+                // Said by the chip and the banner, with Pair again; no dialog opens by itself (G22).
+                pairingRejected = true
+                guestProblem = "The guest no longer accepts this device's pairing. Pair again to reconnect."
                 status = guestProblem!!
-                beginGuestSetup(
-                    "The guest rejected the saved token, which happens after Linux Terminal is reset or the " +
-                        "daemon is reinstalled. Set it up again, or if it is still installed, run " +
-                        "`quirecode-daemon pair` in Linux Terminal and enter the new code.",
-                )
             }
             unreachable -> {
                 guestUnreachable = true
@@ -2892,11 +3027,11 @@ class WorkbenchController(private val context: Context) {
                     "Can't reach the guest daemon. Open Linux Terminal so the guest starts; if it was reset, set it up again."
                 }
                 status = guestProblem!!
-                if (!wasAutomatic && dialog == WorkbenchDialog.Connect) dialog = null
                 if (reconnectAttempt > 0) scheduleReconnect()
             }
             else -> {
-                guestProblem = "Connection failed: ${rejected?.message ?: error.cause?.message ?: error.message}"
+                connectFailure = rejected?.message ?: error.cause?.message ?: error.message
+                guestProblem = "Connection failed: $connectFailure"
                 status = guestProblem!!
             }
         }
@@ -2959,7 +3094,9 @@ class WorkbenchController(private val context: Context) {
     /** Connect: the profiles dialog, or the setup when nothing is paired yet. */
     fun openConnect() {
         // Nothing paired yet (a first run): setup and pairing are the way in, not a URL and a token.
-        if (!connected && profiles.isEmpty()) beginGuestSetup() else dialog = WorkbenchDialog.Connect
+        // One dialog for every connection question (G22): the status, the connections, adding one, troubleshooting.
+        dialog = WorkbenchDialog.Connect
+        if (!connected && profiles.isNotEmpty()) checkConnection()
     }
 
     /**
@@ -2998,7 +3135,9 @@ class WorkbenchController(private val context: Context) {
 
     /** Trades the code the installer printed for the token, saves it in the profile and connects. */
     fun pairAndConnect(code: String) {
-        val target = endpoint.trim().ifEmpty { GUEST_DAEMON_ENDPOINT }
+        // The tablet's own guest, whatever connection is current: its saved connection is updated, or one is added.
+        val existing = profiles.firstOrNull { isTabletGuestEndpoint(it.endpoint) }
+        val target = existing?.endpoint ?: GUEST_DAEMON_ENDPOINT
         busy = true
         pairingError = null
         status = "Pairing with the guest"
@@ -3015,9 +3154,12 @@ class WorkbenchController(private val context: Context) {
                     status = pairingError!!
                     return@post
                 }
+                profileId = existing?.id
+                profileName = existing?.name ?: "Linux guest"
                 endpoint = target
                 token = newToken
-                if (profileName.isBlank()) profileName = "Linux guest"
+                profileFingerprint = null
+                resetConnectionProblems()
                 dialog = null
                 setupCommand = null
                 // A first pairing is a first connection: ask for the notification the background connection shows.
@@ -3059,6 +3201,7 @@ class WorkbenchController(private val context: Context) {
                 endpoint = parsed.endpoint
                 token = newToken
                 profileFingerprint = parsed.fingerprint
+                resetConnectionProblems()
                 dialog = null
                 requestGuestConnection()
             }
@@ -8039,7 +8182,7 @@ class WorkbenchController(private val context: Context) {
     }
 
     private fun toggleTerminal() {
-        if (panelVisible && panelTab == PanelTab.Terminal) {
+        if (panelShown && panelTab == PanelTab.Terminal) {
             panelVisible = false
             return
         }
@@ -10001,14 +10144,14 @@ class WorkbenchController(private val context: Context) {
             "workbench.action.quickSwitchEditor", "workbench.action.nextEditor" -> cycleEditor(1)
             "workbench.action.previousEditor" -> cycleEditor(-1)
             "workbench.action.toggleSidebarVisibility" -> sidebar = if (sidebar == null) SidebarView.Explorer else null
-            "workbench.action.togglePanel" -> panelVisible = !panelVisible
+            "workbench.action.togglePanel" -> panelVisible = !panelShown
             "workbench.view.explorer" -> toggleSidebar(SidebarView.Explorer)
             "workbench.actions.view.problems" -> {
                 panelVisible = true
                 panelTab = PanelTab.Problems
             }
             "workbench.action.output.toggleOutput" -> {
-                panelVisible = !(panelVisible && panelTab == PanelTab.Output)
+                panelVisible = !(panelShown && panelTab == PanelTab.Output)
                 panelTab = PanelTab.Output
             }
             "avf.guest.showResources" -> dialog = WorkbenchDialog.GuestResources

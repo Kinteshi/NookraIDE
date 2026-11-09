@@ -2696,6 +2696,55 @@ missing" (batch 59's "not yet": the hover card in cells with a mouse, find's oth
 * The release notes' known limit about cells (no line numbers, not all of the editor's features) is gone: cells are
   Aardink editors with line numbers on request (batch 59), the hover card and find (this batch).
 
+## 61. Connections reworked (G22), the panel makes room for the keyboard (G23), the Aardink requests drafted (11-09; done, checked on the tablet)
+User's request (11-09): "Go for batch 61" (G22, G23, and the Aardink requests drafted on the side), and "you can leave
+the dev app installed alongside the release one".
+
+* **G22, the first run, connections and offline** (user: "the red banner is strikingly alarming, but the app should be
+  usable"; "use the connection chip to show all status and clicking it opens a dialog to choose connections, create new
+  ones and further troubleshoot"):
+  * One status for the chip, the banner and the dialog (`Connections.kt`: `ConnectionState`, `connectionSummary`, 3
+    tests): not set up, not connected, connecting, connected, the guest stopped at a time, can't reach it, Linux
+    Terminal's forwarding stuck, pairing refused, another failure. Each says what happened and that the app still works
+    (files from this device's copies, saves waiting), in the same words everywhere.
+  * **The chip** shows it in a few words: the connection's name, Connecting… (with a spinner), Offline, Pair again, Set
+    up. Calm colours: the primary container to start, the secondary container while away; never the error colour.
+  * **The banner** (was red, five buttons): a surface-coloured note, "Can't reach the Linux guest. You're working
+    offline meanwhile; QuireCode reconnects by itself.", with the one step that most likely helps (Open Linux
+    Terminal, App info, Pair again, or Retry for a computer), Details and Hide (until the state changes). Setting
+    `avf.connection.banner` (Settings > Guest: Banner while away), on by default.
+  * **The Connections dialog** (the chip, Details, Settings > Guest > Connections, the welcome page): the status and its
+    next steps; the saved connections (tablet or computer icon, which is current or connected; a tap switches, a menu
+    edits, pairs again or deletes); **Add a connection**: this tablet's Linux guest, a computer on the network, by hand;
+    **Troubleshoot** (open by itself while away): Linux Terminal turned on, whether anything answers on the daemon's
+    port (a socket check), pairing refused, with App info, why the guest stops, and Copy diagnostics.
+  * A refused token no longer opens the setup dialog unasked: the chip and banner say "Pair again". Pairing the
+    tablet's guest always pairs the tablet's guest (it used the current connection's URL, a computer's if that was
+    current) and updates its saved connection. The setup dialog is the tablet's only; pairing a computer and "by hand"
+    are dialogs of their own (the old Connect dialog's form is the editor, with "blank keeps the saved token").
+  * Switching connections on purpose isn't "the guest stopped" (it was, at first). Deleting the current connection
+    drops its problems and picks the next saved one.
+  * Explorer's empty state says the connection's title ("Not set up yet", "Can't reach the Linux guest").
+  * Checked on the dev app, from a fresh install: Set up on the chip and the first-run dialog (only the three ways to
+    add), pairing the tablet's guest from it, connected ("Linux guest"), a by-hand connection to a closed port
+    (Offline, the calm banner, Troubleshoot finding nothing on 127.0.0.1:19871), the same with a wrong token (Pair
+    again everywhere, no dialog by itself), deleting it and switching back. Not seen: the guest really stopping
+    (G17, asked first) and a computer.
+* **G23, the panel makes room for the on-screen keyboard:** while a real on-screen keyboard is up (taller than 160 dp,
+  so not Samsung's suggestion strip over the Book Cover) and the editor or a notebook has the focus, the panel steps
+  aside, and comes back with the keyboard down. With the focus in the panel (a terminal) it stays; the panel's buttons
+  (the Terminal rail item, Ctrl+`, Toggle Panel) bring it back while typing. Setting `avf.panel.hideWhileTyping`
+  (Settings > Appearance > Panel: Make room while typing), on by default. Checked with Android's "on-screen keyboard
+  with a physical keyboard" on for the test (then back off): terminal focused, the panel stays; a tap in the editor,
+  it steps aside and the editor gets the room; the Terminal item brings it back; the keyboard down, it's back; with
+  the Book Cover alone, it never moves.
+* **The Aardink requests (group C) all drafted** in [AARDINK-UPSTREAM-REQUESTS.md](AARDINK-UPSTREAM-REQUESTS.md): A11
+  (Samsung Keyboard: Enter, selections turned round, composing from a hardware keyboard, the on-screen Enter), A14
+  (`LanguageConfiguration`'s regex on Android), A15 and A18 together ("typing as VS Code does"), with A9's problem
+  reworded for what's left after 0.9. Six drafts, not filed: the user posts them.
+* The dev app stays installed beside the release app (user, 11-09); stopped after the checks, its terminal closed.
+* README and the hosting guide follow the chip and its dialog. 379 unit tests.
+
 ## Backlog
 ### Open backlog (11-08)
 The current lists of what's open, in two: the general backlog, and the Aardink switch's until it's complete. The older
@@ -2719,11 +2768,11 @@ Grouped (11-08) so that what's cheaper done together is done together; the numbe
 | **5. Notebook outputs** | G8 | 56 | M–L | Widgets not drawn yet. (G3, the data viewer's filter with the on-screen keyboard, done in batch 59) |
 | **6. Large workspaces** | G4 | 61 | S–M | Files beyond Quick Open's 20,000 |
 | | G7 | 55 | S | Deep Rust projects on the tablet (about 1 GB of Rust) |
-| **7. Window and layout** | G23 | – | S–M | With the on-screen keyboard up and the panel open, the editor or notebook is left a sliver (batch 59): give the editor the room while typing (shrink or hide the panel, as VS Code's does on phones). Done before: G6 (batch 57), the terminal toolbar at phone width (58) |
+| **7. Window and layout** | – | – | – | Done: G23 in batch 61 (the panel makes room for the on-screen keyboard), G6 (57), the terminal toolbar at phone width (58) |
 | **On its own** | G12 | 64 | S–M or L | Replace Gemini CLI with Antigravity CLI |
 | | G19 | – | S–M | Debugger: values in the hover while paused, and Copilot's partial accept (word by word): in neither engine (batch 55) |
 | | G11 | – | ? | Copilot exits after a daemon restart (watching) |
-| **8. First run and connections** | G22 | – | L | Rework the first run, setup, connection management and the offline experience (user, 11-09). The red banner when the guest is away is alarming while the app is still usable offline: say it calmly. The connection chip shows the whole status; a tap opens one dialog to choose a connection, create new ones (tablet guest, computer), and troubleshoot (port forwarding, guest stopped, pairing again). Builds on R7's Get started card and Connect-leads-to-setup |
+| **8. First run and connections** | – | – | – | Done in batch 61 (G22): the status in the chip, a calm banner, the Connections dialog. The request was: Rework the first run, setup, connection management and the offline experience (user, 11-09). The red banner when the guest is away is alarming while the app is still usable offline: say it calmly. The connection chip shows the whole status; a tap opens one dialog to choose a connection, create new ones (tablet guest, computer), and troubleshoot (port forwarding, guest stopped, pairing again). Builds on R7's Get started card and Connect-leads-to-setup |
 
 Why these groups:
 1. Most of the memory and the frame time is the editor's. Tuning sora's would be thrown away, so both wait for the flip (A5),
@@ -2753,10 +2802,10 @@ A2, A3, A4, A8, A16, A17 and A19 were done in batches 47–54, and A5's checks i
 | **C. Asks to Aardink, filed together** | A9 | 71 | S to ask | Public text positions: Next Edit's card, the peek and our suggestion list at their line. Drafted |
 | | A13 | 77 | S to ask | The completion list at the caret on Android with a hardware keyboard; our list stands in (batch 51). Drafted |
 | | A10 | 72 | S to ask | Gutter icons and taps (real breakpoints after the bars). Drafted |
-| | A11 | 73 | S to ask | Samsung's keyboard: Enter, Shift+arrows, and words composed even from a hardware keyboard; our workarounds go when it's fixed. Also its on-screen Enter (batch 59): in a file it only took the word suggestion, in a cell it left the cursor before the new line |
-| | A14 | 75 | S to ask | `LanguageConfiguration` can't load on Android (regex); ours reads the files meanwhile |
-| | A15 | 76 | S to ask | Typing over auto-inserted closers; ours does it for hardware keys |
-| | A18 | – | S to ask | Backspace back to a tab stop in leading spaces (VS Code's `useTabStops`); ours does it for hardware keys (batch 53) |
+| | A11 | 73 | S to ask, drafted (61) | Samsung's keyboard: Enter, Shift+arrows, and words composed even from a hardware keyboard; our workarounds go when it's fixed. Also its on-screen Enter (batch 59): in a file it only took the word suggestion, in a cell it left the cursor before the new line |
+| | A14 | 75 | S to ask, drafted (61) | `LanguageConfiguration` can't load on Android (regex); ours reads the files meanwhile |
+| | A15 | 76 | S to ask, drafted with A18 (61) | Typing over auto-inserted closers; ours does it for hardware keys |
+| | A18 | – | S to ask, drafted with A15 (61) | Backspace back to a tab stop in leading spaces (VS Code's `useTabStops`); ours does it for hardware keys (batch 53) |
 | **E. After sora is out** | – | – | – | A20 done in batch 59: notebook cells in Aardink (`avf.notebook.cellEditor`, the text field kept as a choice); the hover card and find's matches in them in batch 60 |
 | **D. Each release** | A12 | habit | S per release | Review each Aardink release against the plan and these lists, bump the pin, recheck (plan, "Release reviews"); with A19, check its reflection still works |
 
@@ -2764,7 +2813,7 @@ Why these groups:
 * A: A7 is the first day of A5's daily use, and A6 follows the period the user picks. The general backlog's group 1 starts
   from A5's measurements.
 * B: done (batch 54); A9 replaces its reflection when it ships.
-* C: one session drafts the four not yet drafted and files all seven, for the user to post. A15 and A18 could be one issue
+* C: all drafted (batch 61, six drafts: A15 and A18 are one); the user posts them. A15 and A18 could be one issue
   ("typing as VS Code does"), A9 and A13 cross-reference each other, and A11 now has the composing finding.
 * D: A19 adds a check to every release review.
 

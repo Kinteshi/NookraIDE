@@ -425,10 +425,10 @@ private fun GetStartedCard(controller: WorkbenchController) {
                 } else {
                     androidx.compose.material3.Button(onClick = controller::openDeveloperOptions) { Text("Developer options") }
                 }
-                androidx.compose.material3.OutlinedButton(onClick = { controller.beginGuestSetup() }) {
+                androidx.compose.material3.OutlinedButton(onClick = { controller.dialog = WorkbenchDialog.ComputerPairing }) {
                     Text(if (terminal) "Pair with a computer" else "Use a computer instead")
                 }
-                androidx.compose.material3.TextButton(onClick = { controller.dialog = WorkbenchDialog.Connect }) { Text("Connect by hand") }
+                androidx.compose.material3.TextButton(onClick = { controller.dialog = WorkbenchDialog.ConnectionEditor(null) }) { Text("Connect by hand") }
             }
         }
     }
@@ -488,9 +488,9 @@ private fun EmptyEditor(controller: WorkbenchController) = BoxWithConstraints(Mo
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             if (!controller.connected && controller.profiles.isNotEmpty()) {
-                androidx.compose.material3.FilledTonalButton(onClick = { controller.dialog = WorkbenchDialog.Connect }) {
+                androidx.compose.material3.FilledTonalButton(onClick = controller::openConnect) {
                     Icon(Icons.Outlined.Cloud, contentDescription = null, modifier = Modifier.padding(end = 8.dp).size(18.dp))
-                    Text("Connect to guest")
+                    Text("Connections")
                 }
             }
             androidx.compose.material3.OutlinedButton(onClick = { controller.newUntitledFile() }) {

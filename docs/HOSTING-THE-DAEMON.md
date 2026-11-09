@@ -2,7 +2,7 @@
 
 QuireCode's editor runs on the tablet; files, terminals, language servers, Git, search, Jupyter
 and the debugger run wherever the **daemon** runs. Usually that is the Linux guest on the tablet
-itself (Connect → *Set up or pair…*). This guide covers running it on a **Linux computer** or a
+itself (the connection chip → *Add a connection* → *This tablet's Linux guest*). This guide covers running it on a **Linux computer** or a
 **Windows computer (through WSL2)** on your network, so the tablet works on that machine's files
 with its CPU and memory.
 
@@ -47,9 +47,10 @@ Requirements: x86_64 or arm64 Linux with systemd, `curl`, `tar`, and Git for Sou
 
 3. Open the port if a firewall is active, for example `sudo ufw allow 19870/tcp`.
 
-4. In QuireCode: **Connect → Set up or pair… → Pair with a computer**, paste the connection string,
-   and tap **Pair with computer**. The app saves a profile for that host and reconnects to it on
-   launch.
+4. In QuireCode: the connection chip at the top right → **Add a connection → A computer on your
+   network** (or **Pair with a computer** on the welcome page), paste the connection string, and tap
+   **Pair and connect**. The app saves the connection and reconnects to it on launch; the chip's
+   dialog switches between it and the tablet's guest.
 
 Need a new code later (another tablet, or a reinstall of the app)?
 

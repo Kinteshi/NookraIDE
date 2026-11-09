@@ -71,6 +71,10 @@ data class WorkbenchSettings(
      * with no port open, Variables with no kernel running… The tab being shown always stays.
      */
     val panelAutoHide: Set<PanelTab> = DEFAULT_PANEL_AUTO_HIDE,
+    /** `avf.panel.hideWhileTyping`: the panel steps aside while the on-screen keyboard is up in the editor or a notebook (G23). */
+    val panelHideWhileTyping: Boolean = true,
+    /** `avf.connection.banner`: the note under the top bar while the connection is away (G22); the chip says it either way. */
+    val connectionBanner: Boolean = true,
     /** `editor.hover.enabled`: the language server's hover card when the pointer rests on code. */
     val editorHover: Boolean = true,
     /** `editor.hover.delay`: how long the pointer rests before the hover card shows, in ms. */
@@ -243,6 +247,8 @@ data class WorkbenchSettings(
         /** Off by default for the panel's everyday tabs, on for the ones that only matter now and then. */
         val DEFAULT_PANEL_AUTO_HIDE = setOf(PanelTab.Ports, PanelTab.Variables, PanelTab.Interactive)
         val AUTO_HIDING_PANEL_TABS = PanelTab.entries.filter { it != PanelTab.Docs }
+        const val PANEL_HIDE_WHILE_TYPING = "avf.panel.hideWhileTyping"
+        const val CONNECTION_BANNER = "avf.connection.banner"
         const val EDITOR_HOVER = "editor.hover.enabled"
         const val EDITOR_HOVER_DELAY = "editor.hover.delay"
         const val EDITOR_HOVER_HIDING_DELAY = "editor.hover.hidingDelay"
@@ -363,6 +369,8 @@ data class WorkbenchSettings(
                 mouseWheelZoom = bool(MOUSE_WHEEL_ZOOM, defaults.mouseWheelZoom),
                 tooltips = bool(TOOLTIPS, defaults.tooltips),
                 panelAutoHide = AUTO_HIDING_PANEL_TABS.filter { bool(panelAutoHideKey(it), it in defaults.panelAutoHide) }.toSet(),
+                panelHideWhileTyping = bool(PANEL_HIDE_WHILE_TYPING, defaults.panelHideWhileTyping),
+                connectionBanner = bool(CONNECTION_BANNER, defaults.connectionBanner),
                 editorHover = bool(EDITOR_HOVER, defaults.editorHover),
                 editorHoverDelay = number(EDITOR_HOVER_DELAY)?.toInt()?.coerceIn(0, 5000) ?: defaults.editorHoverDelay,
                 editorHoverHidingDelay = number(EDITOR_HOVER_HIDING_DELAY)?.toInt()?.coerceIn(0, 5000) ?: defaults.editorHoverHidingDelay,

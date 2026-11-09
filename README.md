@@ -22,13 +22,15 @@ that the app installs there. The daemon can also run on a Linux or Windows compu
 1. Download `quirecode-<version>.apk` from the [latest release](../../releases/latest) and install it. To get updates,
    watch the releases, or add this repository to [Obtainium](https://github.com/ImranR98/Obtainium).
 2. Open **Linux Terminal** once, so the guest is running.
-3. Open QuireCode. In **Connect**, choose **Set up or pair…**:
+3. Open QuireCode and choose **Set up the guest** (on the welcome page, or from the connection chip at the top right,
+   under **Add a connection**):
    1. **Copy command**, then **Open Linux Terminal**, and paste the command there. It installs the daemon and its
       tools, which takes a few minutes, then prints a pairing code.
    2. If Android asks to open port 19870, accept it.
    3. Back in QuireCode, enter the pairing code and choose **Pair and connect**.
 
-The app remembers the connection. When the guest is running, it reconnects by itself.
+The app remembers the connection. When the guest is running, it reconnects by itself. The connection chip at the top
+right always says where things stand; tap it for your connections, adding one, and a troubleshooting check.
 
 Want a new pairing code later, for another tablet or after reinstalling the app? Run `quirecode-daemon pair` in Linux
 Terminal.
@@ -49,9 +51,10 @@ Install the new APK over the old one. If the guest's daemon is from an older rel
 * **Android may stop the guest** when the tablet runs low on memory, or when apps start many background processes.
   Android limits them to 32 for the whole device, and the guest uses several. QuireCode says when this happens; open
   Linux Terminal to start the guest again, and the app reconnects.
-* **Offline:** while the guest is away, the files of your last folder open from the copies kept on this device. Saves
-  wait and go to the guest when it's back.
+* **Offline:** while the guest is away, the app keeps working: the chip says "Offline", and the files of your last
+  folder open from the copies kept on this device. Saves wait and go to the guest when it's back.
 * **Port 19870 isn't reachable after the guest starts:** close Linux Terminal fully, from Recents, and open it again.
+  The connection chip's dialog has a **Troubleshoot** check that tells whether anything answers on the port.
 
 ## Reporting a problem
 

@@ -100,8 +100,13 @@ fun ExplorerList(controller: WorkbenchController) {
     LaunchedEffect(controller.connected) { if (controller.connected && controller.settings.gitDecorations) controller.refreshGitStatus() }
     when {
         controller.offline -> OfflineFilesList(controller)
-        !controller.connected && controller.roots.isEmpty() -> EmptyState(Icons.Outlined.CloudOff, "Not connected", "Connect to the guest to browse its workspace.") {
-            androidx.compose.material3.FilledTonalButton(onClick = controller::openConnect) { Text("Connect") }
+        // The connection's own words (G22): set up, connecting, offline and why.
+        !controller.connected && controller.roots.isEmpty() -> controller.connection.let { summary ->
+            EmptyState(Icons.Outlined.CloudOff, summary.title, "Explorer shows the files of the machine QuireCode is connected to.") {
+                androidx.compose.material3.FilledTonalButton(onClick = controller::openConnect) {
+                    Text(if (summary.state == ConnectionState.NotSetUp) "Set up" else "Connections")
+                }
+            }
         }
         directory.isEmpty() -> LazyColumn {
             items(controller.roots) { root ->

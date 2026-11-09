@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
@@ -78,6 +79,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -162,6 +164,9 @@ fun NativeWorkbench() {
                 KeyBar.inject = { event -> activity?.dispatchKeyEvent(event) ?: false }
                 onDispose { KeyBar.inject = null }
             }
+            // G23: the on-screen keyboard counts when it's taller than a hardware keyboard's suggestion strip.
+            val keyboardUp = with(androidx.compose.ui.platform.LocalDensity.current) { WindowInsets.ime.getBottom(this).toDp() } > KEYBOARD_MIN_HEIGHT
+            LaunchedEffect(keyboardUp) { controller.onKeyboard(keyboardUp) }
             DisposableEffect(controller) {
                 TouchpadPinch.handler = controller::onTouchpadPinch
                 onDispose { TouchpadPinch.handler = null }
@@ -206,7 +211,7 @@ private fun WorkbenchLayout(controller: WorkbenchController) {
         val windowHeight = maxHeight.value
         Column(Modifier.fillMaxSize()) {
             TopBar(controller, expanded)
-            GuestWorkbenchBanner(controller)
+            ConnectionBanner(controller)
             DaemonVersionBanner(controller)
             GuestDiskBanner(controller)
             if (expanded) {
@@ -229,7 +234,7 @@ private fun WorkbenchLayout(controller: WorkbenchController) {
                     Column(Modifier.weight(1f).fillMaxHeight()) {
                         Box(Modifier.weight(1f).fillMaxWidth().paneShape()) { EditorArea(controller) }
                         // The panel leaves the editor its tabs and a few lines.
-                        if (controller.panelVisible) PanelArea(controller, Modifier.paneShape(), maxHeight = windowHeight - MIN_EDITOR_HEIGHT)
+                        if (controller.panelShown) PanelArea(controller, Modifier.paneShape(), maxHeight = windowHeight - MIN_EDITOR_HEIGHT)
                     }
                     if (chatOpen) {
                         PaneGutter(
@@ -255,6 +260,8 @@ private fun WorkbenchLayout(controller: WorkbenchController) {
 }
 
 private const val MIN_SIDE_PANE_WIDTH = 200f
+/** Samsung's strip of suggestions over a hardware keyboard is about 50 dp; an on-screen keyboard is well over 160. */
+private val KEYBOARD_MIN_HEIGHT = 160.dp
 private const val MIN_EDITOR_WIDTH = 360f
 private const val MIN_EDITOR_HEIGHT = 300f
 
@@ -309,23 +316,7 @@ private fun TopBar(controller: WorkbenchController, expanded: Boolean) {
                 )
             }
         }
-        AssistChip(
-            onClick = controller::openConnect,
-            // busy is any operation, opening a file too; only without a connection does it mean connecting.
-            label = { Text(if (controller.connected) "Connected" else if (controller.busy) "Connecting…" else "Connect") },
-            leadingIcon = {
-                Icon(
-                    if (controller.connected) Icons.Outlined.Cloud else Icons.Outlined.CloudOff,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp),
-                )
-            },
-            colors = if (controller.connected) AssistChipDefaults.assistChipColors() else AssistChipDefaults.assistChipColors(
-                containerColor = colors.primaryContainer,
-                labelColor = colors.onPrimaryContainer,
-                leadingIconContentColor = colors.onPrimaryContainer,
-            ),
-        )
+        ConnectionChip(controller)
         Box {
             Tooltip("More") { IconButton(onClick = { menu = true }) { Icon(Icons.Outlined.MoreVert, contentDescription = "More") } }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
@@ -388,7 +379,7 @@ private fun WorkbenchRail(controller: WorkbenchController) {
             },
             label = { Text("Problems") },
         )
-        RailItem(Icons.Outlined.Terminal, "Terminal", "workbench.action.terminal.toggleTerminal", controller.panelVisible && controller.panelTab == PanelTab.Terminal) {
+        RailItem(Icons.Outlined.Terminal, "Terminal", "workbench.action.terminal.toggleTerminal", controller.panelShown && controller.panelTab == PanelTab.Terminal) {
             controller.runCommand("workbench.action.terminal.toggleTerminal")
         }
         RailItem(Icons.Outlined.AutoAwesome, "Chat", "workbench.action.chat.open", controller.chatVisible) { controller.runCommand("workbench.action.chat.open") }
@@ -615,24 +606,6 @@ private fun GuestDiskBanner(controller: WorkbenchController) {
             "Force stop Linux Terminal and open it again.",
     ) {
         TextButton(onClick = controller::openLinuxTerminalAppInfo) { Text("App info") }
-    }
-}
-
-/** Shown while disconnected after a failed attempt, with the ways out. */
-@Composable
-private fun GuestWorkbenchBanner(controller: WorkbenchController) {
-    val problem = controller.guestProblem ?: return
-    if (controller.connected) return
-    WorkbenchBanner(Icons.Outlined.CloudOff, problem) {
-        if (controller.guestForwardingSuspected) {
-            FilledTonalButton(onClick = controller::openLinuxTerminalAppInfo) { Text("App info") }
-        }
-        TextButton(onClick = controller::openLinuxTerminal) { Text("Open Terminal") }
-        if (controller.guestStoppedAt != null && !controller.guestForwardingSuspected) {
-            TextButton(onClick = { controller.dialog = WorkbenchDialog.GuestStopped }) { Text("Why?") }
-        }
-        TextButton(onClick = controller::connectGuest, enabled = !controller.busy) { Text("Retry") }
-        TextButton(onClick = { controller.beginGuestSetup() }) { Text("Set up again") }
     }
 }
 

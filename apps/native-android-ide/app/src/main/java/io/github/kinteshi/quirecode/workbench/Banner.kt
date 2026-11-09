@@ -21,7 +21,8 @@ import androidx.compose.ui.unit.dp
 
 /**
  * The app's banner (R8: one look for all of them): a rounded card with an icon, the message, and actions that wrap below
- * the text when narrow. The error container for problems, or [tonal] (the secondary container) for news and offers.
+ * the text when narrow. The error container for problems, [tonal] (the secondary container) for news and offers, or
+ * [quiet] (a surface container) for a state that isn't a problem to fix now, as the connection being away (G22).
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -29,13 +30,22 @@ internal fun WorkbenchBanner(
     icon: ImageVector,
     message: String,
     tonal: Boolean = false,
+    quiet: Boolean = false,
     textStyle: TextStyle? = null,
     actions: @Composable () -> Unit,
 ) {
     val colors = MaterialTheme.colorScheme
     Surface(
-        color = if (tonal) colors.secondaryContainer else colors.errorContainer,
-        contentColor = if (tonal) colors.onSecondaryContainer else colors.onErrorContainer,
+        color = when {
+            quiet -> colors.surfaceContainerHigh
+            tonal -> colors.secondaryContainer
+            else -> colors.errorContainer
+        },
+        contentColor = when {
+            quiet -> colors.onSurface
+            tonal -> colors.onSecondaryContainer
+            else -> colors.onErrorContainer
+        },
         shape = MaterialTheme.shapes.large,
         modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
     ) {

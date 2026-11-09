@@ -147,6 +147,10 @@ sealed interface WorkbenchDialog {
     ) : WorkbenchDialog
     /** Set up (or re-pair) the Linux guest; [reason] says why it opened, e.g. a rejected token. */
     data class GuestSetup(val reason: String? = null) : WorkbenchDialog
+    /** Pairing with a computer from the connection string its daemon printed (G22: apart from the tablet's setup). */
+    data object ComputerPairing : WorkbenchDialog
+    /** A connection's name, URL and token by hand; [profileId] null for a new one (G22). */
+    data class ConnectionEditor(val profileId: String?) : WorkbenchDialog
     /** Why a connected guest can stop (G17): opened from the banner that says it did. */
     data object GuestStopped : WorkbenchDialog
     /** Settings > About > Open-source licences. */

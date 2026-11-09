@@ -99,6 +99,16 @@ class WorkbenchSettingsTest {
     }
 
     @Test
+    fun panelHideWhileTypingAndConnectionBanner() {
+        val defaults = WorkbenchSettings()
+        assertTrue(defaults.panelHideWhileTyping)
+        assertTrue(defaults.connectionBanner)
+        val off = WorkbenchSettings.from(JsonParser.parseString("""{"avf.panel.hideWhileTyping":false,"avf":{"connection":{"banner":false}}}""").asJsonObject)
+        assertFalse(off.panelHideWhileTyping)
+        assertFalse(off.connectionBanner)
+    }
+
+    @Test
     fun notebookCellEditorAndLineNumbers() {
         val defaults = WorkbenchSettings()
         assertEquals("aardink", defaults.cellEditor)
