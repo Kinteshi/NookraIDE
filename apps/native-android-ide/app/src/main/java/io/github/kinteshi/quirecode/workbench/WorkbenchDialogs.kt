@@ -1201,8 +1201,9 @@ private fun GuestSetupDialog(controller: WorkbenchController, setup: WorkbenchDi
                 HorizontalDivider()
                 Text("Or pair with a computer (Linux, or Windows through WSL)", style = MaterialTheme.typography.titleSmall)
                 Text(
-                    "On the computer, run scripts/install-native-daemon.sh --remote (on Windows, " +
-                        "install-host-daemon-wsl.ps1); it prints a connection string starting with avf://. Paste it here.",
+                    "On the computer, run the release's install-native-daemon.sh with --remote (on Windows, " +
+                        "install-host-daemon-wsl.ps1; see docs/HOSTING-THE-DAEMON.md on GitHub). It prints a connection " +
+                        "string starting with avf://: paste it here.",
                     style = MaterialTheme.typography.bodySmall,
                     color = colors.onSurfaceVariant,
                 )

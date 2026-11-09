@@ -69,7 +69,11 @@ else
   tls_line=""
 fi
 
-install -D -m 755 "$daemon_source" "$HOME/.local/bin/quirecode-daemon.new"
+# A plain read and write, never cp or install: on Linux Terminal's shared folder (/mnt/shared, where "Set up guest"
+# puts the daemon) their copy_file_range made crosvm's virtio-fs panic and stopped the VM, leaving a 0-byte daemon.
+mkdir -p "$HOME/.local/bin"
+cat "$daemon_source" >"$HOME/.local/bin/quirecode-daemon.new"
+chmod 755 "$HOME/.local/bin/quirecode-daemon.new"
 mv "$HOME/.local/bin/quirecode-daemon.new" "$HOME/.local/bin/quirecode-daemon"
 if [[ ! -e "$config" && -d "$former_config" ]]; then
   mv "$former_config" "$config"

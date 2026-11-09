@@ -2932,6 +2932,12 @@ class WorkbenchController(private val context: Context) {
         runCatching { context.startActivity(intent) }.onFailure { status = "Could not open App info: ${it.message}" }
     }
 
+    /** Connect: the profiles dialog, or the setup when nothing is paired yet. */
+    fun openConnect() {
+        // Nothing paired yet (a first run): setup and pairing are the way in, not a URL and a token.
+        if (!connected && profiles.isEmpty()) beginGuestSetup() else dialog = WorkbenchDialog.Connect
+    }
+
     /**
      * Linux Terminal can be opened: Android has it and it's turned on (Developer options). Asked each time the welcome
      * page draws, since it's turned on outside the app.
@@ -2990,7 +2996,8 @@ class WorkbenchController(private val context: Context) {
                 if (profileName.isBlank()) profileName = "Linux guest"
                 dialog = null
                 setupCommand = null
-                connectGuest()
+                // A first pairing is a first connection: ask for the notification the background connection shows.
+                requestGuestConnection()
             }
         }
     }
@@ -3029,7 +3036,7 @@ class WorkbenchController(private val context: Context) {
                 token = newToken
                 profileFingerprint = parsed.fingerprint
                 dialog = null
-                connectGuest()
+                requestGuestConnection()
             }
         }
     }
@@ -3451,7 +3458,7 @@ class WorkbenchController(private val context: Context) {
     fun showOpenFolder(path: String? = null) {
         if (!connected) {
             status = "Connect to a guest to open a folder"
-            dialog = WorkbenchDialog.Connect
+            openConnect()
             return
         }
         val start = path
@@ -9987,7 +9994,7 @@ class WorkbenchController(private val context: Context) {
             "workbench.action.debug.run" -> runActiveFile()
             "editor.action.fontZoomIn" -> zoomEditorOrImage(1)
             "editor.action.fontZoomOut" -> zoomEditorOrImage(-1)
-            "workbench.action.connect" -> dialog = WorkbenchDialog.Connect
+            "workbench.action.connect" -> openConnect()
             "undo" -> surface?.undo()
             "redo" -> surface?.redo()
             "editor.action.clipboardCopyAction" -> copySelection(false)

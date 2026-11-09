@@ -278,7 +278,7 @@ private fun TopBar(controller: WorkbenchController, expanded: Boolean) {
         // The workspace name opens Open Folder (switch to another or a recent one).
         Column(
             Modifier.widthIn(max = 220.dp).clip(RoundedCornerShape(8.dp))
-                .clickable { if (controller.connected) controller.showOpenFolder() else controller.dialog = WorkbenchDialog.Connect }
+                .clickable { if (controller.connected) controller.showOpenFolder() else controller.openConnect() }
                 .padding(horizontal = 6.dp),
         ) {
             Text("QuireCode", style = MaterialTheme.typography.titleMedium, maxLines = 1)
@@ -307,7 +307,7 @@ private fun TopBar(controller: WorkbenchController, expanded: Boolean) {
             }
         }
         AssistChip(
-            onClick = { controller.dialog = WorkbenchDialog.Connect },
+            onClick = controller::openConnect,
             // busy is any operation, opening a file too; only without a connection does it mean connecting.
             label = { Text(if (controller.connected) "Connected" else if (controller.busy) "Connecting…" else "Connect") },
             leadingIcon = {

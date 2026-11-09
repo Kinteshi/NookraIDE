@@ -435,9 +435,10 @@ private fun GetStartedCard(controller: WorkbenchController) {
 }
 
 @Composable
-private fun EmptyEditor(controller: WorkbenchController) {
+private fun EmptyEditor(controller: WorkbenchController) = BoxWithConstraints(Modifier.fillMaxSize()) {
+    // Centred when it fits; scrolls in a short window (a floating one, or a phone in landscape).
     Column(
-        Modifier.fillMaxSize().padding(32.dp),
+        Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).heightIn(min = maxHeight).padding(32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
@@ -457,7 +458,7 @@ private fun EmptyEditor(controller: WorkbenchController) {
         }
         // Each line does what it says; the keys are for next time.
         val actions: List<Triple<androidx.compose.ui.graphics.vector.ImageVector, String, Pair<String, () -> Unit>>> = listOf(
-            Triple(Icons.Outlined.FolderOpen, "Open Folder", "Ctrl+K Ctrl+O" to { if (controller.connected) controller.showOpenFolder() else controller.dialog = WorkbenchDialog.Connect }),
+            Triple(Icons.Outlined.FolderOpen, "Open Folder", "Ctrl+K Ctrl+O" to { if (controller.connected) controller.showOpenFolder() else controller.openConnect() }),
             Triple(Icons.Outlined.Search, "Quick Open", "Ctrl+P" to { controller.runCommand("workbench.action.quickOpen") }),
             Triple(Icons.Outlined.Widgets, "Command Palette", "Ctrl+Shift+P" to { controller.runCommand("workbench.action.showCommands") }),
             Triple(Icons.Outlined.Terminal, "Toggle Terminal", "Ctrl+`" to { controller.runCommand("workbench.action.terminal.toggleTerminal") }),

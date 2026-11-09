@@ -101,7 +101,7 @@ fun ExplorerList(controller: WorkbenchController) {
     when {
         controller.offline -> OfflineFilesList(controller)
         !controller.connected && controller.roots.isEmpty() -> EmptyState(Icons.Outlined.CloudOff, "Not connected", "Connect to the guest to browse its workspace.") {
-            androidx.compose.material3.FilledTonalButton(onClick = { controller.dialog = WorkbenchDialog.Connect }) { Text("Connect") }
+            androidx.compose.material3.FilledTonalButton(onClick = controller::openConnect) { Text("Connect") }
         }
         directory.isEmpty() -> LazyColumn {
             items(controller.roots) { root ->
