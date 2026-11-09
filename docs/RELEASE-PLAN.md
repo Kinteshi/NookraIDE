@@ -8,7 +8,9 @@ and the options still open, so they survive a context reset.
 
 R1 to R11 are done (batch 58). The release-signed build was installed on the tablet and walked through as a new user's
 first run (R7), which found and fixed four problems, one of them the installer able to stop the VM. CI and the release
-workflow's dry run pass. Left, in this order:
+workflow's dry run pass. **On hold (user, 11-09):** the repository is private, where GitHub doesn't enforce the
+ruleset the user made for `main` (it needs a public repository or Pro), and a private release can't be downloaded by
+others. The user keeps developing and decides the visibility later. Left, in this order:
 
 1. **The user protects `main`** on GitHub (Settings > Branches): only the admin can.
 2. **Tag `v0.1.0`** on `main` and push the tag: the release workflow builds, signs, checks and publishes the release with
