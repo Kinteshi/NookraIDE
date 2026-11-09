@@ -58,7 +58,7 @@ jobs:
       - name: Files and checksums
         run: |
           mkdir dist
-          cp apps/native-android-ide/app/build/outputs/apk/release/app-release.apk "dist/materialcode-$VERSION.apk"
+          cp apps/native-android-ide/app/build/outputs/apk/release/app-release.apk "dist/quirecode-$VERSION.apk"
           cp target/aarch64-unknown-linux-gnu/release/avf-daemon "dist/avf-daemon-$VERSION-linux-arm64"
           cp target/x86_64-unknown-linux-gnu/release/avf-daemon "dist/avf-daemon-$VERSION-linux-x86_64"
           cp scripts/install-native-daemon.sh dist/
@@ -66,4 +66,4 @@ jobs:
       - name: GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/* --title "MaterialCode $VERSION" --notes-file "docs/releases/$VERSION.md"
+        run: gh release create "$GITHUB_REF_NAME" dist/* --title "QuireCode $VERSION" --notes-file "docs/releases/$VERSION.md"

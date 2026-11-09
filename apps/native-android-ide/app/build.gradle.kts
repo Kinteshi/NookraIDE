@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace = "com.avfstudio.nativeide"
+    namespace = "io.github.kinteshi.quirecode"
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "com.avfstudio.nativeide"
+        applicationId = "io.github.kinteshi.quirecode"
         minSdk = 34
         targetSdk = 35
         // A release's version comes from its tag (CI passes -Pavf.version=0.1.0); other builds are the next one's dev build.

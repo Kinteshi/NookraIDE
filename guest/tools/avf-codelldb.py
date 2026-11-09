@@ -31,11 +31,13 @@ SHA256 = {
     "x86_64": "1cd7f386598022b51a5b93b9ffa23e812b23f519cfe1833384ec4bef4bfd1be1",
 }
 VSIX = {"aarch64": "codelldb-linux-arm64.vsix", "x86_64": "codelldb-linux-x64.vsix"}
+# The app's former name: guests already have their installs here, so the folder keeps it.
 ROOT = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share") / "materialcode" / "debuggers"
 DIRECTORY = ROOT / f"codelldb-{VERSION}"
 ADAPTER = DIRECTORY / "adapter" / "codelldb"
 LIBLLDB = DIRECTORY / "lldb" / "lib" / "liblldb.so"
 WRAPPER = Path.home() / ".local/bin/codelldb"
+# The app's former name: the marker finds files written by earlier versions, so it stays.
 MARKER = "# Written by MaterialCode (avf-codelldb)."
 
 

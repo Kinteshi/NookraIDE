@@ -2506,6 +2506,24 @@ app id and the icon, so the work that doesn't depend on it goes first. 368 app u
     with `-Pavf.version=0.1.0` is version 0.1.0, code 100.
   * `docs/releases/0.1.0.md`: the first release notes, a draft for people reading the release page (what it is, what
     you need, installing, what's in it, known limits). The name in it waits for R2.
+* **R2, the name: QuireCode** (user, 11-08: "Quire"; plain Quire is taken nearby, see the release plan). Done in the code:
+  * App id and package `io.github.kinteshi.quirecode` (the user's main account, Kinteshi, owns the repository from now);
+    the app is "QuireCode" everywhere it names itself, and in what it tells servers (Copilot's editor info, the
+    debugger's client name), the daemon's pairing text, the guest tools' comments, the installer, CONTRIBUTING, NOTICE,
+    the release notes and workflow (`quirecode-<version>.apk`).
+  * The icon is Quire's: the folded pages drawing `<` with a cursor beside them, on a pale blue; its themed layer, the
+    status-bar and Quick Settings icons, the welcome page's mark and the legacy PNGs are drawn from the same paths
+    (`docs/branding/quirecode-icon.svg`).
+  * Kept on purpose, as renaming them would strand what's installed: the markers the guest tools recognise their files
+    by ("Written by MaterialCode", "MaterialCode tcpstates wrapper"), the guest's data folder
+    (`~/.local/share/materialcode`), the Windows firewall rule's id; and the internal folder and crate names
+    (`apps/native-android-ide`, `crates/avf-daemon`). The commands `materialcode.resetPaneSizes` and
+    `materialcode.restartLanguageServers` are now `quirecode.*`, the old ids still accepted from keybindings.json.
+  * Found on the way: the controller's executor is called `io`, so names written in full from `io.github…` resolved to
+    it; two imports instead.
+  * The new app id makes it a separate app: installing it beside the old one needs pairing again, so it isn't on the
+    tablet yet. The guest daemon's own name (`avf-native-daemon`) is a separate step: it needs the installer to move the
+    running service.
 * Left for later release items: CI checking that `notices.json` is current (R5); the version shown is the build's fixed
   `0.1.0` until versions come from tags (R4); the repository link in tm4e's notice points at `main`, which this branch
   becomes (R11).
@@ -2596,7 +2614,7 @@ release waits for; the rest stay in their lists for later releases.
 | Group | # | Size | Description |
 |---|---|---|---|
 | **1. Decide** | R1 | Decided 11-08; its batch done (57) | 0.1.0 follows batch 57: A5, A6, A7, G20, G6 and the whole of group 2 (G14, G17, G5 and its loose ends) |
-| | R2 | S, the user's | Name and icon: shortlist Burrow, Quire, Traveler, Clarity, with icon ideas in [RELEASE-PLAN.md](RELEASE-PLAN.md); goes to the repository, app id and daemon |
+| | R2 | Done in the app (58) | **QuireCode**, app id `io.github.kinteshi.quirecode`, Quire's icon. Left: the daemon's installed name, the repository's name (R11) |
 | | R3 | Done (58) | Licence **Apache-2.0**: LICENSE and NOTICE, Cargo changed, notices generated from what ships and shown in Settings > About |
 | **2. Build and ship** | R4 | Done but the key (58) | Release builds: version from the tag, signing from the environment, R8 (25 MB). Left: the user creates and keeps the release key |
 | | R5 | Written (58), runs once pushed | CI and releases (GitHub Actions): tests, notices check, daemon for the guest and hosts, signed APK, checksums, release from a tag; notes in docs/releases/ |

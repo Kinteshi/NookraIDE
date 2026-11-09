@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# MaterialCode's launcher for what runs on Node.js: the chat agents Claude Code (through its ACP
+# QuireCode's launcher for what runs on Node.js: the chat agents Claude Code (through its ACP
 # adapter, which carries the Claude Code CLI) and Gemini CLI, the language servers published
 # on npm (Bash, YAML, JSON, HTML, CSS, Dockerfile, SQL) and VS Code's JavaScript debugger.
 #
@@ -22,9 +22,11 @@ NODE_SHA256_ARM64=b7e7991d5407815adfa74a2a9cd4db683552c8ce32ff4a295c22e972849c3f
 NODE_SHA256_X64=28ea0a438de9a13bd7891fd758eee6c7819ee8af5442dfd8d45bd65e56d4228c
 JS_DEBUG_VERSION=1.140.0
 JS_DEBUG_SHA256=27dab92937ec1ab35821ae955aac867544fe06a1b6307229049f2d789af10968
+# The app's former name: guests already have their installs here, so the folder keeps it.
 ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/materialcode"
 NODE_DIR="$ROOT/node-v$NODE_VERSION"
 BIN="$HOME/.local/bin"
+# The app's former name: the marker finds files written by earlier versions, so it stays.
 MARKER="# Written by MaterialCode (avf-node-agent)."
 
 fail() {
@@ -171,7 +173,7 @@ run_js_debug() {
     case "$port" in '' | *[!0-9]*) fail "js-debug needs a port number" ;; esac
     [ -x "$NODE_DIR/bin/node" ] && [ -f "$JS_DEBUG_DIR/js-debug/src/dapDebugServer.js" ] ||
         fail "js-debug is not set up; run: avf-native-daemon tools install js-debug"
-    # The programs it starts find the user's own node first, MaterialCode's otherwise.
+    # The programs it starts find the user's own node first, QuireCode's otherwise.
     PATH="$PATH:$NODE_DIR/bin" exec "$NODE_DIR/bin/node" -e "$JS_DEBUG_BRIDGE" "$mode" "$port" "$JS_DEBUG_DIR/js-debug/src/dapDebugServer.js"
 }
 

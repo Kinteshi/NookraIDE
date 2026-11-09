@@ -1,19 +1,26 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- MaterialCode: "< / >" inside the adaptive-icon safe zone (a 66 dp circle in a 108 dp canvas). -->
+<!-- QuireCode: a quire's folded pages drawing "<", a cursor beside them, inside the adaptive-icon safe zone
+     (a 66 dp circle in a 108 dp canvas). The drawing is docs/branding/quirecode-icon.svg. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
     <path
-        android:pathData="M42,40 L30,54 L42,68 M66,40 L78,54 L66,68"
-        android:strokeColor="#D0BCFF"
-        android:strokeWidth="6.5"
+        android:pathData="M68,30 L36,54 L68,78"
+        android:strokeColor="#7F97D8"
+        android:strokeWidth="8"
         android:strokeLineCap="round"
         android:strokeLineJoin="round" />
     <path
-        android:pathData="M57,39 L51,69"
-        android:strokeColor="#7DDBC4"
-        android:strokeWidth="6.5"
+        android:pathData="M60,36 L36,54 L60,72"
+        android:strokeColor="#24418F"
+        android:strokeWidth="8"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M78,40 L78,68"
+        android:strokeColor="#E0662F"
+        android:strokeWidth="5"
         android:strokeLineCap="round" />
 </vector>

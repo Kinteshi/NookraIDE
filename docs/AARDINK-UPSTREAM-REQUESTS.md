@@ -16,7 +16,7 @@ rule is the issue's text. Checked against Aardink 0.8.0's sources and roadmap on
 
 ## Problem
 
-We're moving an Android code editor app (MaterialCode) from sora-editor to Aardink, and draw several things
+We're moving an Android code editor app (QuireCode) from sora-editor to Aardink, and draw several things
 over the text from the host: a clickable action row above a code cell, actions on merge conflict markers,
 an inline suggestion widget, a popup anchored to a word. To place these, a host needs to know where text
 is on screen.

@@ -124,7 +124,7 @@ pub fn print_pairing_code(args: &[String]) -> Result<(), String> {
         None => {
             println!("    Pairing code:  {code}");
             println!();
-            println!("In MaterialCode, open Connect and choose \"Set up or pair\". The code works once,");
+            println!("In QuireCode, open Connect and choose \"Set up or pair\". The code works once,");
         }
         Some(host) => {
             let (host, port) = match host.rsplit_once(':').filter(|(name, _)| !name.contains(':') || name.ends_with(']')) {
@@ -134,7 +134,7 @@ pub fn print_pairing_code(args: &[String]) -> Result<(), String> {
             let material = tls::load_or_create(&pairing::config_dir()?)?;
             println!("    {}", tls::connection_string(&host, port, &material.fingerprint, &code));
             println!();
-            println!("In MaterialCode, open Connect, choose \"Set up or pair\" and paste this under");
+            println!("In QuireCode, open Connect, choose \"Set up or pair\" and paste this under");
             println!("\"Pair with a computer\". The code in it works once,");
         }
     }

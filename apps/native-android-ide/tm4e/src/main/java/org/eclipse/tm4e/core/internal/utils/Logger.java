@@ -5,7 +5,7 @@
  *
  * SPDX-License-Identifier: EPL-2.0
  *
- * Written for MaterialCode, in place of the sora-editor logger this copy of tm4e used:
+ * Written for QuireCode, in place of the sora-editor logger this copy of tm4e used:
  * java.util.logging, which Android sends to logcat, keeps the module a plain Java library.
  */
 package org.eclipse.tm4e.core.internal.utils;

@@ -14,6 +14,7 @@ const LAUNCHER: &str = "/usr/bin/forwarder_guest_launcher";
 const TOOL: &str = "/usr/sbin/tcpstates-libbpf";
 const REAL_TOOL: &str = "/usr/sbin/tcpstates-libbpf.real";
 const WRAPPER: &str = include_str!("../../../guest/tools/tcpstates-space-safe.pl");
+// The app's former name: the marker finds wrappers installed by earlier versions, so it stays.
 const MARKER: &str = "MaterialCode tcpstates wrapper";
 
 /// Whether the fix is installed and whether the running forwarder already uses it (it starts

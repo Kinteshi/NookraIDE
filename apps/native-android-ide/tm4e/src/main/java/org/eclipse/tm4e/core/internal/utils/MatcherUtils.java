@@ -5,7 +5,7 @@
  *
  * SPDX-License-Identifier: EPL-2.0
  *
- * Written for MaterialCode, in place of the sora-editor helper this copy of tm4e used.
+ * Written for QuireCode, in place of the sora-editor helper this copy of tm4e used.
  */
 package org.eclipse.tm4e.core.internal.utils;
 

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="432" height="432" viewBox="0 0 108 108">
+  <!-- QuireCode's icon: a quire's folded pages drawing "<", a cursor beside them. The app's adaptive icon draws the same
+       paths (res/drawable/ic_launcher_foreground.xml) on #DFE6F8; the themed icon draws them in one colour. -->
+  <rect width="108" height="108" fill="#DFE6F8"/>
+  <path d="M68 30 L36 54 L68 78" stroke="#7F97D8" stroke-width="8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M60 36 L36 54 L60 72" stroke="#24418F" stroke-width="8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M78 40 V68" stroke="#E0662F" stroke-width="5" stroke-linecap="round"/>
+</svg>
