@@ -377,6 +377,7 @@ internal object MessagePackVfsCodec {
                         }.orEmpty(),
                     features = fields["features"]?.takeUnless { it.isNilValue }?.asArrayValue()?.list()
                         ?.map { it.asStringValue().asString() }?.toSet().orEmpty(),
+                    daemonVersion = fields["daemon_version"]?.takeUnless { it.isNilValue }?.asStringValue()?.asString(),
                 )
             }
             "CommandsProbed" -> {
@@ -530,6 +531,8 @@ sealed interface IncomingPacket {
         val protocolVersion: Int,
         val ptySessions: List<PtySessionInfo> = emptyList(),
         val features: Set<String> = emptySet(),
+        /** The daemon's release version (its Cargo version), as the app's own comes from the same tag. */
+        val daemonVersion: String? = null,
     ) : IncomingPacket
     /** Each probed command's path in the guest, or null when it isn't installed. */
     data class CommandsProbed(val requestId: Long, val paths: Map<String, String?>) : IncomingPacket

@@ -64,6 +64,9 @@ class GuestVfsClient(
     /** Optional requests the connected daemon understands (its Welcome `features`). */
     @Volatile var guestFeatures: Set<String> = emptySet()
         private set
+    /** The connected daemon's release version, from the latest handshake. */
+    @Volatile var guestDaemonVersion: String? = null
+        private set
     /** Terminal sessions the guest still runs, from the latest handshake; reattach to keep them. */
     @Volatile var guestPtySessions: List<PtySessionInfo> = emptyList()
         private set
@@ -176,6 +179,7 @@ class GuestVfsClient(
                             } else {
                                 guestPtySessions = packet.ptySessions
                                 guestFeatures = packet.features
+                                guestDaemonVersion = packet.daemonVersion
                                 handshake.complete(Unit)
                                 connectionStateListener?.invoke(true, null)
                             }

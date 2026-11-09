@@ -35,6 +35,9 @@ enum class PanelTab(val title: String) {
     Docs("Docs"),
 }
 
+/** The guest's daemon is from another release than the app ([status] Older or Newer). */
+data class DaemonVersionNotice(val guest: String, val app: String, val status: DaemonVersionStatus)
+
 /**
  * A hover card expanded into the panel's Docs tab: its place and its documentation. Not its problems: they're about the
  * place, not the symbol, and the Problems panel keeps them current.

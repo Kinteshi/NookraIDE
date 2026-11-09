@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Installs the AVF Studio native daemon as a systemd user service.
+# Installs the QuireCode native daemon as a systemd user service.
 #
 #   AVF guest (Linux Terminal on the tablet):
 #     bash install-native-daemon.sh [/path/to/avf-daemon] [workspace]
@@ -7,7 +7,7 @@
 #     bash install-native-daemon.sh --remote [--port 19870] [--address HOST] [/path/to/avf-daemon] [workspace]
 #
 # Without a daemon path it uses the avf-native-daemon (or avf-daemon) next to this script, as
-# AVF Studio's "Set up guest" places it. It ends by printing a one-time pairing code (guest) or a
+# QuireCode's "Set up guest" places it. It ends by printing a one-time pairing code (guest) or a
 # connection string (remote) for the app. The session token lives in ~/.config/avf-native/env
 # (mode 0600). Safe to rerun, including on a guest reset from Terminal → Settings → Recovery.
 set -euo pipefail

@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Hosts the AVF Studio daemon on Windows through WSL2, reachable by the app over the LAN.
+    Hosts the QuireCode daemon on Windows through WSL2, reachable by the app over the LAN.
 
 .DESCRIPTION
     Runs scripts/install-native-daemon.sh --remote inside a WSL2 distro (systemd enabled), then
@@ -87,7 +87,7 @@ netsh interface portproxy add v4tov4 listenport=$Port listenaddress=0.0.0.0 conn
 "@
 }
 Set-Content -Path $startup -Encoding UTF8 -Value @"
-# Written by install-host-daemon-wsl.ps1: keeps '$Distro' running for the AVF Studio daemon.
+# Written by install-host-daemon-wsl.ps1: keeps '$Distro' running for the QuireCode daemon.
 Start-Process -WindowStyle Hidden -FilePath wsl.exe -ArgumentList '-d', '$Distro', '--exec', 'sleep', 'infinity'
 Start-Sleep -Seconds 5
 $proxyRefresh
@@ -100,5 +100,5 @@ Start-ScheduledTask -TaskName $TaskName
 # Install the daemon in the distro; it prints the connection string for the app.
 Invoke-Wsl "bash '$repo/scripts/install-native-daemon.sh' --remote --port $Port --address $address '$DaemonPath' $Workspace" | Out-Host
 Write-Host ""
-Write-Host "Paste the avf:// connection string above into AVF Studio: Connect > Set up or pair > Pair with computer."
+Write-Host "Paste the avf:// connection string above into QuireCode: Connect > Set up or pair > Pair with computer."
 Write-Host "New code later: wsl -d $Distro -- ~/.local/bin/avf-native-daemon pair --remote ${address}:$Port"

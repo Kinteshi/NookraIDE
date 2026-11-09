@@ -1,6 +1,6 @@
-# Hosting the AVF Studio daemon on a computer
+# Hosting the QuireCode daemon on a computer
 
-AVF Studio's editor runs on the tablet; files, terminals, language servers, Git, search, Jupyter
+QuireCode's editor runs on the tablet; files, terminals, language servers, Git, search, Jupyter
 and the debugger run wherever the **daemon** runs. Usually that is the Linux guest on the tablet
 itself (Connect → *Set up or pair…*). This guide covers running it on a **Linux computer** or a
 **Windows computer (through WSL2)** on your network, so the tablet works on that machine's files
@@ -44,7 +44,7 @@ Requirements: x86_64 or arm64 Linux with systemd, `curl`, `tar`, and Git for Sou
 
 3. Open the port if a firewall is active, for example `sudo ufw allow 19870/tcp`.
 
-4. In AVF Studio: **Connect → Set up or pair… → Pair with a computer**, paste the connection string,
+4. In QuireCode: **Connect → Set up or pair… → Pair with a computer**, paste the connection string,
    and tap **Pair with computer**. The app saves a profile for that host and reconnects to it on
    launch.
 

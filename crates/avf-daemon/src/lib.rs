@@ -287,7 +287,7 @@ pub async fn serve(config: AppConfig) -> io::Result<()> {
     if !config.bind_addr.ip().is_loopback() && !config.tls {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "AVF Studio daemon may only bind beyond loopback with TLS",
+            "QuireCode daemon may only bind beyond loopback with TLS",
         ));
     }
     if !is_valid_token(&config.token) || config.allowed_origins.is_empty() {

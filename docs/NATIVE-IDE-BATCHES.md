@@ -2528,6 +2528,17 @@ app id and the icon, so the work that doesn't depend on it goes first. 368 app u
   * The new app id makes it a separate app: installing it beside the old one needs pairing again, so it isn't on the
     tablet yet. The guest daemon's own name (`avf-native-daemon`) is a separate step: it needs the installer to move the
     running service.
+* **R6, the daemon's version against the app's** (built; unit-tested, not seen on the tablet):
+  * The daemon already sent its version (its Cargo version) when the app connects; the app now reads it and compares it
+    with its own, as both come from the release's tag (a dev build counts as the release it leads to).
+  * A daemon from an older release: a tonal banner says so, with **Update**, which opens the setup flow with the reason
+    (the installer replaces the daemon and keeps the session token, so the pairing stays, and the app reconnects when the
+    daemon restarts), and **Not now** for this run of the app. A newer one: the banner says to update the app.
+  * Not seen on the tablet: the guest's daemon and the app are both 0.1.0, and the renamed app (a new app id) isn't
+    installed yet.
+* Also: the remaining "AVF Studio" in what users read (the daemon's log and errors, the guest tools' descriptions, the
+  installers, HOSTING-THE-DAEMON.md) is QuireCode; the Windows script's task and firewall-rule ids stay, as its
+  uninstall looks for them. A compiled Python cache (`guest/tools/__pycache__`) had been committed: removed, and ignored.
 * Left for later release items: CI checking that `notices.json` is current (R5); the version shown is the build's fixed
   `0.1.0` until versions come from tags (R4); the repository link in tm4e's notice points at `main`, which this branch
   becomes (R11).
@@ -2622,7 +2633,7 @@ release waits for; the rest stay in their lists for later releases.
 | | R3 | Done (58) | Licence **Apache-2.0**: LICENSE and NOTICE, Cargo changed, notices generated from what ships and shown in Settings > About |
 | **2. Build and ship** | R4 | Done but the key (58) | Release builds: version from the tag, signing from the environment, R8 (25 MB). Left: the user creates and keeps the release key |
 | | R5 | Written (58), runs once pushed | CI and releases (GitHub Actions): tests, notices check, daemon for the guest and hosts, signed APK, checksums, release from a tag; notes in docs/releases/ |
-| | R6 | S–M | App and daemon versions: the app checks the guest daemon's version, not only the protocol number, and offers to update it with the one it carries; release notes for both |
+| | R6 | Done (58), unchecked on the tablet | The app compares the guest daemon's version with its own and offers to update it, keeping the pairing |
 | **3. Polish** | R7 | M | First run and setup: what's needed (Android version, Linux Terminal, AVF), Set up guest, pairing, offline; a README for users, apart from the specs |
 | | R8 | M | Material You pass: cards, dialogs and banners consistent (as the large-file banner wasn't), empty states, phone width (the terminal toolbar loose end) |
 | | R9 | S–M | Diagnostics for bug reports: a Copy Diagnostics command (versions, device, guest state, recent errors); no telemetry |

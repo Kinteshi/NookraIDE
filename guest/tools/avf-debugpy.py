@@ -3,7 +3,7 @@
 # requires-python = ">=3.10"
 # dependencies = ["debugpy==1.8.22"]
 # ///
-"""AVF Studio's Python debug adapter: debugpy's DAP adapter on stdin/stdout.
+"""QuireCode's Python debug adapter: debugpy's DAP adapter on stdin/stdout.
 
 uv keeps debugpy in an isolated cached environment, so nothing is installed into the user's
 interpreters. The adapter starts the program with the interpreter named in the launch request

@@ -33,6 +33,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Article
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.AccountTree
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Cloud
@@ -206,6 +207,7 @@ private fun WorkbenchLayout(controller: WorkbenchController) {
         Column(Modifier.fillMaxSize()) {
             TopBar(controller, expanded)
             GuestProblemBanner(controller)
+            DaemonVersionBanner(controller)
             GuestDiskBanner(controller)
             if (expanded) {
                 Row(Modifier.weight(1f).fillMaxWidth()) {
@@ -631,14 +633,31 @@ private fun GuestProblemBanner(controller: WorkbenchController) {
     }
 }
 
-/** A Material error banner: icon, message, and actions that wrap below the text when narrow. */
+/** The guest's daemon is from another release than the app: update it (or the app), or not now. */
+@Composable
+private fun DaemonVersionBanner(controller: WorkbenchController) {
+    val notice = controller.daemonVersionNotice ?: return
+    if (!controller.connected) return
+    val message = when (notice.status) {
+        DaemonVersionStatus.Older -> "The guest's daemon is ${notice.guest}; this app is ${notice.app}. Update the daemon to match: the pairing is kept."
+        else -> "The guest's daemon is ${notice.guest}, newer than this app (${notice.app}). Update the app to match."
+    }
+    ProblemBanner(Icons.Outlined.Info, message, tonal = true) {
+        if (notice.status == DaemonVersionStatus.Older) {
+            TextButton(onClick = controller::updateGuestDaemon) { Text("Update") }
+        }
+        TextButton(onClick = controller::dismissDaemonVersionNotice) { Text("Not now") }
+    }
+}
+
+/** A Material banner: icon, message, and actions that wrap below the text when narrow; errors, or [tonal] for news. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ProblemBanner(icon: ImageVector, message: String, actions: @Composable () -> Unit) {
+private fun ProblemBanner(icon: ImageVector, message: String, tonal: Boolean = false, actions: @Composable () -> Unit) {
     val colors = MaterialTheme.colorScheme
     Surface(
-        color = colors.errorContainer,
-        contentColor = colors.onErrorContainer,
+        color = if (tonal) colors.secondaryContainer else colors.errorContainer,
+        contentColor = if (tonal) colors.onSecondaryContainer else colors.onErrorContainer,
         shape = MaterialTheme.shapes.large,
         modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
     ) {

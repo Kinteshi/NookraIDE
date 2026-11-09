@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""AVF Studio's C, C++ and Rust debug adapter: CodeLLDB's DAP adapter on stdin/stdout.
+"""QuireCode's C, C++ and Rust debug adapter: CodeLLDB's DAP adapter on stdin/stdout.
 
     avf-codelldb setup     downloads the pinned CodeLLDB release (checksum-verified) and writes
                            the `codelldb` command the app checks for

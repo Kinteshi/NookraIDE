@@ -59,3 +59,24 @@ fun exportGuestBundle(context: Context): String {
     val directory = "$GUEST_SHARED_DOWNLOADS/$GUEST_BUNDLE_FOLDER/$folder"
     return "bash '$directory/${stored[1]}' '$directory/${stored[0]}'"
 }
+
+/** How the connected daemon's version compares with the one this app carries (R6). */
+enum class DaemonVersionStatus { Current, Older, Newer, Unknown }
+
+/**
+ * [guest]'s daemon against the app's [app] version (a dev build's `-dev` suffix ignored): both come from the release's
+ * tag, so a different number means one of them is from another release. Unknown when either can't be read.
+ */
+internal fun daemonVersionStatus(guest: String?, app: String): DaemonVersionStatus {
+    fun parts(version: String?): List<Int>? = version?.substringBefore('-')?.trim()?.split('.')
+        ?.takeIf { it.size in 1..3 }?.map { it.toIntOrNull() ?: return null }?.let { it + List(3 - it.size) { 0 } }
+    val daemon = parts(guest) ?: return DaemonVersionStatus.Unknown
+    val own = parts(app) ?: return DaemonVersionStatus.Unknown
+    val order = daemon.zip(own).map { (a, b) -> a.compareTo(b) }.firstOrNull { it != 0 } ?: 0
+    return when {
+        order < 0 -> DaemonVersionStatus.Older
+        order > 0 -> DaemonVersionStatus.Newer
+        else -> DaemonVersionStatus.Current
+    }
+}
+

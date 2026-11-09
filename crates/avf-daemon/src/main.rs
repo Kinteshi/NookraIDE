@@ -70,7 +70,7 @@ async fn run(disk_tmpdir: Option<std::path::PathBuf>) -> Result<(), Box<dyn Erro
     tracing::info!(
         bind = %config.bind_addr,
         roots = config.workspace_roots.len(),
-        "starting AVF Studio daemon"
+        "starting QuireCode daemon"
     );
     serve(config).await?;
     Ok(())

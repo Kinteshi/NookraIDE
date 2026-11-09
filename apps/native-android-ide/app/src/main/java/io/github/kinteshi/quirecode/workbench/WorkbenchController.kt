@@ -1104,6 +1104,7 @@ class WorkbenchController(private val context: Context) {
                 unreachableFailures = 0
                 guestForwardingSuspected = false
                 guestStoppedAt = null
+                checkDaemonVersion()
                 reconnectAttempt = 0
                 scheduledReconnect?.cancel(false)
                 scheduledReconnect = null
@@ -2747,6 +2748,37 @@ class WorkbenchController(private val context: Context) {
     /** Set when the guest probably runs but Linux Terminal stopped forwarding its port. */
     var guestForwardingSuspected by mutableStateOf(false)
         private set
+    /** The connected daemon's version against the one this app carries, when they differ (R6); null otherwise. */
+    var daemonVersionNotice by mutableStateOf<DaemonVersionNotice?>(null)
+        private set
+    /** A notice "Not now" was said to, for this run of the app. */
+    private var daemonVersionDismissed: DaemonVersionNotice? = null
+
+    private fun checkDaemonVersion() {
+        val guest = vfs.guestDaemonVersion
+        val status = daemonVersionStatus(guest, appVersion)
+        val notice = if (guest != null && status in setOf(DaemonVersionStatus.Older, DaemonVersionStatus.Newer)) {
+            DaemonVersionNotice(guest, appVersion.substringBefore('-'), status)
+        } else {
+            null
+        }
+        daemonVersionNotice = notice?.takeIf { it != daemonVersionDismissed }
+    }
+
+    fun dismissDaemonVersionNotice() {
+        daemonVersionDismissed = daemonVersionNotice
+        daemonVersionNotice = null
+    }
+
+    /** Update: the setup flow, which installs the daemon this app carries and keeps the pairing. */
+    fun updateGuestDaemon() {
+        val notice = daemonVersionNotice ?: return
+        beginGuestSetup(
+            "The guest's daemon is ${notice.guest}; this app carries ${notice.app}. Run the command below in Linux Terminal: " +
+                "it replaces the daemon and keeps the pairing, and the app reconnects when the daemon restarts.",
+        )
+    }
+
     /** When a connected guest went away (its VM or daemon stopped); null while connected or never connected. */
     var guestStoppedAt by mutableStateOf<Long?>(null)
         private set
