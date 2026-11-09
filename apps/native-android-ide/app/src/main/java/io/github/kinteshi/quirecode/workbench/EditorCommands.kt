@@ -200,6 +200,7 @@ object EditorCommands {
         command("quirecode.shareActiveFile", "File: Share Active File", ""),
         command("quirecode.saveActiveFileToDevice", "File: Save a Copy to the Device…", ""),
         command("quirecode.importFiles", "File: Import Files from the Device…", ""),
+        command("quirecode.openDeviceFolder", "File: Open Device Folder… (no guest needed)", ""),
         command("quirecode.importFolder", "File: Import a Folder from the Device…", ""),
         command("editor.action.fontZoomIn", "Editor Font Zoom In", "Ctrl+="),
         command("editor.action.fontZoomOut", "Editor Font Zoom Out", "Ctrl+-"),

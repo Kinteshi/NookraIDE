@@ -104,6 +104,11 @@ internal fun JsonElement.workspaceTextEdits(): Map<String, List<LspTextEdit>> {
 }
 
 internal fun isPathWithinRoot(path: String, root: String): Boolean {
+    // A device folder's paths (G29) aren't guest paths: within it when they start with its root.
+    if (io.github.kinteshi.quirecode.document.isTreePath(path) || io.github.kinteshi.quirecode.document.isTreePath(root)) {
+        val base = root.trimEnd('/')
+        return path.trimEnd('/') == base || path.startsWith("$base/")
+    }
     val normalizedPath = normalizeGuestPath(path) ?: return false
     val normalizedRoot = normalizeGuestPath(root) ?: return false
     return normalizedPath == normalizedRoot || normalizedPath.startsWith("$normalizedRoot/")

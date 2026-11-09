@@ -25,6 +25,8 @@ interface GuestVfs {
     fun write(path: String, offset: Long, content: ByteArray, truncate: Boolean, expectedModifiedTs: Long?): CompletableFuture<IncomingPacket.Ack>
     fun flush(path: String): CompletableFuture<IncomingPacket.Ack>
     fun isConnected(): Boolean
+    /** Whether [path] can be reached now: a device folder's always, the guest's while connected (G29). */
+    fun isConnected(path: String): Boolean = isConnected()
 }
 
 class GuestVfsException(val code: String, message: String) : IOException(message)

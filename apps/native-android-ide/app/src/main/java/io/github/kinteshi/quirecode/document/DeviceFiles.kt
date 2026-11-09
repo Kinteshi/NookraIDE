@@ -25,8 +25,8 @@ fun deviceUri(path: String): String? =
     path.takeIf(::isDevicePath)?.removePrefix(DEVICE_PREFIX)?.substringBefore('/')
         ?.let { URLDecoder.decode(it, StandardCharsets.UTF_8.name()) }
 
-/** A guest file, as opposed to an untitled (`scratch:`) or a device file. */
-fun isGuestPath(path: String): Boolean = !path.startsWith("scratch:") && !isDevicePath(path)
+/** A guest file, as opposed to an untitled (`scratch:`) file, a device file, or one in a device folder (`tree:/`, G29). */
+fun isGuestPath(path: String): Boolean = !path.startsWith("scratch:") && !isDevicePath(path) && !isTreePath(path)
 
 /** Reads and writes device files by content URI. */
 interface DeviceFileStore {

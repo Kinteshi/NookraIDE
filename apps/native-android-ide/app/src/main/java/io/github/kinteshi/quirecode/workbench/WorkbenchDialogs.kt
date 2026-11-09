@@ -363,7 +363,13 @@ fun WorkbenchDialogHost(controller: WorkbenchController) {
             },
             text = {
                 val names = dialog.paths.take(5).joinToString(", ") { it.substringAfterLast('/') } + if (dialog.paths.size > 5) " and ${dialog.paths.size - 5} more" else ""
-                Text("$names will be moved to the guest's trash. Undo brings them back for 10 seconds.")
+                Text(
+                    if (dialog.paths.any { io.github.kinteshi.quirecode.document.isTreePath(it) }) {
+                        "$names will be deleted from this device. This can't be undone."
+                    } else {
+                        "$names will be moved to the guest's trash. Undo brings them back for 10 seconds."
+                    },
+                )
             },
             confirmButton = { TextButton(onClick = { controller.deleteEntries(dialog.paths) }) { Text("Delete") } },
             dismissButton = { TextButton(onClick = { controller.dialog = null }) { Text("Cancel") } },
@@ -615,18 +621,29 @@ fun WorkbenchDialogHost(controller: WorkbenchController) {
             onDismiss = { controller.dialog = null },
             onPick = controller::applyCodeAction,
         ) { choice -> PaletteRow(choice.title, null) }
-        is WorkbenchDialog.Conflict -> AlertDialog(
+        is WorkbenchDialog.Conflict -> {
+            val onDevice = io.github.kinteshi.quirecode.document.isTreePath(dialog.document.path)
+            AlertDialog(
             onDismissRequest = { controller.dialog = null },
-            title = { Text("File changed on the guest") },
-            text = { Text("Your local draft of ${dialog.document.path.substringAfterLast('/')} is kept. Load the guest copy, or save your draft over it.") },
+            title = { Text(if (onDevice) "File changed on this device" else "File changed on the guest") },
+            text = {
+                Text(
+                    if (onDevice) {
+                        "Another app changed ${dialog.document.path.substringAfterLast('/')} since you opened it. Your edits are kept here. Load the changed file, or save your edits over it."
+                    } else {
+                        "Your local draft of ${dialog.document.path.substringAfterLast('/')} is kept. Load the guest copy, or save your draft over it."
+                    },
+                )
+            },
             confirmButton = { TextButton(onClick = { controller.keepLocalAfterConflict(dialog.document) }) { Text("Keep my draft") } },
             dismissButton = {
                 Row {
-                    TextButton(onClick = { controller.loadRemoteAfterConflict(dialog.document) }) { Text("Load guest copy") }
+                    TextButton(onClick = { controller.loadRemoteAfterConflict(dialog.document) }) { Text(if (onDevice) "Load the changed file" else "Load guest copy") }
                     TextButton(onClick = { controller.dialog = null }) { Text("Later") }
                 }
             },
         )
+        }
         is WorkbenchDialog.CopilotSignInCode -> AlertDialog(
             onDismissRequest = controller::abandonCopilotSignIn,
             title = { Text("Sign in to GitHub Copilot") },
@@ -1215,7 +1232,7 @@ private fun PathPromptDialog(controller: WorkbenchController, prompt: WorkbenchD
         title = { Text(title) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                parent?.let { Text("In $it", style = MaterialTheme.typography.bodySmall) }
+                parent?.let { Text("In ${controller.displayPath(it)}", style = MaterialTheme.typography.bodySmall) }
                 OutlinedTextField(
                     value = value,
                     onValueChange = { value = it },

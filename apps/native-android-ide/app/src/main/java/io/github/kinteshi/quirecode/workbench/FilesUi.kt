@@ -107,13 +107,18 @@ internal fun ImportDialog(controller: WorkbenchController, import: WorkbenchDial
                     if (names.size == 1) names.single() else "${names.size} files: ${names.take(3).joinToString(", ")}${if (names.size > 3) "…" else ""}",
                     style = MaterialTheme.typography.titleSmall,
                 )
-                OutlinedTextField(
-                    value = folder,
-                    onValueChange = { folder = it },
-                    label = { Text("Into the folder") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                if (io.github.kinteshi.quirecode.document.isTreePath(folder)) {
+                    // A device folder's path isn't one to type (G29): where it goes, by name.
+                    Text("Into ${controller.displayPath(folder)}", style = MaterialTheme.typography.bodyMedium)
+                } else {
+                    OutlinedTextField(
+                        value = folder,
+                        onValueChange = { folder = it },
+                        label = { Text("Into the folder") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
                 Text("When a name is taken", style = MaterialTheme.typography.labelLarge)
                 listOf(false to "Keep both (the new one gets \" (2)\")", true to "Replace what's there").forEach { (value, label) ->
                     Row(

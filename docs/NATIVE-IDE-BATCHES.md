@@ -2874,6 +2874,48 @@ User's request (11-09): "Go for suggestion 2" (G30's private network and hardeni
 * G30 left: steps 2 (Cloudflare Tunnel, checking a public certificate) and 3 (port forwarding), and managing devices
   from the app (list and revoke over the protocol) rather than the command line.
 
+## 64. A device folder as the workspace, no guest needed (G29 step a) (11-09; done, checked on the tablet)
+User's request (11-09): "For the next batch, I agree with your priority. Go ahead!" (G29's first step), and "Yeah go
+ahead" to restarting Linux Terminal for G31.
+
+* **Open device folder…** (the welcome page, the top bar's menu, the palette's File: Open Device Folder…): a folder
+  picked with Android's folder picker (Documents, a USB drive, a synced folder) becomes the workspace, with its access
+  kept across restarts. Its files have paths of their own (`tree:/<encoded tree URI>/src/main.py`, `DeviceTreeFs.kt`)
+  and the app's file calls go through `RoutingVfs`, which sends a device folder's to the device and the rest to the
+  guest; the document repository, Explorer, Quick Open, transfers and file actions use it unchanged.
+* What works there **without the guest**: Explorer (tree, expand, refresh), opening, editing and saving (written
+  through the folder's provider; a file another app changed meanwhile gets the conflict view, worded for the device),
+  Quick Open, Find in files (done by the app: literal or regex, case, whole word, include and exclude globs, text files
+  up to 2 MB, the same results panel), new file and folder, rename, move, delete (always confirmed, "can't be undone":
+  no trash), share, save to the device, import, and the session (tabs, the active one, open folders) restored at
+  launch, with the folder itself if it was the last. Names read as the folder's ("b64-folder/src/main.py") in the
+  title, breadcrumbs, Explorer, dialogs and statuses, never the tree URI.
+* What stays the guest's: terminals (open in the guest's home), language servers, Copilot and the chat agents (not
+  sent device files), Git, debugging, running. With the guest connected the device folder stays the workspace.
+* Recent lists device folders (a phone icon, "on this device"), with or without the guest. One that was deleted or
+  moved says so and leaves Recent, and its access grant is released.
+* **Found and fixed on the tablet:**
+  * Starting with no connection to make crashed the app at launch (a session restore ran before part of the controller
+    existed); startup now runs once the controller is built. In the released app too, whenever the last connection was
+    gone and Offline mode was on.
+  * A saved tab kept its unsaved dot when nothing else redrew it (for a guest file the Git refresh after saving did);
+    each tab now reads the document revision itself. Also in the released app, unseen there.
+  * Opening a search result built a `file://` URI from the path, which crashed for a device folder; results go by path.
+  * At launch the guest's connection could replace a device folder that was still opening with the guest's last
+    folder; a folder opening counts as open.
+  * After deleting the last-used connection the app selected none at launch and didn't reconnect; it falls back to the
+    first saved one.
+  * Making a folder that exists (New file `docs/new.txt` makes `docs` first) failed as "name taken"; it's fine now,
+    as the guest's.
+* 390 app unit tests (paths, globs, the search matcher, the router's rules). Tested in the dev app with a test folder in
+  Documents (granted to that folder only), deleted afterwards; the dev app is back on the guest's Projects.
+* **G31 (Linux Terminal and the tablet's Tailscale VPN):** with the user's OK, Linux Terminal was force-stopped and
+  opened with the VPN still on: the daemon answered in 20 s and kept answering (8 of 8 probes over a minute; the gaps
+  seen first were the probe's own `nc` closing early). So one restart with the VPN on was enough; whether turning the
+  VPN on again breaks it each time is still to see.
+* Left for G29: (b) "keep available offline" for a guest folder, (c) notebooks without a kernel and what else needs no
+  guest; a device folder's files in language servers would need a server on the device.
+
 ## Backlog
 ### Open backlog (11-08)
 The current lists of what's open, in two: the general backlog, and the Aardink switch's until it's complete. The older
@@ -2907,9 +2949,9 @@ Grouped (11-08) so that what's cheaper done together is done together; the numbe
 | | G26 | – | S | **Share the editor's selection**: the selected text (in a file, a cell, an output) through the share sheet, from the editor's context and touch menus and the command palette |
 | | G27 | – | M | **Download to the device's storage**: files or folders from Explorer to a place the user picks (Android's file picker), kept there; the option to zip them into one archive (a setting for the default). Progress and the size before starting, as large folders come from the guest over the connection |
 | | G28 | – | M | **Import into Explorer**: files or a whole folder from the device (Android's file picker) into the folder chosen in Explorer, with replace or keep both on name clashes. Builds on receiving shared files (the share sheet into the workspace) and Open from device |
-| **10. Beyond the tablet's guest** (user, 11-09) | G29 | – | L overall, in steps | **Fully usable offline, without a guest** (user: "where possible"). What can be: (a) **a device folder as the workspace** (Android's folder picker: Documents, a synced folder), with Explorer, tabs, editing, Quick Open, find and replace in files done in the app and saves straight to the device (M–L, the first step); (b) **"Keep available offline"** for a guest folder: all of it copied to the device and synced back with conflict checks, beyond today's copies of opened files (M–L); (c) what already needs no guest, made whole: colours, snippets, previews (Markdown, SVG, images, hex), notebooks edited with their saved outputs (no kernel). What can't be without some machine: language servers, debuggers, kernels, terminals, Copilot and the agents (they run in the guest). Later, research: a Python kernel in the browser engine (Pyodide in a WebView) for notebooks (L+). Overlaps G18 |
+| **10. Beyond the tablet's guest** (user, 11-09) | G29 | – | Step (a) done (64); (b), (c) left | **Fully usable offline, without a guest** (user: "where possible"). What can be: (a) **a device folder as the workspace** (Android's folder picker: Documents, a synced folder), with Explorer, tabs, editing, Quick Open, find and replace in files done in the app and saves straight to the device (M–L, the first step); (b) **"Keep available offline"** for a guest folder: all of it copied to the device and synced back with conflict checks, beyond today's copies of opened files (M–L); (c) what already needs no guest, made whole: colours, snippets, previews (Markdown, SVG, images, hex), notebooks edited with their saved outputs (no kernel). What can't be without some machine: language servers, debuggers, kernels, terminals, Copilot and the agents (they run in the guest). Later, research: a Python kernel in the browser engine (Pyodide in a WebView) for notebooks (L+). Overlaps G18 |
 | | G30 | – | Steps 1 and 4 done (63); M left | **The daemon reachable over the internet.** Done in batch 63: Tailscale (`--tailscale`), device tokens, revoking, limits, the connection log. Left: (2) Cloudflare Tunnel with a public certificate, (3) port forwarding, and the paired devices listed and revoked from the app. The original suggestions: Suggested, in order: (1) **a private network** (Tailscale, or ZeroTier or WireGuard) on the computer and the tablet: the daemon listens on that network's address, nothing is open to the internet, and today's pinned certificate and token work as they are; an installer option that puts that address in the connection string, and a guide (S–M). (2) **A public address through Cloudflare Tunnel** (or similar), behind Cloudflare Access: the app then checks a public certificate instead of pinning one (a per-connection setting) (M). (3) **Router port forwarding with dynamic DNS**: works with pinning today but exposes the daemon; not without (4). (4) **Hardening first**, for any of them: limits on handshake attempts, revoking a paired device, a log of connections (S–M) |
-| | G31 | – | S–M | **Linux Terminal stopped forwarding the guest's port when the tablet's Tailscale VPN came on** (batch 63's live test): the daemon was healthy inside the guest, the port answered nothing. Find out whether restarting Linux Terminal with the VPN on fixes it for good or the VPN breaks it each time; then say so in the app (Troubleshoot can tell "port open, no answer" apart) and in the guide (a Tailscale exclusion or split tunnelling for Linux Terminal, if that helps) |
+| | G31 | – | S | (One restart with the VPN on fixed it, batch 64; left: whether turning the VPN on breaks it each time.) **Linux Terminal stopped forwarding the guest's port when the tablet's Tailscale VPN came on** (batch 63's live test): the daemon was healthy inside the guest, the port answered nothing. Find out whether restarting Linux Terminal with the VPN on fixes it for good or the VPN breaks it each time; then say so in the app (Troubleshoot can tell "port open, no answer" apart) and in the guide (a Tailscale exclusion or split tunnelling for Linux Terminal, if that helps) |
 
 Why these groups:
 1. Most of the memory and the frame time is the editor's. Tuning sora's would be thrown away, so both wait for the flip (A5),

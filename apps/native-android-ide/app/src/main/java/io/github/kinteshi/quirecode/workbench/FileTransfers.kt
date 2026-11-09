@@ -4,7 +4,6 @@ import android.content.ContentResolver
 import android.net.Uri
 import android.provider.DocumentsContract
 import io.github.kinteshi.quirecode.document.VFS_CHUNK_SIZE
-import io.github.kinteshi.quirecode.transport.GuestVfsClient
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
@@ -77,7 +76,7 @@ fun mimeTypeFor(name: String): String {
 }
 
 internal class FileTransfers(
-    private val vfs: GuestVfsClient,
+    private val vfs: io.github.kinteshi.quirecode.document.RoutingVfs,
     private val resolver: ContentResolver,
     private val cancelled: AtomicBoolean,
 ) {

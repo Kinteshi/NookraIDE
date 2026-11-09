@@ -43,6 +43,13 @@ The release includes the daemon for both (`quirecode-daemon-<version>-linux-x86_
 the internet, put both on [Tailscale](https://tailscale.com) and install with `--tailscale`. Each paired device has its
 own token, so one can be revoked (`quirecode-daemon devices`), and the daemon logs every connection.
 
+### Without a Linux machine
+
+**Open device folder…** (on the welcome page, or in the menu at the top right) opens a folder on the tablet itself,
+such as one in Documents, on a USB drive or synced by another app, as the workspace. Explorer, editing, Quick Open,
+find in files and the file actions work there without the guest. Terminals, language servers, Copilot, Git and
+debugging run in the guest, so they're only there when it's connected.
+
 ## Updating
 
 Install the new APK over the old one. If the guest's daemon is from an older release, the app says so and offers

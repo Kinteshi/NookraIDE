@@ -115,9 +115,20 @@ fun EditorArea(controller: WorkbenchController, modifier: Modifier = Modifier) {
         activeDocument?.takeUnless { it.path.startsWith("scratch:") }?.let { document ->
             // A device file has no folders to go to; its crumb says where it is.
             val device = isDevicePath(document.path)
+            // A device folder's file (G29): its folder's name and the path below it; a crumb goes to that folder.
+            val treeRoot = io.github.kinteshi.quirecode.document.treeRootOf(document.path)
+            val treeName = treeRoot?.let(controller::displayName)
             Breadcrumbs(
-                if (device) "/This device/${document.path.substringAfterLast('/')}" else document.path,
-                if (device) { _ -> } else controller::navigateToDirectory,
+                when {
+                    device -> "/This device/${document.path.substringAfterLast('/')}"
+                    treeRoot != null -> "/" + controller.displayPath(document.path)
+                    else -> document.path
+                },
+                when {
+                    device -> { _ -> }
+                    treeRoot != null -> { crumb -> controller.navigateToDirectory(treeRoot + crumb.removePrefix("/$treeName")) }
+                    else -> controller::navigateToDirectory
+                },
             ) {
                 if (controller.hasPreview(document.path)) MarkdownPreviewButtons(controller, preview)
             }
@@ -273,6 +284,9 @@ private fun EditorTab(controller: WorkbenchController, document: DocumentSession
     val colors = MaterialTheme.colorScheme
     val path = document.path
     val selected = path == controller.activePath
+    // Read here, not only above: a skipped tab (same document object) missed a save's clean state until something
+    // else redrew it, which for a guest file was the Git refresh after the save and for a device folder's nothing.
+    controller.documentRevision
     val dirty = document.dirty || controller.notebooks[path]?.notebook?.dirty == true
     val preview = controller.previewTab == path
     val pinned = path in controller.pinnedTabs
@@ -351,7 +365,7 @@ private fun EditorTab(controller: WorkbenchController, document: DocumentSession
                 item("Close others", Icons.Outlined.ClearAll) { controller.closeOtherTabs(path) }
                 item("Close all", Icons.Outlined.DeleteSweep) { controller.runCommand("workbench.action.closeAllEditors") }
                 if (!path.startsWith("scratch:")) item("Copy path", Icons.Outlined.ContentCopy) { controller.copyPath(if (isDevicePath(path)) path.substringAfterLast('/') else path) }
-                if (path == controller.activePath && (isGuestPath(path) || path.startsWith("scratch:"))) {
+                if (path == controller.activePath && (isGuestPath(path) || io.github.kinteshi.quirecode.document.isTreePath(path) || path.startsWith("scratch:"))) {
                     item("Share…", Icons.Outlined.Share) { controller.shareActiveFile() }
                 }
                 if (isGuestPath(path)) item("Save to the device…", Icons.Outlined.Download) { controller.beginSaveToDevice(listOf(path)) }
@@ -509,13 +523,22 @@ private fun EmptyEditor(controller: WorkbenchController) = BoxWithConstraints(Mo
                 Icon(Icons.Outlined.PhoneAndroid, contentDescription = null, modifier = Modifier.padding(end = 8.dp).size(18.dp))
                 Text("Open from device…")
             }
+            // A folder on this device as the workspace, no guest needed (G29).
+            androidx.compose.material3.OutlinedButton(onClick = controller::beginOpenDeviceFolder) {
+                Icon(Icons.Outlined.FolderOpen, contentDescription = null, modifier = Modifier.padding(end = 8.dp).size(18.dp))
+                Text("Open device folder…")
+            }
         }
         // VS Code's Start page: the last folders, a tap away (without a guest, from this device's copies).
         val offlineFolders = !controller.connected && controller.settings.offlineWorkspace
-        val recent = when {
+        // Device folders (G29) open with or without the guest.
+        val guestRecent = when {
             controller.connected -> controller.recentWorkspaceChoices
-            offlineFolders -> controller.recentWorkspaces.filter { it != controller.workspaceRoot }
+            offlineFolders -> controller.recentWorkspaces.filter { it != controller.workspaceRoot && isGuestPath(it) }
             else -> emptyList()
+        }
+        val recent = controller.recentWorkspaces.filter { path ->
+            path != controller.workspaceRoot && (path in guestRecent || io.github.kinteshi.quirecode.document.isTreePath(path))
         }.take(5)
         if (recent.isNotEmpty()) {
             Spacer(Modifier.height(20.dp))
@@ -530,15 +553,18 @@ private fun EmptyEditor(controller: WorkbenchController) = BoxWithConstraints(Mo
                     Row(
                         Modifier.fillMaxWidth()
                             .clip(RoundedCornerShape(8.dp))
-                            .clickable { if (offlineFolders) controller.openOfflineWorkspace(path) else controller.openWorkspace(path) }
+                            .clickable {
+                                if (offlineFolders && isGuestPath(path)) controller.openOfflineWorkspace(path) else controller.openWorkspace(path)
+                            }
                             .padding(horizontal = 10.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
-                        Icon(Icons.Outlined.Folder, contentDescription = null, tint = colors.onSurfaceVariant, modifier = Modifier.size(18.dp))
-                        Text(path.substringAfterLast('/').ifEmpty { path }, color = MaterialTheme.colorScheme.onSurface)
+                        val onDevice = io.github.kinteshi.quirecode.document.isTreePath(path)
+                        Icon(if (onDevice) Icons.Outlined.PhoneAndroid else Icons.Outlined.Folder, contentDescription = null, tint = colors.onSurfaceVariant, modifier = Modifier.size(18.dp))
+                        Text(controller.displayName(path), color = MaterialTheme.colorScheme.onSurface)
                         Text(
-                            "  " + path.substringBeforeLast('/'),
+                            "  " + if (onDevice) "on this device" else path.substringBeforeLast('/'),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             style = MaterialTheme.typography.bodySmall,
                             maxLines = 1,

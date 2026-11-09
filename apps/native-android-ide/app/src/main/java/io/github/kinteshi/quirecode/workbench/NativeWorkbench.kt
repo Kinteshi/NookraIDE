@@ -33,6 +33,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.PhoneAndroid
 import androidx.compose.material.icons.automirrored.outlined.Article
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.AccountTree
@@ -306,7 +307,7 @@ private fun TopBar(controller: WorkbenchController, expanded: Boolean) {
                 DevBadge()
             }
             Text(
-                controller.workspaceRoot?.substringAfterLast('/') ?: "No workspace",
+                controller.workspaceRoot?.let(controller::displayName) ?: "No workspace",
                 style = MaterialTheme.typography.labelSmall,
                 color = colors.onSurfaceVariant,
                 maxLines = 1,
@@ -335,6 +336,7 @@ private fun TopBar(controller: WorkbenchController, expanded: Boolean) {
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                 MenuItem("Command palette", "Ctrl+Shift+P", Icons.Outlined.Widgets) { menu = false; controller.runCommand("workbench.action.showCommands") }
                 MenuItem("Open folder…", "Ctrl+K Ctrl+O", Icons.Outlined.FolderOpen) { menu = false; controller.showOpenFolder() }
+                MenuItem("Open device folder…", "", Icons.Outlined.PhoneAndroid) { menu = false; controller.beginOpenDeviceFolder() }
                 MenuItem("New file…", "", Icons.Outlined.NoteAdd) { menu = false; controller.beginNewEntry(folder = false) }
                 MenuItem("New untitled file", "Ctrl+N", Icons.Outlined.NoteAdd) { menu = false; controller.newUntitledFile() }
                 MenuItem("New terminal", "Ctrl+Shift+`", Icons.Outlined.Terminal) { menu = false; controller.newTerminal() }

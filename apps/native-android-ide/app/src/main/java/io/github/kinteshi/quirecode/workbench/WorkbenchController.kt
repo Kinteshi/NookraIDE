@@ -35,6 +35,13 @@ import io.github.kinteshi.quirecode.document.ContentResolverFileStore
 import io.github.kinteshi.quirecode.document.devicePath
 import io.github.kinteshi.quirecode.document.isDevicePath
 import io.github.kinteshi.quirecode.document.isGuestPath
+import io.github.kinteshi.quirecode.document.DeviceTreeFs
+import io.github.kinteshi.quirecode.document.RoutingVfs
+import io.github.kinteshi.quirecode.document.isTreePath
+import io.github.kinteshi.quirecode.document.treeDisplayPath
+import io.github.kinteshi.quirecode.document.treeRoot
+import io.github.kinteshi.quirecode.document.treeRootOf
+import io.github.kinteshi.quirecode.document.treeUriOf
 import com.aardarch.aardink.core.EditorCommand as AardinkCommand
 import io.github.kinteshi.quirecode.ai.parseDeviceCodePrompt
 import io.github.kinteshi.quirecode.assets.AssetPackGrammarLoader
@@ -306,7 +313,9 @@ class WorkbenchController(private val context: Context) {
         }
     private val preferences = context.getSharedPreferences("native-ide-settings", Context.MODE_PRIVATE)
     private val cache = EncryptedDocumentCache(context)
-    val repository = DocumentRepository(vfs, cache, ContentResolverFileStore(context))
+    /** The guest's files and device folders' (G29), each call sent where its path lives. */
+    val files = RoutingVfs(vfs, DeviceTreeFs(context.contentResolver, Executors.newFixedThreadPool(2)))
+    val repository = DocumentRepository(files, cache, ContentResolverFileStore(context))
     val editorHost = EditorSurfaceHost()
     private val io = Executors.newSingleThreadExecutor()
     private val timer = Executors.newSingleThreadScheduledExecutor()
@@ -684,16 +693,23 @@ class WorkbenchController(private val context: Context) {
             chatAgent = AcpClient(vfs, settings.chatAgent.tool)
             chatAgentKind = settings.chatAgent
         }
-        profiles.firstOrNull { it.id == profileStore.lastUsedId() }?.let(::selectProfile)
+        // The last one used, else the first saved one (the last one used may have been deleted).
+        (profiles.firstOrNull { it.id == profileStore.lastUsedId() } ?: profiles.firstOrNull())?.let(::selectProfile)
         preferences.getString("grammar-load-errors", null)
             ?.takeIf(String::isNotBlank)?.let { status = "Asset-pack grammar load failed: $it" }
         bindListeners()
-        // Pick up where the last session left off: reconnect, then reopen its tabs (onWorkspaceConnected).
-        if (settings.autoConnect && endpoint.isNotBlank() && token.isNotBlank()) {
-            autoConnecting = true
-            connectGuest()
-        } else if (settings.offlineWorkspace) {
-            openOfflineWorkspace()
+        // Once the controller is built: restoring a session touches state declared below this block (pinned tabs),
+        // which is still null here. Starting offline, with no connection to retry, crashed the app on launch.
+        mainHandler.post {
+            // A device folder that was open last (G29) opens at once, guest or not.
+            recentWorkspaces.firstOrNull()?.takeIf { isTreePath(it) && files.device.hasAccess(it) }?.let(::openWorkspace)
+            // Pick up where the last session left off: reconnect, then reopen its tabs (onWorkspaceConnected).
+            if (settings.autoConnect && endpoint.isNotBlank() && token.isNotBlank()) {
+                autoConnecting = true
+                connectGuest()
+            } else if (settings.offlineWorkspace && workspaceRoot == null) {
+                openOfflineWorkspace()
+            }
         }
     }
 
@@ -1040,7 +1056,7 @@ class WorkbenchController(private val context: Context) {
 
     private fun loadWorkspaceSettings(root: String): CompletableFuture<JsonObject> {
         val path = "${root.trimEnd('/')}/.vscode/settings.json"
-        return vfs.stat(path).thenCompose { entry ->
+        return files.stat(path).thenCompose { entry ->
             when {
                 entry.isDirectory -> CompletableFuture.failedFuture(
                     IllegalStateException("Workspace settings path is a directory: $path"),
@@ -1133,7 +1149,7 @@ class WorkbenchController(private val context: Context) {
                 connected = true
                 roots = guestRoots
                 // Only what this machine serves: a folder from another one (a connection switched) is dropped.
-                val served = { path: String -> guestRoots.any { isPathWithinRoot(path, it) } }
+                val served = { path: String -> isTreePath(path) || guestRoots.any { isPathWithinRoot(path, it) } }
                 if (currentDirectory.isNotEmpty() && !served(currentDirectory)) currentDirectory = ""
                 expandedFolders.removeAll { !served(it) }
                 folderChildren.keys.filterNot(served).forEach(folderChildren::remove)
@@ -1163,9 +1179,17 @@ class WorkbenchController(private val context: Context) {
                     guestRoots.isEmpty() -> "Connected; guest has no workspace roots"
                     else -> "Guest connected"
                 }
-                // A folder opened offline may belong to another guest than this one.
-                if (workspaceRoot?.let { root -> guestRoots.none { isPathWithinRoot(root, it) } } == true) workspaceRoot = null
-                if (workspaceRoot == null) chooseWorkspace(guestRoots, ::onWorkspaceConnected) else onWorkspaceConnected(workspaceRoot!!)
+                // A folder opened offline may belong to another guest than this one. A device folder stays (G29): the
+                // guest adds terminals, Copilot and the rest, the workspace is still the device's.
+                if (workspaceRoot?.let { root -> isGuestPath(root) && guestRoots.none { isPathWithinRoot(root, it) } } == true) workspaceRoot = null
+                // A device folder still opening (its settings load before workspaceRoot is set) counts as open: at
+                // startup the connection could land first and replace it with the guest's last folder.
+                val deviceOpening = workspaceRoot == null && sessionWorkspace?.let(::isTreePath) == true
+                when {
+                    deviceWorkspace || deviceOpening -> startCopilot()
+                    workspaceRoot == null -> chooseWorkspace(guestRoots, ::onWorkspaceConnected)
+                    else -> onWorkspaceConnected(workspaceRoot!!)
+                }
                 reattachTerminals()
                 documents.filter { it.dirty && isGuestPath(it.path) }.forEach(::reconcileDocument)
                 refreshCleanDocuments()
@@ -1216,7 +1240,7 @@ class WorkbenchController(private val context: Context) {
 
     fun runSearch() {
         scheduledSearch?.cancel(false)
-        activeSearch?.let(vfs::cancelSearch)
+        activeSearch?.let { if (!files.device.cancelSearch(it)) vfs.cancelSearch(it) }
         activeSearch = null
         searchResults.clear()
         val text = searchText
@@ -1226,7 +1250,7 @@ class WorkbenchController(private val context: Context) {
             return
         }
         val root = workspaceRoot
-        if (root == null || !vfs.isConnected()) {
+        if (root == null || !files.isConnected(root)) {
             searchRunning = false
             searchSummary = "Connect to a guest to search"
             return
@@ -1241,18 +1265,18 @@ class WorkbenchController(private val context: Context) {
             include = globs(searchInclude),
             exclude = globs(searchExclude),
         )
-        val files = HashMap<String, SearchFileResult>()
+        val byFile = HashMap<String, SearchFileResult>()
         searchRunning = true
         searchSummary = "Searching…"
         val searchStarted = android.os.SystemClock.uptimeMillis()
         var requestId: Long? = null
-        requestId = vfs.search(query) { event ->
+        val onEvent: (SearchEvent) -> Unit = { event ->
             post {
                 if (activeSearch != requestId) return@post
                 if (searchResults.isEmpty() && event is SearchEvent.Match) Perf.afterNextFrame("search first result", searchStarted)
                 if (event is SearchEvent.Done) Perf.log { "search done ${android.os.SystemClock.uptimeMillis() - searchStarted} ms, ${event.total} results" }
                 when (event) {
-                    is SearchEvent.Match -> files.getOrPut(event.path) {
+                    is SearchEvent.Match -> byFile.getOrPut(event.path) {
                         SearchFileResult(event.path).also(searchResults::add)
                     }.matches.add(event)
                     is SearchEvent.Done -> {
@@ -1277,6 +1301,8 @@ class WorkbenchController(private val context: Context) {
                 }
             }
         }
+        // A device folder is searched by the app (G29), the guest's by ripgrep in the guest.
+        requestId = if (isTreePath(root)) files.device.search(query, ::isExcluded, onEvent) else vfs.search(query, onEvent)
         activeSearch = requestId
         if (requestId == null) {
             searchRunning = false
@@ -1384,20 +1410,9 @@ class WorkbenchController(private val context: Context) {
         }
     }
 
+    /** By path, not through a file URI: a device folder's paths (G29) aren't file URIs (opening one crashed the app). */
     fun openSearchMatch(match: SearchEvent.Match) {
-        val position = JsonObject().apply {
-            addProperty("line", match.line - 1)
-            addProperty("character", match.column)
-        }
-        val end = JsonObject().apply {
-            addProperty("line", match.line - 1)
-            addProperty("character", match.column + match.length)
-        }
-        val range = JsonObject().apply {
-            add("start", position)
-            add("end", end)
-        }
-        navigateToLocation(LanguageLocation(java.net.URI("file", "", match.path, null).toASCIIString(), range), preview = true)
+        navigateToPosition(match.path, match.line - 1, match.column, preview = true)
     }
 
     // Guest resources -----------------------------------------------------------------------------
@@ -1719,14 +1734,14 @@ class WorkbenchController(private val context: Context) {
             return
         }
         val path = "${root.trimEnd('/')}/.vscode/launch.json"
-        vfs.stat(path).whenComplete { _, missing ->
+        files.stat(path).whenComplete { _, missing ->
             post {
                 if (missing == null) {
                     openPath(path)
                     return@post
                 }
-                vfs.create("${root.trimEnd('/')}/.vscode", directory = true).handle { _, _ -> null }
-                    .thenCompose { vfs.create(path, directory = false) }
+                files.create("${root.trimEnd('/')}/.vscode", directory = true).handle { _, _ -> null }
+                    .thenCompose { files.create(path, directory = false) }
                     .thenCompose { repository.writeAll(path, LAUNCH_JSON_TEMPLATE.toByteArray(), null) }.whenComplete { _, error ->
                         post {
                             if (error != null) {
@@ -1757,7 +1772,7 @@ class WorkbenchController(private val context: Context) {
 
     /** [built]: the configuration's build (C/C++, Rust) already ran; start the session itself. */
     private fun startDebugging(configuration: DebugConfiguration, built: Boolean = false) {
-        val workspace = workspaceRoot
+        val workspace = guestWorkspace
         if (workspace == null || !vfs.isConnected()) {
             status = "Connect to a guest to debug"
             return
@@ -1944,7 +1959,7 @@ class WorkbenchController(private val context: Context) {
     /** The closest Cargo.toml from [directory] up to [root]. */
     private fun findCargoManifest(directory: String, root: String, found: (String?) -> Unit) {
         val candidate = "${directory.trimEnd('/')}/Cargo.toml"
-        vfs.stat(candidate).whenComplete { _, missing ->
+        files.stat(candidate).whenComplete { _, missing ->
             post {
                 when {
                     missing == null -> found(candidate)
@@ -2429,10 +2444,10 @@ class WorkbenchController(private val context: Context) {
     var commitMessage by mutableStateOf("")
 
     private fun runGit(label: String?, operation: GitOperation, then: (GitResult) -> Unit = {}) {
-        val repo = workspaceRoot
+        val repo = guestWorkspace
         if (repo == null || !vfs.isConnected()) {
             // Only when asked for: background refreshes (after a save, offline) stay quiet.
-            if (label != null) status = "Connect to a guest to use Git"
+            if (label != null) status = if (deviceWorkspace) "Git runs in the guest; a device folder has no Git here" else "Connect to a guest to use Git"
             return
         }
         if (label != null) gitBusy = label
@@ -2860,6 +2875,8 @@ class WorkbenchController(private val context: Context) {
      * refreshing them doesn't ask the new machine for paths it doesn't serve ("outside the configured project roots").
      */
     private fun forgetMachineExplorer() {
+        roots = emptyList()
+        if (deviceWorkspace) return
         currentDirectory = ""
         entries = emptyList()
         roots = emptyList()
@@ -3259,6 +3276,9 @@ class WorkbenchController(private val context: Context) {
         if (preferences.getString(key, null) != value) preferences.edit().putString(key, value).apply()
     }
 
+    /** A file of a workspace (the guest's or a device folder's, G29), whose tab the workspace's session keeps. */
+    private fun isWorkspaceFile(path: String): Boolean = isGuestPath(path) || isTreePath(path)
+
     private fun persistSession() {
         val gson = com.google.gson.Gson()
         val untitled = documents.map { it.path }.filter { it.startsWith("scratch:") }
@@ -3271,17 +3291,17 @@ class WorkbenchController(private val context: Context) {
         // tabs close one by one: neither may overwrite what was saved.
         val workspace = sessionWorkspace ?: return
         if (!sessionRestored || switchingWorkspace) return
-        val loaded = documents.map { it.path }.filter(::isGuestPath)
+        val loaded = documents.map { it.path }.filter(::isWorkspaceFile)
         // Tabs still loading, or waiting for the guest, keep their place.
-        val waiting = restorePending.filter { isGuestPath(it) && it !in loaded }
+        val waiting = restorePending.filter { isWorkspaceFile(it) && it !in loaded }
         val open = sessionTabs(loaded, waiting, restoreOrder)
         val session = WorkspaceSession(
             open = open,
-            active = activePath?.takeIf(::isGuestPath) ?: restoreActive?.takeIf { it in waiting },
+            active = activePath?.takeIf(::isWorkspaceFile) ?: restoreActive?.takeIf { it in waiting },
             directory = currentDirectory.ifEmpty { null },
             expanded = expandedFolders.toList(),
-            pinned = pinnedTabs.filter(::isGuestPath),
-            preview = previewTab?.takeIf(::isGuestPath),
+            pinned = pinnedTabs.filter(::isWorkspaceFile),
+            preview = previewTab?.takeIf(::isWorkspaceFile),
         )
         preferences.edit().putString(workspaceSessionKey(workspace), gson.toJson(session)).apply()
     }
@@ -3298,7 +3318,7 @@ class WorkbenchController(private val context: Context) {
     private fun restoreSession(workspace: String) {
         if (sessionRestored) {
             // Started offline: the tabs this device had no copy of open now.
-            if (vfs.isConnected()) reopenPendingTabs(workspace)
+            if (files.isConnected(workspace)) reopenPendingTabs(workspace)
             return
         }
         sessionRestored = true
@@ -3319,7 +3339,7 @@ class WorkbenchController(private val context: Context) {
         restorePreview = saved.preview
         open.sortedBy { it == active }.forEach { openPath(it, preview = it == saved.preview, background = it != active) }
         // Offline there is no folder to list; Explorer shows the files this device has instead.
-        if (!vfs.isConnected()) return
+        if (!files.isConnected(workspace)) return
         saved.directory?.takeIf { isPathWithinRoot(it, workspace) && it != workspace }?.let(::loadDirectory)
         saved.expanded.orEmpty().filter { isPathWithinRoot(it, workspace) }.forEach { path ->
             expandedFolders.add(path)
@@ -3367,7 +3387,16 @@ class WorkbenchController(private val context: Context) {
     // Offline ---------------------------------------------------------------------------------
 
     /** A folder is open but no guest is connected: tabs come from this device's copies. */
-    val offline: Boolean get() = workspaceRoot != null && !connected
+    val offline: Boolean get() = workspaceRoot?.let(::isGuestPath) == true && !connected
+
+    /** A folder on this device is the workspace (G29): Explorer, files, Quick Open and search work without the guest. */
+    val deviceWorkspace: Boolean get() = workspaceRoot?.let(::isTreePath) == true
+
+    /** The workspace when it's the guest's: what Git, terminals, language servers, Copilot and debugging run in. */
+    val guestWorkspace: String? get() = workspaceRoot?.takeIf(::isGuestPath)
+
+    /** The workspace's files can be listed and changed now: a device folder's always, the guest's while connected. */
+    val workspaceAvailable: Boolean get() = deviceWorkspace || connected
 
     /** Set by the activity: Android's file picker, whose choice comes back as [openDeviceFile]. */
     var pickLocalFile: (() -> Unit)? = null
@@ -3426,7 +3455,7 @@ class WorkbenchController(private val context: Context) {
         fun check(index: Int) {
             val path = files.getOrNull(index) ?: return
             if (!vfs.isConnected()) return
-            vfs.stat(path).whenComplete { _, error ->
+            this.files.stat(path).whenComplete { _, error ->
                 post {
                     if (error.isNotFound() && documents.none { it.path == path }) {
                         forgetOfflineFile(path, workspace)
@@ -3446,7 +3475,7 @@ class WorkbenchController(private val context: Context) {
     private fun forgetMissingRecentFolders(guestRoots: List<String>) {
         val kept = preferences.all.keys.filter { it.startsWith(OFFLINE_FILES_PREFIX) }.map { it.removePrefix(OFFLINE_FILES_PREFIX) }
         (recentWorkspaces + kept).distinct().filter { folder -> guestRoots.any { isPathWithinRoot(folder, it) } }.forEach { folder ->
-            vfs.stat(folder).whenComplete { entry, error ->
+            files.stat(folder).whenComplete { entry, error ->
                 post {
                     if (!error.isNotFound() && (error != null || entry.isDirectory)) return@post
                     if (folder in recentWorkspaces) forgetRecentWorkspace(folder)
@@ -3484,7 +3513,7 @@ class WorkbenchController(private val context: Context) {
      */
     private fun refreshCleanDocuments() {
         documents.filter { isGuestPath(it.path) && !it.dirty && it.path !in notebooks }.forEach { document ->
-            vfs.stat(document.path).whenComplete { entry, error ->
+            files.stat(document.path).whenComplete { entry, error ->
                 if (error != null || entry.isDirectory || entry.modifiedTs == document.baseModifiedTs) return@whenComplete
                 repository.open(document.path).whenComplete { result, _ ->
                     val fresh = (result as? OpenDocument.Editable)?.document ?: return@whenComplete
@@ -3521,6 +3550,17 @@ class WorkbenchController(private val context: Context) {
     }
 
     fun forgetRecentWorkspace(path: String) {
+        // A device folder's access grant goes with it (Android keeps a limited number per app).
+        if (isTreePath(path) && path != workspaceRoot) {
+            treeUriOf(path)?.let { uri ->
+                runCatching {
+                    context.contentResolver.releasePersistableUriPermission(
+                        android.net.Uri.parse(uri),
+                        android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                    )
+                }
+            }
+        }
         recentWorkspaces = recentWorkspaces.filterNot { it == path }
         preferences.edit().putString(RECENT_WORKSPACES_KEY, com.google.gson.Gson().toJson(recentWorkspaces)).apply()
         refreshLauncherShortcuts()
@@ -3592,7 +3632,7 @@ class WorkbenchController(private val context: Context) {
         fun freeName(name: String, attempt: Int = 1): CompletableFuture<String> {
             val candidate = if (attempt == 1) name else name.substringBeforeLast('.', name) + " ($attempt)" + name.substringAfterLast('.', "").let { if (it.isEmpty() || !name.contains('.')) "" else ".$it" }
             val path = "$target/$candidate"
-            return vfs.stat(path).handle { _, error -> error != null }.thenCompose { free -> if (free) CompletableFuture.completedFuture(path) else freeName(name, attempt + 1) }
+            return files.stat(path).handle { _, error -> error != null }.thenCompose { free -> if (free) CompletableFuture.completedFuture(path) else freeName(name, attempt + 1) }
         }
         fun next(index: Int) {
             if (index == shared.uris.size) {
@@ -3622,9 +3662,9 @@ class WorkbenchController(private val context: Context) {
                 }
                 bytes.fold(
                     onSuccess = { content ->
-                        vfs.create(target, directory = true).handle { _, _ -> }
+                        files.create(target, directory = true).handle { _, _ -> }
                             .thenCompose { freeName(shared.names[index].replace('/', '_')) }
-                            .thenCompose { path -> vfs.create(path, directory = false).thenCompose { repository.writeAll(path, content, null) }.thenApply { path } }
+                            .thenCompose { path -> files.create(path, directory = false).thenCompose { repository.writeAll(path, content, null) }.thenApply { path } }
                             .whenComplete { path, error ->
                                 if (error != null) {
                                     post { dialog = shared.copy(error = "${shared.names[index]}: ${failureMessage(error)}") }
@@ -3639,6 +3679,50 @@ class WorkbenchController(private val context: Context) {
             }
         }
         next(0)
+    }
+
+    // Device folders as workspaces (G29) ------------------------------------------------------------
+
+    /** Device folders' own names (their roots name only a tree URI), kept for titles and Recent. */
+    private val treeNames = mutableStateMapOf<String, String>()
+
+    /** How [path] reads to people: a device folder's as its name and the path below it, a guest path as is. */
+    fun displayPath(path: String): String =
+        if (isTreePath(path)) treeDisplayPath(path, treeNameOf(path)) else path
+
+    /** A folder's or file's name: a device folder's root by its own name. */
+    fun displayName(path: String): String = displayPath(path).trimEnd('/').substringAfterLast('/').ifEmpty { path }
+
+    private fun treeNameOf(path: String): String? {
+        val root = treeRootOf(path) ?: return null
+        return treeNames[root] ?: preferences.getString("tree-name:$root", null)?.also { treeNames[root] = it }
+    }
+
+    /** File > Open Device Folder: a folder on this device (Documents, a USB drive, a synced folder) as the workspace. */
+    fun beginOpenDeviceFolder() {
+        treePickedFor = TreePurpose.Workspace
+        devicePickers?.openTree?.invoke() ?: run { status = "The folder picker isn't available" }
+    }
+
+    private fun openDeviceFolder(uri: android.net.Uri) {
+        val resolver = context.contentResolver
+        val flags = android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+        val granted = runCatching { resolver.takePersistableUriPermission(uri, flags) }.isSuccess
+        if (!granted) {
+            status = "Android didn't let QuireCode keep access to that folder; pick another"
+            return
+        }
+        val root = treeRoot(uri.toString())
+        io.execute {
+            val name = files.device.folderName(root)
+            post {
+                name?.let {
+                    treeNames[root] = it
+                    preferences.edit().putString("tree-name:$root", it).apply()
+                }
+                openWorkspace(root)
+            }
+        }
     }
 
     /** A launcher shortcut's folder: opened now, or first once the guest connects. */
@@ -3658,7 +3742,7 @@ class WorkbenchController(private val context: Context) {
             guestRoots.firstOrNull()?.let(then)
             return
         }
-        vfs.stat(last).whenComplete { entry, error ->
+        files.stat(last).whenComplete { entry, error ->
             post { (if (error == null && entry?.isDirectory == true) last else guestRoots.firstOrNull())?.let(then) }
         }
     }
@@ -3675,7 +3759,7 @@ class WorkbenchController(private val context: Context) {
             ?: roots.firstOrNull()
             ?: return
         dialog = WorkbenchDialog.OpenFolder(start)
-        vfs.listDir(start).whenComplete { result, error ->
+        files.listDir(start).whenComplete { result, error ->
             post {
                 val shown = dialog as? WorkbenchDialog.OpenFolder ?: return@post
                 if (shown.path != start) return@post
@@ -3695,7 +3779,7 @@ class WorkbenchController(private val context: Context) {
             return
         }
         val target = "${parent.trimEnd('/')}/$clean"
-        vfs.create(target, directory = true).whenComplete { _, error ->
+        files.create(target, directory = true).whenComplete { _, error ->
             post {
                 if (error != null) {
                     (dialog as? WorkbenchDialog.OpenFolder)?.let { dialog = it.copy(error = error.cause?.message ?: error.message) }
@@ -3711,21 +3795,46 @@ class WorkbenchController(private val context: Context) {
      * their drafts kept, so unsaved work comes back with its folder; language servers, Copilot and
      * the chat agent restart in the new folder. Terminals keep running where they are.
      */
-    fun openWorkspace(path: String) {
-        val target = normalizeGuestPath(path) ?: return
+    fun openWorkspace(path: String) = openWorkspace(path, checked = false)
+
+    private fun openWorkspace(path: String, checked: Boolean) {
+        val target = (if (isTreePath(path)) path.trimEnd('/') else normalizeGuestPath(path)) ?: return
         if (dialog is WorkbenchDialog.OpenFolder) dialog = null
-        if (!connected) {
-            status = "Connect to a guest to open a folder"
-            return
-        }
-        if (roots.none { isPathWithinRoot(target, it) }) {
-            status = "$target is outside the folders the guest daemon serves"
-            return
+        if (isTreePath(target)) {
+            // A device folder (G29): no guest needed, only the folder's grant.
+            if (!files.device.hasAccess(target)) {
+                status = "QuireCode no longer has access to ${displayName(target)}; open it again with Open Device Folder"
+                forgetRecentWorkspace(target)
+                return
+            }
+            // Deleted or moved by another app since: say so and drop it from Recent, instead of an empty Explorer.
+            if (!checked) {
+                files.stat(target).whenComplete { entry, error ->
+                    post {
+                        if (error != null || entry?.isDirectory != true) {
+                            status = "${displayName(target)} is no longer on this device"
+                            forgetRecentWorkspace(target)
+                        } else {
+                            openWorkspace(target, checked = true)
+                        }
+                    }
+                }
+                return
+            }
+        } else {
+            if (!connected) {
+                status = "Connect to a guest to open a folder"
+                return
+            }
+            if (roots.none { isPathWithinRoot(target, it) }) {
+                status = "$target is outside the folders the guest daemon serves"
+                return
+            }
         }
         if (target == workspaceRoot) return
         persistSession()
         switchingWorkspace = true
-        documents.map { it.path }.filter(::isGuestPath).forEach { open ->
+        documents.map { it.path }.filter { isGuestPath(it) || isTreePath(it) }.forEach { open ->
             notebooks[open]?.takeIf { it.notebook.dirty }?.let { session -> session.document.updateText(session.notebook.toJson()) }
             documents.firstOrNull { it.path == open }?.let { document -> io.execute { repository.persistDraft(document) } }
             closeDocument(open)
@@ -3757,7 +3866,7 @@ class WorkbenchController(private val context: Context) {
         workspaceRoot = null
         sessionRestored = false
         onWorkspaceConnected(target)
-        status = "Opened ${target.substringAfterLast('/').ifEmpty { target }}"
+        status = "Opened ${displayName(target)}"
     }
 
     private fun startKeepAlive(state: String) {
@@ -3776,7 +3885,7 @@ class WorkbenchController(private val context: Context) {
         rememberWorkspace(workspace)
         loadDirectory(workspace)
         restoreSession(workspace)
-        forgetMissingOfflineFiles(workspace)
+        if (isGuestPath(workspace)) forgetMissingOfflineFiles(workspace)
         loadWorkspaceSettings(workspace).whenComplete { loaded, settingsError ->
             post {
                 if (settingsError != null) {
@@ -3823,11 +3932,11 @@ class WorkbenchController(private val context: Context) {
     // Explorer and documents -----------------------------------------------------------------
 
     fun loadDirectory(path: String) {
-        if (!vfs.isConnected()) {
+        if (!files.isConnected(path)) {
             status = "Connect to a guest to browse files"
             return
         }
-        vfs.listDir(path).whenComplete { result, error ->
+        files.listDir(path).whenComplete { result, error ->
             post {
                 if (error != null) {
                     status = "Explorer error: ${error.message ?: "request failed"}"
@@ -3844,13 +3953,13 @@ class WorkbenchController(private val context: Context) {
     fun refreshQuickOpenIndex() {
         val root = workspaceRoot ?: return
         if (quickOpenIndexing && quickOpenWalkRoot == root) return
-        if (!vfs.isConnected()) return
+        if (!files.isConnected(root)) return
         quickOpenWalk?.cancel()
         quickOpenIndexing = true
         quickOpenWalkRoot = root
         lateinit var walk: QuickOpenWalk
         walk = QuickOpenWalk(
-            list = vfs::listDir,
+            list = files::listDir,
             isExcluded = { isExcluded(it.path) },
             walksInto = { walksIntoForQuickOpen(it.name) },
             maxFiles = MAX_QUICK_OPEN_FILES,
@@ -3887,7 +3996,7 @@ class WorkbenchController(private val context: Context) {
     }
 
     private fun loadFolderChildren(path: String) {
-        vfs.listDir(path).whenComplete { result, error ->
+        files.listDir(path).whenComplete { result, error ->
             post {
                 if (error != null) {
                     expandedFolders.remove(path)
@@ -4274,13 +4383,15 @@ class WorkbenchController(private val context: Context) {
         private set
     private val transferCancelled = java.util.concurrent.atomic.AtomicBoolean(false)
     private val transfers = Executors.newSingleThreadExecutor()
-    private val fileTransfers by lazy { FileTransfers(vfs, context.contentResolver, transferCancelled) }
+    private val fileTransfers by lazy { FileTransfers(files, context.contentResolver, transferCancelled) }
     /** What the next save picker's answer is for. */
     private var pendingSave: PendingSave? = null
     /** Where the next import picker's answer goes (a guest folder). */
     private var pendingImportFolder: String? = null
-    /** The folder picker is answering a save (true) or an import (false). */
-    private var treePickedForSave = false
+    /** What the folder picker's answer is for. */
+    private var treePickedFor = TreePurpose.Import
+
+    private enum class TreePurpose { Save, Import, Workspace }
 
     private data class PendingSave(val paths: List<String>, val plan: TransferPlan, val zip: Boolean)
 
@@ -4425,8 +4536,8 @@ class WorkbenchController(private val context: Context) {
     fun shareActiveFile() {
         val document = activeDocument
         val path = activePath ?: return
-        if (document == null || !isGuestPath(path) && !path.startsWith("scratch:")) {
-            if (isGuestPath(path)) shareEntries(listOf(path)) else status = "Only the guest's files and untitled files can be shared from here"
+        if (document == null || !isWorkspaceFile(path) && !path.startsWith("scratch:")) {
+            if (isWorkspaceFile(path)) shareEntries(listOf(path)) else status = "Only workspace and untitled files can be shared from here"
             return
         }
         val name = path.substringAfterLast('/').let { if (path.startsWith("scratch:") && !it.contains('.')) "$it.txt" else it }
@@ -4463,7 +4574,7 @@ class WorkbenchController(private val context: Context) {
         when (how) {
             SaveHow.Folder -> {
                 pendingSave = PendingSave(save.paths, plan, zip = false)
-                treePickedForSave = true
+                treePickedFor = TreePurpose.Save
                 pickers.openTree()
             }
             SaveHow.Zip -> {
@@ -4501,8 +4612,13 @@ class WorkbenchController(private val context: Context) {
 
     /** The folder picker's answer: a device folder to save into, or to import from. */
     fun onTreePicked(uri: android.net.Uri?) {
-        if (treePickedForSave) {
-            treePickedForSave = false
+        if (treePickedFor == TreePurpose.Workspace) {
+            treePickedFor = TreePurpose.Import
+            uri?.let(::openDeviceFolder)
+            return
+        }
+        if (treePickedFor == TreePurpose.Save) {
+            treePickedFor = TreePurpose.Import
             val save = pendingSave.also { pendingSave = null } ?: return
             if (uri == null) return
             runTransfer("Saving to the device") { progress ->
@@ -4534,7 +4650,7 @@ class WorkbenchController(private val context: Context) {
     fun beginImportFolder(folder: String = importFolder()) {
         if (needsGuest(listOf(folder))) return
         pendingImportFolder = folder
-        treePickedForSave = false
+        treePickedFor = TreePurpose.Import
         devicePickers?.openTree?.invoke()
     }
 
@@ -4584,7 +4700,7 @@ class WorkbenchController(private val context: Context) {
                     }
                 } catch (error: Exception) {
                     // The file it was partway through goes (to the daemon's trash); the finished ones stay.
-                    runCatching { vfs.delete("$target/$name").get(30, java.util.concurrent.TimeUnit.SECONDS) }
+                    runCatching { this.files.delete("$target/$name").get(30, java.util.concurrent.TimeUnit.SECONDS) }
                     post { afterFileSystemChange() }
                     throw if (error is TransferCancelled) TransferCancelled() else error
                 }
@@ -4595,7 +4711,7 @@ class WorkbenchController(private val context: Context) {
                 afterFileSystemChange()
                 work.singleOrNull()?.let { (_, name) -> openPath("$target/$name") }
             }
-            "Imported ${work.singleOrNull()?.second?.substringAfterLast('/') ?: "${work.size} files"} into ${target.substringAfterLast('/')}"
+            "Imported ${work.singleOrNull()?.second?.substringAfterLast('/') ?: "${work.size} files"} into ${displayName(target)}"
         }
     }
 
@@ -4639,7 +4755,7 @@ class WorkbenchController(private val context: Context) {
                 status = "$path is outside the guest's folders"
                 return
             }
-            vfs.stat(path).whenComplete { entry, error ->
+            files.stat(path).whenComplete { entry, error ->
                 post {
                     when {
                         error != null -> status = "No file at $path"
@@ -4686,7 +4802,7 @@ class WorkbenchController(private val context: Context) {
 
     /** An image the preview shows, read from the guest (on the WebView's loader thread). */
     fun readPreviewImage(path: String): ByteArray? {
-        if (!vfs.isConnected() || roots.none { isPathWithinRoot(path, it) }) return null
+        if (!files.isConnected(path) || isGuestPath(path) && roots.none { isPathWithinRoot(path, it) }) return null
         return runCatching { repository.readBytes(path, MAX_PREVIEW_IMAGE_BYTES).get(15, TimeUnit.SECONDS) }.getOrNull()
     }
 
@@ -4737,7 +4853,7 @@ class WorkbenchController(private val context: Context) {
         }
         val document = activeDocument?.takeUnless { it.binary } ?: return
         if (document.path.startsWith("scratch:")) {
-            if (vfs.isConnected()) {
+            if (workspaceAvailable) {
                 beginSaveAs(document)
                 return
             }
@@ -4762,7 +4878,7 @@ class WorkbenchController(private val context: Context) {
             return
         }
         applySaveCleanups(document, automatic)
-        status = "Saving ${document.path}"
+        status = "Saving ${displayName(document.path)}"
         repository.save(document).whenComplete { result, error ->
             post {
                 documentRevision++
@@ -4772,7 +4888,7 @@ class WorkbenchController(private val context: Context) {
                 }
                 when (result) {
                     is SaveResult.Saved -> {
-                        status = "Saved ${document.path}"
+                        status = "Saved ${displayPath(document.path)}"
                         if (document.path.endsWith(".code-snippets")) workspaceRoot?.let(::reloadWorkspaceSnippets)
                         if (document.path.endsWith("/.vscode/launch.json")) workspaceRoot?.let(::reloadLaunchConfigurations)
                         if (movedBreakpointFiles.remove(document.path)) sendBreakpoints(document.path)
@@ -4811,7 +4927,7 @@ class WorkbenchController(private val context: Context) {
                 documentRevision++
                 if (activePath == document.path) editorSurface?.setText(document.text)
                 notifyDocumentChanged(document.path, document.version, document.text)
-                status = if (error == null) "Loaded guest version" else "Reload failed: ${error.message}"
+                status = if (error == null) (if (isTreePath(document.path)) "Loaded the changed file" else "Loaded guest version") else "Reload failed: ${error.message}"
             }
         }
     }
@@ -4863,7 +4979,7 @@ class WorkbenchController(private val context: Context) {
     private fun explorerParent(): String? = currentDirectory.ifEmpty { null } ?: workspaceRoot
 
     fun beginNewEntry(folder: Boolean, parent: String? = explorerParent()) {
-        if (!vfs.isConnected() || parent == null) {
+        if (parent == null || !files.isConnected(parent)) {
             status = "Connect to a guest to create files"
             return
         }
@@ -4871,7 +4987,7 @@ class WorkbenchController(private val context: Context) {
     }
 
     fun beginRenameEntry(path: String? = activePath) {
-        if (path == null || !isGuestPath(path)) {
+        if (path == null || !isWorkspaceFile(path)) {
             status = "Open or select a saved file to rename"
             return
         }
@@ -4879,7 +4995,7 @@ class WorkbenchController(private val context: Context) {
     }
 
     fun beginDeleteEntry(path: String? = activePath, isDirectory: Boolean = false) {
-        if (path == null || !isGuestPath(path)) {
+        if (path == null || !(isGuestPath(path) || isTreePath(path))) {
             status = "Open or select a saved file to delete"
             return
         }
@@ -4891,12 +5007,13 @@ class WorkbenchController(private val context: Context) {
         // A folder and something inside it: deleting the folder covers both.
         val roots = paths.distinct().filter { path -> paths.none { other -> other != path && path.startsWith("$other/") } }
         if (roots.isEmpty()) return
-        if (settings.confirmDelete) dialog = WorkbenchDialog.ConfirmDelete(roots, isDirectory) else deleteEntries(roots)
+        // A device folder has no trash to undo from (G29): it always asks.
+        if (settings.confirmDelete || roots.any(::isTreePath)) dialog = WorkbenchDialog.ConfirmDelete(roots, isDirectory) else deleteEntries(roots)
     }
 
     fun beginSaveAs(document: DocumentSession? = activeDocument) {
         val parent = explorerParent()
-        if (document == null || !vfs.isConnected() || parent == null) {
+        if (document == null || parent == null || !files.isConnected(parent)) {
             status = "Connect to a guest to save files"
             return
         }
@@ -4929,9 +5046,9 @@ class WorkbenchController(private val context: Context) {
                 val parentReady = if (folder || targetParent == parent.trimEnd('/')) {
                     CompletableFuture.completedFuture(Unit)
                 } else {
-                    vfs.create(targetParent, directory = true).thenApply { }
+                    files.create(targetParent, directory = true).thenApply { }
                 }
-                parentReady.thenCompose { vfs.create(target, folder) }.whenComplete { _, error ->
+                parentReady.thenCompose { files.create(target, folder) }.whenComplete { _, error ->
                     if (error != null) return@whenComplete fail(error)
                     post {
                         dialog = null
@@ -4944,7 +5061,7 @@ class WorkbenchController(private val context: Context) {
             is PathAction.Move -> {
                 val root = workspaceRoot ?: action.paths.first().substringBeforeLast('/')
                 val folder = name.trim().trim('/').let { if (it.isEmpty()) root else resolveEntryPath(root, it) }
-                vfs.create(folder, directory = true).handle { _, _ -> }.whenComplete { _, _ ->
+                files.create(folder, directory = true).handle { _, _ -> }.whenComplete { _, _ ->
                     post {
                         dialog = null
                         moveEntries(action.paths, folder)
@@ -4961,7 +5078,7 @@ class WorkbenchController(private val context: Context) {
             fail(IllegalStateException("Save ${document.path.substringAfterLast('/')} before renaming"))
             return
         }
-        vfs.rename(from, to).whenComplete { _, error ->
+        files.rename(from, to).whenComplete { _, error ->
             if (error != null) return@whenComplete fail(error)
             post {
                 dialog = null
@@ -5014,7 +5131,7 @@ class WorkbenchController(private val context: Context) {
         val deleted = mutableListOf<String>()
         fun next(index: Int) {
             if (index == paths.size) return finishDelete(deleted, trashIds, null)
-            vfs.delete(paths[index]).whenComplete { ack, error ->
+            files.delete(paths[index]).whenComplete { ack, error ->
                 if (error != null) return@whenComplete finishDelete(deleted, trashIds, error)
                 deleted += paths[index]
                 ack?.trashId?.let(trashIds::add)
@@ -5039,6 +5156,7 @@ class WorkbenchController(private val context: Context) {
         status = when {
             error != null && deleted.isEmpty() -> "Delete failed: ${failureMessage(error)}"
             error != null -> "Deleted $names; then failed: ${failureMessage(error)}"
+            trashIds.isEmpty() && deleted.any(::isTreePath) -> "Deleted $names"
             else -> "Moved $names to the trash"
         }
         if (trashIds.isEmpty()) return@post
@@ -5134,7 +5252,7 @@ class WorkbenchController(private val context: Context) {
         fun next(index: Int) {
             if (index == moves.size) return finish(null)
             val (from, to) = moves[index]
-            vfs.rename(from, to).whenComplete { _, error ->
+            files.rename(from, to).whenComplete { _, error ->
                 if (error != null) return@whenComplete finish(error)
                 done += from to to
                 next(index + 1)
@@ -5167,7 +5285,7 @@ class WorkbenchController(private val context: Context) {
     private fun saveDocumentAs(sourcePath: String, target: String, fail: (Throwable) -> Unit) {
         val source = documents.firstOrNull { it.path == sourcePath } ?: return
         val copy = DocumentSession(target, source.text, baseModifiedTs = null, dirty = true, encoding = source.encoding, eol = source.eol)
-        vfs.create(target, directory = false)
+        files.create(target, directory = false)
             .thenCompose { repository.save(copy) }
             .whenComplete { result, error ->
                 if (error != null) return@whenComplete fail(error)
@@ -5186,8 +5304,8 @@ class WorkbenchController(private val context: Context) {
     val deletedFiles = mutableStateListOf<String>()
 
     private fun checkFileExists(path: String) {
-        if (!isGuestPath(path) || !vfs.isConnected()) return
-        vfs.stat(path).whenComplete { _, error ->
+        if (!(isGuestPath(path) || isTreePath(path)) || !files.isConnected(path)) return
+        files.stat(path).whenComplete { _, error ->
             post {
                 when {
                     error == null -> deletedFiles.remove(path)
@@ -5209,7 +5327,7 @@ class WorkbenchController(private val context: Context) {
                 folder += "/$name"
                 val next = folder
                 // Folders that exist answer AlreadyExists; a real problem shows when the file is written.
-                ready = ready.thenCompose { vfs.create(next, directory = true).handle { _, _ -> Unit } }
+                ready = ready.thenCompose { files.create(next, directory = true).handle { _, _ -> Unit } }
             }
         }
         ready.whenComplete { _, _ -> post(then) }
@@ -5217,7 +5335,7 @@ class WorkbenchController(private val context: Context) {
 
     /** Lists Explorer's folder and the folders open in it again, and checks the open files are still there. */
     fun refreshExplorer() {
-        if (!vfs.isConnected()) return
+        if (!workspaceAvailable) return
         documents.forEach { checkFileExists(it.path) }
         currentDirectory.takeIf(String::isNotEmpty)?.let(::loadDirectory)
         // Reload open folders; ones that went away (deleted, renamed) close.
@@ -5346,8 +5464,11 @@ class WorkbenchController(private val context: Context) {
 
     // Language servers ------------------------------------------------------------------------
 
+    /** A file only this device has (a picked file, or a device folder's, G29): the guest's servers can't see it. */
+    private fun onDevice(path: String): Boolean = isDevicePath(path) || isTreePath(path)
+
     fun languageClientFor(path: String): LanguageClient? =
-        if (isDevicePath(path)) null else when (path.substringAfterLast('.', "").lowercase()) {
+        if (onDevice(path)) null else when (path.substringAfterLast('.', "").lowercase()) {
             "py", "pyi" -> languageClients["python"]
             "ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs" -> languageClients["typescript"]
             else -> otherLanguageServer(path)?.let { languageClients[it.first.id] }
@@ -5358,7 +5479,7 @@ class WorkbenchController(private val context: Context) {
         if (settings.otherLanguageServers) OtherLanguageServer.forPath(path) else null
 
     private fun languageClientsFor(path: String): List<LanguageClient> =
-        if (isDevicePath(path)) emptyList() else listOfNotNull(
+        if (onDevice(path)) emptyList() else listOfNotNull(
             languageClientFor(path),
             if (path.substringAfterLast('.', "").lowercase() in setOf("py", "pyi")) languageClients["python-format"] else null,
         ).distinct()
@@ -5408,7 +5529,7 @@ class WorkbenchController(private val context: Context) {
 
     private fun notifyDocumentOpened(document: DocumentSession) {
         // Device files have no guest path for the servers (or Copilot) to know them by.
-        if (document.path in notebooks || isDevicePath(document.path) || document.binary) return
+        if (document.path in notebooks || onDevice(document.path) || document.binary) return
         lspLanguageId(document.path)?.let { languageId ->
             languageClientsFor(document.path).filter { it.isReady }.forEach { client ->
                 lspLog { "didOpen ${document.path} v${document.version} (${document.text.length} chars) in ${languageClients.entries.firstOrNull { it.value === client }?.key}" }
@@ -5421,14 +5542,14 @@ class WorkbenchController(private val context: Context) {
     }
 
     private fun notifyDocumentChanged(path: String, version: Long, text: String) {
-        if (isDevicePath(path)) return
+        if (onDevice(path)) return
         languageClientsFor(path).filter { it.isReady }.forEach { client -> client.didChange(path, version, text) }
         if (copilot.language.isReady) copilot.language.didChange(path, version, text)
     }
 
     private fun notifyDocumentClosed(path: String) {
         untrackRustCrate(path)
-        if (isDevicePath(path) || isImagePath(path)) return
+        if (onDevice(path) || isImagePath(path)) return
         languageClientsFor(path).forEach { it.didClose(path) }
         copilot.language.didClose(path)
     }
@@ -5447,7 +5568,7 @@ class WorkbenchController(private val context: Context) {
 
     /** Starts the servers a document needs, so idle languages cost no guest memory. */
     private fun ensureLanguageServers(path: String) {
-        val workspace = workspaceRoot ?: return
+        val workspace = guestWorkspace ?: return
         if (!vfs.isConnected() || path in notebooks) return
         val starting = languageClients.filterValues { it in languageClientsFor(path) && !it.isStarted }
         if (starting.isEmpty()) return
@@ -5610,7 +5731,12 @@ class WorkbenchController(private val context: Context) {
     fun navigateToLocation(location: LanguageLocation, preview: Boolean = false) {
         val path = java.net.URI(location.uri).path?.let(::documentPathFor) ?: return
         val start = location.range.getAsJsonObject("start") ?: return
-        val target = EditorNavigationTarget(path, start.get("line").asInt, start.get("character").asInt)
+        navigateToPosition(path, start.get("line").asInt, start.get("character").asInt, preview)
+    }
+
+    /** Opens [path] (or shows its tab) with the cursor at 0-based [line] and [character]. */
+    fun navigateToPosition(path: String, line: Int, character: Int, preview: Boolean = false) {
+        val target = EditorNavigationTarget(path, line, character)
         compactDestination = CompactDestination.Editor
         if (activePath == path) {
             editorSurface?.moveCursor(LspPosition(target.line, target.character))
@@ -5677,7 +5803,7 @@ class WorkbenchController(private val context: Context) {
     /** Reads the `.code-snippets` files in the workspace's `.vscode` folder (at connect, and when one is saved). */
     private fun reloadWorkspaceSnippets(root: String) {
         val folder = "${root.trimEnd('/')}/.vscode"
-        vfs.listDir(folder).thenCompose { entries ->
+        files.listDir(folder).thenCompose { entries ->
             val files = entries.filter { !it.isDirectory && it.name.endsWith(".code-snippets") && it.size in 1..MAX_SNIPPET_FILE_BYTES.toLong() }
             val reads = files.map { entry -> entry to repository.readBytes(entry.path, MAX_SNIPPET_FILE_BYTES) }
             CompletableFuture.allOf(*reads.map { it.second }.toTypedArray()).thenApply {
@@ -5759,15 +5885,15 @@ class WorkbenchController(private val context: Context) {
             return
         }
         val path = "${root.trimEnd('/')}/.vscode/workspace.code-snippets"
-        vfs.stat(path).whenComplete { _, missing ->
+        files.stat(path).whenComplete { _, missing ->
             post {
                 if (missing == null) {
                     openPath(path)
                     return@post
                 }
                 // .vscode may exist already: its error is ignored, the file's isn't.
-                vfs.create("${root.trimEnd('/')}/.vscode", directory = true).handle { _, _ -> null }
-                    .thenCompose { vfs.create(path, directory = false) }
+                files.create("${root.trimEnd('/')}/.vscode", directory = true).handle { _, _ -> null }
+                    .thenCompose { files.create(path, directory = false) }
                     .thenCompose { repository.writeAll(path, WORKSPACE_SNIPPETS_TEMPLATE.toByteArray(), null) }.whenComplete { _, error ->
                     post {
                         if (error != null) status = "Couldn't create $path: ${error.cause?.message ?: error.message}" else openPath(path)
@@ -7295,7 +7421,7 @@ class WorkbenchController(private val context: Context) {
     }
 
     private fun startCopilot(attempt: Int = 0) {
-        val workspace = workspaceRoot ?: return
+        val workspace = guestWorkspace ?: return
         if (!copilotEnabled || copilot.language.isStarted || !vfs.isConnected()) return
         if (copilotSignedOut) {
             // Started by "Sign in" (beginCopilotSignIn) instead, so a signed-out guest doesn't pay for it.
@@ -7416,7 +7542,7 @@ class WorkbenchController(private val context: Context) {
      * shows the first; null when Copilot isn't on. Call on the main thread.
      */
     fun copilotInlineCompletions(document: DocumentSession, position: LspPosition): CompletableFuture<List<CopilotSuggestion>>? {
-        if (isDevicePath(document.path) || !copilotEnabled || !copilot.language.isReady) return null
+        if (onDevice(document.path) || !copilotEnabled || !copilot.language.isReady) return null
         val indentation = indentation(document)
         copilotLog { "aardink request ${document.path.substringAfterLast('/')} ${position.line}:${position.character} v${document.version}" }
         return copilot.inlineCompletion(document.path, document.version, position, indentation.tabSize, indentation.insertSpaces, false)
@@ -7445,7 +7571,7 @@ class WorkbenchController(private val context: Context) {
     }
 
     private fun requestNextEdit(invoked: Boolean) {
-        if (activePath?.let(::isDevicePath) == true) return
+        if (activePath?.let(::onDevice) == true) return
         val document = activeDocument?.takeUnless { it.binary || activeNotebook != null } ?: return
         val surface = editorSurface ?: return
         if (!copilotEnabled || !copilot.language.isReady) {
@@ -7557,7 +7683,7 @@ class WorkbenchController(private val context: Context) {
     }
 
     fun sendChat(text: String) {
-        val workspace = workspaceRoot
+        val workspace = guestWorkspace
         if (workspace == null || !vfs.isConnected()) {
             chatEntries.add(ChatEntry.Notice("Connect to a guest workspace first."))
             return
@@ -7659,7 +7785,7 @@ class WorkbenchController(private val context: Context) {
     var showChatHistory by mutableStateOf(false)
 
     fun openChatHistory() {
-        val workspace = workspaceRoot
+        val workspace = guestWorkspace
         if (workspace == null || !vfs.isConnected()) {
             status = "Connect to a guest workspace to see past chats"
             return
@@ -7811,7 +7937,7 @@ class WorkbenchController(private val context: Context) {
 
     /** The picker's first tap before any message: opens a session so the agent lists its options. */
     fun loadChatOptions() {
-        val workspace = workspaceRoot
+        val workspace = guestWorkspace
         if (workspace == null || !vfs.isConnected() || chatOptionsLoading) return
         chatOptionsLoading = true
         ensureChatSession(workspace).whenComplete { _, error ->
@@ -8137,7 +8263,7 @@ class WorkbenchController(private val context: Context) {
                 else -> Unit
             }
         }
-        if (!vfs.ptySpawn(id, workspaceRoot, 120, 32, shell.path, shell.args, settings.shellIntegration)) {
+        if (!vfs.ptySpawn(id, guestWorkspace, 120, 32, shell.path, shell.args, settings.shellIntegration)) {
             status = "Could not start a terminal"
             vfs.removePtyListener(id)
             session.emulator.close()
@@ -8492,7 +8618,7 @@ class WorkbenchController(private val context: Context) {
 
     /** Opens [path] at [line] and [column] (1-based) once the guest says it is a file. */
     private fun openGuestFileAt(path: String, line: Int?, column: Int?) {
-        vfs.stat(path).whenComplete { entry, error ->
+        files.stat(path).whenComplete { entry, error ->
             post {
                 if (error != null || entry.isDirectory) {
                     status = "No file at $path"
@@ -9024,13 +9150,13 @@ class WorkbenchController(private val context: Context) {
             NotebookCell(cell.id, cell.type, cell.source, cell.outputs.toList(), cell.executionCount, metadata)
         }
         val text = NotebookDocument(target, cells, session.notebook.metadata.deepCopy(), 5).toJson()
-        vfs.stat(target).whenComplete { _, missing ->
+        files.stat(target).whenComplete { _, missing ->
             if (missing == null) {
                 if (attempt < 20) exportInteractive(session, path, attempt + 1) else post { status = "Export failed: too many notebooks named like ${target.substringAfterLast('/')}" }
                 return@whenComplete
             }
             // writeAll flushes: the daemon keeps a write buffered until then (a bare write left 0 bytes).
-            vfs.create(target, false)
+            files.create(target, false)
                 .thenCompose { repository.writeAll(target, text.toByteArray(), null) }
                 .whenComplete { _, error ->
                     post {
@@ -9080,18 +9206,18 @@ class WorkbenchController(private val context: Context) {
     /** Writes the plot beside the notebook as `name-plot-1.png` (the next free number), as VS Code's Save does. */
     fun savePlotToWorkspace(session: NotebookSession, plot: NotebookPlot, attempt: Int = 1) {
         val path = session.notebook.path.substringBefore(" · ")
-        if (isDevicePath(path) || !vfs.isConnected()) {
+        if (isDevicePath(path) || !files.isConnected(path)) {
             status = "Connect to the guest to save beside the notebook"
             return
         }
         val stem = if ('.' in path.substringAfterLast('/')) path.substringBeforeLast('.') else path
         val target = "$stem-plot-$attempt.${plot.extension}"
-        vfs.stat(target).whenComplete { _, missing ->
+        files.stat(target).whenComplete { _, missing ->
             if (missing == null) {
                 if (attempt < 200) savePlotToWorkspace(session, plot, attempt + 1) else post { status = "Save failed: too many plots named like ${target.substringAfterLast('/')}" }
                 return@whenComplete
             }
-            vfs.create(target, false)
+            files.create(target, false)
                 .thenCompose { repository.writeAll(target, plotBytes(plot), null) }
                 .whenComplete { _, error ->
                     post {
@@ -10485,6 +10611,7 @@ class WorkbenchController(private val context: Context) {
             "quirecode.saveActiveFileToDevice" -> activePath?.takeIf(::isGuestPath)?.let { beginSaveToDevice(listOf(it)) }
                 ?: run { status = "Only the guest's files can be saved to the device from here" }
             "quirecode.importFiles" -> beginImportFiles()
+            "quirecode.openDeviceFolder" -> beginOpenDeviceFolder()
             "quirecode.importFolder" -> beginImportFolder()
             "notebook.cell.toggleLineNumbers" -> toggleCellLineNumbers()
             "notebook.cell.triggerSuggest" -> triggerCellSuggest()

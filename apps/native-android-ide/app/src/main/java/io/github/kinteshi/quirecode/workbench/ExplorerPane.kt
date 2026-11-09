@@ -106,7 +106,7 @@ fun ExplorerList(controller: WorkbenchController) {
     when {
         controller.offline -> OfflineFilesList(controller)
         // The connection's own words (G22): set up, connecting, offline and why.
-        !controller.connected && controller.roots.isEmpty() -> controller.connection.let { summary ->
+        !controller.workspaceAvailable && controller.roots.isEmpty() -> controller.connection.let { summary ->
             EmptyState(Icons.Outlined.CloudOff, summary.title, "Explorer shows the files of the machine QuireCode is connected to.") {
                 androidx.compose.material3.FilledTonalButton(onClick = controller::openConnect) {
                     Text(if (summary.state == ConnectionState.NotSetUp) "Set up" else "Connections")
@@ -183,7 +183,7 @@ private fun ExplorerTree(controller: WorkbenchController, directory: String) {
                         PaneRow(
                             // The arrow only where it goes somewhere.
                             if (atRoot) Icons.Outlined.FolderOpen else Icons.AutoMirrored.Outlined.ArrowBack,
-                            if (atRoot) directory else "..",
+                            if (atRoot) controller.displayPath(directory) else "..",
                             muted = true,
                             selected = drag.target != null && drag.target == parent && !atRoot,
                             trailing = if (tree && rows.any { it.expanded }) {
@@ -399,7 +399,14 @@ private fun OpenEditorsHeader(controller: WorkbenchController) {
 private fun OpenEditorRow(controller: WorkbenchController, document: io.github.kinteshi.quirecode.document.DocumentSession) {
     val path = document.path
     val dirty = document.dirty || controller.notebooks[path]?.notebook?.dirty == true
-    val folder = path.substringBeforeLast('/', "").removePrefix(controller.workspaceRoot?.trimEnd('/').orEmpty()).trim('/')
+    val root = controller.workspaceRoot?.trimEnd('/').orEmpty()
+    val parentFolder = path.substringBeforeLast('/', "")
+    // A device folder's file outside the workspace (G29): its folder by name, not its tree URI.
+    val folder = if (io.github.kinteshi.quirecode.document.isTreePath(path) && !path.startsWith("$root/")) {
+        controller.displayPath(parentFolder)
+    } else {
+        parentFolder.removePrefix(root).trim('/')
+    }
     PaneRow(
         when {
             path.endsWith(".ipynb") -> Icons.Outlined.Code
@@ -448,7 +455,10 @@ private fun EntryMenu(
             item("New file here", Icons.AutoMirrored.Outlined.NoteAdd) { controller.beginNewEntry(folder = false, parent = entry.path) }
             if (tree) item("Show only this folder", Icons.Outlined.FolderOpen) { controller.loadDirectory(entry.path) }
         } else {
-            item("Add to Copilot chat", Icons.Outlined.AutoAwesome) { controller.attachFileToChat(entry.path) }
+            // The chat agents run in the guest and can't read a device folder's files (G29).
+            if (!io.github.kinteshi.quirecode.document.isTreePath(entry.path)) {
+                item("Add to Copilot chat", Icons.Outlined.AutoAwesome) { controller.attachFileToChat(entry.path) }
+            }
         }
         item("Select", Icons.Outlined.CheckBox) { controller.toggleExplorerSelection(entry.path) }
         item("Share…", Icons.Outlined.Share) { controller.shareEntries(listOf(entry.path)) }

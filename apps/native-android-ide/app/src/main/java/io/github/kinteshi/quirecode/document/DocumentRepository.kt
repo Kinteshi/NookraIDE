@@ -229,7 +229,7 @@ class DocumentRepository(
             ),
         )
         if (isDevicePath(document.path)) return saveDeviceFile(document, savingText, bytes)
-        if (!vfs.isConnected()) {
+        if (!vfs.isConnected(document.path)) {
             return CompletableFuture.completedFuture(SaveResult.QueuedOffline)
         }
         return writeAll(document.path, bytes, document.baseModifiedTs)
@@ -373,7 +373,7 @@ class DocumentRepository(
 
     fun reconcile(document: DocumentSession): CompletableFuture<SaveResult> {
         if (!document.dirty) return CompletableFuture.completedFuture(SaveResult.Saved(document.baseModifiedTs ?: 0L))
-        if (!vfs.isConnected()) return CompletableFuture.completedFuture(SaveResult.QueuedOffline)
+        if (!vfs.isConnected(document.path)) return CompletableFuture.completedFuture(SaveResult.QueuedOffline)
         return vfs.stat(document.path).thenCompose<SaveResult> { entry ->
             if (document.baseModifiedTs != null && entry.modifiedTs != document.baseModifiedTs) {
                 loadRemoteConflict(document).thenApply<SaveResult> { conflict ->

@@ -92,7 +92,7 @@ fun SidebarContent(controller: WorkbenchController, view: SidebarView, modifier:
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(view.title, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-            if (view == SidebarView.Explorer && controller.connected) {
+            if (view == SidebarView.Explorer && controller.workspaceAvailable) {
                 Tooltip("New file") { IconButton(onClick = { controller.beginNewEntry(folder = false) }) {
                     Icon(Icons.AutoMirrored.Outlined.NoteAdd, contentDescription = "New file")
                 } }
