@@ -36,7 +36,9 @@ class ConnectionsTest {
         assertEquals("Linux guest", connectionSummary(guest.copy(connected = true)).chip)
         assertNull(connectionSummary(guest.copy(connected = true)).detail)
         assertEquals("Set up", connectionSummary(guest.copy(hasConnections = false)).chip)
-        assertTrue(connectionSummary(guest.copy(failure = "Handshake timed out")).detail!!.startsWith("Handshake timed out"))
+        assertTrue(connectionSummary(guest.copy(failure = "Handshake timed out")).detail!!.startsWith("Handshake timed out. "))
+        assertTrue(connectionSummary(guest.copy(name = "100.64.0.1", tabletGuest = false, pairingRejected = true)).detail!!.contains("revoked"))
+        assertTrue(connectionSummary(guest.copy(pairingRejected = true)).detail!!.contains("Linux Terminal is reset"))
     }
 
     @Test

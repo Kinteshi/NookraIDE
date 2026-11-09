@@ -104,11 +104,16 @@ fun connectionSummary(facts: ConnectionFacts): ConnectionSummary {
         )
         ConnectionState.PairingRejected -> ConnectionSummary(
             state, "Pair again", "${where.replaceFirstChar(Char::uppercase)} needs pairing again",
-            "It no longer accepts this device's pairing, which happens after Linux Terminal is reset or the daemon is " +
-                "reinstalled. Pair again with a new code; your files and settings are kept.",
+            if (facts.tabletGuest) {
+                "It no longer accepts this device's pairing, which happens after Linux Terminal is reset or the daemon is " +
+                    "reinstalled. Pair again with a new code; your files and settings are kept."
+            } else {
+                "It no longer accepts this device's pairing: this device was revoked there, or its daemon was reinstalled. " +
+                    "Pair again with a new code from `quirecode-daemon pair --remote`; your files and settings are kept."
+            },
         )
         ConnectionState.Failed -> ConnectionSummary(
-            state, "Offline", "Couldn't connect to ${facts.name}", listOfNotNull(facts.failure, meanwhile).joinToString(" "),
+            state, "Offline", "Couldn't connect to ${facts.name}", listOfNotNull(facts.failure?.trimEnd()?.let { if (it.endsWith('.')) it else "$it." }, meanwhile).joinToString(" "),
         )
     }
 }

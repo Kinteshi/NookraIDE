@@ -2852,6 +2852,25 @@ User's request (11-09): "Go for suggestion 2" (G30's private network and hardeni
   with the address and the name; `--remote --address` unchanged. Without Tailscale it says to install it; with
   Tailscale down it **stopped silently** (`set -e` and `pipefail` on the failing `tailscale ip`): fixed, it now says to
   run `sudo tailscale up`.
+* **Tailscale for real** (user, 11-09: made an account, chose this machine as the host, a login link, keep Tailscale
+  here): Tailscale 1.104.5 from Arch's repository on this WSL machine, joined as `example-host` (100.64.0.1);
+  the user put Tailscale on the tablet (100.64.0.2; a direct path over the LAN, 8 ms). The build's daemon ran here
+  bound to the tailnet address only (closed on loopback and on WSL's own address). From the dev app: paired with the
+  connection string carrying the tailnet address (the daemon listed and logged the device from 100.64.0.2), opened
+  a file of this machine's workspace, revoked here (cut off in 5 s, the reconnect refused, "Pair again"), the shared
+  token refused from the tailnet ("works only from this machine"), and after 10 failures "Too many failed attempts from
+  this device; try again in 9 minutes".
+* **Fixed from that run:** a computer's "needs pairing again" explained it with Linux Terminal's reset (now: revoked
+  or its daemon reinstalled, and the pair command); a failure's sentence ran into "Meanwhile" without a full stop;
+  Troubleshoot opened with no check (after deleting the current connection) said "Checking…" forever and now runs one
+  (this last fix built and installed, not seen: the user had the tablet again).
+* **Found, not fixed: with the tablet's Tailscale VPN on, Linux Terminal stopped forwarding port 19870.** The guest's
+  daemon was healthy (its own `/health` answered inside the guest) and nothing reached it after the VPN came up: the
+  port on the tablet accepted connections and answered nothing, and the apps showed the guest as stopped. The usual
+  remedy (force stop Linux Terminal and open it again) restarts the guest and was left for the user to approve.
+  Whether it holds with the VPN on, or the VPN breaks it each time, is still to see: registered as G31.
+* The test daemon and its files were removed; Tailscale stays installed and enabled on this machine (the user's
+  choice). The dev app's Tailscale connection was deleted.
 * G30 left: steps 2 (Cloudflare Tunnel, checking a public certificate) and 3 (port forwarding), and managing devices
   from the app (list and revoke over the protocol) rather than the command line.
 
@@ -2890,6 +2909,7 @@ Grouped (11-08) so that what's cheaper done together is done together; the numbe
 | | G28 | – | M | **Import into Explorer**: files or a whole folder from the device (Android's file picker) into the folder chosen in Explorer, with replace or keep both on name clashes. Builds on receiving shared files (the share sheet into the workspace) and Open from device |
 | **10. Beyond the tablet's guest** (user, 11-09) | G29 | – | L overall, in steps | **Fully usable offline, without a guest** (user: "where possible"). What can be: (a) **a device folder as the workspace** (Android's folder picker: Documents, a synced folder), with Explorer, tabs, editing, Quick Open, find and replace in files done in the app and saves straight to the device (M–L, the first step); (b) **"Keep available offline"** for a guest folder: all of it copied to the device and synced back with conflict checks, beyond today's copies of opened files (M–L); (c) what already needs no guest, made whole: colours, snippets, previews (Markdown, SVG, images, hex), notebooks edited with their saved outputs (no kernel). What can't be without some machine: language servers, debuggers, kernels, terminals, Copilot and the agents (they run in the guest). Later, research: a Python kernel in the browser engine (Pyodide in a WebView) for notebooks (L+). Overlaps G18 |
 | | G30 | – | Steps 1 and 4 done (63); M left | **The daemon reachable over the internet.** Done in batch 63: Tailscale (`--tailscale`), device tokens, revoking, limits, the connection log. Left: (2) Cloudflare Tunnel with a public certificate, (3) port forwarding, and the paired devices listed and revoked from the app. The original suggestions: Suggested, in order: (1) **a private network** (Tailscale, or ZeroTier or WireGuard) on the computer and the tablet: the daemon listens on that network's address, nothing is open to the internet, and today's pinned certificate and token work as they are; an installer option that puts that address in the connection string, and a guide (S–M). (2) **A public address through Cloudflare Tunnel** (or similar), behind Cloudflare Access: the app then checks a public certificate instead of pinning one (a per-connection setting) (M). (3) **Router port forwarding with dynamic DNS**: works with pinning today but exposes the daemon; not without (4). (4) **Hardening first**, for any of them: limits on handshake attempts, revoking a paired device, a log of connections (S–M) |
+| | G31 | – | S–M | **Linux Terminal stopped forwarding the guest's port when the tablet's Tailscale VPN came on** (batch 63's live test): the daemon was healthy inside the guest, the port answered nothing. Find out whether restarting Linux Terminal with the VPN on fixes it for good or the VPN breaks it each time; then say so in the app (Troubleshoot can tell "port open, no answer" apart) and in the guide (a Tailscale exclusion or split tunnelling for Linux Terminal, if that helps) |
 
 Why these groups:
 1. Most of the memory and the frame time is the editor's. Tuning sora's would be thrown away, so both wait for the flip (A5),

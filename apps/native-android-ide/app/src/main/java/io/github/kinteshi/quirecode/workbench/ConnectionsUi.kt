@@ -318,6 +318,10 @@ private fun AddRow(icon: ImageVector, title: String, summary: String, onClick: (
 private fun Troubleshooting(controller: WorkbenchController) {
     val check = controller.connectionCheck
     val facts = controller.connectionFacts
+    // Shown with no check yet (just opened, or the connection changed): run one rather than wait.
+    androidx.compose.runtime.LaunchedEffect(check == null, controller.endpoint) {
+        if (controller.connectionCheck == null && !controller.connected) controller.checkConnection()
+    }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         if (facts.tabletGuest) {
             when (check?.terminalAvailable) {
