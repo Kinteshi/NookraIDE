@@ -2477,6 +2477,8 @@ app id and the icon, so the work that doesn't depend on it goes first. 368 app u
   asks. Nothing ships under GPL, LGPL or MPL (a unit test checks, and that the key components are listed).
 * **Settings > About**: the version, the licence, and **Open-source licences**: the components by group, with a filter;
   one opens its licence text. Checked on the tablet.
+* **R11's first step, the history scanned for secrets**: none found; the first two commits carry the user's personal
+  email as author, for the user to decide on (details in [RELEASE-PLAN.md](RELEASE-PLAN.md), "The repository").
 * Left for later release items: CI checking that `notices.json` is current (R5); the version shown is the build's fixed
   `0.1.0` until versions come from tags (R4); the repository link in tm4e's notice points at `main`, which this branch
   becomes (R11).

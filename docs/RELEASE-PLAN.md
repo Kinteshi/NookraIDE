@@ -67,7 +67,16 @@ This branch (`agents/reset-and-implement-native-android-ide`) becomes the defini
 (user, 11-08). On 11-08 the repository had `main` (Track A's history) and four `agents/*` branches on GitHub besides this one.
 Suggested order, each destructive step confirmed with the user right before it:
 
-1. Scan the whole history for secrets (gitleaks or similar): batches handled tokens and pairing codes.
+1. Scan the whole history for secrets (gitleaks or similar): batches handled tokens and pairing codes. **Done 11-08
+   (batch 58)**, with a pattern scan of every commit on every branch (GitHub, Google, AWS, Slack and OpenAI-style tokens,
+   private keys, token/secret/password assignments, long hex strings): **no secrets found**. The one hit was a VS Code CLI
+   version hash. Also seen, for the user to decide on before the history goes public:
+   * The first two commits (`23bc319` "Add AVF Studio spec and docs" and `9747fba` "Translate spec and docs to English",
+     10-15) are authored as `[redacted username] <[redacted personal email]>`, a personal email; every later commit uses the GitHub
+     noreply address. They're in every branch and already on GitHub. Rewriting their author (a mailmap with
+     `git filter-repo`) changes every commit's hash, so it would go with step 3's force push, or be left as is.
+   * Private network addresses of the tablet and the dev machine (192.168.1.x, 10.x) appear in docs and tests: harmless,
+     listed only for completeness.
 2. Keep this branch's history unless the scan finds something; otherwise squash into one first commit.
 3. Replace `main` on GitHub with this branch (a force push) and delete the other branches there and locally. An optional
    local bundle as a backup.
