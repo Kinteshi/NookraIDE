@@ -2569,6 +2569,37 @@ app id and the icon, so the work that doesn't depend on it goes first. 368 app u
     release says nothing in logcat by itself.
   * Users' and developers' docs: the README (R7) is for users; CONTRIBUTING.md leads to the specs, batches and plans in
     `docs/`. HOSTING-THE-DAEMON.md is for users and linked from the README.
+* **R7, first run** (checked on the tablet with the release-signed build, 11-09):
+  * README.md for users: what's needed, install, setup and pairing, a computer instead, updating, the guest going
+    away, reporting a problem (Copy Diagnostics), privacy, licence. HOSTING-THE-DAEMON.md offers the release's Linux
+    daemon besides building it.
+  * The welcome page has a **Get started** card until something is paired: what the app needs, **Set up the guest**
+    (or **Developer options** when Linux Terminal isn't turned on), **Pair with a computer**, **Connect by hand**.
+    **Connect** everywhere (the top bar, Explorer, Open Folder, the command) opens the setup instead of the URL-and-token
+    dialog while nothing is paired.
+  * Found in the walkthrough and fixed:
+    * **The installer copied the daemon out of `/mnt/shared` with `install`**, whose copy_file_range is what made
+      crosvm's virtio-fs panic and stop the VM on 10-29 (`cp` then; manual updates had switched to `cat`, the
+      installer hadn't). It reads and writes the file with `cat` now. Every user's setup goes through it.
+    * Pairing connected without asking for the notification permission (only the Connect dialog asked), so a new user's
+      background connection had no notification: pairing asks now.
+    * The welcome page didn't scroll: in a short floating window its last actions and buttons were cut off. It scrolls,
+      centred when it fits, and its buttons wrap.
+    * The setup dialog's "computer" paragraph named `scripts/install-native-daemon.sh`, which a user downloading the
+      release doesn't have: it names the release's installer and the hosting guide.
+  * The walkthrough: a clean install of the signed APK (the old debug app was gone from the tablet), the Get started
+    card, Set up the guest, the installer run in Linux Terminal on the real guest (the fixed one, with the bundled
+    daemon). It moved the old install over: the token from 10-27 kept in `~/.config/quirecode`, `avf-native.service`
+    stopped and removed, `quirecode.service` active, the old binary gone. Then the pairing code, Pair and connect,
+    and `~/Projects` opened. R6's banner stays away (both 0.1.0, as expected). R9's report checked by pasting it into
+    an untitled file (not saved): versions, device, guest and daemon, recent messages, no token.
+* **R8, the Material You pass:**
+  * One banner (`WorkbenchBanner`, Banner.kt) for the workbench's and the editor's: the deleted-file, language-pack and
+    large-file strips were flat bars whose buttons couldn't wrap; they're the workbench's rounded cards now, with icons,
+    wrapping at phone width.
+  * Phone width (a 380 dp window on the tablet): the terminal's toolbar row fits a tab and its six actions, the tabs
+    scrolling (batch 40's loose end, closed); Files, Problems (its empty state) and the bottom bar look right. The
+    panel's tab chips scroll past the edge.
 * Also: the remaining "AVF Studio" in what users read (the daemon's log and errors, the guest tools' descriptions, the
   installers, HOSTING-THE-DAEMON.md) is QuireCode; the Windows script's task and firewall-rule ids stay, as its
   uninstall looks for them. A compiled Python cache (`guest/tools/__pycache__`) had been committed: removed, and ignored.
@@ -2600,7 +2631,7 @@ Grouped (11-08) so that what's cheaper done together is done together; the numbe
 | | G8 | 56 | M–L | Widgets not drawn yet |
 | **6. Large workspaces** | G4 | 61 | S–M | Files beyond Quick Open's 20,000 |
 | | G7 | 55 | S | Deep Rust projects on the tablet (about 1 GB of Rust) |
-| **7. Window and layout** | – | – | S | The terminal's toolbar row at phone width (batch 40). G6 was done in batch 57 |
+| **7. Window and layout** | – | – | – | Done: the terminal's toolbar row at phone width was checked in batch 58 (R8). G6 was done in batch 57 |
 | **On its own** | G12 | 64 | S–M or L | Replace Gemini CLI with Antigravity CLI |
 | | G19 | – | S–M | Debugger: values in the hover while paused, and Copilot's partial accept (word by word): in neither engine (batch 55) |
 | | G11 | – | ? | Copilot exits after a daemon restart (watching) |
@@ -2666,10 +2697,10 @@ release waits for; the rest stay in their lists for later releases.
 | | R3 | Done (58) | Licence **Apache-2.0**: LICENSE and NOTICE, Cargo changed, notices generated from what ships and shown in Settings > About |
 | **2. Build and ship** | R4 | Done but the key (58) | Release builds: version from the tag, signing from the environment, R8 (25 MB). Left: the user creates and keeps the release key |
 | | R5 | Written (58), runs once pushed | CI and releases (GitHub Actions): tests, notices check, daemon for the guest and hosts, signed APK, checksums, release from a tag; notes in docs/releases/ |
-| | R6 | Done (58), unchecked on the tablet | The app compares the guest daemon's version with its own and offers to update it, keeping the pairing |
-| **3. Polish** | R7 | M | First run and setup: what's needed (Android version, Linux Terminal, AVF), Set up guest, pairing, offline; a README for users, apart from the specs |
-| | R8 | M | Material You pass: cards, dialogs and banners consistent (as the large-file banner wasn't), empty states, phone width (the terminal toolbar loose end) |
-| | R9 | Done (58), unchecked on the tablet | Diagnostics for bug reports: a Copy Diagnostics command (versions, device, guest state, recent errors); no telemetry |
+| | R6 | Done (58) | The app compares the guest daemon's version with its own and offers to update it, keeping the pairing |
+| **3. Polish** | R7 | Done (58) | First run and setup: what's needed (Android version, Linux Terminal, AVF), Set up guest, pairing, offline; a README for users, apart from the specs |
+| | R8 | Done (58) | Material You pass: cards, dialogs and banners consistent (as the large-file banner wasn't), empty states, phone width (the terminal toolbar loose end) |
+| | R9 | Done (58), checked on the tablet | Diagnostics for bug reports: a Copy Diagnostics command (versions, device, guest state, recent errors); no telemetry |
 | | R10 | Done (58) | Out of the release: the aardink-lab module, debug probes, Track A's leftovers (SPEC.md, the untracked `android/`), developer docs kept apart from users' |
 | **4. The repository** | R11 | S–M | This branch becomes the definitive `main`; the other branches and trials (old `main`, the four `agents/*` on GitHub) are scrapped, after a check of the history for secrets; release tags from then on (user, 11-08) |
 
