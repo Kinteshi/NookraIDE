@@ -103,6 +103,10 @@ at the repository's final address:
 * **Then, here:** point `origin` at the new address; rewrite the history's author emails to the main account's private
   address; force-push this branch as `main`; delete the other branches; protect `main`. Then the release key's secrets
   are set on the final repository, and `v0.1.0` is tagged.
+  **Done 11-08 (with the user's go-ahead):** a backup bundle of every branch (`~/backups/AVFStudio-before-rewrite-2026-11-08.bundle`,
+  outside the repository); the 179 commits' author and committer rewritten to `Kinteshi <36821534+Kinteshi@users.noreply.github.com>` (`git filter-branch`;
+  the final tree identical, no old address left in any message); this branch force-pushed as `main` (`7c70aae`); the five
+  `agents/*` branches deleted on GitHub and the old ones here. Left: protecting `main` (the user, as admin), the secrets, the tag.
 
 Suggested order of the clean-up itself, each destructive step confirmed with the user right before it:
 

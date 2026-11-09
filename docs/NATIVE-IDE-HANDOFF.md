@@ -15,7 +15,7 @@ the engine seam, batches, testing on the device) is in [CONTRIBUTING.md](../CONT
 
 ## Where things are
 
-* **Branch:** `agents/reset-and-implement-native-android-ide`. Work is committed batch by batch (see the batch plan); nothing is pushed. The untracked top-level `android/` folder holds build leftovers from the Track A branch, so ignore it.
+* **Branch:** `main` of `github.com/Kinteshi/QuireCode` (private). Since 11-08 it's the only branch: the earlier trials were deleted after a backup (`~/backups/AVFStudio-before-rewrite-2026-11-08.bundle`), and the history's authors rewritten to `Kinteshi <36821534+Kinteshi@users.noreply.github.com>`, the identity commits use from now. Pushing is the user's call. The untracked top-level `android/` folder holds build leftovers from Track A, so ignore it.
 * **App:** `apps/native-android-ide`, app id and package `io.github.kinteshi.quirecode` (QuireCode; `com.avfstudio.nativeide` before 11-08).
 * **Guest daemon:** `crates/avf-daemon` with protocol `crates/avf-protocol`. The guest tool catalog is `guest/tools/catalog.json`, and the Jupyter bridge is `guest/tools/avf-jupyter-bridge.py`; the daemon embeds both.
 * **Guest install script:** `scripts/install-native-daemon.sh`.
