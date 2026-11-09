@@ -1,6 +1,8 @@
 package io.github.kinteshi.quirecode.workbench
 
 import androidx.compose.material.icons.outlined.Warning
+import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.DeleteSweep
 import androidx.compose.material.icons.outlined.ClearAll
@@ -168,19 +170,10 @@ fun EditorArea(controller: WorkbenchController, modifier: Modifier = Modifier) {
 /** The active tab's file is gone from the guest; what's shown is this device's copy. */
 @Composable
 private fun DeletedFileBanner(controller: WorkbenchController, path: String) {
-    val colors = MaterialTheme.colorScheme
-    Row(
-        Modifier.fillMaxWidth().background(colors.errorContainer).padding(start = 14.dp, end = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    WorkbenchBanner(
+        Icons.Outlined.Warning,
+        "This file no longer exists in the guest. This is the copy kept on this device; saving puts it back.",
     ) {
-        Icon(Icons.Outlined.Warning, contentDescription = null, tint = colors.onErrorContainer, modifier = Modifier.size(16.dp))
-        Text(
-            "This file no longer exists in the guest. This is the copy kept on this device; saving puts it back.",
-            style = MaterialTheme.typography.bodySmall,
-            color = colors.onErrorContainer,
-            modifier = Modifier.weight(1f).padding(vertical = 6.dp),
-        )
         androidx.compose.material3.TextButton(onClick = controller::saveActiveDocument) { Text("Save") }
         androidx.compose.material3.TextButton(onClick = { controller.requestCloseDocument(path) }) { Text("Close") }
     }
@@ -189,18 +182,12 @@ private fun DeletedFileBanner(controller: WorkbenchController, path: String) {
 /** A file without colours whose language VS Code's built-in extensions cover: fetch them, later, or never. */
 @Composable
 private fun LanguagePackBanner(controller: WorkbenchController, pack: io.github.kinteshi.quirecode.assets.LanguagePack) {
-    val colors = MaterialTheme.colorScheme
     val downloading = pack.id in controller.languagePackDownloads
-    Row(
-        Modifier.fillMaxWidth().background(colors.secondaryContainer).padding(start = 14.dp, end = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
+    WorkbenchBanner(
+        Icons.Outlined.Palette,
+        if (downloading) "Downloading ${pack.languageName} colours…" else "Colour ${pack.languageName} files? Downloads VS Code's ${pack.languageName} grammar (${pack.id} ${pack.version}) from Open VSX.",
+        tonal = true,
     ) {
-        Text(
-            if (downloading) "Downloading ${pack.languageName} colours…" else "Colour ${pack.languageName} files? Downloads VS Code's ${pack.languageName} grammar (${pack.id} ${pack.version}) from Open VSX.",
-            style = MaterialTheme.typography.bodySmall,
-            color = colors.onSecondaryContainer,
-            modifier = Modifier.weight(1f).padding(vertical = 6.dp),
-        )
         if (!downloading) {
             androidx.compose.material3.TextButton(onClick = { controller.installLanguagePack(pack) }) { Text("Download") }
             androidx.compose.material3.TextButton(onClick = { controller.postponeLanguagePack(pack) }) { Text("Not now") }
@@ -400,6 +387,53 @@ private fun Breadcrumbs(path: String, onNavigate: (String) -> Unit, actions: @Co
     }
 }
 
+/**
+ * The welcome page's first-run card: what the app needs (a Linux machine: Linux Terminal's guest, or a computer), and
+ * the setup a tap away. Without Linux Terminal turned on it says where to turn it on.
+ */
+@Composable
+private fun GetStartedCard(controller: WorkbenchController) {
+    val colors = MaterialTheme.colorScheme
+    val terminal = controller.linuxTerminalAvailable()
+    androidx.compose.material3.Surface(
+        color = colors.surfaceContainerHigh,
+        shape = MaterialTheme.shapes.large,
+        modifier = Modifier.widthIn(max = 520.dp).fillMaxWidth(),
+    ) {
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("Get started", style = MaterialTheme.typography.titleMedium, color = colors.onSurface)
+            Text(
+                "QuireCode edits files on a Linux machine: the guest of Android's Linux Terminal on this tablet, or a " +
+                    "computer on your network. Set it up once; afterwards the app connects by itself.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = colors.onSurfaceVariant,
+            )
+            if (!terminal) {
+                Text(
+                    "Linux Terminal isn't turned on here. Turn on Linux development environment in Developer options, " +
+                        "open Linux Terminal once to install its Debian guest, then come back.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.onSurfaceVariant,
+                )
+            }
+            androidx.compose.foundation.layout.FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                if (terminal) {
+                    androidx.compose.material3.Button(onClick = { controller.beginGuestSetup() }) { Text("Set up the guest") }
+                } else {
+                    androidx.compose.material3.Button(onClick = controller::openDeveloperOptions) { Text("Developer options") }
+                }
+                androidx.compose.material3.OutlinedButton(onClick = { controller.beginGuestSetup() }) {
+                    Text(if (terminal) "Pair with a computer" else "Use a computer instead")
+                }
+                androidx.compose.material3.TextButton(onClick = { controller.dialog = WorkbenchDialog.Connect }) { Text("Connect by hand") }
+            }
+        }
+    }
+}
+
 @Composable
 private fun EmptyEditor(controller: WorkbenchController) {
     Column(
@@ -416,6 +450,11 @@ private fun EmptyEditor(controller: WorkbenchController) {
         )
         Text("QuireCode", style = MaterialTheme.typography.headlineMedium, color = colors.onSurface)
         Spacer(Modifier.height(16.dp))
+        // First run (R7): nothing paired yet, so the way in comes first.
+        if (!controller.connected && controller.profiles.isEmpty()) {
+            GetStartedCard(controller)
+            Spacer(Modifier.height(16.dp))
+        }
         // Each line does what it says; the keys are for next time.
         val actions: List<Triple<androidx.compose.ui.graphics.vector.ImageVector, String, Pair<String, () -> Unit>>> = listOf(
             Triple(Icons.Outlined.FolderOpen, "Open Folder", "Ctrl+K Ctrl+O" to { if (controller.connected) controller.showOpenFolder() else controller.dialog = WorkbenchDialog.Connect }),
@@ -439,8 +478,12 @@ private fun EmptyEditor(controller: WorkbenchController) {
             }
         }
         Spacer(Modifier.height(20.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (!controller.connected) {
+        // Wraps at phone width rather than squeezing the buttons.
+        androidx.compose.foundation.layout.FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            if (!controller.connected && controller.profiles.isNotEmpty()) {
                 androidx.compose.material3.FilledTonalButton(onClick = { controller.dialog = WorkbenchDialog.Connect }) {
                     Icon(Icons.Outlined.Cloud, contentDescription = null, modifier = Modifier.padding(end = 8.dp).size(18.dp))
                     Text("Connect to guest")
@@ -499,28 +542,18 @@ private fun EmptyEditor(controller: WorkbenchController) {
 @Composable
 private fun LargeFileView(controller: WorkbenchController) {
     val paged = controller.pagedDocument ?: return
-    val colors = MaterialTheme.colorScheme
-    val dark = LocalDarkTheme.current
     Column(Modifier.fillMaxSize()) {
-        // Its buttons in the banner's own content colour: the theme's default was pale on the container.
-        androidx.compose.runtime.CompositionLocalProvider(androidx.compose.material3.LocalContentColor provides colors.onTertiaryContainer) {
-        Row(
-            Modifier.fillMaxWidth().background(colors.tertiaryContainer).padding(horizontal = 12.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
+        WorkbenchBanner(
+            Icons.Outlined.Description,
+            "Read-only large file · ${paged.size / (1024 * 1024)} MiB · page ${paged.pageIndex + 1}/${paged.pageCount}",
+            tonal = true,
         ) {
-            Text(
-                "Read-only large file · ${paged.size / (1024 * 1024)} MiB · page ${paged.pageIndex + 1}/${paged.pageCount}",
-                color = colors.onTertiaryContainer,
-                style = MaterialTheme.typography.labelLarge,
-                modifier = Modifier.weight(1f),
-            )
             Tooltip("Previous page") { IconButton(onClick = { controller.pageLargeFile(-1) }, enabled = paged.canGoPrevious) {
                 Icon(Icons.Outlined.ChevronLeft, contentDescription = "Previous page")
             } }
             Tooltip("Next page") { IconButton(onClick = { controller.pageLargeFile(1) }, enabled = paged.canGoNext) {
                 Icon(Icons.Outlined.ChevronRight, contentDescription = "Next page")
             } }
-        }
         }
         AardinkReadOnlyView(paged.text, controller.settings.syntaxColors, Modifier.fillMaxSize())
     }

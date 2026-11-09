@@ -24,13 +24,16 @@ with its CPU and memory.
 
 Requirements: x86_64 or arm64 Linux with systemd, `curl`, `tar`, and Git for Source Control.
 
-1. Build the daemon from this repository (needs Rust, https://rustup.rs):
+1. Get the daemon and its installer. Either download them from the
+   [release](../../../releases/latest): `quirecode-daemon-<version>-linux-x86_64` (or `-linux-arm64`), checked against
+   `SHA256SUMS`, and `install-native-daemon.sh`, both attached to the release; or build the daemon from this repository
+   (needs Rust, https://rustup.rs):
 
    ```sh
    cargo build --release -p avf-daemon
    ```
 
-2. Install it as a user service, listening on the network:
+2. Install it as a user service, listening on the network (with a downloaded daemon, give its path instead):
 
    ```sh
    bash scripts/install-native-daemon.sh --remote target/release/quirecode-daemon ~/Projects

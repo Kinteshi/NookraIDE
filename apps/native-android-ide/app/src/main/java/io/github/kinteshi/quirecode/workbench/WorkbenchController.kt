@@ -2932,6 +2932,22 @@ class WorkbenchController(private val context: Context) {
         runCatching { context.startActivity(intent) }.onFailure { status = "Could not open App info: ${it.message}" }
     }
 
+    /**
+     * Linux Terminal can be opened: Android has it and it's turned on (Developer options). Asked each time the welcome
+     * page draws, since it's turned on outside the app.
+     */
+    fun linuxTerminalAvailable(): Boolean = context.packageManager.getLaunchIntentForPackage(LINUX_TERMINAL_PACKAGE) != null
+
+    /** Android's Developer options, where Linux Terminal is turned on (Linux development environment). */
+    fun openDeveloperOptions() {
+        val intent = Intent(android.provider.Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (runCatching { context.startActivity(intent) }.isFailure) {
+            // Developer options are hidden until turned on: Settings > About tablet > Software information > Build number, 7 taps.
+            context.startActivity(Intent(android.provider.Settings.ACTION_DEVICE_INFO_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            status = "Turn on Developer options first: tap Build number seven times"
+        }
+    }
+
     fun openLinuxTerminal() {
         // The launcher intent brings a running Terminal forward; a bare ACTION_MAIN would start a
         // second Terminal screen that never attaches to the VM.

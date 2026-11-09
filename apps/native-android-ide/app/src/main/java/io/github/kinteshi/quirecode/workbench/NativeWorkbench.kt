@@ -206,7 +206,7 @@ private fun WorkbenchLayout(controller: WorkbenchController) {
         val windowHeight = maxHeight.value
         Column(Modifier.fillMaxSize()) {
             TopBar(controller, expanded)
-            GuestProblemBanner(controller)
+            GuestWorkbenchBanner(controller)
             DaemonVersionBanner(controller)
             GuestDiskBanner(controller)
             if (expanded) {
@@ -606,7 +606,7 @@ private fun StatusItem(text: String, icon: ImageVector? = null, tooltip: String 
 @Composable
 private fun GuestDiskBanner(controller: WorkbenchController) {
     val problem = controller.guestStats?.diskProblem?.takeIf { controller.connected } ?: return
-    ProblemBanner(
+    WorkbenchBanner(
         Icons.Outlined.Warning,
         "$problem. Files saved now may be damaged. Copy out what you need, then restart the guest: " +
             "Force stop Linux Terminal and open it again.",
@@ -617,10 +617,10 @@ private fun GuestDiskBanner(controller: WorkbenchController) {
 
 /** Shown while disconnected after a failed attempt, with the ways out. */
 @Composable
-private fun GuestProblemBanner(controller: WorkbenchController) {
+private fun GuestWorkbenchBanner(controller: WorkbenchController) {
     val problem = controller.guestProblem ?: return
     if (controller.connected) return
-    ProblemBanner(Icons.Outlined.CloudOff, problem) {
+    WorkbenchBanner(Icons.Outlined.CloudOff, problem) {
         if (controller.guestForwardingSuspected) {
             FilledTonalButton(onClick = controller::openLinuxTerminalAppInfo) { Text("App info") }
         }
@@ -642,7 +642,7 @@ private fun DaemonVersionBanner(controller: WorkbenchController) {
         DaemonVersionStatus.Older -> "The guest's daemon is ${notice.guest}; this app is ${notice.app}. Update the daemon to match: the pairing is kept."
         else -> "The guest's daemon is ${notice.guest}, newer than this app (${notice.app}). Update the app to match."
     }
-    ProblemBanner(Icons.Outlined.Info, message, tonal = true) {
+    WorkbenchBanner(Icons.Outlined.Info, message, tonal = true) {
         if (notice.status == DaemonVersionStatus.Older) {
             TextButton(onClick = controller::updateGuestDaemon) { Text("Update") }
         }
@@ -650,31 +650,3 @@ private fun DaemonVersionBanner(controller: WorkbenchController) {
     }
 }
 
-/** A Material banner: icon, message, and actions that wrap below the text when narrow; errors, or [tonal] for news. */
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun ProblemBanner(icon: ImageVector, message: String, tonal: Boolean = false, actions: @Composable () -> Unit) {
-    val colors = MaterialTheme.colorScheme
-    Surface(
-        color = if (tonal) colors.secondaryContainer else colors.errorContainer,
-        contentColor = if (tonal) colors.onSecondaryContainer else colors.onErrorContainer,
-        shape = MaterialTheme.shapes.large,
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
-    ) {
-        FlowRow(
-            Modifier.padding(start = 16.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.End),
-            verticalArrangement = Arrangement.Center,
-        ) {
-            Row(
-                Modifier.weight(1f).widthIn(min = 280.dp).padding(vertical = 6.dp).align(Alignment.CenterVertically),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(icon, contentDescription = null, modifier = Modifier.size(20.dp))
-                Text(message, style = MaterialTheme.typography.bodyMedium)
-            }
-            Row(Modifier.align(Alignment.CenterVertically), verticalAlignment = Alignment.CenterVertically) { actions() }
-        }
-    }
-}
