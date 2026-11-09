@@ -226,6 +226,14 @@ private val KEYBINDINGS_TEMPLATE = """
     [
     ]
 """.trimIndent()
+/**
+ * The tabs a session saves: the open ones, and restored ones not open yet ([waiting]: loading, or waiting for the guest),
+ * each restored tab at its old place ([order]), new tabs after them.
+ */
+internal fun sessionTabs(loaded: List<String>, waiting: List<String>, order: Map<String, Int>): List<String> =
+    if (waiting.isEmpty()) loaded
+    else (loaded + waiting).withIndex().sortedWith(compareBy({ order[it.value] ?: Int.MAX_VALUE }, { it.index })).map { it.value }
+
 /** Per folder, the guest files this device has a copy of (the document cache), for Explorer offline. */
 private const val OFFLINE_FILES_PREFIX = "offline-files:"
 private const val OFFLINE_FILES_LIMIT = 200
@@ -542,7 +550,8 @@ class WorkbenchController(private val context: Context) {
             saveLayout("layout-panel", if (value) "shown" else "")
         }
     private val panelTabState = mutableStateOf(
-        PanelTab.entries.firstOrNull { restoreLayout && it.name == layoutValue("layout-panel-tab", "") } ?: PanelTab.Terminal,
+        // Docs has nothing to show after a restart.
+        PanelTab.entries.firstOrNull { restoreLayout && it != PanelTab.Docs && it.name == layoutValue("layout-panel-tab", "") } ?: PanelTab.Terminal,
     )
     var panelTab: PanelTab
         get() = panelTabState.value
@@ -686,6 +695,8 @@ class WorkbenchController(private val context: Context) {
                     // The daemon restarts on updates and the VM may pause; come back by ourselves.
                     if (wasConnected) scheduleReconnect()
                 }
+                // Connected, then gone: the guest stopped or its daemon did. Said when reconnecting fails.
+                if (wasConnected && !isConnected) guestStoppedAt = System.currentTimeMillis()
                 wasConnected = isConnected
             }
         }
@@ -1090,6 +1101,7 @@ class WorkbenchController(private val context: Context) {
                 guestUnreachable = false
                 unreachableFailures = 0
                 guestForwardingSuspected = false
+                guestStoppedAt = null
                 reconnectAttempt = 0
                 scheduledReconnect?.cancel(false)
                 scheduledReconnect = null
@@ -1104,6 +1116,7 @@ class WorkbenchController(private val context: Context) {
                 reattachTerminals()
                 documents.filter { it.dirty && isGuestPath(it.path) }.forEach(::reconcileDocument)
                 refreshCleanDocuments()
+                forgetMissingRecentFolders(guestRoots)
             }
         }
     }
@@ -2732,6 +2745,9 @@ class WorkbenchController(private val context: Context) {
     /** Set when the guest probably runs but Linux Terminal stopped forwarding its port. */
     var guestForwardingSuspected by mutableStateOf(false)
         private set
+    /** When a connected guest went away (its VM or daemon stopped); null while connected or never connected. */
+    var guestStoppedAt by mutableStateOf<Long?>(null)
+        private set
     private var reconnectAttempt = 0
     private var scheduledReconnect: ScheduledFuture<*>? = null
 
@@ -2781,9 +2797,13 @@ class WorkbenchController(private val context: Context) {
                 // Seen on the tablet: the guest and daemon run, but Terminal reports no forwarded
                 // port until it is force-stopped and opened again.
                 guestForwardingSuspected = unreachableFailures >= 2
+                val stoppedAt = guestStoppedAt
                 guestProblem = if (guestForwardingSuspected) {
                     "Still can't reach the guest daemon. If Linux Terminal is already open, it may have stopped " +
                         "forwarding the connection: Force stop it in App info (this restarts the guest), then open it again."
+                } else if (stoppedAt != null) {
+                    val time = java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(stoppedAt))
+                    "The guest stopped at $time. Open Linux Terminal to start it again; edits are kept on this device meanwhile."
                 } else {
                     "Can't reach the guest daemon. Open Linux Terminal so the guest starts; if it was reset, set it up again."
                 }
@@ -2937,9 +2957,13 @@ class WorkbenchController(private val context: Context) {
         // tabs close one by one: neither may overwrite what was saved.
         val workspace = sessionWorkspace ?: return
         if (!sessionRestored || switchingWorkspace) return
+        val loaded = documents.map { it.path }.filter(::isGuestPath)
+        // Tabs still loading, or waiting for the guest, keep their place.
+        val waiting = restorePending.filter { isGuestPath(it) && it !in loaded }
+        val open = sessionTabs(loaded, waiting, restoreOrder)
         val session = WorkspaceSession(
-            open = documents.map { it.path }.filter(::isGuestPath),
-            active = activePath?.takeIf(::isGuestPath),
+            open = open,
+            active = activePath?.takeIf(::isGuestPath) ?: restoreActive?.takeIf { it in waiting },
             directory = currentDirectory.ifEmpty { null },
             expanded = expandedFolders.toList(),
             pinned = pinnedTabs.filter(::isGuestPath),
@@ -2952,10 +2976,17 @@ class WorkbenchController(private val context: Context) {
     private val restoringTabs = mutableSetOf<String>()
     /** The last session's tab order: its files load in any order, each takes its place. */
     private val restoreOrder = mutableMapOf<String, Int>()
+    /** Restored tabs not open yet: loading, or waiting for the guest (no copy on this device). Kept in the saved session. */
     private val restorePending = mutableSetOf<String>()
+    private var restoreActive: String? = null
+    private var restorePreview: String? = null
 
     private fun restoreSession(workspace: String) {
-        if (sessionRestored) return
+        if (sessionRestored) {
+            // Started offline: the tabs this device had no copy of open now.
+            if (vfs.isConnected()) reopenPendingTabs(workspace)
+            return
+        }
         sessionRestored = true
         if (!settings.restoreSession) return
         val gson = com.google.gson.Gson()
@@ -2970,6 +3001,8 @@ class WorkbenchController(private val context: Context) {
         open.forEachIndexed { index, path -> restoreOrder[path] = index }
         restorePending.clear()
         restorePending.addAll(open)
+        restoreActive = active
+        restorePreview = saved.preview
         open.sortedBy { it == active }.forEach { openPath(it, preview = it == saved.preview, background = it != active) }
         // Offline there is no folder to list; Explorer shows the files this device has instead.
         if (!vfs.isConnected()) return
@@ -2977,6 +3010,14 @@ class WorkbenchController(private val context: Context) {
         saved.expanded.orEmpty().filter { isPathWithinRoot(it, workspace) }.forEach { path ->
             expandedFolders.add(path)
             loadFolderChildren(path)
+        }
+    }
+
+    /** The last session's tabs that couldn't open offline, opened once the guest is back; its active tab shown if none is. */
+    private fun reopenPendingTabs(workspace: String) {
+        val waiting = restorePending.filter { path -> isPathWithinRoot(path, workspace) && documents.none { it.path == path } }
+        waiting.sortedBy { it == restoreActive }.forEach { path ->
+            openPath(path, preview = path == restorePreview, background = path != restoreActive || activePath != null)
         }
     }
 
@@ -3056,10 +3097,47 @@ class WorkbenchController(private val context: Context) {
         preferences.edit().putString(OFFLINE_FILES_PREFIX + workspace, com.google.gson.Gson().toJson(files)).apply()
     }
 
-    private fun forgetOfflineFile(path: String) {
-        val workspace = workspaceRoot ?: return
+    private fun forgetOfflineFile(path: String, workspace: String? = workspaceRoot) {
+        if (workspace == null) return
         val files = offlineFiles(workspace)
         if (path in files) preferences.edit().putString(OFFLINE_FILES_PREFIX + workspace, com.google.gson.Gson().toJson(files - path)).apply()
+    }
+
+    /**
+     * After connecting: the offline list's files deleted in the guest meanwhile (in Linux Terminal, say) go from the list,
+     * with their copy on this device unless it holds unsaved edits. Asked one at a time, as there can be 200.
+     */
+    private fun forgetMissingOfflineFiles(workspace: String) {
+        val files = offlineFiles(workspace).filterNot { path -> documents.any { it.path == path } }
+        fun check(index: Int) {
+            val path = files.getOrNull(index) ?: return
+            if (!vfs.isConnected()) return
+            vfs.stat(path).whenComplete { _, error ->
+                post {
+                    if (error.isNotFound() && documents.none { it.path == path }) {
+                        forgetOfflineFile(path, workspace)
+                        repository.forgetCleanCopy(path)
+                    }
+                    check(index + 1)
+                }
+            }
+        }
+        check(0)
+    }
+
+    /** After connecting: Recent folders of this guest that no longer exist are forgotten (G5). */
+    private fun forgetMissingRecentFolders(guestRoots: List<String>) {
+        recentWorkspaces.filter { recent -> guestRoots.any { isPathWithinRoot(recent, it) } }.forEach { folder ->
+            vfs.stat(folder).whenComplete { entry, error ->
+                post { if (error.isNotFound() || error == null && !entry.isDirectory) forgetRecentWorkspace(folder) }
+            }
+        }
+    }
+
+    /** Whether a guest request failed because the path isn't there. */
+    private fun Throwable?.isNotFound(): Boolean {
+        val cause = this?.let { generateSequence(it) { failure -> failure.cause }.last() }
+        return cause is GuestVfsException && cause.code == "NotFound"
     }
 
     /** A file picked in Android's picker: kept readable and writable across restarts, then opened. */
@@ -3375,6 +3453,7 @@ class WorkbenchController(private val context: Context) {
         rememberWorkspace(workspace)
         loadDirectory(workspace)
         restoreSession(workspace)
+        forgetMissingOfflineFiles(workspace)
         loadWorkspaceSettings(workspace).whenComplete { loaded, settingsError ->
             post {
                 if (settingsError != null) {
@@ -3555,6 +3634,8 @@ class WorkbenchController(private val context: Context) {
         val openStarted = now
         repository.open(path).whenComplete { result, error ->
             post {
+                // A restored tab that can't open (deleted meanwhile) isn't kept for later.
+                if (error != null) restorePending.remove(path)
                 Perf.log { "open ${path.substringAfterLast('/')}: content after ${android.os.SystemClock.uptimeMillis() - openStarted} ms" }
                 Perf.afterNextFrame("open ${path.substringAfterLast('/')}", openStarted)
                 if (generateSequence(error) { it.cause }.any { it is com.avfstudio.nativeide.document.BinaryFileException }) {
@@ -4444,10 +4525,9 @@ class WorkbenchController(private val context: Context) {
         if (!isGuestPath(path) || !vfs.isConnected()) return
         vfs.stat(path).whenComplete { _, error ->
             post {
-                val cause = error?.let { generateSequence(it) { failure -> failure.cause }.last() }
                 when {
                     error == null -> deletedFiles.remove(path)
-                    cause is GuestVfsException && cause.code == "NotFound" && documents.any { it.path == path } && path !in deletedFiles -> deletedFiles.add(path)
+                    error.isNotFound() && documents.any { it.path == path } && path !in deletedFiles -> deletedFiles.add(path)
                 }
             }
         }
@@ -5093,6 +5173,24 @@ class WorkbenchController(private val context: Context) {
     fun leaveHoverCard() {
         hoverCardHovered = false
         scheduleHoverHide()
+    }
+
+    /** The hover card shown whole in the panel's Docs tab (G20); null when it's closed. */
+    var expandedDocs by mutableStateOf<ExpandedDocs?>(null)
+        private set
+
+    /** The hover card's expand button: its content goes to the panel's Docs tab, where it scrolls in full, and the card closes. */
+    fun expandHover(docs: ExpandedDocs) {
+        expandedDocs = docs
+        panelVisible = true
+        panelTab = PanelTab.Docs
+        hideHoverCard()
+        activeNotebook?.let(::hideCellHover)
+    }
+
+    fun closeDocs() {
+        expandedDocs = null
+        if (panelTab == PanelTab.Docs) panelTab = PanelTab.Terminal
     }
 
     fun hideHoverCard() {
@@ -8070,6 +8168,11 @@ class WorkbenchController(private val context: Context) {
     fun runCell(session: NotebookSession, cell: NotebookCell, advance: Boolean = false) {
         if (advance) selectNextCell(session, cell, insertIfLast = true)
         if (cell.type != CellType.Code || cell.running || cell.queued) return
+        // Kernels run in the guest. Offline, a run would clear the outputs, then fail: they're kept instead.
+        if (!vfs.isConnected()) {
+            status = "Running cells needs the guest; the outputs are kept"
+            return
+        }
         if (session.kernelName == null) {
             val pending = pendingExecution.getOrPut(session.document.path) { mutableListOf() }
             val firstRequest = pending.isEmpty()

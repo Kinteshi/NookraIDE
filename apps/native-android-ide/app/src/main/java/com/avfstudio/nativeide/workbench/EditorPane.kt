@@ -605,6 +605,8 @@ internal fun HoverCardSurface(controller: WorkbenchController, card: HoverCard, 
             }
             HoverProblem(problem.severity, problem.message, origin)
         }
-        HoverCardContent(controller, card.path, problems, card.markdown)
+        HoverCardContent(controller, card.path, problems, card.markdown) {
+            controller.expandHover(ExpandedDocs(card.path, "${card.path.substringAfterLast('/')}:${card.position.line + 1}", problems, card.markdown))
+        }
     }
 }

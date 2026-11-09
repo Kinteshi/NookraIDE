@@ -6,6 +6,7 @@ import androidx.compose.material.icons.outlined.PlayCircleOutline
 import androidx.compose.material.icons.outlined.DataObject
 import androidx.compose.material.icons.outlined.Lan
 import androidx.compose.material.icons.automirrored.outlined.Article
+import androidx.compose.material.icons.automirrored.outlined.MenuBook
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.BugReport
 import androidx.compose.foundation.background
@@ -95,6 +96,7 @@ private val PanelTab.icon: ImageVector
         PanelTab.Ports -> Icons.Outlined.Lan
         PanelTab.Variables -> Icons.Outlined.DataObject
         PanelTab.Interactive -> Icons.Outlined.PlayCircleOutline
+        PanelTab.Docs -> Icons.AutoMirrored.Outlined.MenuBook
     }
 
 /** A panel tab; the wide and the compact layout draw the same one. */
@@ -152,7 +154,7 @@ fun PanelArea(controller: WorkbenchController, modifier: Modifier = Modifier, ma
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                PanelTab.entries.forEach { tab -> PanelTabChip(controller, tab) }
+                PanelTab.entries.filter { it != PanelTab.Docs || controller.expandedDocs != null }.forEach { tab -> PanelTabChip(controller, tab) }
             }
             Tooltip("Hide panel") { IconButton(onClick = { controller.panelVisible = false }) {
                 Icon(Icons.Outlined.KeyboardArrowDown, contentDescription = "Hide panel")
@@ -167,6 +169,7 @@ fun PanelArea(controller: WorkbenchController, modifier: Modifier = Modifier, ma
                 PanelTab.Ports -> PortsView(controller)
                 PanelTab.Variables -> VariablesView(controller)
                 PanelTab.Interactive -> InteractiveView(controller)
+                PanelTab.Docs -> DocsView(controller)
             }
         }
     }
@@ -214,6 +217,11 @@ fun TerminalView(controller: WorkbenchController, modifier: Modifier = Modifier)
             TerminalActions(controller)
         }
         val session = controller.activeTerminal
+        if (session == null && !controller.connected) {
+            // Terminals run in the guest: offline, the button would only say so.
+            EmptyState(Icons.Outlined.Terminal, "Terminals run in the guest", "Connect to the guest to open one.")
+            return
+        }
         if (session == null) {
             EmptyState(Icons.Outlined.Terminal, "No terminal is open", "Ctrl+Shift+` opens one too.") {
                 FilledTonalButton(onClick = { controller.newTerminal() }) {

@@ -268,6 +268,11 @@ class DocumentRepository(
     /** Whether this device keeps a copy of [path], so it opens without the guest. */
     fun hasCopy(path: String): Boolean = cache.contains(path)
 
+    /** Drops this device's copy of [path] unless it holds edits not saved to the guest. */
+    fun forgetCleanCopy(path: String) {
+        if (cache.load(path)?.dirty == false) cache.delete(path)
+    }
+
     /** A whole file's bytes, for files the editor doesn't open (preview images); fails past [limit]. */
     fun readBytes(path: String, limit: Int): CompletableFuture<ByteArray> {
         if (isDevicePath(path)) return readDeviceBytes(path, limit)

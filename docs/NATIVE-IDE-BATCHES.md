@@ -2387,6 +2387,59 @@ The user started this batch, which ends A5's daily use. 362 app unit tests pass 
 * Left: the aardink-lab module still has sora for its comparison screen; it isn't in the app and goes in R10. Settings'
   "Word wrap" still says folding needs it off, which was sora's limit; to check with Aardink.
 
+### G6: a window reopened partly off-screen goes full screen (done; checked on the tablet)
+The tablet runs Samsung's desktop windowing ("Desk"), where every app is a floating window and the system reopens one at its
+last bounds. The app can't move its own window, so as it opens, a window that reaches past the screen asks to be full screen
+(`requestFullscreenMode`, Android 14+). It's checked once as the app opens, so a window the user drags partly off-screen later
+stays where they put it. No setting: a window off the screen is never wanted.
+* On the tablet: the window moved to (1400, 500)-(4360, 2176) with `am task resize`, the app's process killed in the
+  background and the app opened again: it came back in its task at those bounds, logged it, and went full screen. A force stop
+  doesn't reproduce it (the system opens a new task at default bounds), nor does an install; a process ended while its task
+  stays (memory, or an update) does, and so may rotating, or the keyboard cover changing the screen, under a placed window.
+* Found on the way: going full screen ends the desktop session when the app is its only window, so the next launches open
+  full screen until it's made a floating window again (the handle at the top, then the first button). The test left the
+  app floating at its old bounds, but as its own floating window rather than inside the Desk.
+
+### G14: the offline experience, from a walkthrough with the guest away (in progress)
+The guest wasn't running when the batch started (not stopped by me), so the walkthrough looked at the app as it was. Found and
+done so far:
+* **Running a cell offline lost its outputs**: `runCell` cleared them, then the kernel request failed. Offline it now says
+  "Running cells needs the guest; the outputs are kept" and leaves the cell as it was (Run All and Shift+Enter go through it).
+  Not tried on the tablet, to keep off the user's notebook.
+* The terminal panel offered "New terminal", which can only fail offline: it now says "Terminals run in the guest".
+* **The last session's tabs were lost when the app started before the guest** (the batch 55 loose end, a notebook tab not
+  restored after a force stop): starting offline, tabs whose file had no copy on this device were skipped, and the next save
+  of the session dropped them. They now stay in the saved session in their place (`sessionTabs`, tested) and open once the
+  guest connects; one that can't open then (deleted) is let go.
+* The offline Explorer listed files deleted in the guest long ago (b30, b34: the batch 52 loose end). After connecting, each
+  file in the folder's offline list is checked, one request at a time, and missing ones leave the list with their copy on
+  this device (kept if it holds unsaved edits).
+* Seen and kept: the red banner while the guest is away is the app's error style, with its three ways out; Search and Source
+  Control say they need the guest; the offline list is flat, by path.
+
+### G5: Recent forgets folders that no longer exist (built)
+After connecting, Recent folders of this guest are checked, and those that are gone (or aren't folders) are forgotten, as
+Remove from Recent does; the launcher's shortcuts follow.
+
+### G17: saying so when the guest goes away (built; half of it can't be done)
+* An app can't count the phantom processes of the device: Android hides other apps' processes from it, and the guest can't
+  see Android's. So the warning near the limit isn't possible; what's possible is explaining it when it happens.
+* When a connected guest goes away and reconnecting fails, the banner says "The guest stopped at 21:05. Open Linux Terminal to
+  start it again; edits are kept on this device meanwhile.", with **Why?**, which explains the causes: Linux Terminal closed
+  (Back or swiping it away), Android needing memory, and the limit of 32 background processes across apps (the VM takes 6;
+  MaterialCode starts none on the tablet). It mentions Developer options' "Disable child process restrictions" as the
+  user's decision; the app changes nothing. No setting: it's a message.
+* Not checked on the tablet: it needs the guest stopped on purpose while connected, which is for the user to allow.
+
+### G20: the hover card's expand button (built)
+A button in the hover card's corner (the editor's and a notebook cell's) shows the card whole in a **Docs** tab of the bottom
+panel, where it scrolls, with its place as the title and a close button; the card closes. The tab exists only while it has
+something, and isn't restored after a restart. Of the two places the user suggested (a split panel, or a tab below), the
+panel tab: it doesn't change the editor's layout. No setting: the button is small and does nothing until tapped.
+
+### Loose end: the unsaved dot after saving a restored deleted file (batch 39)
+Looked at: saving a deleted file waits for its folders to be made before writing, so that isn't it. Not reproduced yet.
+
 ## Backlog
 ### Open backlog (11-08)
 The current lists of what's open, in two: the general backlog, and the Aardink switch's until it's complete. The older

@@ -414,7 +414,8 @@ private fun CompactContent(controller: WorkbenchController) {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                listOf(PanelTab.Terminal, PanelTab.Debug, PanelTab.Output, PanelTab.Ports, PanelTab.Variables, PanelTab.Interactive).forEach { tab ->
+                (listOf(PanelTab.Terminal, PanelTab.Debug, PanelTab.Output, PanelTab.Ports, PanelTab.Variables, PanelTab.Interactive) +
+                    listOfNotNull(PanelTab.Docs.takeIf { controller.expandedDocs != null })).forEach { tab ->
                     PanelTabChip(controller, tab)
                 }
             }
@@ -425,6 +426,7 @@ private fun CompactContent(controller: WorkbenchController) {
                     PanelTab.Ports -> PortsView(controller)
                     PanelTab.Variables -> VariablesView(controller)
                     PanelTab.Interactive -> InteractiveView(controller)
+                    PanelTab.Docs -> DocsView(controller)
                     else -> TerminalView(controller)
                 }
             }
@@ -621,6 +623,9 @@ private fun GuestProblemBanner(controller: WorkbenchController) {
             FilledTonalButton(onClick = controller::openLinuxTerminalAppInfo) { Text("App info") }
         }
         TextButton(onClick = controller::openLinuxTerminal) { Text("Open Terminal") }
+        if (controller.guestStoppedAt != null && !controller.guestForwardingSuspected) {
+            TextButton(onClick = { controller.dialog = WorkbenchDialog.GuestStopped }) { Text("Why?") }
+        }
         TextButton(onClick = controller::connectGuest, enabled = !controller.busy) { Text("Retry") }
         TextButton(onClick = { controller.beginGuestSetup() }) { Text("Set up again") }
     }

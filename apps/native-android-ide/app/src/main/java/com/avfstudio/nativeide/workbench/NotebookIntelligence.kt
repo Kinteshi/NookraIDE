@@ -201,7 +201,10 @@ internal fun CellHoverCard(controller: WorkbenchController, session: NotebookSes
                 }
             },
         ) {
-            HoverCardContent(controller, session.document.path, hover.problems.map { HoverProblem(it.severity, it.message, it.origin) }, hover.markdown)
+            val problems = hover.problems.map { HoverProblem(it.severity, it.message, it.origin) }
+            HoverCardContent(controller, session.document.path, problems, hover.markdown) {
+                controller.expandHover(ExpandedDocs(session.document.path, session.document.path.substringAfterLast('/'), problems, hover.markdown))
+            }
         }
     }
 }

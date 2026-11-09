@@ -31,7 +31,12 @@ enum class PanelTab(val title: String) {
     Ports("Ports"),
     Variables("Variables"),
     Interactive("Interactive"),
+    /** A hover card shown whole (G20); the tab is there only while it has one. */
+    Docs("Docs"),
 }
+
+/** A hover card expanded into the panel's Docs tab: its place, its problems and its Markdown. */
+data class ExpandedDocs(val path: String, val title: String, val problems: List<HoverProblem>, val markdown: String?)
 
 enum class CompactDestination(val title: String) {
     Files("Files"),
@@ -136,6 +141,8 @@ sealed interface WorkbenchDialog {
     ) : WorkbenchDialog
     /** Set up (or re-pair) the Linux guest; [reason] says why it opened, e.g. a rejected token. */
     data class GuestSetup(val reason: String? = null) : WorkbenchDialog
+    /** Why a connected guest can stop (G17): opened from the banner that says it did. */
+    data object GuestStopped : WorkbenchDialog
     /** Offers to install a missing guest tool; [then] continues what needed it. */
     data class InstallDependency(val dependency: GuestDependency, val reason: String?, val then: (() -> Unit)?) : WorkbenchDialog
     /**

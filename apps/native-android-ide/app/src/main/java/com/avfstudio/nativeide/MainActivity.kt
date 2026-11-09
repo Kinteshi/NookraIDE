@@ -58,6 +58,27 @@ class MainActivity : ComponentActivity() {
         com.avfstudio.nativeide.workbench.Perf.watchFrames(window)
         // A restored activity already handled the intent it started with.
         if (savedInstanceState == null) com.avfstudio.nativeide.workbench.IntentRouter.deliver(intent)
+        root.post(::keepWindowOnScreen)
+    }
+
+    /**
+     * In desktop windowing (Samsung's Desk mode, Android's desktop mode), the system reopens a floating window at its last
+     * bounds, which after an install or a restart can reach past the screen (backlog G6); the app can't move its own window,
+     * so a window opened partly off-screen asks to be full screen. Checked once as the app opens: a window the user drags
+     * partly off-screen later stays where they put it.
+     */
+    private fun keepWindowOnScreen() {
+        if (!isInMultiWindowMode) return
+        val window = windowManager.currentWindowMetrics.bounds
+        val screen = windowManager.maximumWindowMetrics.bounds
+        // A few pixels of slack for window shadows and rounding.
+        val slack = (4 * resources.displayMetrics.density).toInt()
+        val inside = window.left >= screen.left - slack && window.top >= screen.top - slack &&
+            window.right <= screen.right + slack && window.bottom <= screen.bottom + slack
+        if (inside) return
+        android.util.Log.i("MainActivity", "Window $window reaches past the screen $screen; asking for full screen")
+        runCatching { requestFullscreenMode(FULLSCREEN_MODE_REQUEST_ENTER, null) }
+            .onFailure { android.util.Log.w("MainActivity", "Full screen refused", it) }
     }
 
     /** Compose drops touchpad pinches before they reach the views inside it; they go to the workbench here. */

@@ -1,6 +1,9 @@
 package com.avfstudio.nativeide.workbench
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
@@ -9,15 +12,20 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.OpenInFull
 import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 
@@ -30,12 +38,37 @@ fun severityIcon(severity: Int?): ImageVector = when (severity) {
     else -> Icons.Outlined.Info
 }
 
-/** The hover card's body: the problems at the place, then the language server's Markdown; links resolve from [path]. */
+/**
+ * The hover card's body: the problems at the place, then the language server's Markdown; links resolve from [path].
+ * With [onExpand], a button in its corner shows it whole in the panel's Docs tab (G20).
+ */
 @Composable
-internal fun HoverCardContent(controller: WorkbenchController, path: String, problems: List<HoverProblem>, markdown: String?) {
+internal fun HoverCardContent(
+    controller: WorkbenchController,
+    path: String,
+    problems: List<HoverProblem>,
+    markdown: String?,
+    onExpand: (() -> Unit)? = null,
+) {
+    Box {
+        HoverCardBody(controller, path, problems, markdown, Modifier.padding(end = if (onExpand != null) 28.dp else 0.dp))
+        if (onExpand != null) {
+            Box(Modifier.align(Alignment.TopEnd).padding(2.dp)) {
+                Tooltip("Show in the panel") {
+                    IconButton(onClick = onExpand, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Outlined.OpenInFull, contentDescription = "Show in the panel", modifier = Modifier.size(16.dp))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HoverCardBody(controller: WorkbenchController, path: String, problems: List<HoverProblem>, markdown: String?, modifier: Modifier) {
     val colors = MaterialTheme.colorScheme
     Column(
-        Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 8.dp),
+        modifier.verticalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         problems.forEach { problem ->
@@ -60,3 +93,27 @@ internal fun HoverCardContent(controller: WorkbenchController, path: String, pro
         }
     }
 }
+
+/** The panel's Docs tab: an expanded hover card in full, scrolling, until it's closed or another replaces it. */
+@Composable
+internal fun DocsView(controller: WorkbenchController) {
+    val docs = controller.expandedDocs ?: return
+    val colors = MaterialTheme.colorScheme
+    Column(Modifier.fillMaxSize()) {
+        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                docs.title,
+                style = MaterialTheme.typography.labelLarge,
+                color = colors.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Tooltip("Close") {
+                IconButton(onClick = controller::closeDocs) { Icon(Icons.Outlined.Close, contentDescription = "Close", modifier = Modifier.size(18.dp)) }
+            }
+        }
+        HoverCardBody(controller, docs.path, docs.problems, docs.markdown, Modifier.fillMaxWidth().padding(horizontal = 4.dp))
+    }
+}
+

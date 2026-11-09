@@ -8,6 +8,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.ui.window.Dialog
+import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.automirrored.outlined.InsertDriveFile
 import androidx.compose.foundation.clickable
@@ -234,6 +235,35 @@ fun WorkbenchDialogHost(controller: WorkbenchController) {
         )
         WorkbenchDialog.GitClone -> GitCloneDialog(controller)
         WorkbenchDialog.GuestResources -> GuestResourcesDialog(controller)
+        WorkbenchDialog.GuestStopped -> AlertDialog(
+            onDismissRequest = { controller.dialog = null },
+            icon = { Icon(Icons.Outlined.CloudOff, contentDescription = null) },
+            title = { Text("Why the guest stops") },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("The Linux guest runs in Linux Terminal's virtual machine, which stops when:")
+                    Text("• Linux Terminal is closed. Back, or swiping it away from Recents, shuts the guest down; leave it with Home instead.")
+                    Text("• Android needs the memory. With the tablet low on memory, it can stop the virtual machine.")
+                    Text(
+                        "• Apps start too many background processes. Android allows 32 across all apps, and the virtual machine takes 6. " +
+                            "Past that, switching apps makes Android stop some, which can include the guest. Build tools, data loaders and " +
+                            "other terminal apps can start many. MaterialCode starts none on the tablet; its work runs in the guest.",
+                    )
+                    Text(
+                        "Developer options may have a switch that lifts that limit (\"Disable child process restrictions\" on Android 14 and " +
+                            "later). It's a device setting for you to decide on; MaterialCode doesn't change it.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Text(
+                        "When the guest stops, its terminals and running kernels end with it. Files saved in the guest are kept, and edits " +
+                            "made here meanwhile are kept on this device until it's back.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            },
+            confirmButton = { TextButton(onClick = { controller.dialog = null; controller.openLinuxTerminal() }) { Text("Open Terminal") } },
+            dismissButton = { TextButton(onClick = { controller.dialog = null }) { Text("Close") } },
+        )
         is WorkbenchDialog.InstallDependency -> AlertDialog(
             onDismissRequest = { controller.dialog = null },
             icon = { Icon(Icons.Outlined.Download, contentDescription = null) },
