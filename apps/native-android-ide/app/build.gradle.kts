@@ -11,8 +11,33 @@ android {
         applicationId = "com.avfstudio.nativeide"
         minSdk = 34
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        // A release's version comes from its tag (CI passes -Pavf.version=0.1.0); other builds are the next one's dev build.
+        val version = providers.gradleProperty("avf.version").orNull ?: "0.1.0-dev"
+        versionName = version
+        versionCode = versionCodeOf(version)
+    }
+
+    signingConfigs {
+        // The release key comes from the environment (CI's secrets, or a local shell), never from the repository.
+        val keystore = System.getenv("AVF_KEYSTORE")
+        if (keystore != null) {
+            create("release") {
+                storeFile = file(keystore)
+                storePassword = System.getenv("AVF_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("AVF_KEY_ALIAS")
+                keyPassword = System.getenv("AVF_KEY_PASSWORD")
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            // Without the release key, the debug key: a local release build then installs over the debug app, data kept.
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+        }
     }
 
     compileOptions {
@@ -23,6 +48,12 @@ android {
     buildFeatures {
         compose = true
     }
+}
+
+/** 0.1.0 → 100, 1.2.3 → 10203 (major, minor and patch in two digits each); a dev or pre-release build is the same number. */
+fun versionCodeOf(version: String): Int {
+    val (major, minor, patch) = (version.substringBefore('-').split('.').map { it.toIntOrNull() ?: 0 } + listOf(0, 0, 0)).take(3)
+    return (major * 10_000 + minor * 100 + patch).coerceAtLeast(1)
 }
 
 // "Set up guest" ships the arm64 daemon and its installer; build the daemon first with

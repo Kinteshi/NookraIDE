@@ -2479,6 +2479,22 @@ app id and the icon, so the work that doesn't depend on it goes first. 368 app u
   one opens its licence text. Checked on the tablet.
 * **R11's first step, the history scanned for secrets**: none found; the first two commits carry the user's personal
   email as author, for the user to decide on (details in [RELEASE-PLAN.md](RELEASE-PLAN.md), "The repository").
+* **R4, release builds** (the signing key itself is left: see below):
+  * The version comes from a property CI sets from the tag (`-Pavf.version=0.1.0`); other builds are `0.1.0-dev`. The
+    version code follows it (0.1.0 → 100, 1.2.3 → 10203), so debug builds are 100 now too.
+  * Signing reads the keystore and its passwords from the environment (`AVF_KEYSTORE`, `AVF_KEYSTORE_PASSWORD`,
+    `AVF_KEY_ALIAS`, `AVF_KEY_PASSWORD`), never from the repository. Without them a release build is signed with the
+    debug key, so it installs over the debug app with its data.
+  * R8 shrinks the release build: **25 MB against the debug build's 104 MB**, the 8.7 MB guest daemon included. Keep
+    rules (`app/proguard-rules.pro`): the app's own classes (Gson reads its saved state by field name), Aardink's (reached
+    by reflection in AardinkGeometry), tm4e, joni and jcodings.
+  * **Found on the tablet: the first R8 build crashed on connecting.** msgpack, the daemon protocol's encoding, chooses
+    its buffer class by name; it's kept now. Then checked with the release build: connecting, the session's tabs, colours
+    and semantic tokens, inlay hints, a hover card placed at its word (Aardink's reflection survives R8), and a terminal.
+    The debug build is back on the tablet afterwards, for further checks.
+  * **Left, the user's: the release key.** Creating it (`keytool -genkeypair -keystore release.jks -alias materialcode
+    -keyalg RSA -keysize 4096 -validity 10000`) and keeping it: a password manager and a backup, as a lost key means
+    users can't update; CI gets it base64-encoded in a GitHub secret. Its name can wait for R2.
 * Left for later release items: CI checking that `notices.json` is current (R5); the version shown is the build's fixed
   `0.1.0` until versions come from tags (R4); the repository link in tm4e's notice points at `main`, which this branch
   becomes (R11).
@@ -2571,7 +2587,7 @@ release waits for; the rest stay in their lists for later releases.
 | **1. Decide** | R1 | Decided 11-08; its batch done (57) | 0.1.0 follows batch 57: A5, A6, A7, G20, G6 and the whole of group 2 (G14, G17, G5 and its loose ends) |
 | | R2 | S, the user's | Name and icon: shortlist Burrow, Quire, Traveler, Clarity, with icon ideas in [RELEASE-PLAN.md](RELEASE-PLAN.md); goes to the repository, app id and daemon |
 | | R3 | Done (58) | Licence **Apache-2.0**: LICENSE and NOTICE, Cargo changed, notices generated from what ships and shown in Settings > About |
-| **2. Build and ship** | R4 | M | Release builds: a signing key and where it's kept, R8 with keep rules (Aardink's reflection in `AardinkGeometry` needs them), version numbers from tags, APK size |
+| **2. Build and ship** | R4 | Done but the key (58) | Release builds: version from the tag, signing from the environment, R8 (25 MB). Left: the user creates and keeps the release key |
 | | R5 | M | CI (GitHub Actions): app unit tests (JDK 17 and 21), daemon tests, the arm64 daemon (zigbuild) bundled into the APK, the daemon for Linux and WSL hosts, checksums, a GitHub release from a tag |
 | | R6 | S–M | App and daemon versions: the app checks the guest daemon's version, not only the protocol number, and offers to update it with the one it carries; release notes for both |
 | **3. Polish** | R7 | M | First run and setup: what's needed (Android version, Linux Terminal, AVF), Set up guest, pairing, offline; a README for users, apart from the specs |
