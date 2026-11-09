@@ -37,6 +37,13 @@ but common, a default look, so it changes with the name to give the app an ident
 (monochrome) icons, which Material You recolours, and avoid the `</>`-on-a-gradient look. Check the store, GitHub and
 trademarks before choosing.
 
+**Chosen (user, 11-08): Quire**, with its icon (the folded pages drawing `<`, a cursor beside them). The exact form is
+the user's: plain "Quire" is taken in nearby places (quire.io, a project-management app on Google Play as `io.quire.app`
+since 2018, with a VS Code extension and the tagline "Unfold your ideas"; and Getty's Quire, an open-source publishing
+framework edited in VS Code, `@thegetty/quire-cli`). No app or repository named QuireCode or Quire IDE was found
+(web search, 11-08; not a trademark search). Recommended: **QuireCode** as the app's name, `quirecode` for the
+repository, the app id and the daemon (`quirecode-daemon`); check trademarks (INPI, USPTO, class 9) before the store.
+
 **The user's shortlist (11-08):**
 
 | Name | Why | Icon |
