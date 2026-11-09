@@ -125,7 +125,7 @@ internal fun DocsView(controller: WorkbenchController) {
                 IconButton(onClick = controller::closeDocs) { Icon(Icons.Outlined.Close, contentDescription = "Close", modifier = Modifier.size(18.dp)) }
             }
         }
-        HoverCardBody(controller, docs.path, docs.problems, docs.markdown, Modifier.fillMaxWidth().padding(horizontal = 4.dp))
+        HoverCardBody(controller, docs.path, emptyList(), docs.markdown, Modifier.fillMaxWidth().padding(horizontal = 4.dp))
     }
 }
 

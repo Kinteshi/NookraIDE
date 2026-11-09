@@ -2445,6 +2445,9 @@ panel tab: it doesn't change the editor's layout. No setting: the button is smal
 * On the tablet: Show Hover on `DataFrame` in `example.py`, then the button: the Docs tab opened with the whole card,
   titled "DataFrame · example.py:9", the signature on full lines rather than cut at the card's width, code coloured; Close
   took the tab away and went back to Terminal. Not tried: a notebook cell's card (same content, same button).
+* Refined after the user asked whether problems should carry over (11-08): no. The Docs tab shows the documentation only;
+  a place's problems stay on the card, and in the Problems panel, which keeps them current. A card with problems and no
+  documentation has no expand button. Built and unit-tested; installed with the next build.
 
 ### Loose end: the unsaved dot after saving a restored deleted file (batch 39)
 Looked at: saving a deleted file waits for its folders to be made before writing, so that isn't it. Not reproduced on the

@@ -605,10 +605,14 @@ internal fun HoverCardSurface(controller: WorkbenchController, card: HoverCard, 
             }
             HoverProblem(problem.severity, problem.message, origin)
         }
-        HoverCardContent(controller, card.path, problems, card.markdown) {
-            val place = "${card.path.substringAfterLast('/')}:${card.position.line + 1}"
-            val word = controller.editorSurface?.lineText(card.position.line)?.let { wordAt(it, card.position.character) }
-            controller.expandHover(ExpandedDocs(card.path, word?.let { "$it · $place" } ?: place, problems, card.markdown))
+        // Expanding is for documentation: a card with problems only has none.
+        val expand = card.markdown?.let { markdown ->
+            {
+                val place = "${card.path.substringAfterLast('/')}:${card.position.line + 1}"
+                val word = controller.editorSurface?.lineText(card.position.line)?.let { wordAt(it, card.position.character) }
+                controller.expandHover(ExpandedDocs(card.path, word?.let { "$it · $place" } ?: place, markdown))
+            }
         }
+        HoverCardContent(controller, card.path, problems, card.markdown, expand)
     }
 }

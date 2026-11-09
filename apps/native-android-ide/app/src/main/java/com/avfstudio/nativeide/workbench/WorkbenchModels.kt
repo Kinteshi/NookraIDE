@@ -35,8 +35,11 @@ enum class PanelTab(val title: String) {
     Docs("Docs"),
 }
 
-/** A hover card expanded into the panel's Docs tab: its place, its problems and its Markdown. */
-data class ExpandedDocs(val path: String, val title: String, val problems: List<HoverProblem>, val markdown: String?)
+/**
+ * A hover card expanded into the panel's Docs tab: its place and its documentation. Not its problems: they're about the
+ * place, not the symbol, and the Problems panel keeps them current.
+ */
+data class ExpandedDocs(val path: String, val title: String, val markdown: String)
 
 enum class CompactDestination(val title: String) {
     Files("Files"),
