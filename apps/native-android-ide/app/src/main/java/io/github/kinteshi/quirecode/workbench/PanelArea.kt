@@ -87,7 +87,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.foundation.layout.fillMaxHeight
 
-private val PanelTab.icon: ImageVector
+internal val PanelTab.icon: ImageVector
     get() = when (this) {
         PanelTab.Terminal -> Icons.Outlined.Terminal
         PanelTab.Debug -> Icons.Outlined.BugReport
@@ -154,7 +154,7 @@ fun PanelArea(controller: WorkbenchController, modifier: Modifier = Modifier, ma
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                PanelTab.entries.filter { it != PanelTab.Docs || controller.expandedDocs != null }.forEach { tab -> PanelTabChip(controller, tab) }
+                controller.shownPanelTabs.forEach { tab -> PanelTabChip(controller, tab) }
             }
             Tooltip("Hide panel") { IconButton(onClick = { controller.panelVisible = false }) {
                 Icon(Icons.Outlined.KeyboardArrowDown, contentDescription = "Hide panel")

@@ -66,6 +66,11 @@ data class WorkbenchSettings(
     val mouseWheelZoom: Boolean = true,
     /** `avf.workbench.tooltips`: a button's name (and key) when the pointer rests on it or on a long press. */
     val tooltips: Boolean = true,
+    /**
+     * The panel's tabs hidden while they have nothing to show (`avf.panel.autoHide.<tab>`, one switch per tab): Ports
+     * with no port open, Variables with no kernel running… The tab being shown always stays.
+     */
+    val panelAutoHide: Set<PanelTab> = DEFAULT_PANEL_AUTO_HIDE,
     /** `editor.hover.enabled`: the language server's hover card when the pointer rests on code. */
     val editorHover: Boolean = true,
     /** `editor.hover.delay`: how long the pointer rests before the hover card shows, in ms. */
@@ -226,6 +231,11 @@ data class WorkbenchSettings(
         const val MOUSE_WHEEL_ZOOM = "editor.mouseWheelZoom"
         const val NOTEBOOK_LANGUAGE_SERVER = "avf.notebook.languageServer"
         const val TOOLTIPS = "avf.workbench.tooltips"
+        /** `avf.panel.autoHide.ports` and so on, one per tab (Docs is shown only with a card anyway). */
+        fun panelAutoHideKey(tab: PanelTab) = "avf.panel.autoHide.${tab.name.replaceFirstChar(Char::lowercase)}"
+        /** Off by default for the panel's everyday tabs, on for the ones that only matter now and then. */
+        val DEFAULT_PANEL_AUTO_HIDE = setOf(PanelTab.Ports, PanelTab.Variables, PanelTab.Interactive)
+        val AUTO_HIDING_PANEL_TABS = PanelTab.entries.filter { it != PanelTab.Docs }
         const val EDITOR_HOVER = "editor.hover.enabled"
         const val EDITOR_HOVER_DELAY = "editor.hover.delay"
         const val EDITOR_HOVER_HIDING_DELAY = "editor.hover.hidingDelay"
@@ -343,6 +353,7 @@ data class WorkbenchSettings(
                 pinchToZoom = bool(PINCH_TO_ZOOM, defaults.pinchToZoom),
                 mouseWheelZoom = bool(MOUSE_WHEEL_ZOOM, defaults.mouseWheelZoom),
                 tooltips = bool(TOOLTIPS, defaults.tooltips),
+                panelAutoHide = AUTO_HIDING_PANEL_TABS.filter { bool(panelAutoHideKey(it), it in defaults.panelAutoHide) }.toSet(),
                 editorHover = bool(EDITOR_HOVER, defaults.editorHover),
                 editorHoverDelay = number(EDITOR_HOVER_DELAY)?.toInt()?.coerceIn(0, 5000) ?: defaults.editorHoverDelay,
                 editorHoverHidingDelay = number(EDITOR_HOVER_HIDING_DELAY)?.toInt()?.coerceIn(0, 5000) ?: defaults.editorHoverHidingDelay,

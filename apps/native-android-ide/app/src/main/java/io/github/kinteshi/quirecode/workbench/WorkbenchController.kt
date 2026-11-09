@@ -2932,6 +2932,28 @@ class WorkbenchController(private val context: Context) {
         runCatching { context.startActivity(intent) }.onFailure { status = "Could not open App info: ${it.message}" }
     }
 
+    /**
+     * A panel tab with nothing to show, which its `avf.panel.autoHide.<tab>` setting hides. Reads observable state
+     * only (the notebooks map isn't: [documentRevision] moves when a notebook or Interactive window opens or closes).
+     */
+    fun panelTabEmpty(tab: PanelTab): Boolean = when (tab) {
+        PanelTab.Terminal -> terminals.isEmpty()
+        PanelTab.Debug -> debugState == DebugState.Idle
+        PanelTab.Problems -> diagnostics.isEmpty()
+        PanelTab.Output -> outputLog.isEmpty()
+        PanelTab.Ports -> guestPorts.isEmpty()
+        PanelTab.Variables -> documentRevision.let { notebooks.values.none { it.kernelName != null } }
+        PanelTab.Interactive -> documentRevision.let { notebooks.keys.none { it.endsWith(INTERACTIVE_SUFFIX) } }
+        PanelTab.Docs -> expandedDocs == null
+    }
+
+    /** The panel's tabs to show: a hidden-when-empty tab comes back as soon as it has something, and the shown one stays. */
+    val shownPanelTabs: List<PanelTab>
+        get() = PanelTab.entries.filter { tab ->
+            tab == panelTab && tab != PanelTab.Docs ||
+                if (tab == PanelTab.Docs) expandedDocs != null else !(tab in settings.panelAutoHide && panelTabEmpty(tab))
+        }
+
     /** Connect: the profiles dialog, or the setup when nothing is paired yet. */
     fun openConnect() {
         // Nothing paired yet (a first run): setup and pairing are the way in, not a URL and a token.

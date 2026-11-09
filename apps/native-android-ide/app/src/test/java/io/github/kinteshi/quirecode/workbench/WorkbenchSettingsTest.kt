@@ -86,4 +86,15 @@ class WorkbenchSettingsTest {
         assertTrue(fuzzyMatch("", "anything"))
         assertFalse(fuzzyMatch("cbw", "WorkbenchController.kt"))
     }
+
+    @Test
+    fun panelAutoHideIsPerTabWithDefaults() {
+        assertEquals(setOf(PanelTab.Ports, PanelTab.Variables, PanelTab.Interactive), WorkbenchSettings().panelAutoHide)
+        assertEquals("avf.panel.autoHide.ports", WorkbenchSettings.panelAutoHideKey(PanelTab.Ports))
+        val nested = JsonParser.parseString("""{"avf":{"panel":{"autoHide":{"ports":false,"output":true}}}}""").asJsonObject
+        assertEquals(setOf(PanelTab.Output, PanelTab.Variables, PanelTab.Interactive), WorkbenchSettings.from(nested).panelAutoHide)
+        val written = JsonParser.parseString("{}").asJsonObject.withPath(WorkbenchSettings.panelAutoHideKey(PanelTab.Debug), true)
+        assertTrue(PanelTab.Debug in WorkbenchSettings.from(written).panelAutoHide)
+        assertFalse(PanelTab.Docs in WorkbenchSettings.AUTO_HIDING_PANEL_TABS)
+    }
 }

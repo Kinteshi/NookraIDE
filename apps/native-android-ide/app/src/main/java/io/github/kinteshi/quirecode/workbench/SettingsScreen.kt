@@ -281,6 +281,17 @@ private fun LazyListScope.appearance(controller: WorkbenchController, settings: 
     }
     item { ActionRow(Icons.Outlined.FileOpen, "Import VS Code theme", "Syntax colours from a .vsix or theme JSON") { controller.pickAssetPack?.invoke("vsix") } }
     item { ActionRow(Icons.Outlined.Restore, "Use app syntax colours", "Drop an imported theme and follow light and dark mode") { controller.clearImportedTheme() } }
+    item { Section("Panel") }
+    WorkbenchSettings.AUTO_HIDING_PANEL_TABS.forEach { tab ->
+        item {
+            SwitchRow(
+                tab.icon,
+                "Hide ${tab.title} when empty",
+                panelAutoHideSummary(tab),
+                tab in settings.panelAutoHide,
+            ) { set(WorkbenchSettings.panelAutoHideKey(tab), it) }
+        }
+    }
     item { Section("Icons") }
     item {
         ChoiceRow(
@@ -757,6 +768,18 @@ private fun Section(title: String) {
     }
 }
 
+/** What "empty" means for each tab that `avf.panel.autoHide.<tab>` can hide. */
+private fun panelAutoHideSummary(tab: PanelTab): String = when (tab) {
+    PanelTab.Terminal -> "While no terminal is open"
+    PanelTab.Debug -> "While nothing is being debugged (F5 still starts)"
+    PanelTab.Problems -> "While the open files have no problems"
+    PanelTab.Output -> "Until the app has a message"
+    PanelTab.Ports -> "While no port is open in the guest"
+    PanelTab.Variables -> "While no notebook kernel is running"
+    PanelTab.Interactive -> "Until a .py file runs a cell in an Interactive window"
+    PanelTab.Docs -> ""
+}
+
 @Composable
 private fun RowIcon(icon: ImageVector) {
     Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -798,8 +821,9 @@ private fun ActionRow(icon: ImageVector, title: String, summary: String?, onClic
 }
 
 /**
- * A setting with a few values as segmented buttons: beside the text, or across the row's width
- * below it when [below] (four choices don't fit beside the text at tablet width).
+ * A setting with a few values as segmented buttons: beside the text, or across the row's width below it when they'd take
+ * more than half the row (long labels, four choices, a narrow window), or always when [below]. Beside the text, wide
+ * buttons squeezed the title into a column of single letters (Snippets in suggestions, 11-09).
  */
 @Composable
 private fun ChoiceRow(
@@ -823,29 +847,33 @@ private fun ChoiceRow(
             }
         }
     }
-    ListItem(
-        leadingContent = { RowIcon(icon) },
-        headlineContent = { Text(title) },
-        supportingContent = if (below) {
-            {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    summary?.let { Text(it) }
-                    Buttons(Modifier.fillMaxWidth())
+    // Equal buttons, as wide as the longest label and the check need (the row's default stops at the longest word).
+    val measurer = rememberTextMeasurer()
+    val style = MaterialTheme.typography.labelLarge
+    val longest = remember(options, style) { options.maxOf { (_, label) -> measurer.measure(label, style).size.width } }
+    val buttonsWidth = (with(LocalDensity.current) { longest.toDp() } + 60.dp) * options.size
+    BoxWithConstraints(Modifier.widthIn(max = 840.dp).fillMaxWidth()) {
+        val rowWidth = maxWidth
+        val stacked = below || buttonsWidth > rowWidth * 0.5f
+        ListItem(
+            leadingContent = { RowIcon(icon) },
+            headlineContent = { Text(title) },
+            supportingContent = if (stacked) {
+                {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        summary?.let { Text(it) }
+                        // Across the row, or each button as wide as its label needs when the row is narrower still.
+                        Buttons(if (buttonsWidth > rowWidth - 72.dp) Modifier.fillMaxWidth() else Modifier.width(buttonsWidth))
+                    }
                 }
-            }
-        } else {
-            summary?.let { { Text(it) } }
-        },
-        // Equal buttons, as wide as the longest label and the check need (the row's default stops at the longest word).
-        trailingContent = if (below) null else ({
-            val measurer = rememberTextMeasurer()
-            val style = MaterialTheme.typography.labelLarge
-            val longest = remember(options, style) { options.maxOf { (_, label) -> measurer.measure(label, style).size.width } }
-            Buttons(Modifier.width((with(LocalDensity.current) { longest.toDp() } + 60.dp) * options.size))
-        }),
-        colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surface),
-        modifier = Modifier.widthIn(max = 840.dp).fillMaxWidth(),
-    )
+            } else {
+                summary?.let { { Text(it) } }
+            },
+            trailingContent = if (stacked) null else ({ Buttons(Modifier.width(buttonsWidth)) }),
+            colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surface),
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
 }
 
 /** A slider that writes its setting once the thumb is released, not on every frame of the drag. */
