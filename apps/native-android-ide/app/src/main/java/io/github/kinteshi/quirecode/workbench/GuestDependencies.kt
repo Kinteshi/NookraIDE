@@ -13,7 +13,7 @@ private const val MINIFORGE_VERSION = "26.7.2-0"
 private const val MINIFORGE_SHA256_AARCH64 = "89b786c8d2c8b0fda7553914c1314ae4ddaa094503802f279377b19ac4463cb2"
 private const val MINIFORGE_SHA256_X86_64 = "281b0ac7d550802efc81af633225a5e6116d29ae72f3ab4eae7168c3931a4c05"
 
-private const val CATALOG_INSTALL = "avf-native-daemon tools install "
+private const val CATALOG_INSTALL = "quirecode-daemon tools install "
 
 /** apt first from the cached lists, then again after refreshing them (a fresh guest has none). */
 internal fun aptInstall(packages: String) =
@@ -44,14 +44,14 @@ enum class GuestDependency(
         listOf("gh"),
         "Signing in to GitHub for Copilot chat and Git",
         "the QuireCode tool catalog (pinned, checksum-verified)",
-        "avf-native-daemon tools install gh",
+        "quirecode-daemon tools install gh",
     ),
     Uv(
         "uv",
         listOf("uv"),
         "The Jupyter bridge, ty, ruff and quick Python environments",
         "the QuireCode tool catalog (pinned, checksum-verified)",
-        "avf-native-daemon tools install uv",
+        "quirecode-daemon tools install uv",
     ),
     Conda(
         "Conda",
@@ -69,21 +69,21 @@ enum class GuestDependency(
         listOf("avf-jupyter-bridge"),
         "Running notebook kernels",
         "the QuireCode tool catalog",
-        "avf-native-daemon tools install jupyter",
+        "quirecode-daemon tools install jupyter",
     ),
     TypeScript(
         "TypeScript 7",
         listOf("tsgo"),
         "TypeScript and JavaScript completion, errors and navigation",
         "the QuireCode tool catalog (pinned, checksum-verified; about 26 MB)",
-        "avf-native-daemon tools install typescript",
+        "quirecode-daemon tools install typescript",
     ),
     Ripgrep(
         "ripgrep",
         listOf("rg"),
         "Search across files",
         "the QuireCode tool catalog (pinned, checksum-verified)",
-        "avf-native-daemon tools install ripgrep",
+        "quirecode-daemon tools install ripgrep",
     ),
     // The setup writes these commands into ~/.local/bin, so finding them means it finished.
     ClaudeCode(
@@ -91,14 +91,14 @@ enum class GuestDependency(
         listOf("claude-agent-acp"),
         "Claude Code in the Chat view (and `claude` in terminals)",
         "npm: Claude Code's ACP adapter 0.91.0 on Node.js 24.22.0 (checksum-verified), in ~/.local/share/materialcode; about 330 MB, plus 205 MB for Node.js (shared with Gemini)",
-        "avf-native-daemon tools install claude-code",
+        "quirecode-daemon tools install claude-code",
     ),
     Gemini(
         "Gemini CLI",
         listOf("gemini"),
         "Gemini in the Chat view (and `gemini` in terminals)",
         "npm: Gemini CLI 0.64.0 on Node.js 24.22.0 (checksum-verified), in ~/.local/share/materialcode; about 100 MB, plus 205 MB for Node.js (shared with Claude Code)",
-        "avf-native-daemon tools install gemini",
+        "quirecode-daemon tools install gemini",
     ),
     // Language servers beyond Python and TypeScript, offered when a file of their language opens.
     Gopls(
@@ -106,98 +106,98 @@ enum class GuestDependency(
         listOf("gopls"),
         "Go: completion, errors and navigation",
         "Debian packages (apt, needs sudo; gopls 0.16)",
-        "avf-native-daemon tools install gopls",
+        "quirecode-daemon tools install gopls",
     ),
     Clangd(
         "C/C++ language server",
         listOf("clangd"),
         "C and C++: completion, errors and navigation (reads compile_commands.json)",
         "Debian packages (apt, needs sudo; clangd 19)",
-        "avf-native-daemon tools install clangd",
+        "quirecode-daemon tools install clangd",
     ),
     RustAnalyzer(
         "Rust language server",
         listOf("rust-analyzer"),
         "Rust: completion, errors and navigation (needs cargo in the guest)",
         "Debian packages (apt, needs sudo)",
-        "avf-native-daemon tools install rust-analyzer",
+        "quirecode-daemon tools install rust-analyzer",
     ),
     BashLanguageServer(
         "Bash language server",
         listOf("bash-language-server"),
         "Shell scripts: completion, hover and navigation",
         "npm: bash-language-server 5.8.1 on QuireCode's Node.js 24.22.0 (checksum-verified, shared with the chat agents), in ~/.local/share/materialcode",
-        "avf-native-daemon tools install bash-language-server",
+        "quirecode-daemon tools install bash-language-server",
     ),
     YamlLanguageServer(
         "YAML language server",
         listOf("yaml-language-server"),
         "YAML: completion and checks against JSON schemas",
         "npm: yaml-language-server 2.0.0 on QuireCode's Node.js 24.22.0 (checksum-verified), in ~/.local/share/materialcode",
-        "avf-native-daemon tools install yaml-language-server",
+        "quirecode-daemon tools install yaml-language-server",
     ),
     JsonLanguageServer(
         "JSON language server",
         listOf("json-language-server"),
         "JSON: completion, checks and formatting (VS Code's own server)",
         "npm: vscode-langservers-extracted 4.10.0 on QuireCode's Node.js 24.22.0 (checksum-verified), in ~/.local/share/materialcode",
-        "avf-native-daemon tools install json-language-server",
+        "quirecode-daemon tools install json-language-server",
     ),
     HtmlLanguageServer(
         "HTML language server",
         listOf("html-language-server"),
         "HTML: completion, hover and formatting (VS Code's own server)",
         "npm: vscode-langservers-extracted 4.10.0 on QuireCode's Node.js 24.22.0 (checksum-verified), in ~/.local/share/materialcode",
-        "avf-native-daemon tools install html-language-server",
+        "quirecode-daemon tools install html-language-server",
     ),
     CssLanguageServer(
         "CSS language server",
         listOf("css-language-server"),
         "CSS, SCSS and Less: completion, hover and checks (VS Code's own server)",
         "npm: vscode-langservers-extracted 4.10.0 on QuireCode's Node.js 24.22.0 (checksum-verified), in ~/.local/share/materialcode",
-        "avf-native-daemon tools install css-language-server",
+        "quirecode-daemon tools install css-language-server",
     ),
     DockerLanguageServer(
         "Dockerfile language server",
         listOf("docker-langserver"),
         "Dockerfiles: completion, hover and checks",
         "npm: dockerfile-language-server-nodejs 0.15.0 on QuireCode's Node.js 24.22.0 (checksum-verified), in ~/.local/share/materialcode",
-        "avf-native-daemon tools install docker-langserver",
+        "quirecode-daemon tools install docker-langserver",
     ),
     SqlLanguageServer(
         "SQL language server",
         listOf("sql-language-server"),
         "SQL: completion and checks",
         "npm: sql-language-server 1.7.1 on QuireCode's Node.js 24.22.0 (checksum-verified), in ~/.local/share/materialcode",
-        "avf-native-daemon tools install sql-language-server",
+        "quirecode-daemon tools install sql-language-server",
     ),
     Taplo(
         "TOML language server (Taplo)",
         listOf("taplo"),
         "TOML: completion, checks and formatting",
         "the QuireCode tool catalog (Taplo 0.10.0, pinned, checksum-verified; about 13 MB)",
-        "avf-native-daemon tools install taplo",
+        "quirecode-daemon tools install taplo",
     ),
     Marksman(
         "Markdown language server (Marksman)",
         listOf("marksman"),
         "Markdown: links, headings, references and rename",
         "the QuireCode tool catalog (Marksman 2026-02-08, pinned, checksum-verified; about 22 MB)",
-        "avf-native-daemon tools install marksman",
+        "quirecode-daemon tools install marksman",
     ),
     JsDebug(
         "Node.js debugger (js-debug)",
         listOf("js-debug-adapter"),
         "Debugging JavaScript on Node.js (breakpoints, stepping, variables)",
         "VS Code's js-debug $JS_DEBUG_VERSION (GitHub release, checksum-verified; about 3 MB) on QuireCode's Node.js 24.22.0, in ~/.local/share/materialcode",
-        "avf-native-daemon tools install js-debug",
+        "quirecode-daemon tools install js-debug",
     ),
     CodeLldb(
         "C, C++ and Rust debugger (CodeLLDB)",
         listOf("codelldb"),
         "Debugging C, C++ and Rust (breakpoints, stepping, variables)",
         "CodeLLDB $CODELLDB_VERSION (GitHub release, checksum-verified; about 55 MB, 170 MB unpacked, with its own LLDB) in ~/.local/share/materialcode",
-        "avf-native-daemon tools install codelldb",
+        "quirecode-daemon tools install codelldb",
     ),
     // Toolchains some of those servers work through, offered when one runs without its toolchain.
     GoToolchain(
@@ -231,7 +231,7 @@ enum class GuestDependency(
      */
     val remove: String?
         get() = install.takeIf { it.startsWith(CATALOG_INSTALL) && this != Uv }
-            ?.let { "avf-native-daemon tools remove " + it.removePrefix(CATALOG_INSTALL) }
+            ?.let { "quirecode-daemon tools remove " + it.removePrefix(CATALOG_INSTALL) }
 
     companion object {
         val allCommands: List<String> get() = entries.flatMap { it.commands }.distinct()
@@ -346,7 +346,7 @@ internal fun tmpPlacement(inMemory: Boolean?, masked: Boolean?): TmpPlacement? =
 /**
  * The fix for Linux Terminal's port forwarder, from the daemon's stats. The forwarder exits when
  * a process or thread name has a space (Python 3.14 thread names), and the app can't reach the
- * guest until it restarts; the fix (`avf-native-daemon guest fix-port-forwarding`) wraps the tool
+ * guest until it restarts; the fix (`quirecode-daemon guest fix-port-forwarding`) wraps the tool
  * it reads.
  */
 enum class ForwarderFix(val summary: String) {
@@ -362,7 +362,7 @@ internal fun forwarderFix(installed: Boolean?, active: Boolean?): ForwarderFix? 
 }
 
 /** Runs as root: it diverts `/usr/sbin/tcpstates-libbpf` and installs the daemon's wrapper there. */
-internal const val FORWARDER_FIX_COMMAND = "sudo \"\$HOME/.local/bin/avf-native-daemon\" guest fix-port-forwarding"
+internal const val FORWARDER_FIX_COMMAND = "sudo \"\$HOME/.local/bin/quirecode-daemon\" guest fix-port-forwarding"
 internal const val FORWARDER_UNDO_COMMAND = "$FORWARDER_FIX_COMMAND --undo"
 
 /** Debian's tmpfs /tmp comes from systemd's tmp.mount; masked, /tmp stays on the root filesystem. */

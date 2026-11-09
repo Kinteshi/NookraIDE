@@ -37,7 +37,7 @@ At last run: 381 app unit tests (on Java 21, installed beside 17) and 7 lab test
 * **adb:** wireless at `192.0.2.66:<port>`. The port changes after reboots, so ask the user for the new one.
 * **Guest services:**
   * Track A Supervisor on 19860.
-  * Track B daemon `avf-native.service` on **19870**, binary `~/.local/bin/avf-native-daemon`, token in `~/.config/avf-native/env`, workspace `~/Projects`.
+  * Track B daemon `quirecode.service` on **19870**, binary `~/.local/bin/quirecode-daemon`, token in `~/.config/quirecode/env`, workspace `~/Projects` (before batch 58: `avf-native.service`, `avf-native-daemon`, `~/.config/avf-native`; the installer moves them over, keeping the pairing).
   * A system code-server on 8080, which is not ours.
 * **Running guest commands:** push a script to `/sdcard/Download`, bring Linux Terminal to the front, and type `bash /mnt/shared/Download/x.sh`. Write results to `/mnt/shared/Download/*.log` and read them back with adb.
 * **Never send Back to Linux Terminal.** It shuts the VM down and the app then kills it forcibly. After a VM stop, "Preparando o terminal" is just the boot (about a minute).
@@ -46,9 +46,9 @@ At last run: 381 app unit tests (on Java 21, installed beside 17) and 7 lab test
 * **Guest reset:** at 13:46 on 2026-10-23 the Debian image was reset from Terminal → Settings → Recovery (not by automation), which wiped the whole guest, Track A and the system code-server included. To re-provision Track B, push the arm64 daemon and run `scripts/install-native-daemon.sh` (it now bootstraps a pinned, checksum-verified uv 0.13.0 and no longer needs openssl). Then enter the new token in the app and accept port 19870 in the notification shade.
 * **Port forwarding after a reboot:** forwards can be missing even though the ports are allowed. Toggle the port off and on in Terminal → Settings → Controle de portas. A new port raises a notification; tap *Aceitar*.
 * **Hosting on a computer (batch 8):** see [HOSTING-THE-DAEMON.md](HOSTING-THE-DAEMON.md).
-* **Pairing (batch 4):** the app's Connect → "Set up or pair…" shows the setup command; on an installed guest, `avf-native-daemon pair` prints a one-time code to enter there. Typing the token by hand is now only a fallback.
+* **Pairing (batch 4):** the app's Connect → "Set up or pair…" shows the setup command; on an installed guest, `quirecode-daemon pair` prints a one-time code to enter there. Typing the token by hand is now only a fallback.
 * **The token:** never print it. To fill the app's Connect dialog, have a guest script copy the value to `/sdcard/Download`, type it on the device in 4-character chunks with `sleep 0.3` between them (8-character chunks still dropped characters), then delete the copy. The app saves the profile encrypted, so this is a one-time step per guest.
-* **Updating the daemon:** reinstall the binary, then `systemctl --user stop avf-native; sleep 3; start` (never `restart`).
+* **Updating the daemon:** reinstall the binary, then `systemctl --user stop quirecode; sleep 3; start` (never `restart`).
 * **The tablet still panics:** a sixth host kernel panic happened at 13:06 on 2026-10-23 with the VM running (dropbox `SYSTEM_LAST_KMSG_10_20261023_130718_KP`). The log is truncated before the panic line.
 
 ## Done

@@ -9,7 +9,7 @@ with its CPU and memory.
 ## How the connection is secured
 
 * On a computer the daemon listens on the network only with **TLS**. It creates a self-signed
-  certificate the first time it starts (`~/.config/avf-native/tls/`).
+  certificate the first time it starts (`~/.config/quirecode/tls/`).
 * The installer prints a **connection string**:
   `avf://192.168.1.10:19870?fp=<certificate fingerprint>&code=K7QM-2XPA`.
   The app **pins** that fingerprint: it trusts that certificate and nothing else, so another
@@ -33,7 +33,7 @@ Requirements: x86_64 or arm64 Linux with systemd, `curl`, `tar`, and Git for Sou
 2. Install it as a user service, listening on the network:
 
    ```sh
-   bash scripts/install-native-daemon.sh --remote target/release/avf-daemon ~/Projects
+   bash scripts/install-native-daemon.sh --remote target/release/quirecode-daemon ~/Projects
    ```
 
    * `~/Projects` is the workspace the app sees; any absolute folder works.
@@ -51,7 +51,7 @@ Requirements: x86_64 or arm64 Linux with systemd, `curl`, `tar`, and Git for Sou
 Need a new code later (another tablet, or a reinstall of the app)?
 
 ```sh
-avf-native-daemon pair --remote 192.168.1.10:19870
+quirecode-daemon pair --remote 192.168.1.10:19870
 ```
 
 ## Windows computer (WSL2)
@@ -95,26 +95,26 @@ exposes it on your network.
 4. Pair from the app as for Linux. A new code later:
 
    ```powershell
-   wsl -d Ubuntu -- ~/.local/bin/avf-native-daemon pair --remote 192.168.1.10:19870
+   wsl -d Ubuntu -- ~/.local/bin/quirecode-daemon pair --remote 192.168.1.10:19870
    ```
 
 ## Troubleshooting
 
 | Symptom in the app | Likely cause |
 |---|---|
-| "Can't reach HOST:PORT" | Different network, firewall closed, the daemon isn't running (`systemctl --user status avf-native`), or on Windows the WSL distro stopped (run the logon task: `Start-ScheduledTask "AVF Studio daemon (WSL)"`). |
-| "doesn't match the connection string" | The certificate changed (for example `~/.config/avf-native/tls` was deleted). Run `pair --remote` again and paste the new string. |
+| "Can't reach HOST:PORT" | Different network, firewall closed, the daemon isn't running (`systemctl --user status quirecode`), or on Windows the WSL distro stopped (run the logon task: `Start-ScheduledTask "AVF Studio daemon (WSL)"`). |
+| "doesn't match the connection string" | The certificate changed (for example `~/.config/quirecode/tls` was deleted). Run `pair --remote` again and paste the new string. |
 | "No pairing code is active" | The code expired, was used, or ran out of attempts. Run `pair --remote` again. |
 | "The guest rejected the saved token" | The daemon was reinstalled with a new token. Pair again. |
-| Connected, but Search finds nothing | ripgrep is missing: `avf-native-daemon tools install ripgrep`. |
+| Connected, but Search finds nothing | ripgrep is missing: `quirecode-daemon tools install ripgrep`. |
 
 ## Removing it
 
 Linux or WSL distro:
 
 ```sh
-systemctl --user disable --now avf-native.service
-rm -r ~/.config/systemd/user/avf-native.service ~/.config/avf-native ~/.local/bin/avf-native-daemon
+systemctl --user disable --now quirecode.service
+rm -r ~/.config/systemd/user/quirecode.service ~/.config/quirecode ~/.local/bin/quirecode-daemon
 ```
 
 Windows, elevated PowerShell:

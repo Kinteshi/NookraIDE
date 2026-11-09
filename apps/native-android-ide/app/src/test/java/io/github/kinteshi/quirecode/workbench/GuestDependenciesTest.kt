@@ -21,7 +21,7 @@ class GuestDependenciesTest {
         assertEquals(GuestDependency.Git, missingDependencyIn("could not start Git: No such file or directory (os error 2)"))
         assertEquals(GuestDependency.JupyterBridge, missingDependencyIn("tool 'jupyter' is not installed in the guest registry"))
         assertEquals(GuestDependency.ClaudeCode, missingDependencyIn("tool 'claude-code' is not installed in the guest registry"))
-        assertEquals(GuestDependency.Gemini, missingDependencyIn("avf-node-agent: gemini is not set up; run: avf-native-daemon tools install gemini"))
+        assertEquals(GuestDependency.Gemini, missingDependencyIn("avf-node-agent: gemini is not set up; run: quirecode-daemon tools install gemini"))
         // Git ran but something else failed.
         assertEquals(null, missingDependencyIn("could not start Git credential prompt listener: Address in use"))
         assertEquals(null, missingDependencyIn("fatal: not a git repository"))
@@ -69,7 +69,7 @@ class GuestDependenciesTest {
         assertEquals(ForwarderFix.Missing, forwarderFix(false, false))
         assertEquals(ForwarderFix.AfterRestart, forwarderFix(true, false))
         assertEquals(ForwarderFix.Active, forwarderFix(true, true))
-        assertEquals("sudo \"\$HOME/.local/bin/avf-native-daemon\" guest fix-port-forwarding --undo", FORWARDER_UNDO_COMMAND)
+        assertEquals("sudo \"\$HOME/.local/bin/quirecode-daemon\" guest fix-port-forwarding --undo", FORWARDER_UNDO_COMMAND)
     }
 
     @Test
@@ -85,8 +85,8 @@ class GuestDependenciesTest {
 
     @Test
     fun catalogToolsCanBeRemovedAndSystemPackagesAreLeftAlone() {
-        assertEquals("avf-native-daemon tools remove gopls", GuestDependency.Gopls.remove)
-        assertEquals("avf-native-daemon tools remove codelldb", GuestDependency.CodeLldb.remove)
+        assertEquals("quirecode-daemon tools remove gopls", GuestDependency.Gopls.remove)
+        assertEquals("quirecode-daemon tools remove codelldb", GuestDependency.CodeLldb.remove)
         assertEquals(null, GuestDependency.Git.remove)
         assertEquals(null, GuestDependency.GoToolchain.remove)
         assertEquals(null, GuestDependency.Conda.remove)

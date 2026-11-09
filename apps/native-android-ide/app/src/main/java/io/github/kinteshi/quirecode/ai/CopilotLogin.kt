@@ -17,7 +17,7 @@ const val COPILOT_LOGIN_COMMAND = "copilot login --device-code && exit"
  * the account's private noreply address. The shell exits only when everything succeeded.
  */
 const val GITHUB_SIGN_IN_COMMAND =
-    "avf-native-daemon tools install gh >/dev/null && " +
+    "quirecode-daemon tools install gh >/dev/null && " +
         "{ gh auth status --hostname github.com >/dev/null 2>&1 || " +
         "GH_BROWSER=true gh auth login --hostname github.com --git-protocol https --web; } && " +
         // A reset guest may lack git (the installer adds it only with passwordless sudo).

@@ -1179,8 +1179,8 @@ private fun GuestSetupDialog(controller: WorkbenchController, setup: WorkbenchDi
                     OutlinedButton(onClick = controller::openLinuxTerminal) { Text("Open Linux Terminal") }
                 }
                 Text(
-                    "If Android asks to open port 19870 (avf-native), accept it. Already installed? Run " +
-                        "`avf-native-daemon pair` in Linux Terminal for a new code.",
+                    "If Android asks to open port 19870, accept it. Already installed? Run " +
+                        "`quirecode-daemon pair` in Linux Terminal for a new code.",
                     style = MaterialTheme.typography.bodySmall,
                     color = colors.onSurfaceVariant,
                 )

@@ -69,8 +69,8 @@ jobs:
         run: |
           mkdir dist
           cp apps/native-android-ide/app/build/outputs/apk/release/app-release.apk "dist/quirecode-$VERSION.apk"
-          cp target/aarch64-unknown-linux-gnu/release/avf-daemon "dist/avf-daemon-$VERSION-linux-arm64"
-          cp target/x86_64-unknown-linux-gnu/release/avf-daemon "dist/avf-daemon-$VERSION-linux-x86_64"
+          cp target/aarch64-unknown-linux-gnu/release/quirecode-daemon "dist/quirecode-daemon-$VERSION-linux-arm64"
+          cp target/x86_64-unknown-linux-gnu/release/quirecode-daemon "dist/quirecode-daemon-$VERSION-linux-x86_64"
           cp scripts/install-native-daemon.sh dist/
           (cd dist && sha256sum * > SHA256SUMS)
       - name: Signed with the release key, not a debug key

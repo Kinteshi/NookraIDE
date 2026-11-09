@@ -76,15 +76,14 @@ abstract class GuestBundleTask : DefaultTask() {
         target.deleteRecursively()
         target.mkdirs()
         sources.files.filter { it.isFile }.forEach { source ->
-            val name = if (source.name == "avf-daemon") "avf-native-daemon" else source.name
-            source.copyTo(target.resolve(name), overwrite = true)
+            source.copyTo(target.resolve(source.name), overwrite = true)
         }
     }
 }
 
 val guestBundle = tasks.register<GuestBundleTask>("guestBundle") {
     sources.from(
-        rootProject.file("../../target/aarch64-unknown-linux-gnu/release/avf-daemon"),
+        rootProject.file("../../target/aarch64-unknown-linux-gnu/release/quirecode-daemon"),
         rootProject.file("../../scripts/install-native-daemon.sh"),
     )
 }

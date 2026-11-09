@@ -33,7 +33,7 @@ class GuestVfsException(val code: String, message: String) : IOException(message
 class GuestRejectedException(val reason: String, val attemptsLeft: Int? = null) : IOException(
     when (reason) {
         "InvalidToken" -> "The guest rejected the saved token"
-        "PairingUnavailable" -> "No pairing code is active on the guest; run the installer or `avf-native-daemon pair` again"
+        "PairingUnavailable" -> "No pairing code is active on the guest; run the installer or `quirecode-daemon pair` again"
         "PairingFailed" -> "Wrong pairing code" + (attemptsLeft?.let { "; $it attempts left" } ?: "")
         else -> "Guest rejected connection: $reason"
     },

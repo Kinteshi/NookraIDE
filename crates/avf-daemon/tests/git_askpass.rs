@@ -12,7 +12,7 @@ async fn askpass_helper_forwards_prompt_and_returns_answer_without_logging_it() 
     let socket_path = directory.path().join("prompt.sock");
     let listener = UnixListener::bind(&socket_path).unwrap();
     let askpass_path = directory.path().join("askpass");
-    std::os::unix::fs::symlink(env!("CARGO_BIN_EXE_avf-daemon"), &askpass_path).unwrap();
+    std::os::unix::fs::symlink(env!("CARGO_BIN_EXE_quirecode-daemon"), &askpass_path).unwrap();
     let prompt = "Password for 'https://example.test':";
     let helper = Command::new(&askpass_path)
         .arg(prompt)

@@ -204,7 +204,7 @@ private const val DATA_VIEWER_ROWS = DATA_VIEWER_PAGE
 /** The native daemon's default port; hidden in Ports with the connection's own. */
 private const val DAEMON_PORT = 19870
 /** Commands whose ports are the app's own plumbing (kernels, the Jupyter bridge, the daemon). */
-private val INTERNAL_COMMANDS = listOf("ipykernel", "avf-native-daemon", "avf-jupyter-bridge", "jupyter-bridge")
+private val INTERNAL_COMMANDS = listOf("ipykernel", "quirecode-daemon", "avf-native-daemon", "avf-jupyter-bridge", "jupyter-bridge")
 /** Two taps on the same file this close together keep its preview tab. */
 private const val DOUBLE_TAP_MS = 500L
 /** Files shared into the workspace are read into memory first; larger ones are refused. */
@@ -2870,7 +2870,7 @@ class WorkbenchController(private val context: Context) {
                 beginGuestSetup(
                     "The guest rejected the saved token, which happens after Linux Terminal is reset or the " +
                         "daemon is reinstalled. Set it up again, or if it is still installed, run " +
-                        "`avf-native-daemon pair` in Linux Terminal and enter the new code.",
+                        "`quirecode-daemon pair` in Linux Terminal and enter the new code.",
                 )
             }
             unreachable -> {

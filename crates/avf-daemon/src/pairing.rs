@@ -39,7 +39,7 @@ pub enum PairingError {
 }
 
 /// `$AVF_PAIRING_FILE`, else `pairing.json` in the per-user config directory
-/// (`$XDG_CONFIG_HOME` or `~/.config` on Unix, `%APPDATA%` on Windows) under `avf-native`.
+/// (`$XDG_CONFIG_HOME` or `~/.config` on Unix, `%APPDATA%` on Windows) under `quirecode`.
 pub fn pairing_path() -> Result<PathBuf, String> {
     if let Some(path) = std::env::var_os("AVF_PAIRING_FILE") {
         return Ok(PathBuf::from(path));
@@ -47,7 +47,8 @@ pub fn pairing_path() -> Result<PathBuf, String> {
     Ok(config_dir()?.join("pairing.json"))
 }
 
-/// The per-user `avf-native` configuration directory.
+/// The per-user `quirecode` configuration directory: the session token's file, the pairing code and
+/// the TLS certificate the app pins. Daemons before 0.1.0 used `avf-native`; it's moved here once.
 pub fn config_dir() -> Result<PathBuf, String> {
     let base = if cfg!(windows) {
         std::env::var_os("APPDATA").map(PathBuf::from)
@@ -56,8 +57,21 @@ pub fn config_dir() -> Result<PathBuf, String> {
             .map(PathBuf::from)
             .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))
     };
-    base.map(|dir| dir.join("avf-native"))
-        .ok_or_else(|| "cannot find the user's configuration directory".to_owned())
+    let base = base.ok_or_else(|| "cannot find the user's configuration directory".to_owned())?;
+    Ok(migrated_config_dir(&base))
+}
+
+/// `base/quirecode`, after moving the former `base/avf-native` there when only that one exists.
+/// A failed move leaves the old folder in use, so pairing and the pinned certificate still work.
+fn migrated_config_dir(base: &Path) -> PathBuf {
+    let current = base.join("quirecode");
+    let former = base.join("avf-native");
+    if !current.exists() && former.is_dir() {
+        if std::fs::rename(&former, &current).is_err() {
+            return former;
+        }
+    }
+    current
 }
 
 /// Issues a new code (replacing any earlier one) and returns it formatted as `XXXX-XXXX`.
@@ -152,6 +166,30 @@ fn write_record(path: &Path, record: &PairingRecord) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn config_dir_moves_the_former_folder_once() {
+        let base = tempfile::tempdir().unwrap();
+        let former = base.path().join("avf-native");
+        std::fs::create_dir_all(former.join("tls")).unwrap();
+        std::fs::write(former.join("env"), "AVF_TOKEN=x\n").unwrap();
+        let dir = migrated_config_dir(base.path());
+        assert_eq!(dir, base.path().join("quirecode"));
+        assert_eq!(std::fs::read_to_string(dir.join("env")).unwrap(), "AVF_TOKEN=x\n");
+        assert!(dir.join("tls").is_dir());
+        assert!(!former.exists());
+        // A later former folder (an old daemon run again) is left alone: the current one wins.
+        std::fs::create_dir_all(&former).unwrap();
+        assert_eq!(migrated_config_dir(base.path()), dir);
+        assert!(former.exists());
+    }
+
+    #[test]
+    fn config_dir_is_new_without_a_former_folder() {
+        let base = tempfile::tempdir().unwrap();
+        assert_eq!(migrated_config_dir(base.path()), base.path().join("quirecode"));
+        assert!(!base.path().join("quirecode").exists());
+    }
 
     #[test]
     fn issued_code_redeems_once_ignoring_case_and_dashes() {

@@ -2,14 +2,15 @@
 # Installs the QuireCode native daemon as a systemd user service.
 #
 #   AVF guest (Linux Terminal on the tablet):
-#     bash install-native-daemon.sh [/path/to/avf-daemon] [workspace]
+#     bash install-native-daemon.sh [/path/to/quirecode-daemon] [workspace]
 #   Linux computer or WSL distro on the network (see docs/HOSTING-THE-DAEMON.md):
-#     bash install-native-daemon.sh --remote [--port 19870] [--address HOST] [/path/to/avf-daemon] [workspace]
+#     bash install-native-daemon.sh --remote [--port 19870] [--address HOST] [/path/to/quirecode-daemon] [workspace]
 #
-# Without a daemon path it uses the avf-native-daemon (or avf-daemon) next to this script, as
-# QuireCode's "Set up guest" places it. It ends by printing a one-time pairing code (guest) or a
-# connection string (remote) for the app. The session token lives in ~/.config/avf-native/env
-# (mode 0600). Safe to rerun, including on a guest reset from Terminal → Settings → Recovery.
+# Without a daemon path it uses the quirecode-daemon next to this script, as QuireCode's "Set up
+# guest" places it. It ends by printing a one-time pairing code (guest) or a connection string
+# (remote) for the app. The session token lives in ~/.config/quirecode/env (mode 0600). Safe to
+# rerun, including on a guest reset from Terminal → Settings → Recovery. It replaces a daemon
+# installed before 0.1.0 (avf-native-daemon and its avf-native service), keeping its pairing.
 set -euo pipefail
 
 # uv runs ty, ruff and the Jupyter bridge. Pinned and checksum-verified, like the tool catalog.
@@ -20,7 +21,7 @@ declare -A UV_SHA256=(
 )
 
 usage() {
-  echo "usage: $0 [--remote [--port N] [--address HOST]] [/path/to/avf-daemon] [workspace]" >&2
+  echo "usage: $0 [--remote [--port N] [--address HOST]] [/path/to/quirecode-daemon] [workspace]" >&2
   exit 2
 }
 
@@ -40,13 +41,16 @@ while (($#)); do
 done
 
 here="$(dirname "$(readlink -f "$0")")"
-default_daemon="$here/avf-native-daemon"
-[[ -f "$default_daemon" ]] || default_daemon="$here/avf-daemon"
+default_daemon="$here/quirecode-daemon"
 daemon_source=${positional[0]:-$default_daemon}
 [[ -f "$daemon_source" ]] || usage
 workspace=${positional[1]:-$HOME/Projects}
-config="$HOME/.config/avf-native"
-unit="$HOME/.config/systemd/user/avf-native.service"
+config="$HOME/.config/quirecode"
+unit="$HOME/.config/systemd/user/quirecode.service"
+# Before 0.1.0 the daemon was avf-native-daemon, run by avf-native.service, with its token,
+# pairing code and TLS certificate in ~/.config/avf-native. Moving that folder keeps the pairing.
+former_config="$HOME/.config/avf-native"
+former_unit="$HOME/.config/systemd/user/avf-native.service"
 
 # The app opens ~/Projects first; on the tablet's own guest the rest of home can be opened too
 # (File > Open Folder). Its terminal reaches all of it anyway. A LAN host serves only the workspace.
@@ -65,8 +69,11 @@ else
   tls_line=""
 fi
 
-install -D -m 755 "$daemon_source" "$HOME/.local/bin/avf-native-daemon.new"
-mv "$HOME/.local/bin/avf-native-daemon.new" "$HOME/.local/bin/avf-native-daemon"
+install -D -m 755 "$daemon_source" "$HOME/.local/bin/quirecode-daemon.new"
+mv "$HOME/.local/bin/quirecode-daemon.new" "$HOME/.local/bin/quirecode-daemon"
+if [[ ! -e "$config" && -d "$former_config" ]]; then
+  mv "$former_config" "$config"
+fi
 mkdir -p "$config" "$workspace" "$(dirname "$unit")"
 chmod 700 "$config"
 # /tmp in the AVF guest is a RAM-backed tmpfs of half the guest's memory (2 GB on a 4 GB guest);
@@ -95,13 +102,13 @@ fi
 
 cat >"$unit" <<UNIT
 [Unit]
-Description=QuireCode IDE daemon (avf-native)
+Description=QuireCode daemon
 
 [Service]
 Type=simple
-ExecStart=%h/.local/bin/avf-native-daemon
+ExecStart=%h/.local/bin/quirecode-daemon
 WorkingDirectory=$workspace
-EnvironmentFile=%h/.config/avf-native/env
+EnvironmentFile=%h/.config/quirecode/env
 Environment=AVF_WORKSPACE_ROOTS=$roots
 Environment=AVF_BIND_ADDR=$bind
 $tls_line
@@ -115,12 +122,19 @@ UMask=0077
 WantedBy=default.target
 UNIT
 
+# The daemon from before 0.1.0 holds the same port: stop it and remove it for good.
+if [[ -f "$former_unit" ]]; then
+  systemctl --user disable --now avf-native.service 2>/dev/null || true
+  rm -f "$former_unit" "$HOME/.local/bin/avf-native-daemon"
+  rm -rf "$HOME/.cache/avf-native/shell-integration"
+  rmdir "$HOME/.cache/avf-native" 2>/dev/null || true
+fi
 systemctl --user daemon-reload
-systemctl --user enable avf-native.service
+systemctl --user enable quirecode.service
 # stop/sleep/start, never restart: the Terminal app's port forwarder can lose the port otherwise.
-systemctl --user stop avf-native.service || true
+systemctl --user stop quirecode.service || true
 sleep 3
-systemctl --user start avf-native.service
+systemctl --user start quirecode.service
 if $remote; then
   # Keep the service running without an open login session (allowed for your own user on most distros).
   loginctl enable-linger "$USER" 2>/dev/null || echo "note: run 'sudo loginctl enable-linger $USER' to keep the daemon running after logout" >&2
@@ -146,7 +160,7 @@ fi
 # wrapper for the tool the forwarder reads; it takes effect at the next guest start (Settings ->
 # Guest tools -> Port forwarding fix shows it and can undo it).
 if ! $remote && [ -x /usr/bin/forwarder_guest_launcher ] && sudo -n true 2>/dev/null; then
-  sudo -n "$HOME/.local/bin/avf-native-daemon" guest fix-port-forwarding ||
+  sudo -n "$HOME/.local/bin/quirecode-daemon" guest fix-port-forwarding ||
     echo "warning: the port forwarding fix wasn't installed; apply it from the app's Settings" >&2
 fi
 
@@ -184,9 +198,9 @@ if ! command -v uv >/dev/null; then
   rm -f "$archive"
 fi
 for tool in ty ruff ripgrep jupyter debugpy typescript copilot-language-server copilot; do
-  avf-native-daemon tools install "$tool" || echo "warning: could not install $tool" >&2
+  quirecode-daemon tools install "$tool" || echo "warning: could not install $tool" >&2
 done
-avf-native-daemon tools list
+quirecode-daemon tools list
 echo
 if $remote; then
   if [[ -z "$address" ]]; then
@@ -195,10 +209,10 @@ if $remote; then
     address=${address:-$(hostname -I 2>/dev/null | awk '{print $1}')}
   fi
   echo "The daemon listens on port $port over TLS. Allow it through the firewall if one is active"
-  echo "(for example: sudo ufw allow $port/tcp). Run 'avf-native-daemon pair --remote $address:$port'"
+  echo "(for example: sudo ufw allow $port/tcp). Run 'quirecode-daemon pair --remote $address:$port'"
   echo "again whenever you need a new code."
-  avf-native-daemon pair --remote "${address:?could not detect the address of this machine, pass --address}:$port"
+  quirecode-daemon pair --remote "${address:?could not detect the address of this machine, pass --address}:$port"
 else
-  echo "If Android asks to open port 19870 (avf-native), accept it."
-  avf-native-daemon pair
+  echo "If Android asks to open port 19870, accept it."
+  quirecode-daemon pair
 fi

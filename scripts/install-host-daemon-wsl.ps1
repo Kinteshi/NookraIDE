@@ -52,7 +52,7 @@ if ((Invoke-Wsl "ps -p 1 -o comm=").Trim() -ne "systemd") {
 # The repository as the distro sees it (works whether it lives in Windows or in the distro).
 $repo = (Invoke-Wsl "wslpath -a '$((Split-Path -Parent $PSScriptRoot) -replace "'", "'\''")'").Trim()
 if (-not $DaemonPath) {
-    $DaemonPath = "$repo/target/release/avf-daemon"
+    $DaemonPath = "$repo/target/release/quirecode-daemon"
     if ((Invoke-Wsl "test -x '$DaemonPath' && echo yes || echo no").Trim() -ne "yes") {
         Write-Host "Building the daemon in WSL (needs Rust: https://rustup.rs)…"
         Invoke-Wsl "cd '$repo' && cargo build --release -p avf-daemon" | Out-Host
@@ -101,4 +101,4 @@ Start-ScheduledTask -TaskName $TaskName
 Invoke-Wsl "bash '$repo/scripts/install-native-daemon.sh' --remote --port $Port --address $address '$DaemonPath' $Workspace" | Out-Host
 Write-Host ""
 Write-Host "Paste the avf:// connection string above into QuireCode: Connect > Set up or pair > Pair with computer."
-Write-Host "New code later: wsl -d $Distro -- ~/.local/bin/avf-native-daemon pair --remote ${address}:$Port"
+Write-Host "New code later: wsl -d $Distro -- ~/.local/bin/quirecode-daemon pair --remote ${address}:$Port"

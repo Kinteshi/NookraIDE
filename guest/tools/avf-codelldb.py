@@ -112,7 +112,7 @@ def remove() -> None:
 
 def serve(extra: list) -> None:
     if not ADAPTER.is_file():
-        fail("CodeLLDB is not set up; run: avf-native-daemon tools install codelldb")
+        fail("CodeLLDB is not set up; run: quirecode-daemon tools install codelldb")
     listener = socket.socket()
     listener.bind(("127.0.0.1", 0))
     listener.listen(1)

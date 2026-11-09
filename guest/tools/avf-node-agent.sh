@@ -172,7 +172,7 @@ run_js_debug() {
     case "$mode" in serve | connect) ;; *) fail "usage: avf-node-agent js-debug serve|connect <port>" ;; esac
     case "$port" in '' | *[!0-9]*) fail "js-debug needs a port number" ;; esac
     [ -x "$NODE_DIR/bin/node" ] && [ -f "$JS_DEBUG_DIR/js-debug/src/dapDebugServer.js" ] ||
-        fail "js-debug is not set up; run: avf-native-daemon tools install js-debug"
+        fail "js-debug is not set up; run: quirecode-daemon tools install js-debug"
     # The programs it starts find the user's own node first, QuireCode's otherwise.
     PATH="$PATH:$NODE_DIR/bin" exec "$NODE_DIR/bin/node" -e "$JS_DEBUG_BRIDGE" "$mode" "$port" "$JS_DEBUG_DIR/js-debug/src/dapDebugServer.js"
 }
@@ -264,7 +264,7 @@ run() {
     local entry
     entry=$(entry_of "$agent")
     [ -x "$NODE_DIR/bin/node" ] && [ -f "$entry" ] ||
-        fail "$agent is not set up; run: avf-native-daemon tools install $agent"
+        fail "$agent is not set up; run: quirecode-daemon tools install $agent"
     PATH="$NODE_DIR/bin:$PATH" exec "$NODE_DIR/bin/node" "$entry" "$@"
 }
 
@@ -295,7 +295,7 @@ login() {
             echo "Sign in with the link Gemini prints, paste the code, then type /quit."
             local entry
             entry=$(entry_of gemini)
-            [ -x "$NODE_DIR/bin/node" ] && [ -f "$entry" ] || fail "gemini is not set up; run: avf-native-daemon tools install gemini"
+            [ -x "$NODE_DIR/bin/node" ] && [ -f "$entry" ] || fail "gemini is not set up; run: quirecode-daemon tools install gemini"
             NO_BROWSER=true PATH="$NODE_DIR/bin:$PATH" "$NODE_DIR/bin/node" "$entry"
             [ -s "$HOME/.gemini/oauth_creds.json" ] || fail "no Google sign-in was saved"
             ;;

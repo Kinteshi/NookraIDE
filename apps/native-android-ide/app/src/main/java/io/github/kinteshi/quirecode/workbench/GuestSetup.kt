@@ -9,8 +9,8 @@ import java.util.Date
 import java.util.Locale
 
 /** Assets the build bundles for "Set up guest" (see scripts/build-guest-bundle.sh). */
-private val GUEST_BUNDLE_FILES = listOf("avf-native-daemon", "install-native-daemon.sh")
-private const val GUEST_BUNDLE_FOLDER = "avf-studio"
+private val GUEST_BUNDLE_FILES = listOf("quirecode-daemon", "install-native-daemon.sh")
+private const val GUEST_BUNDLE_FOLDER = "QuireCode"
 
 /** The Linux Terminal app sees Android's shared storage at this path. */
 private const val GUEST_SHARED_DOWNLOADS = "/mnt/shared/Download"
@@ -22,7 +22,7 @@ fun guestBundleAvailable(context: Context): Boolean =
     runCatching { context.assets.list("guest").orEmpty().toSet().containsAll(GUEST_BUNDLE_FILES) }.getOrDefault(false)
 
 /**
- * Copies the bundled daemon and installer to `Download/avf-studio/setup-<time>/` (a fresh folder,
+ * Copies the bundled daemon and installer to `Download/QuireCode/setup-<time>/` (a fresh folder,
  * because Android won't let an app overwrite Downloads entries it no longer owns) and returns the
  * command to run in Linux Terminal. Older setup folders this app created are removed.
  */

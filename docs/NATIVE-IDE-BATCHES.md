@@ -2545,6 +2545,22 @@ app id and the icon, so the work that doesn't depend on it goes first. 368 app u
   * Nothing is sent: there's no telemetry. The connection token is replaced wherever it appears, and the user reads the
     report before pasting it.
   * Aardink's version now comes from one place in app/build.gradle.kts (the dependency and BuildConfig).
+* **R2's last part, the guest daemon's name** (built; tested here, not yet on the tablet's guest):
+  * The command is `quirecode-daemon` (`quirecode-daemon pair`, `quirecode-daemon tools install …`), run by
+    `quirecode.service`, with its token, pairing code and TLS certificate in `~/.config/quirecode`. Cargo builds it under
+    that name (a `[[bin]]`; the package is still `avf-daemon`), so the app's bundle, the release's files
+    (`quirecode-daemon-<version>-linux-arm64`, `-x86_64`) and the WSL installer follow.
+  * Moving over keeps the pairing: the installer moves `~/.config/avf-native` to `~/.config/quirecode`, stops and removes
+    `avf-native.service`, the old binary and its shell-integration cache, then starts the new service (stop, wait, start,
+    as before). The daemon moves the folder too when it finds only the old one (hosts updated by hand). Checked with the
+    installer run against a temporary home with stubbed `systemctl` and `sudo`, twice: the token and certificate kept,
+    the old files gone, the second run a plain reinstall. Two daemon tests for the folder's move.
+  * The setup files go to `Download/QuireCode/` instead of `Download/avf-studio/`. The app still treats an
+    `avf-native-daemon` process as its own (hidden from the terminal's process lists).
+  * Not changed, as nothing a user reads shows them: the protocol's origin and client name, the `AVF_*` variables, the
+    keystore aliases, the crate and folder names.
+  * The old app (`com.avfstudio.nativeide`) on the tablet runs `avf-native-daemon …` for tool installs: once the guest
+    is moved over, that stops working there. It's to be uninstalled anyway.
 * Also: the remaining "AVF Studio" in what users read (the daemon's log and errors, the guest tools' descriptions, the
   installers, HOSTING-THE-DAEMON.md) is QuireCode; the Windows script's task and firewall-rule ids stay, as its
   uninstall looks for them. A compiled Python cache (`guest/tools/__pycache__`) had been committed: removed, and ignored.
@@ -2638,7 +2654,7 @@ release waits for; the rest stay in their lists for later releases.
 | Group | # | Size | Description |
 |---|---|---|---|
 | **1. Decide** | R1 | Decided 11-08; its batch done (57) | 0.1.0 follows batch 57: A5, A6, A7, G20, G6 and the whole of group 2 (G14, G17, G5 and its loose ends) |
-| | R2 | Done in the app (58) | **QuireCode**, app id `io.github.kinteshi.quirecode`, Quire's icon. Left: the daemon's installed name, the repository's name (R11) |
+| | R2 | Done (58) | **QuireCode**, app id `io.github.kinteshi.quirecode`, Quire's icon; the guest daemon is `quirecode-daemon` (`quirecode.service`, `~/.config/quirecode`); the repository is `Kinteshi/QuireCode` |
 | | R3 | Done (58) | Licence **Apache-2.0**: LICENSE and NOTICE, Cargo changed, notices generated from what ships and shown in Settings > About |
 | **2. Build and ship** | R4 | Done but the key (58) | Release builds: version from the tag, signing from the environment, R8 (25 MB). Left: the user creates and keeps the release key |
 | | R5 | Written (58), runs once pushed | CI and releases (GitHub Actions): tests, notices check, daemon for the guest and hosts, signed APK, checksums, release from a tag; notes in docs/releases/ |
