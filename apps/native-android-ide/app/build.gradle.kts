@@ -91,3 +91,26 @@ dependencies {
 // Aardink's classes are Java 21 bytecode, so the JVM that runs the tests must be at least that.
 val testJvm = extensions.getByType<JavaToolchainService>().launcherFor { languageVersion.set(JavaLanguageVersion.of(21)) }
 tasks.withType<Test>().configureEach { javaLauncher.set(testJvm) }
+
+// The libraries the release build ships, one `group:name:version` a line, for scripts/third-party-notices.py.
+tasks.register("thirdPartyArtifacts") {
+    val components = configurations.named("releaseRuntimeClasspath").flatMap { configuration ->
+        configuration.incoming.resolutionResult.rootComponent.map { root ->
+            val seen = linkedSetOf<String>()
+            fun walk(component: org.gradle.api.artifacts.result.ResolvedComponentResult) {
+                component.dependencies.filterIsInstance<org.gradle.api.artifacts.result.ResolvedDependencyResult>().forEach { dependency ->
+                    when (val id = dependency.selected.id) {
+                        is org.gradle.api.artifacts.component.ModuleComponentIdentifier ->
+                            if (seen.add("${id.group}:${id.module}:${id.version}")) walk(dependency.selected)
+                        // The app's own modules (tm4e): what they bring in ships too.
+                        is org.gradle.api.artifacts.component.ProjectComponentIdentifier ->
+                            if (seen.add("project ${id.projectPath}")) walk(dependency.selected)
+                    }
+                }
+            }
+            walk(root)
+            seen.filterNot { it.startsWith("project ") }.sorted()
+        }
+    }
+    doLast { components.get().forEach { println(it) } }
+}

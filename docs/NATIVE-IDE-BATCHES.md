@@ -2460,6 +2460,27 @@ The latest build; the guest running; `example.py` and `main.ipynb` open as befor
 (G6's test took it out of the Desk session, see above); b57 deleted; old test files of earlier batches removed from
 `/data/local/tmp`. The b57 file stays in the offline list until the next connection drops it.
 
+## 58. Release 0.1.0, part 1: the licence and the notices (R3) (11-08; done, checked on the tablet)
+User's go (11-08): "We can move on to the release!" The name (R2) is still the user's to choose; it comes in with the
+app id and the icon, so the work that doesn't depend on it goes first. 368 app unit tests pass.
+* **Apache-2.0 for the repository**: `LICENSE` (Apache's own text) and `NOTICE` at the root; the Rust workspace's
+  `license` changed from MIT. The copyright line says "Kinteshi-dev and contributors", the account the commits are made
+  as; for the user to change if they want another holder.
+* **Third-party notices, generated from what ships**: `scripts/third-party-notices.py` lists the release build's
+  Android libraries (a new Gradle task, `:app:thirdPartyArtifacts`, walks the runtime classpath, the tm4e module's too),
+  the Rust crates the daemon is built from for the tablet (`cargo metadata` for aarch64-unknown-linux-gnu), and the bundled
+  VS Code grammar, themes and Seti icons, and the tm4e module: 360 components, 106 distinct texts, 290 KiB, in
+  `assets/licenses/notices.json`. Each component's own licence file is used when it has one (inside the jar, or in the
+  crate's source), with the NOTICE files Apache-2.0 asks to pass on; otherwise the standard text from the SPDX list
+  (`scripts/licenses/`), whose copyright line then names "the authors of X" and their link, rather than a holder the
+  script can't know. Of a choice (MIT OR Apache-2.0), MIT is taken. tm4e's entry says where its source is, as EPL-2.0
+  asks. Nothing ships under GPL, LGPL or MPL (a unit test checks, and that the key components are listed).
+* **Settings > About**: the version, the licence, and **Open-source licences**: the components by group, with a filter;
+  one opens its licence text. Checked on the tablet.
+* Left for later release items: CI checking that `notices.json` is current (R5); the version shown is the build's fixed
+  `0.1.0` until versions come from tags (R4); the repository link in tm4e's notice points at `main`, which this branch
+  becomes (R11).
+
 ## Backlog
 ### Open backlog (11-08)
 The current lists of what's open, in two: the general backlog, and the Aardink switch's until it's complete. The older
@@ -2547,7 +2568,7 @@ release waits for; the rest stay in their lists for later releases.
 |---|---|---|---|
 | **1. Decide** | R1 | Decided 11-08; its batch done (57) | 0.1.0 follows batch 57: A5, A6, A7, G20, G6 and the whole of group 2 (G14, G17, G5 and its loose ends) |
 | | R2 | S, the user's | Name and icon: shortlist Burrow, Quire, Traveler, Clarity, with icon ideas in [RELEASE-PLAN.md](RELEASE-PLAN.md); goes to the repository, app id and daemon |
-| | R3 | S | Licence **Apache-2.0** (decided 11-08): LICENSE and NOTICE files, Cargo's MIT changed, third-party notices in the app (Aardink, tm4e EPL-2.0, termlib…) |
+| | R3 | Done (58) | Licence **Apache-2.0**: LICENSE and NOTICE, Cargo changed, notices generated from what ships and shown in Settings > About |
 | **2. Build and ship** | R4 | M | Release builds: a signing key and where it's kept, R8 with keep rules (Aardink's reflection in `AardinkGeometry` needs them), version numbers from tags, APK size |
 | | R5 | M | CI (GitHub Actions): app unit tests (JDK 17 and 21), daemon tests, the arm64 daemon (zigbuild) bundled into the APK, the daemon for Linux and WSL hosts, checksums, a GitHub release from a tag |
 | | R6 | S–M | App and daemon versions: the app checks the guest daemon's version, not only the protocol number, and offers to update it with the one it carries; release notes for both |

@@ -146,6 +146,8 @@ sealed interface WorkbenchDialog {
     data class GuestSetup(val reason: String? = null) : WorkbenchDialog
     /** Why a connected guest can stop (G17): opened from the banner that says it did. */
     data object GuestStopped : WorkbenchDialog
+    /** Settings > About > Open-source licences. */
+    data object Licenses : WorkbenchDialog
     /** Offers to install a missing guest tool; [then] continues what needed it. */
     data class InstallDependency(val dependency: GuestDependency, val reason: String?, val then: (() -> Unit)?) : WorkbenchDialog
     /**

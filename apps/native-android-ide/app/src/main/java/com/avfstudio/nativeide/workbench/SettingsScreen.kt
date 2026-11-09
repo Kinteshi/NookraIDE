@@ -27,6 +27,9 @@ import androidx.compose.material.icons.automirrored.outlined.Login
 import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.automirrored.outlined.Notes
 import androidx.compose.material.icons.automirrored.outlined.WrapText
+import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.Gavel
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.AccountTree
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.AutoFixHigh
@@ -147,6 +150,7 @@ enum class SettingsCategory(val title: String, val summary: String, val icon: Im
     Ai("Copilot and Chat", "Inline suggestions, next edits, chat agent", Icons.Outlined.AutoAwesome),
     Guest("Guest", "Linux tools, fixes, connections", Icons.Outlined.Dns),
     Keyboard("Keyboard and device", "Shortcuts, key bar, haptics, settings.json", Icons.Outlined.Keyboard),
+    About("About", "Version, licence, open-source licences", Icons.Outlined.Info),
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -241,6 +245,7 @@ private fun CategoryPage(controller: WorkbenchController, category: SettingsCate
             SettingsCategory.Ai -> ai(controller, settings, ::set)
             SettingsCategory.Guest -> guest(controller, settings, ::set)
             SettingsCategory.Keyboard -> keyboard(controller, settings, ::set)
+            SettingsCategory.About -> about(controller)
         }
         item { Spacer(Modifier.padding(bottom = 48.dp)) }
     }
@@ -725,6 +730,17 @@ private fun LazyListScope.keyboard(controller: WorkbenchController, settings: Wo
     item { SwitchRow(Icons.Outlined.Vibration, "Haptic feedback", "A short buzz for breakpoints, latched Ctrl or Alt, picking up and dropping in Explorer, and Undo", settings.haptics) { set(WorkbenchSettings.HAPTICS, it) } }
     item { Section("Advanced") }
     item { ActionRow(Icons.Outlined.Settings, "Edit settings.json", "Every setting, in VS Code's format (editor.*, files.* as in VS Code; avf.* for this app's own)") { controller.openSettingsJson() } }
+}
+
+private fun LazyListScope.about(controller: WorkbenchController) {
+    item { Section("MaterialCode") }
+    item {
+        val context = androidx.compose.ui.platform.LocalContext.current
+        val version = remember { runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull() }
+        SettingRow(Icons.Outlined.Info, "Version ${version ?: "unknown"}", "A native code editor for tablets, with a Linux machine behind it") {}
+    }
+    item { SettingRow(Icons.Outlined.Gavel, "Licence", "Apache License 2.0") {} }
+    item { ActionRow(Icons.Outlined.Description, "Open-source licences", "The libraries, crates and files the app ships, and their licences") { controller.dialog = WorkbenchDialog.Licenses } }
 }
 
 @Composable

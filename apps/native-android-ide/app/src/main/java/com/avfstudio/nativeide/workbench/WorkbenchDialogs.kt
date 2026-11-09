@@ -235,6 +235,7 @@ fun WorkbenchDialogHost(controller: WorkbenchController) {
         )
         WorkbenchDialog.GitClone -> GitCloneDialog(controller)
         WorkbenchDialog.GuestResources -> GuestResourcesDialog(controller)
+        WorkbenchDialog.Licenses -> LicensesDialog(controller)
         WorkbenchDialog.GuestStopped -> AlertDialog(
             onDismissRequest = { controller.dialog = null },
             icon = { Icon(Icons.Outlined.CloudOff, contentDescription = null) },

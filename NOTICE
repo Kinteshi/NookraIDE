@@ -1,0 +1,20 @@
+MaterialCode
+Copyright 2026 Kinteshi-dev and contributors
+
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This product includes software by others, each under its own licence. The complete list, with every licence
+text, is shown in the app (Settings > About > Open-source licences). It is generated from what the release
+build ships by scripts/third-party-notices.py, into
+apps/native-android-ide/app/src/main/assets/licenses/notices.json. In particular:
+
+* apps/native-android-ide/tm4e is Eclipse tm4e's core, licensed under the Eclipse Public License 2.0
+  (https://www.eclipse.org/legal/epl-2.0/), taken from sora-editor 0.23.6's copy. Its files keep their licence;
+  its README says where it comes from and what was changed.
+* The Python grammar, its language configuration and the Dark+ and Light+ syntax colours bundled with the app
+  come from Visual Studio Code, Copyright (c) Microsoft Corporation, under the MIT licence
+  (apps/native-android-ide/app/src/main/assets/textmate/VSCODE-LICENSE.txt).
+* The Seti file icons come from Visual Studio Code's icon theme and seti-ui, under the MIT licence
+  (apps/native-android-ide/app/src/main/assets/icon-themes/SETI-NOTICES.txt).
+* The guest daemon (crates/avf-daemon) is built with Rust crates under MIT, Apache-2.0, BSD, ISC, Unicode-3.0
+  and CC0-1.0 licences, listed with their texts in the same file.
