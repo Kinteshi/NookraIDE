@@ -52,6 +52,25 @@ greenhouse whose glazing bars draw `{ }`: a protected place where things grow), 
 cursor bar in the Material You colour), Lathe (a spindle with a curl of shaving shaped like `}`). Names had before:
 MaterialCode, AVF Studio.
 
+## The release key (R4; the user's, being set up 11-08)
+
+Android only installs an update when it's signed with the same key as the installed app, so the key is the app's
+identity for as long as it exists: lose it and installed copies can't be updated (users would uninstall, losing the app's
+data on the device); leak it and someone could sign a fake update. The debug key this machine makes by itself is fine for
+development, never for releases. Steps, run by the user so the password never passes through a session log:
+
+1. `mkdir -p ~/keys && chmod 700 ~/keys`, then
+   `keytool -genkeypair -v -keystore ~/keys/android-release.jks -alias release -keyalg RSA -keysize 4096 -validity 10000 -dname "CN=Kinteshi"`
+   (it asks for a password twice; a long one from a password manager).
+2. Back it up: the `.jks` file and the password in a password manager (as an attachment), and a second copy off this
+   machine. Check it with `keytool -list -keystore ~/keys/android-release.jks`.
+3. After the repository's transfer and rename (secrets are per repository): `base64 -w0 ~/keys/android-release.jks | gh
+   secret set RELEASE_KEYSTORE`, `gh secret set RELEASE_KEYSTORE_PASSWORD` (it asks), `gh secret set RELEASE_KEY_ALIAS
+   --body release`, and `gh secret set RELEASE_KEY_PASSWORD` (the same password: the keystore is PKCS12).
+4. The tablet's app is debug-signed: the first release-signed build needs it uninstalled first (Android refuses the
+   switch), which clears its settings, connections and offline copies on the device (the guest's files are untouched).
+   Export settings.json first. The new app id from R2 makes it a separate app anyway.
+
 ## How releases work (recommended, not yet decided)
 
 * **One repository** for the app and the daemon: the APK carries the arm64 daemon and installs it, and both share
@@ -75,6 +94,10 @@ Suggested order, each destructive step confirmed with the user right before it:
      10-15) are authored as `[redacted username] <[redacted personal email]>`, a personal email; every later commit uses the GitHub
      noreply address. They're in every branch and already on GitHub. Rewriting their author (a mailmap with
      `git filter-repo`) changes every commit's hash, so it would go with step 3's force push, or be left as is.
+     **User, 11-08:** they'll swap it for GitHub's private (noreply) address, later. Done once, with step 3's force push:
+     a mailmap that rewrites both those commits and the `Kinteshi-dev` ones to the address of the account that will own
+     the repository (ownership is moving to the user's main account). Until then, new commits keep using
+     `320711684+Kinteshi-dev@users.noreply.github.com`.
    * Private network addresses of the tablet and the dev machine (192.168.1.x, 10.x) appear in docs and tests: harmless,
      listed only for completeness.
 2. Keep this branch's history unless the scan finds something; otherwise squash into one first commit.
