@@ -2504,6 +2504,10 @@ app id and the icon, so the work that doesn't depend on it goes first. 368 app u
     passwords and alias.
   * Rehearsed here: the x86_64 daemon builds; the notices script leaves the committed file unchanged; a release build
     with `-Pavf.version=0.1.0` is version 0.1.0, code 100.
+  * The first run on GitHub (after the force push) failed in both jobs, on the runner, not the code: a daemon test runs
+    ripgrep, which the runner lacks (installed in the job now), and the Android setup action's default package list
+    asks for `tools`, which the SDK no longer has (only `platform-tools` now). `checkout` and `setup-java` moved to v5,
+    as v4 is deprecated.
   * `docs/releases/0.1.0.md`: the first release notes, a draft for people reading the release page (what it is, what
     you need, installing, what's in it, known limits). The name in it waits for R2.
 * **R2, the name: QuireCode** (user, 11-08: "Quire"; plain Quire is taken nearby, see the release plan). Done in the code:
