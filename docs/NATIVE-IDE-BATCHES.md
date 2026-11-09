@@ -2464,8 +2464,7 @@ The latest build; the guest running; `example.py` and `main.ipynb` open as befor
 User's go (11-08): "We can move on to the release!" The name (R2) is still the user's to choose; it comes in with the
 app id and the icon, so the work that doesn't depend on it goes first. 368 app unit tests pass.
 * **Apache-2.0 for the repository**: `LICENSE` (Apache's own text) and `NOTICE` at the root; the Rust workspace's
-  `license` changed from MIT. The copyright line says "Kinteshi-dev and contributors", the account the commits are made
-  as; for the user to change if they want another holder.
+  `license` changed from MIT. The copyright line says "Kinteshi and contributors" (the user's choice, 11-08; ownership goes to their main account).
 * **Third-party notices, generated from what ships**: `scripts/third-party-notices.py` lists the release build's
   Android libraries (a new Gradle task, `:app:thirdPartyArtifacts`, walks the runtime classpath, the tm4e module's too),
   the Rust crates the daemon is built from for the tablet (`cargo metadata` for aarch64-unknown-linux-gnu), and the bundled
