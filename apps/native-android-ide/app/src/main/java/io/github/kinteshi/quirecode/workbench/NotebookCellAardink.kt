@@ -48,6 +48,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.PopupProperties
 import com.aardarch.aardink.core.CodeEditorState
 import com.aardarch.aardink.core.ContentChange
+import com.aardarch.aardink.core.Decoration
+import com.aardarch.aardink.core.DecorationStyle
 import com.aardarch.aardink.core.Diagnostic
 import com.aardarch.aardink.core.DiagnosticSeverity
 import com.aardarch.aardink.core.InlineCompletion
@@ -168,6 +170,11 @@ internal fun AardinkCellEditor(controller: WorkbenchController, session: Noteboo
             withFrameNanos { }
         }
     }
+    // Aardink draws a selection without focus too: a cell left behind (find's previous match, a selection made before
+    // moving on) drops it, as the text field cells' selections went out of sight.
+    LaunchedEffect(selected) {
+        if (!selected && state.hasSelection) state.selection = TextRange(state.selection.end)
+    }
     // Go to definition or a problem's row: the caret lands there.
     LaunchedEffect(session.cellCaretRequest) {
         val (cellId, offset) = session.cellCaretRequest ?: return@LaunchedEffect
@@ -229,7 +236,32 @@ internal fun AardinkCellEditor(controller: WorkbenchController, session: Noteboo
         }
     }
 
-    Box(Modifier.fillMaxWidth().onGloballyPositioned { box = it }) {
+    // Find's matches in this cell, the current one stronger, as in the code editor.
+    val findMatches = session.findMatches[cell.id].orEmpty()
+    val findCurrent = session.findCurrentMatch?.takeIf { it.first == cell.id }?.second
+    val findColor = colors.tertiary.copy(alpha = 0.28f)
+    val findCurrentColor = colors.tertiary.copy(alpha = 0.6f)
+    LaunchedEffect(state, findMatches, findCurrent, findColor) {
+        state.setDecorations("find", findMatches.filter { it.last < state.text.length }.map { range ->
+            val color = if (range == findCurrent) findCurrentColor else findColor
+            Decoration(range.first until range.last + 1, DecorationStyle(background = color))
+        })
+    }
+
+    /** The character under a pointer at [local] in the cell's box, or null off the text. */
+    fun offsetUnder(local: androidx.compose.ui.geometry.Offset): Int? {
+        val root = box?.takeIf { it.isAttached }?.localToRoot(local) ?: return null
+        val geometry = AardinkGeometry.of(state) ?: return null
+        // Taken from Aardink's own hover tracking, so it doesn't show a problem card of its own beside ours.
+        geometry.takeHover()
+        return geometry.offsetAt(root)?.takeIf { it < state.text.length }
+    }
+
+    Box(
+        Modifier.fillMaxWidth().onGloballyPositioned { box = it }
+            // A mouse resting on a name shows the language server's hover card, as in the text field cells.
+            .cellHoverAt(controller, session, cell, ::offsetUnder),
+    ) {
         CompositionLocalProvider(LocalEditorTheme provides theme) {
             CodeEditorLayout(
                 state = state,
@@ -309,6 +341,8 @@ internal fun AardinkCellEditor(controller: WorkbenchController, session: Noteboo
                     showFoldMarkers = lineNumbers,
                     showDiffMarkers = false,
                     highlightCurrentLine = selected,
+                    // A bracket pair stays boxed at a caret that isn't shown: only in the cell being edited.
+                    matchBrackets = selected,
                     stickyScroll = false,
                     showMinimap = false,
                     breadcrumbs = false,
@@ -346,6 +380,15 @@ internal fun AardinkCellEditor(controller: WorkbenchController, session: Noteboo
                     }
                 },
             )
+        }
+        session.cellHover?.takeIf { it.cellId == cell.id }?.let { hover ->
+            val word = box?.takeIf { it.isAttached }?.let { coordinates ->
+                val caret = AardinkGeometry.of(state)?.caretAt(wordStart(state.text, hover.offset.coerceIn(0, state.text.length)))
+                    ?: return@let null
+                val origin = coordinates.localToRoot(androidx.compose.ui.geometry.Offset.Zero)
+                CellWordBox((caret.left - origin.x).toInt(), (caret.top - origin.y).toInt(), (caret.bottom - origin.y).toInt())
+            }
+            if (word != null) CellHoverCard(controller, session, hover, word)
         }
         val completion = session.cellCompletion?.takeIf { it.cellId == cell.id }
         val items = completion?.visibleItems(value())

@@ -50,7 +50,7 @@ class GuestConnectionService : Service() {
         val host = Uri.parse(endpoint).host.orEmpty()
         return Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle("QuireCode")
+            .setContentTitle(io.github.kinteshi.quirecode.workbench.DevBuild.appName)
             .setContentText(if (host.isBlank()) state else "$state · $host")
             .setContentIntent(openApp)
             .setOngoing(true)

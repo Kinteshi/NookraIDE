@@ -264,7 +264,7 @@ private fun LazyListScope.appearance(controller: WorkbenchController, settings: 
         SwitchRow(
             Icons.Outlined.ColorLens,
             "Dynamic colour",
-            "Material You palette from your wallpaper",
+            if (DevBuild.enabled) "Material You palette from your wallpaper; off, the dev build's orange" else "Material You palette from your wallpaper",
             settings.dynamicColor,
         ) { set(WorkbenchSettings.DYNAMIC_COLOR, it) }
     }
@@ -758,11 +758,19 @@ private fun LazyListScope.keyboard(controller: WorkbenchController, settings: Wo
 }
 
 private fun LazyListScope.about(controller: WorkbenchController) {
-    item { Section("QuireCode") }
+    item { Section(DevBuild.appName) }
     item {
         val context = androidx.compose.ui.platform.LocalContext.current
         val version = remember { runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull() }
-        SettingRow(Icons.Outlined.Info, "Version ${version ?: "unknown"}", "A native code editor for tablets, with a Linux machine behind it") {}
+        SettingRow(
+            Icons.Outlined.Info,
+            "Version ${version ?: "unknown"}" + if (DevBuild.enabled) " (dev build)" else "",
+            if (DevBuild.enabled) {
+                "A development build, installed beside QuireCode with its own settings and pairing"
+            } else {
+                "A native code editor for tablets, with a Linux machine behind it"
+            },
+        ) {}
     }
     item { SettingRow(Icons.Outlined.Gavel, "Licence", "Apache License 2.0") {} }
     item { ActionRow(Icons.Outlined.Description, "Open-source licences", "The libraries, crates and files the app ships, and their licences") { controller.dialog = WorkbenchDialog.Licenses } }

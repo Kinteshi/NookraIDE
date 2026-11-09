@@ -23,6 +23,7 @@ android {
         versionCode = versionCodeOf(version)
         buildConfigField("String", "AARDINK_VERSION", "\"$aardinkVersion\"")
         manifestPlaceholders["appLabel"] = "QuireCode"
+        buildConfigField("boolean", "DEV_BUILD", "false")
     }
 
     signingConfigs {
@@ -44,6 +45,8 @@ android {
         debug {
             applicationIdSuffix = ".dev"
             manifestPlaceholders["appLabel"] = "QuireCode Dev"
+            // Told apart at a glance: an orange palette by default, a DEV badge, its own launcher icon (src/debug/res).
+            buildConfigField("boolean", "DEV_BUILD", "true")
         }
         release {
             // Without the release key, the debug key: a local release build then installs over the debug app, data kept.

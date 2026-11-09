@@ -2666,6 +2666,36 @@ the release-signed QuireCode on the tablet is never replaced by a test build.
 * Debug builds are their own app (`.dev`, "QuireCode Dev"): CI's debug build and local ones no longer clash with the
   release-signed app.
 
+## 60. The dev app told apart; hover and find in Aardink cells (11-09; done, checked on the tablet)
+User's request (11-09): "differentiate the dev build from the release build with different default palette and a dev
+indicator in the name and through the app", and "finish the notebook implementation with the points you deemed
+missing" (batch 59's "not yet": the hover card in cells with a mouse, find's other matches drawn in cells).
+
+* **The dev app** (`io.github.kinteshi.quirecode.dev`, debug builds; `BuildConfig.DEV_BUILD`, `DevBuild` in the app):
+  * Its own palette by default: dynamic colour starts off (`avf.theme.dynamicColor` false among the dev build's default
+    settings, under the user's), and the static palette is Material 3 tones from the icon's orange cursor instead of
+    the release app's blue. Turning dynamic colour on in the dev app still works; the setting's summary says what off
+    means there.
+  * A **DEV** badge by the name in the top bar and on the welcome page; Settings > About is headed "QuireCode Dev" with
+    "(dev build)" after the version; the guest connection's notification is titled "QuireCode Dev". Diagnostics
+    already said "debug build".
+  * Its own launcher icon (`src/debug/res`): a warm background, the quire in browns and a block cursor instead of the
+    bar; the themed (monochrome) icon has the block cursor too, so the two apps differ with themed icons on.
+  * Seen on the tablet: the orange palette, both badges, the icon in the window's caption and the dock.
+* **The hover card in Aardink cells:** a mouse resting on a name shows the language server's card (type, docs, the
+  problem there), as in text field cells and files: the text field cells' pointer handling, given the character
+  under the pointer from Aardink's geometry, and the card placed at the word's start from Aardink's caret position.
+  Aardink's own hover tracking is taken, so it shows no problem card of its own beside ours. Checked with a test HID
+  mouse: on `undefined_name` (the problem and `Unknown`), on `area` in a cell that wasn't selected
+  (`def area(r) -> Unknown`), one card each time, above the word.
+* **Find's matches in Aardink cells:** every match tinted, the current one stronger, as Aardink decorations (the
+  file editor's colours). Checked: 4 matches of `area` across two cells, the current one moving with Enter. Found on
+  the way: Aardink draws a selection in a cell without focus, so find's previous match stayed selected in the cell it
+  left, and a bracket pair stayed boxed at a caret that isn't shown. A cell that stops being selected drops its
+  selection now, and only the selected cell matches brackets.
+* The release notes' known limit about cells (no line numbers, not all of the editor's features) is gone: cells are
+  Aardink editors with line numbers on request (batch 59), the hover card and find (this batch).
+
 ## Backlog
 ### Open backlog (11-08)
 The current lists of what's open, in two: the general backlog, and the Aardink switch's until it's complete. The older
@@ -2727,7 +2757,7 @@ A2, A3, A4, A8, A16, A17 and A19 were done in batches 47–54, and A5's checks i
 | | A14 | 75 | S to ask | `LanguageConfiguration` can't load on Android (regex); ours reads the files meanwhile |
 | | A15 | 76 | S to ask | Typing over auto-inserted closers; ours does it for hardware keys |
 | | A18 | – | S to ask | Backspace back to a tab stop in leading spaces (VS Code's `useTabStops`); ours does it for hardware keys (batch 53) |
-| **E. After sora is out** | – | – | – | A20 done in batch 59: notebook cells in Aardink (`avf.notebook.cellEditor`, the text field kept as a choice) |
+| **E. After sora is out** | – | – | – | A20 done in batch 59: notebook cells in Aardink (`avf.notebook.cellEditor`, the text field kept as a choice); the hover card and find's matches in them in batch 60 |
 | **D. Each release** | A12 | habit | S per release | Review each Aardink release against the plan and these lists, bump the pin, recheck (plan, "Release reviews"); with A19, check its reflection still works |
 
 Why these groups:

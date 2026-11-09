@@ -121,6 +121,14 @@ internal fun Modifier.cellHover(
     session: NotebookSession,
     cell: NotebookCell,
     layout: () -> TextLayoutResult?,
+): Modifier = cellHoverAt(controller, session, cell) { position -> layout()?.let { cellOffsetAt(it, position) } }
+
+/** [cellHover] for a cell whose editor finds the character under a pointer [offsetAt] its own way (Aardink's cells). */
+internal fun Modifier.cellHoverAt(
+    controller: WorkbenchController,
+    session: NotebookSession,
+    cell: NotebookCell,
+    offsetAt: (Offset) -> Int?,
 ): Modifier = if (cell.type != CellType.Code) this else pointerInput(cell.id) {
     coroutineScope {
         var pending: Job? = null
@@ -132,8 +140,7 @@ internal fun Modifier.cellHover(
                     PointerEventType.Enter, PointerEventType.Move -> {
                         if (change.pressed || !controller.settings.editorHover) continue
                         pending?.cancel()
-                        val shown = layout() ?: continue
-                        val offset = cellOffsetAt(shown, change.position)
+                        val offset = offsetAt(change.position)
                         val hover = session.cellHover?.takeIf { it.cellId == cell.id }
                         val onItsWord = hover != null && offset != null && sameWord(cell.source, hover.offset, offset)
                         if (onItsWord) {
@@ -166,17 +173,31 @@ internal fun Modifier.cellHover(
 /** The hover card above the hovered word (below it near the top of the window). */
 @Composable
 internal fun CellHoverCard(controller: WorkbenchController, session: NotebookSession, hover: CellHover, layout: TextLayoutResult) {
-    val colors = MaterialTheme.colorScheme
-    val density = LocalDensity.current
     // The text sits 12 dp inside the box the popup is anchored to.
-    val inset = with(density) { 12.dp.roundToPx() }
-    val gap = with(density) { 4.dp.roundToPx() }
+    val inset = with(LocalDensity.current) { 12.dp.roundToPx() }
     // At the word's start, as in VS Code: from anywhere on the word, straight up lands on the card.
     val offset = wordStart(layout.layoutInput.text.text, hover.offset.coerceIn(0, layout.layoutInput.text.length))
     val line = layout.getLineForOffset(offset)
-    val x = layout.getHorizontalPosition(offset, usePrimaryDirection = true).roundToInt() + inset
-    val top = layout.getLineTop(line).roundToInt() + inset
-    val bottom = layout.getLineBottom(line).roundToInt() + inset
+    val word = CellWordBox(
+        x = layout.getHorizontalPosition(offset, usePrimaryDirection = true).roundToInt() + inset,
+        top = layout.getLineTop(line).roundToInt() + inset,
+        bottom = layout.getLineBottom(line).roundToInt() + inset,
+    )
+    CellHoverCard(controller, session, hover, word)
+}
+
+/** Where a hovered word's start is, in pixels inside the box the hover card is anchored to. */
+internal data class CellWordBox(val x: Int, val top: Int, val bottom: Int)
+
+/** The hover card above [word] (below it near the top of the window). */
+@Composable
+internal fun CellHoverCard(controller: WorkbenchController, session: NotebookSession, hover: CellHover, word: CellWordBox) {
+    val colors = MaterialTheme.colorScheme
+    val density = LocalDensity.current
+    val gap = with(density) { 4.dp.roundToPx() }
+    val x = word.x
+    val top = word.top
+    val bottom = word.bottom
     val position = object : PopupPositionProvider {
         override fun calculatePosition(anchorBounds: IntRect, windowSize: IntSize, layoutDirection: LayoutDirection, popupContentSize: IntSize): IntOffset {
             val left = (anchorBounds.left + x).coerceIn(0, maxOf(0, windowSize.width - popupContentSize.width))

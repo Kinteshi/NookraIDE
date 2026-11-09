@@ -449,7 +449,10 @@ private fun EmptyEditor(controller: WorkbenchController) = BoxWithConstraints(Mo
             tint = colors.primary,
             modifier = Modifier.size(96.dp),
         )
-        Text("QuireCode", style = MaterialTheme.typography.headlineMedium, color = colors.onSurface)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("QuireCode", style = MaterialTheme.typography.headlineMedium, color = colors.onSurface)
+            DevBadge()
+        }
         Spacer(Modifier.height(16.dp))
         // First run (R7): nothing paired yet, so the way in comes first.
         if (!controller.connected && controller.profiles.isEmpty()) {

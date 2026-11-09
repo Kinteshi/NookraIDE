@@ -281,7 +281,10 @@ private fun TopBar(controller: WorkbenchController, expanded: Boolean) {
                 .clickable { if (controller.connected) controller.showOpenFolder() else controller.openConnect() }
                 .padding(horizontal = 6.dp),
         ) {
-            Text("QuireCode", style = MaterialTheme.typography.titleMedium, maxLines = 1)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("QuireCode", style = MaterialTheme.typography.titleMedium, maxLines = 1)
+                DevBadge()
+            }
             Text(
                 controller.workspaceRoot?.substringAfterLast('/') ?: "No workspace",
                 style = MaterialTheme.typography.labelSmall,

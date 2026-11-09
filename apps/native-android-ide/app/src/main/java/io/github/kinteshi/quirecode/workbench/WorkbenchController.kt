@@ -297,7 +297,9 @@ class WorkbenchController(private val context: Context) {
     var chatAgent = AcpClient(vfs)
         private set
     private val defaultSettings =
-        JsonParser.parseString("""{"editor":{"fontSize":14,"tabSize":4,"insertSpaces":true}}""").asJsonObject
+        JsonParser.parseString("""{"editor":{"fontSize":14,"tabSize":4,"insertSpaces":true}}""").asJsonObject.also { defaults ->
+            JsonParser.parseString(DevBuild.defaultSettings).asJsonObject.entrySet().forEach { (key, value) -> defaults.add(key, value) }
+        }
     private val preferences = context.getSharedPreferences("native-ide-settings", Context.MODE_PRIVATE)
     private val cache = EncryptedDocumentCache(context)
     val repository = DocumentRepository(vfs, cache, ContentResolverFileStore(context))
