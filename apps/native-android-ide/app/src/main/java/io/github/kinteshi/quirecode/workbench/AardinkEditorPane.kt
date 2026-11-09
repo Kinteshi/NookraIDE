@@ -95,10 +95,16 @@ internal fun AardinkEditorView(controller: WorkbenchController, document: Docume
     val config = surface.config
     // Toggle and edit the cursor line's breakpoint; the gutter can't be tapped for one yet (request 2).
     val breakpointItems = remember(document.path) {
+        // Share the selection (G26) through Android's share sheet; the selection's own text, read when chosen.
+        val share = EditorMenuItem("Share Selection") {
+            val range = state.selection
+            controller.shareText(state.text.substring(minOf(range.start, range.end), maxOf(range.start, range.end)))
+        }
         if (!isGuestPath(document.path)) {
-            emptyList()
+            listOf(share)
         } else {
             listOf(
+                share,
                 EditorMenuItem("Toggle Breakpoint") { controller.toggleBreakpoint(document.path, state.cursorLine + 1) },
                 EditorMenuItem("Edit Breakpoint…") { controller.editBreakpoint(document.path, state.cursorLine + 1) },
             )

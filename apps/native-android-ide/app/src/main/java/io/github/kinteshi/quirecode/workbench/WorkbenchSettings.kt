@@ -194,6 +194,8 @@ data class WorkbenchSettings(
     val linkedEditing: Boolean = true,
     /** Ask before deleting from Explorer (`explorer.confirmDelete`); Undo is offered either way. */
     val confirmDelete: Boolean = true,
+    /** `avf.files.saveFoldersAs`: saving folders to the device as one "zip" archive (the default) or as a "folder" of files (G27). */
+    val saveFoldersAs: String = "zip",
     /** A folder holding only one folder shows as one row, `src/main/java` (`explorer.compactFolders`). */
     val compactFolders: Boolean = true,
     /** The open tabs listed above the files in Explorer (`explorer.openEditors.visible`). */
@@ -317,6 +319,7 @@ data class WorkbenchSettings(
         const val CODE_LENS = "editor.codeLens"
         const val LINKED_EDITING = "editor.linkedEditing"
         const val CONFIRM_DELETE = "explorer.confirmDelete"
+        const val SAVE_FOLDERS_AS = "avf.files.saveFoldersAs"
         const val COMPACT_FOLDERS = "explorer.compactFolders"
         /** VS Code takes a count (0 hides the section); a boolean works here too. */
         const val OPEN_EDITORS = "explorer.openEditors.visible"
@@ -442,6 +445,7 @@ data class WorkbenchSettings(
                 codeLens = bool(CODE_LENS, defaults.codeLens),
                 linkedEditing = bool(LINKED_EDITING, defaults.linkedEditing),
                 confirmDelete = bool(CONFIRM_DELETE, defaults.confirmDelete),
+                saveFoldersAs = string(SAVE_FOLDERS_AS)?.takeIf { it == "zip" || it == "folder" } ?: defaults.saveFoldersAs,
                 compactFolders = bool(COMPACT_FOLDERS, defaults.compactFolders),
                 openEditors = settings.getPath(OPEN_EDITORS)?.takeIf { it.isJsonPrimitive }?.asJsonPrimitive?.let { value ->
                     if (value.isNumber) value.asInt > 0 else runCatching { value.asBoolean }.getOrNull()

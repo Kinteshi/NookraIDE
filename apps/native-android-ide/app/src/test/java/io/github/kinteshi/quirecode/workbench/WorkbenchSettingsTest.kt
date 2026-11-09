@@ -99,6 +99,13 @@ class WorkbenchSettingsTest {
     }
 
     @Test
+    fun saveFoldersAsZipOrFolder() {
+        assertEquals("zip", WorkbenchSettings().saveFoldersAs)
+        assertEquals("folder", WorkbenchSettings.from(JsonParser.parseString("""{"avf.files.saveFoldersAs":"folder"}""").asJsonObject).saveFoldersAs)
+        assertEquals("zip", WorkbenchSettings.from(JsonParser.parseString("""{"avf.files.saveFoldersAs":"tarball"}""").asJsonObject).saveFoldersAs)
+    }
+
+    @Test
     fun panelHideWhileTypingAndConnectionBanner() {
         val defaults = WorkbenchSettings()
         assertTrue(defaults.panelHideWhileTyping)

@@ -99,6 +99,7 @@ fun SidebarContent(controller: WorkbenchController, view: SidebarView, modifier:
                 Tooltip("New folder") { IconButton(onClick = { controller.beginNewEntry(folder = true) }) {
                     Icon(Icons.Outlined.CreateNewFolder, contentDescription = "New folder")
                 } }
+                ImportButton(controller)
             }
             if (view == SidebarView.Explorer) {
                 Tooltip("Refresh") { IconButton(onClick = {

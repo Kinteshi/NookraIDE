@@ -118,6 +118,11 @@ fun NativeWorkbench() {
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let(controller::openDeviceFile)
     }
+    // Files in and out (group 9): save a file or a zip, pick a device folder (save into, import from), pick files to import.
+    val saveFilePicker = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream"), controller::onSaveDocumentPicked)
+    val saveZipPicker = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip"), controller::onSaveDocumentPicked)
+    val treePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree(), controller::onTreePicked)
+    val importPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments(), controller::onImportFilesPicked)
     DisposableEffect(lifecycleOwner) {
         controller.requestNotificationPermission = { permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) }
         controller.pickAssetPack = { mode ->
@@ -125,6 +130,12 @@ fun NativeWorkbench() {
             assetPicker.launch(if (mode == "theme") arrayOf("application/json", "text/*", "*/*") else arrayOf("*/*"))
         }
         controller.pickLocalFile = { filePicker.launch(arrayOf("*/*")) }
+        controller.devicePickers = DevicePickers(
+            createFile = saveFilePicker::launch,
+            createZip = saveZipPicker::launch,
+            openTree = { treePicker.launch(null) },
+            openFiles = { importPicker.launch(arrayOf("*/*")) },
+        )
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_STOP -> {
@@ -144,6 +155,7 @@ fun NativeWorkbench() {
             KeyRouter.bypassesIme = null
             IntentRouter.handler = null
             controller.pickLocalFile = null
+            controller.devicePickers = null
             lifecycleOwner.lifecycle.removeObserver(observer)
             controller.dispose()
         }
@@ -212,6 +224,7 @@ private fun WorkbenchLayout(controller: WorkbenchController) {
         Column(Modifier.fillMaxSize()) {
             TopBar(controller, expanded)
             ConnectionBanner(controller)
+            TransferBanner(controller)
             DaemonVersionBanner(controller)
             GuestDiskBanner(controller)
             if (expanded) {

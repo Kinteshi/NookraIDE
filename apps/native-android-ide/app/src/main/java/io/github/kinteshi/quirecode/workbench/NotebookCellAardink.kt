@@ -257,6 +257,16 @@ internal fun AardinkCellEditor(controller: WorkbenchController, session: Noteboo
         return geometry.offsetAt(root)?.takeIf { it < state.text.length }
     }
 
+    // Share the cell's selection (G26) through Android's share sheet.
+    val shareItems = remember(state) {
+        listOf(
+            com.aardarch.aardink.ui.EditorMenuItem("Share Selection") {
+                val range = state.selection
+                controller.shareText(state.text.substring(minOf(range.start, range.end), maxOf(range.start, range.end)))
+            },
+        )
+    }
+
     Box(
         Modifier.fillMaxWidth().onGloballyPositioned { box = it }
             // A mouse resting on a name shows the language server's hover card, as in the text field cells.
@@ -332,6 +342,8 @@ internal fun AardinkCellEditor(controller: WorkbenchController, session: Noteboo
                     },
                 diagnostics = diagnostics,
                 inlineCompletionProvider = copilot,
+                contextMenuItems = shareItems,
+                touchMenuItems = shareItems,
                 // Its undo, redo and arrows would sit over a short cell; the app's key bar is above the keyboard anyway.
                 keyboardToolbarPlacement = com.aardarch.aardink.ui.KeyboardToolbarPlacement.Hidden,
                 options = EditorOptions(

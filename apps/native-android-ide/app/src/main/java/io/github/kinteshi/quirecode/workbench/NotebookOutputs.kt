@@ -28,6 +28,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.ExpandLess
@@ -170,6 +171,12 @@ private fun OutputMenuButton(
                 leadingIcon = { Icon(Icons.Outlined.ContentCopy, contentDescription = null) },
                 enabled = text != null,
                 onClick = { onOpenChange(false); text?.let { controller.copyOutputText(it) } },
+            )
+            DropdownMenuItem(
+                text = { Text("Share output") },
+                leadingIcon = { Icon(Icons.Outlined.Share, contentDescription = null) },
+                enabled = text != null,
+                onClick = { onOpenChange(false); text?.let { controller.shareText(it, "Share output") } },
             )
             if (views.size > 1) {
                 HorizontalDivider()

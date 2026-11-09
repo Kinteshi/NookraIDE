@@ -55,6 +55,7 @@ import androidx.compose.material.icons.outlined.FileOpen
 import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.FolderCopy
+import androidx.compose.material.icons.outlined.FolderZip
 import androidx.compose.material.icons.outlined.FormatIndentIncrease
 import androidx.compose.material.icons.outlined.FormatListNumbered
 import androidx.compose.material.icons.outlined.FormatPaint
@@ -422,6 +423,15 @@ private fun LazyListScope.files(controller: WorkbenchController, settings: Workb
     item { SwitchRow(Icons.Outlined.ViewAgenda, "Open editors in Explorer", "The open tabs above the files, with their unsaved marks and close buttons", settings.openEditors) { set(WorkbenchSettings.OPEN_EDITORS, it) } }
     item { SwitchRow(Icons.Outlined.DragIndicator, "Drag to move", "Long-press a file or folder and drag it onto a folder; a long press without moving opens its menu", settings.explorerDragAndDrop) { set(WorkbenchSettings.EXPLORER_DRAG_AND_DROP, it) } }
     item { SwitchRow(Icons.Outlined.Delete, "Confirm before deleting", "Undo brings a deleted file back for 10 seconds either way", settings.confirmDelete) { set(WorkbenchSettings.CONFIRM_DELETE, it) } }
+    item {
+        ChoiceRow(
+            Icons.Outlined.FolderZip,
+            "Saving folders to the device",
+            "Save to the device's first choice for folders and several files; the other is a tap away",
+            listOf("zip" to "One zip", "folder" to "A folder of files"),
+            settings.saveFoldersAs,
+        ) { set(WorkbenchSettings.SAVE_FOLDERS_AS, it) }
+    }
     item {
         ActionRow(Icons.Outlined.VisibilityOff, "Hidden files", "files.exclude in settings.json: ${settings.filesExclude.joinToString(", ").ifEmpty { "none" }}") {
             controller.runCommand("workbench.action.openSettingsJson")

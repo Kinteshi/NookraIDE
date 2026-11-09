@@ -147,6 +147,10 @@ sealed interface WorkbenchDialog {
     ) : WorkbenchDialog
     /** Set up (or re-pair) the Linux guest; [reason] says why it opened, e.g. a rejected token. */
     data class GuestSetup(val reason: String? = null) : WorkbenchDialog
+    /** Save to the device (G27): [paths], their [plan] once walked (size, files), or why it couldn't be. */
+    data class SaveToDevice(val paths: List<String>, val plan: TransferPlan? = null, val error: String? = null) : WorkbenchDialog
+    /** Import (G28): device [items] into the guest [folder]. */
+    data class Import(val items: List<DeviceItem>, val folder: String) : WorkbenchDialog
     /** Pairing with a computer from the connection string its daemon printed (G22: apart from the tablet's setup). */
     data object ComputerPairing : WorkbenchDialog
     /** A connection's name, URL and token by hand; [profileId] null for a new one (G22). */

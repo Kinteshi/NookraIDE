@@ -25,6 +25,11 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.DriveFolderUpload
+import androidx.compose.material.icons.outlined.FileUpload
+import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.outlined.Download
+import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.DriveFileMove
 import androidx.compose.material.icons.automirrored.outlined.InsertDriveFile
@@ -159,7 +164,6 @@ private fun ExplorerTree(controller: WorkbenchController, directory: String) {
     // Files made outside the app (a terminal, the agent) are there when Explorer opens.
     LaunchedEffect(Unit) { controller.refreshExplorer() }
     Column(Modifier.fillMaxSize()) {
-        if (selecting) SelectionBar(controller, selection.toList())
         // Its own section above the files, as in VS Code (inside the list, tabs opened later went
         // above the rows it keeps in view).
         if (settings.openEditors && controller.documents.isNotEmpty()) {
@@ -279,6 +283,8 @@ private fun ExplorerTree(controller: WorkbenchController, directory: String) {
                 }
             }
         }
+        // Below the files while something is selected (G24): what applies to all of it.
+        if (selecting) SelectionBar(controller, selection.toList())
     }
 }
 
@@ -338,9 +344,18 @@ private fun Modifier.explorerDragSource(controller: WorkbenchController, drag: E
 
 @Composable
 private fun SelectionBar(controller: WorkbenchController, selection: List<String>) {
-    Surface(color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 2.dp), shape = MaterialTheme.shapes.small) {
+    Surface(color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.fillMaxWidth().padding(6.dp), shape = MaterialTheme.shapes.medium) {
         Row(Modifier.padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("${selection.size} selected", style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
+            Text("${selection.size} selected", style = MaterialTheme.typography.labelLarge, maxLines = 1, modifier = Modifier.weight(1f))
+            Tooltip("Share") { IconButton(onClick = { controller.shareEntries(selection) }) {
+                Icon(Icons.Outlined.Share, contentDescription = "Share")
+            } }
+            Tooltip("Save to the device") { IconButton(onClick = { controller.beginSaveToDevice(selection) }) {
+                Icon(Icons.Outlined.Download, contentDescription = "Save to the device")
+            } }
+            Tooltip("Copy paths") { IconButton(onClick = { controller.copyPaths(selection) }) {
+                Icon(Icons.Outlined.ContentCopy, contentDescription = "Copy paths")
+            } }
             Tooltip("Move to…") { IconButton(onClick = { controller.beginMoveEntries(selection) }) {
                 Icon(Icons.AutoMirrored.Outlined.DriveFileMove, contentDescription = "Move to…")
             } }
@@ -431,6 +446,12 @@ private fun EntryMenu(
             item("Add to Copilot chat", Icons.Outlined.AutoAwesome) { controller.attachFileToChat(entry.path) }
         }
         item("Select", Icons.Outlined.CheckBox) { controller.toggleExplorerSelection(entry.path) }
+        item("Share…", Icons.Outlined.Share) { controller.shareEntries(listOf(entry.path)) }
+        item("Save to the device…", Icons.Outlined.Download) { controller.beginSaveToDevice(listOf(entry.path)) }
+        if (entry.isDirectory) {
+            item("Import files here…", Icons.Outlined.FileUpload) { controller.beginImportFiles(entry.path) }
+            item("Import a folder here…", Icons.Outlined.DriveFolderUpload) { controller.beginImportFolder(entry.path) }
+        }
         item("Rename", Icons.Outlined.DriveFileRenameOutline) { controller.beginRenameEntry(entry.path) }
         item("Move to…", Icons.AutoMirrored.Outlined.DriveFileMove) { controller.beginMoveEntries(listOf(entry.path)) }
         item("Delete", Icons.Outlined.Delete) { controller.beginDeleteEntry(entry.path, entry.isDirectory) }

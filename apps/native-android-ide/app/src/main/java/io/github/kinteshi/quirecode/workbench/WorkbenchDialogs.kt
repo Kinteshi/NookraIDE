@@ -104,6 +104,8 @@ fun WorkbenchDialogHost(controller: WorkbenchController) {
         null -> Unit
         WorkbenchDialog.Connect -> ConnectionsDialog(controller)
         WorkbenchDialog.ComputerPairing -> ComputerPairingDialog(controller)
+        is WorkbenchDialog.SaveToDevice -> SaveToDeviceDialog(controller, dialog)
+        is WorkbenchDialog.Import -> ImportDialog(controller, dialog)
         is WorkbenchDialog.ConnectionEditor -> ConnectionEditorDialog(controller, dialog)
         WorkbenchDialog.QuickOpen -> QuickOpenDialog(controller)
         WorkbenchDialog.GotoLine -> AlertDialog(

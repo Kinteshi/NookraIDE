@@ -163,12 +163,6 @@ internal fun svgContent(source: String): Loaded {
     )
 }
 
-private fun formatBytes(bytes: Long): String = when {
-    bytes >= 1024 * 1024 -> "%.1f MB".format(bytes / (1024.0 * 1024.0))
-    bytes >= 1024 -> "${bytes / 1024} KB"
-    else -> "$bytes B"
-}
-
 /**
  * Zoom and pan: pinch (or Ctrl and the mouse wheel) zooms around the fingers, a drag pans, a
  * double tap switches between fitting the pane and actual size (one image pixel per dp, as

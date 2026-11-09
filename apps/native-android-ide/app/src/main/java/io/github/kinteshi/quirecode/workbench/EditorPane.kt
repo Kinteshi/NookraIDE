@@ -1,5 +1,7 @@
 package io.github.kinteshi.quirecode.workbench
 
+import io.github.kinteshi.quirecode.document.isGuestPath
+
 import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Palette
@@ -58,6 +60,8 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Download
+import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.automirrored.outlined.InsertDriveFile
@@ -347,6 +351,10 @@ private fun EditorTab(controller: WorkbenchController, document: DocumentSession
                 item("Close others", Icons.Outlined.ClearAll) { controller.closeOtherTabs(path) }
                 item("Close all", Icons.Outlined.DeleteSweep) { controller.runCommand("workbench.action.closeAllEditors") }
                 if (!path.startsWith("scratch:")) item("Copy path", Icons.Outlined.ContentCopy) { controller.copyPath(if (isDevicePath(path)) path.substringAfterLast('/') else path) }
+                if (path == controller.activePath && (isGuestPath(path) || path.startsWith("scratch:"))) {
+                    item("Share…", Icons.Outlined.Share) { controller.shareActiveFile() }
+                }
+                if (isGuestPath(path)) item("Save to the device…", Icons.Outlined.Download) { controller.beginSaveToDevice(listOf(path)) }
             }
         }
     }

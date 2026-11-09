@@ -209,6 +209,10 @@ private val INTERNAL_COMMANDS = listOf("ipykernel", "quirecode-daemon", "avf-nat
 private const val DOUBLE_TAP_MS = 500L
 /** Files shared into the workspace are read into memory first; larger ones are refused. */
 private const val MAX_SHARED_FILE_BYTES = 256L * 1024 * 1024
+/** Sharing copies into the app's cache first: past this, saving to the device is the way (group 9). */
+private const val MAX_TRANSFER_SHARE_BYTES = 512L * 1024 * 1024
+/** More separate files than this are shared as one zip. */
+private const val MAX_SHARED_FILES = 20
 /** Reference counts asked for per file at most (one request each when the server has no code lens). */
 private const val MAX_CODE_LENSES = 200
 /** Symbol kinds that get a reference count: class, method, constructor, enum, interface, function, struct. */
@@ -794,6 +798,8 @@ class WorkbenchController(private val context: Context) {
 
     fun dispose() {
         stopStatsPolling()
+        transferCancelled.set(true)
+        transfers.shutdownNow()
         editorSubscription.close()
         languageClients.values.forEach(LanguageClient::close)
         copilot.language.close()
@@ -4221,6 +4227,328 @@ class WorkbenchController(private val context: Context) {
     /** Close All Editors; pinned tabs stay, as in VS Code. */
     fun closeAllTabs() {
         requestCloseDocuments(documents.map { it.path }.filter { it !in pinnedTabs })
+    }
+
+    // Files in and out of the app (group 9) ----------------------------------------------------------
+
+    /** The device's pickers (Android's file picker), set by the workbench: save a file or a zip, pick a folder, pick files. */
+    var devicePickers: DevicePickers? = null
+    /** A transfer's progress for the banner; null when none runs. */
+    var transfer by mutableStateOf<TransferProgress?>(null)
+        private set
+    private val transferCancelled = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val transfers = Executors.newSingleThreadExecutor()
+    private val fileTransfers by lazy { FileTransfers(vfs, context.contentResolver, transferCancelled) }
+    /** What the next save picker's answer is for. */
+    private var pendingSave: PendingSave? = null
+    /** Where the next import picker's answer goes (a guest folder). */
+    private var pendingImportFolder: String? = null
+    /** The folder picker is answering a save (true) or an import (false). */
+    private var treePickedForSave = false
+
+    private data class PendingSave(val paths: List<String>, val plan: TransferPlan, val zip: Boolean)
+
+    fun cancelTransfer() {
+        transferCancelled.set(true)
+    }
+
+    /**
+     * Runs [work] on the transfer thread with the progress banner: [title] while it runs, [done] said after.
+     * One at a time; a cancel or failure is said in the status bar.
+     */
+    private fun runTransfer(title: String, work: (progress: (files: Int, totalFiles: Int, bytes: Long, totalBytes: Long) -> Unit) -> String) {
+        if (transfer != null) {
+            status = "Another transfer is running; wait for it or cancel it"
+            return
+        }
+        transferCancelled.set(false)
+        transfer = TransferProgress(title, 0, 0, 0, 0)
+        var lastPost = 0L
+        transfers.execute {
+            val result = runCatching {
+                work { files, totalFiles, bytes, totalBytes ->
+                    val now = android.os.SystemClock.uptimeMillis()
+                    if (now - lastPost > 120 || files == totalFiles) {
+                        lastPost = now
+                        post { transfer = TransferProgress(title, files, totalFiles, bytes, totalBytes) }
+                    }
+                }
+            }
+            post {
+                transfer = null
+                result.onSuccess { status = it }
+                result.onFailure { error ->
+                    status = if (error is TransferCancelled) "$title: cancelled" else "$title failed: ${failureMessage(error)}"
+                }
+            }
+        }
+    }
+
+    /** A counter for [runTransfer]'s progress over [plan]. */
+    private class Counter(val plan: TransferPlan, val report: (Int, Int, Long, Long) -> Unit) {
+        var files = 0
+        var bytes = 0L
+        fun file() { files++; report(files, plan.files.size, bytes, plan.totalBytes) }
+        fun bytes(count: Int) { bytes += count; report(files, plan.files.size, bytes, plan.totalBytes) }
+    }
+
+    private fun needsGuest(paths: List<String>): Boolean {
+        if (paths.any(::isGuestPath) && !connected) {
+            status = "Connect to the guest to carry its files; offline, only the open files' copies are here"
+            return true
+        }
+        return false
+    }
+
+    /**
+     * Share (G25): one file as itself, several files as several, anything with a folder as one zip; through Android's
+     * share sheet, from a copy in the app's cache (`cache/shared`, emptied before each share).
+     */
+    fun shareEntries(paths: List<String>) {
+        if (paths.isEmpty() || needsGuest(paths)) return
+        runTransfer("Preparing to share") { progress ->
+            val plan = fileTransfers.plan(paths)
+            if (plan.totalBytes > MAX_TRANSFER_SHARE_BYTES) {
+                throw java.io.IOException("${formatBytes(plan.totalBytes)} is more than sharing takes (${formatBytes(MAX_TRANSFER_SHARE_BYTES)}); save it to the device instead")
+            }
+            val folder = java.io.File(context.cacheDir, "shared").apply { mkdirs() }
+            folder.listFiles()?.forEach { it.deleteRecursively() }
+            val counter = Counter(plan, progress)
+            val made = if (plan.hasFolders || plan.files.size > MAX_SHARED_FILES) {
+                val archive = java.io.File(folder, archiveName(paths))
+                archive.outputStream().use { fileTransfers.zip(plan, it, counter::file, counter::bytes) }
+                listOf(archive)
+            } else {
+                plan.files.map { file ->
+                    java.io.File(folder, file.name.substringAfterLast('/')).also { target ->
+                        target.outputStream().use { fileTransfers.copyOut(file, it, counter::bytes) }
+                        counter.file()
+                    }
+                }
+            }
+            post { sendFiles(made) }
+            "Shared ${made.singleOrNull()?.name ?: "${made.size} files"}"
+        }
+    }
+
+    /** Hands [files] (in `cache/shared`) to the share sheet. */
+    private fun sendFiles(files: List<java.io.File>) {
+        val uris = files.map { androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.files", it) }
+        val types = files.map { mimeTypeFor(it.name) }.toSet()
+        val send = if (uris.size == 1) {
+            android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                type = types.single()
+                putExtra(android.content.Intent.EXTRA_STREAM, uris.single())
+            }
+        } else {
+            android.content.Intent(android.content.Intent.ACTION_SEND_MULTIPLE).apply {
+                type = types.singleOrNull() ?: "*/*"
+                putParcelableArrayListExtra(android.content.Intent.EXTRA_STREAM, ArrayList(uris))
+            }
+        }
+        send.addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        val title = if (files.size == 1) "Share ${files.single().name}" else "Share ${files.size} files"
+        runCatching {
+            context.startActivity(android.content.Intent.createChooser(send, title).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+        }.onFailure { status = "Share failed: ${it.message}" }
+    }
+
+    /** Share [text] (G26: the editor's selection, an output) through the share sheet. */
+    fun shareText(text: String, title: String = "Share selection") {
+        if (text.isEmpty()) {
+            status = "Select some text to share"
+            return
+        }
+        val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(android.content.Intent.EXTRA_TEXT, text)
+        }
+        runCatching {
+            context.startActivity(android.content.Intent.createChooser(send, title).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+        }.onFailure { status = "Share failed: ${it.message}" }
+    }
+
+    /** The selected text where the focus is: the editor, or a notebook's selected cell. */
+    fun focusedSelection(): String {
+        val notebook = activeNotebook
+        if (notebook != null && focusArea != FocusArea.Editor) {
+            val state = notebook.selectedCell?.let { notebook.cellEditors[it] } ?: return ""
+            val range = state.selection
+            return state.text.substring(minOf(range.start, range.end), maxOf(range.start, range.end))
+        }
+        return runCatching { editorSurface?.selectedText.orEmpty() }.getOrDefault("")
+    }
+
+    /** Share the active file: what's in the editor (unsaved changes too) for a text file; the file itself otherwise. */
+    fun shareActiveFile() {
+        val document = activeDocument
+        val path = activePath ?: return
+        if (document == null || !isGuestPath(path) && !path.startsWith("scratch:")) {
+            if (isGuestPath(path)) shareEntries(listOf(path)) else status = "Only the guest's files and untitled files can be shared from here"
+            return
+        }
+        val name = path.substringAfterLast('/').let { if (path.startsWith("scratch:") && !it.contains('.')) "$it.txt" else it }
+        io.execute {
+            val result = runCatching {
+                val folder = java.io.File(context.cacheDir, "shared").apply { mkdirs() }
+                folder.listFiles()?.forEach { it.deleteRecursively() }
+                java.io.File(folder, name).apply { writeText(document.text) }
+            }
+            post { result.onSuccess { sendFiles(listOf(it)) }.onFailure { status = "Share failed: ${it.message}" } }
+        }
+    }
+
+    /** Save to the device (G27): walks [paths] for their size, then asks how (one file as itself, or a zip, or a folder). */
+    fun beginSaveToDevice(paths: List<String>) {
+        if (paths.isEmpty() || needsGuest(paths)) return
+        dialog = WorkbenchDialog.SaveToDevice(paths)
+        transfers.execute {
+            transferCancelled.set(false)
+            val plan = runCatching { fileTransfers.plan(paths) }
+            post {
+                val shown = dialog as? WorkbenchDialog.SaveToDevice ?: return@post
+                if (shown.paths != paths) return@post
+                dialog = plan.fold({ shown.copy(plan = it) }, { shown.copy(error = failureMessage(it)) })
+            }
+        }
+    }
+
+    /** The save dialog's choice: as itself or a zip through the save picker, or into a device folder. */
+    fun chooseSaveTarget(save: WorkbenchDialog.SaveToDevice, how: SaveHow) {
+        val plan = save.plan ?: return
+        val pickers = devicePickers ?: return
+        dialog = null
+        when (how) {
+            SaveHow.Folder -> {
+                pendingSave = PendingSave(save.paths, plan, zip = false)
+                treePickedForSave = true
+                pickers.openTree()
+            }
+            SaveHow.Zip -> {
+                pendingSave = PendingSave(save.paths, plan, zip = true)
+                pickers.createZip(archiveName(save.paths))
+            }
+            SaveHow.File -> {
+                pendingSave = PendingSave(save.paths, plan, zip = false)
+                pickers.createFile(plan.files.single().name)
+            }
+        }
+    }
+
+    /** The save picker's answer: [uri] to write the file or the zip to. */
+    fun onSaveDocumentPicked(uri: android.net.Uri?) {
+        val save = pendingSave.also { pendingSave = null } ?: return
+        if (uri == null) return
+        runTransfer("Saving to the device") { progress ->
+            val counter = Counter(save.plan, progress)
+            (context.contentResolver.openOutputStream(uri, "w") ?: throw java.io.IOException("Couldn't write there")).use { out ->
+                if (save.zip) fileTransfers.zip(save.plan, out, counter::file, counter::bytes) else {
+                    fileTransfers.copyOut(save.plan.files.single(), out, counter::bytes)
+                    counter.file()
+                }
+            }
+            "Saved ${if (save.zip) archiveName(save.paths) else save.plan.files.single().name} to the device"
+        }
+    }
+
+    /** The folder picker's answer: a device folder to save into, or to import from. */
+    fun onTreePicked(uri: android.net.Uri?) {
+        if (treePickedForSave) {
+            treePickedForSave = false
+            val save = pendingSave.also { pendingSave = null } ?: return
+            if (uri == null) return
+            runTransfer("Saving to the device") { progress ->
+                val counter = Counter(save.plan, progress)
+                fileTransfers.saveToTree(save.plan, uri, counter::file, counter::bytes)
+                "Saved ${if (save.plan.files.size == 1) save.plan.files.single().name else "${save.plan.files.size} files"} to the device"
+            }
+            return
+        }
+        val folder = pendingImportFolder.also { pendingImportFolder = null } ?: return
+        if (uri == null) return
+        val name = runCatching {
+            context.contentResolver.query(
+                android.provider.DocumentsContract.buildDocumentUriUsingTree(uri, android.provider.DocumentsContract.getTreeDocumentId(uri)),
+                arrayOf(android.provider.DocumentsContract.Document.COLUMN_DISPLAY_NAME), null, null, null,
+            )?.use { if (it.moveToFirst()) it.getString(0) else null }
+        }.getOrNull() ?: "Imported"
+        dialog = WorkbenchDialog.Import(listOf(DeviceItem(uri, name, folder = true, size = 0)), folder)
+    }
+
+    /** Import (G28): files from the device into [folder] (the current Explorer folder by default). */
+    fun beginImportFiles(folder: String = importFolder()) {
+        if (needsGuest(listOf(folder))) return
+        pendingImportFolder = folder
+        devicePickers?.openFiles?.invoke()
+    }
+
+    /** Import (G28): a whole folder from the device into [folder]. */
+    fun beginImportFolder(folder: String = importFolder()) {
+        if (needsGuest(listOf(folder))) return
+        pendingImportFolder = folder
+        treePickedForSave = false
+        devicePickers?.openTree?.invoke()
+    }
+
+    private fun importFolder(): String = currentDirectory.ifEmpty { workspaceRoot ?: roots.firstOrNull().orEmpty() }
+
+    fun onImportFilesPicked(uris: List<android.net.Uri>) {
+        val folder = pendingImportFolder.also { pendingImportFolder = null } ?: return
+        if (uris.isEmpty()) return
+        val items = uris.map { uri ->
+            val (name, size) = runCatching {
+                context.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME, android.provider.OpenableColumns.SIZE), null, null, null)
+                    ?.use { if (it.moveToFirst()) it.getString(0) to (if (it.isNull(1)) 0L else it.getLong(1)) else null }
+            }.getOrNull() ?: (uri.lastPathSegment?.substringAfterLast('/') ?: "file") to 0L
+            DeviceItem(uri, name.replace('/', '_'), folder = false, size = size)
+        }
+        dialog = WorkbenchDialog.Import(items, folder)
+    }
+
+    /** The import dialog's Import: each item into [folder], a taken name kept beside it or replaced. */
+    fun runImport(import: WorkbenchDialog.Import, folder: String, replace: Boolean) {
+        val target = folder.trim().trimEnd('/').ifEmpty { importFolder() }
+        dialog = null
+        runTransfer("Importing") { progress ->
+            fileTransfers.makeFolder(target)
+            // Each picked item's files, with the names they get under the target.
+            val work = mutableListOf<Pair<DeviceItem, String>>()
+            val folders = mutableListOf<String>()
+            import.items.forEach { item ->
+                val top = if (replace) item.name else fileTransfers.freeName(target, item.name)
+                if (item.folder) {
+                    val (_, files, subfolders) = fileTransfers.deviceTree(item.uri)
+                    folders += top
+                    folders += subfolders.map { "$top/$it" }
+                    work += files.map { (file, relative) -> file to "$top/$relative" }
+                } else {
+                    work += item to top
+                }
+            }
+            val total = work.sumOf { it.first.size }
+            var files = 0
+            var bytes = 0L
+            folders.forEach { fileTransfers.makeFolder("$target/$it") }
+            work.forEach { (item, name) ->
+                (context.contentResolver.openInputStream(item.uri) ?: throw java.io.IOException("Couldn't read ${item.name}")).use { input ->
+                    fileTransfers.copyIn(input, "$target/$name") { count -> bytes += count; progress(files, work.size, bytes, total) }
+                }
+                files++
+                progress(files, work.size, bytes, total)
+            }
+            post {
+                afterFileSystemChange()
+                work.singleOrNull()?.let { (_, name) -> openPath("$target/$name") }
+            }
+            "Imported ${work.singleOrNull()?.second?.substringAfterLast('/') ?: "${work.size} files"} into ${target.substringAfterLast('/')}"
+        }
+    }
+
+    /** Copy the paths of [paths] (the selection bar), one per line. */
+    fun copyPaths(paths: List<String>) {
+        val clipboard = context.getSystemService(android.content.ClipboardManager::class.java) ?: return
+        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Paths", paths.joinToString("\n")))
+        status = if (paths.size == 1) "Copied ${paths.single()}" else "Copied ${paths.size} paths"
     }
 
     fun copyPath(path: String) {
@@ -10097,6 +10425,12 @@ class WorkbenchController(private val context: Context) {
             // The app's former name's ids, which keybindings.json files may still use, run the same commands.
             "quirecode.resetPaneSizes", "materialcode.resetPaneSizes" -> resetPaneSizes()
             "quirecode.copyDiagnostics" -> copyDiagnostics()
+            "quirecode.shareSelection" -> shareText(focusedSelection())
+            "quirecode.shareActiveFile" -> shareActiveFile()
+            "quirecode.saveActiveFileToDevice" -> activePath?.takeIf(::isGuestPath)?.let { beginSaveToDevice(listOf(it)) }
+                ?: run { status = "Only the guest's files can be saved to the device from here" }
+            "quirecode.importFiles" -> beginImportFiles()
+            "quirecode.importFolder" -> beginImportFolder()
             "notebook.cell.toggleLineNumbers" -> toggleCellLineNumbers()
             "notebook.cell.triggerSuggest" -> triggerCellSuggest()
             "notebook.toggleLineNumbers" -> updateSetting(WorkbenchSettings.NOTEBOOK_LINE_NUMBERS, if (settings.notebookLineNumbers) "off" else "on")

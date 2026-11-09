@@ -2745,6 +2745,35 @@ the dev app installed alongside the release one".
 * The dev app stays installed beside the release app (user, 11-09); stopped after the checks, its terminal closed.
 * README and the hosting guide follow the chip and its dialog. 379 unit tests.
 
+## 62. Files in and out of the app (group 9: G24–G28) (11-09; built and unit-tested, tablet check pending)
+User's request (11-09): "I accept your 1 batch suggestion. Go for it! You can commit and push when you're done."
+Registered at the same time: G29 (fully usable offline, without a guest) and G30 (the daemon over the internet), with
+suggestions, as group 10.
+
+* **G24, Explorer's selection bar**, now below the files (it was a strip at the top with Move and Delete): "n
+  selected", Share, Save to the device, Copy paths, Move to…, Delete, Clear. Selecting is as before (Ctrl+tap,
+  Shift+tap, Select in a row's menu, then taps toggle).
+* **G25, share files:** from a row's menu (Share…), the selection bar, an editor tab's menu and File: Share Active File.
+  One file goes as itself, several as several (up to 20), anything with a folder as one zip; copied into the app's
+  cache (`cache/shared`, emptied before each share, up to 512 MB) and offered through the FileProvider. An open text
+  file is shared as it is in the editor, unsaved changes included; untitled files too.
+* **G26, share the selection:** Share Selection in the editor's and notebook cells' context and touch menus, the
+  palette's Share Selection (the editor or the selected cell), and Share output in a cell output's menu.
+* **G27, save to the device:** from a row's menu, the selection bar, a tab's menu and File: Save a Copy to the Device….
+  A dialog counts the files and size first, then: one file as itself (or as a zip); folders and several items as one
+  zip or into a device folder picked with Android's folder picker (folders made, empty ones kept). Setting
+  `avf.files.saveFoldersAs` ("zip", the default, or "folder"): which is offered first.
+* **G28, import:** Explorer's header Import button (files, or a folder), a folder row's menu (Import files here…, Import
+  a folder here…), and the palette. A dialog with the target folder and "Keep both" (" (2)") or "Replace" for taken
+  names; folders keep their structure. The one file imported opens.
+* Transfers run one at a time on their own thread, streamed in 4 MB chunks (nothing held whole in memory), with a
+  progress card under the top bar (files, bytes, Cancel). The guest's files need the connection; offline it says so.
+* `FileTransfers.kt` (walking, zipping, device folders, streaming in and out), `FilesUi.kt` (the dialogs, the progress
+  card, the Import button). 385 unit tests (names, archive names, sizes, progress, the setting).
+* **Not checked on the tablet yet:** when the build was ready, the dev app was open with the user's own work in it
+  (example.py, main.ipynb, private-notebook-2.ipynb, two unsaved), and installing a build restarts it. Left
+  alone until the user says; the staged test files were removed.
+
 ## Backlog
 ### Open backlog (11-08)
 The current lists of what's open, in two: the general backlog, and the Aardink switch's until it's complete. The older
@@ -2778,6 +2807,8 @@ Grouped (11-08) so that what's cheaper done together is done together; the numbe
 | | G26 | – | S | **Share the editor's selection**: the selected text (in a file, a cell, an output) through the share sheet, from the editor's context and touch menus and the command palette |
 | | G27 | – | M | **Download to the device's storage**: files or folders from Explorer to a place the user picks (Android's file picker), kept there; the option to zip them into one archive (a setting for the default). Progress and the size before starting, as large folders come from the guest over the connection |
 | | G28 | – | M | **Import into Explorer**: files or a whole folder from the device (Android's file picker) into the folder chosen in Explorer, with replace or keep both on name clashes. Builds on receiving shared files (the share sheet into the workspace) and Open from device |
+| **10. Beyond the tablet's guest** (user, 11-09) | G29 | – | L overall, in steps | **Fully usable offline, without a guest** (user: "where possible"). What can be: (a) **a device folder as the workspace** (Android's folder picker: Documents, a synced folder), with Explorer, tabs, editing, Quick Open, find and replace in files done in the app and saves straight to the device (M–L, the first step); (b) **"Keep available offline"** for a guest folder: all of it copied to the device and synced back with conflict checks, beyond today's copies of opened files (M–L); (c) what already needs no guest, made whole: colours, snippets, previews (Markdown, SVG, images, hex), notebooks edited with their saved outputs (no kernel). What can't be without some machine: language servers, debuggers, kernels, terminals, Copilot and the agents (they run in the guest). Later, research: a Python kernel in the browser engine (Pyodide in a WebView) for notebooks (L+). Overlaps G18 |
+| | G30 | – | S–M first step | **The daemon reachable over the internet.** Suggested, in order: (1) **a private network** (Tailscale, or ZeroTier or WireGuard) on the computer and the tablet: the daemon listens on that network's address, nothing is open to the internet, and today's pinned certificate and token work as they are; an installer option that puts that address in the connection string, and a guide (S–M). (2) **A public address through Cloudflare Tunnel** (or similar), behind Cloudflare Access: the app then checks a public certificate instead of pinning one (a per-connection setting) (M). (3) **Router port forwarding with dynamic DNS**: works with pinning today but exposes the daemon; not without (4). (4) **Hardening first**, for any of them: limits on handshake attempts, revoking a paired device, a log of connections (S–M) |
 
 Why these groups:
 1. Most of the memory and the frame time is the editor's. Tuning sora's would be thrown away, so both wait for the flip (A5),
@@ -2796,6 +2827,8 @@ Why these groups:
 9. One way between the guest and the device in both directions: the selection bar is where the actions live, and sharing,
    downloading and importing share the file picker, the cache, zipping and progress. One pass with the same test folder
    checks them all.
+10. Both are about working without the tablet's guest: with no machine at all, or with one far away. The connection
+    work of group 8 (the chip, the dialog) is where both show.
 
 #### Aardink switch backlog
 
