@@ -2355,9 +2355,10 @@ memory first), Material You as the style guideline with the workbench's cards as
 Settings switch considered per feature, licences, batches and the backlog, commit messages, and testing on the device
 without disturbing the person who uses it. Linked from the handoff, which is brought up to date.
 
-## 57. The next batch before 0.1.0 (11-08; in progress)
+## 57. The batch before 0.1.0: sora out, offline, the guest stopping, hover cards expanded (11-08; done but A7 and one check)
 User's pick (11-08): A5, A6, A7, G20, G6 and group 2 of the general backlog (G14, G17, G5 and its loose ends); then 0.1.0
-([RELEASE-PLAN.md](RELEASE-PLAN.md)). Done so far, in order:
+([RELEASE-PLAN.md](RELEASE-PLAN.md)). 365 app unit tests pass. Left: A7 (the user's own try) and G17's check with the guest
+stopped on purpose (the user's to allow). In order:
 
 ### A6: sora-editor removed (the Aardink switch's phase 7) (done; checked on the tablet)
 The user started this batch, which ends A5's daily use. 362 app unit tests pass (381 before: the 19 gone tested removed code).
@@ -2400,7 +2401,7 @@ stays where they put it. No setting: a window off the screen is never wanted.
   full screen until it's made a floating window again (the handle at the top, then the first button). The test left the
   app floating at its old bounds, but as its own floating window rather than inside the Desk.
 
-### G14: the offline experience, from a walkthrough with the guest away (in progress)
+### G14: the offline experience, from a walkthrough with the guest away (done)
 The guest wasn't running when the batch started (not stopped by me), so the walkthrough looked at the app as it was. Found and
 done so far:
 * **Running a cell offline lost its outputs**: `runCell` cleared them, then the kernel request failed. Offline it now says
@@ -2413,13 +2414,18 @@ done so far:
   guest connects; one that can't open then (deleted) is let go.
 * The offline Explorer listed files deleted in the guest long ago (b30, b34: the batch 52 loose end). After connecting, each
   file in the folder's offline list is checked, one request at a time, and missing ones leave the list with their copy on
-  this device (kept if it holds unsaved edits).
+  this device (kept if it holds unsaved edits). Checked on the tablet: after the guest came back, the Projects list went from
+  about 40 entries to its 3 real files. Folders that are gone lose their whole offline list, copies and saved session too
+  (lists for b34 and b39 were still kept).
+* Done after the walkthrough: the guest was started by the app's own "Open Terminal" (it hadn't been running) and left
+  running, as the tablet normally is.
 * Seen and kept: the red banner while the guest is away is the app's error style, with its three ways out; Search and Source
   Control say they need the guest; the offline list is flat, by path.
 
-### G5: Recent forgets folders that no longer exist (built)
+### G5: Recent forgets folders that no longer exist (done)
 After connecting, Recent folders of this guest are checked, and those that are gone (or aren't folders) are forgotten, as
-Remove from Recent does; the launcher's shortcuts follow.
+Remove from Recent does; the launcher's shortcuts follow. On the tablet, Recent held only `/home/droid/Projects` after
+connecting.
 
 ### G17: saying so when the guest goes away (built; half of it can't be done)
 * An app can't count the phantom processes of the device: Android hides other apps' processes from it, and the guest can't
@@ -2431,14 +2437,25 @@ Remove from Recent does; the launcher's shortcuts follow.
   user's decision; the app changes nothing. No setting: it's a message.
 * Not checked on the tablet: it needs the guest stopped on purpose while connected, which is for the user to allow.
 
-### G20: the hover card's expand button (built)
+### G20: the hover card's expand button (done; checked on the tablet)
 A button in the hover card's corner (the editor's and a notebook cell's) shows the card whole in a **Docs** tab of the bottom
 panel, where it scrolls, with its place as the title and a close button; the card closes. The tab exists only while it has
 something, and isn't restored after a restart. Of the two places the user suggested (a split panel, or a tab below), the
 panel tab: it doesn't change the editor's layout. No setting: the button is small and does nothing until tapped.
+* On the tablet: Show Hover on `DataFrame` in `example.py`, then the button: the Docs tab opened with the whole card,
+  titled "DataFrame · example.py:9", the signature on full lines rather than cut at the card's width, code coloured; Close
+  took the tab away and went back to Terminal. Not tried: a notebook cell's card (same content, same button).
 
 ### Loose end: the unsaved dot after saving a restored deleted file (batch 39)
-Looked at: saving a deleted file waits for its folders to be made before writing, so that isn't it. Not reproduced yet.
+Looked at: saving a deleted file waits for its folders to be made before writing, so that isn't it. Not reproduced on the
+tablet, in a throwaway `~/Projects/b57` (deleted after): a file opened, its whole folder removed in a terminal, then Save in
+the tab's banner, once with the tab clean and once after an edit; both times the file and folders came back and the tab had
+no dot. Closed as not reproducible; if it's seen again, the steps that led to it are what's needed.
+
+### Left on the tablet
+The latest build; the guest running; `example.py` and `main.ipynb` open as before; the app a floating window at its old place
+(G6's test took it out of the Desk session, see above); b57 deleted; old test files of earlier batches removed from
+`/data/local/tmp`. The b57 file stays in the offline list until the next connection drops it.
 
 ## Backlog
 ### Open backlog (11-08)
@@ -2454,10 +2471,7 @@ Grouped (11-08) so that what's cheaper done together is done together; the numbe
 |---|---|------|------|-------------|
 | **1. Performance, after the flip** | G1 | 52 | M–L | Memory against the 250 MB budget: Aardink 262–290 MB PSS, 414–442 MB RSS (batch 55; sora 308–393 / 420–504) |
 | | G2 | 53 | M | Key to frame against the 16 ms budget: with the input method, Aardink 30 ms median / 36 ms p95, sora 24 / 31 (batch 55) |
-| **2. Guest away, and offline** | G14 | 66 | M, after a walkthrough | Refine the offline experience |
-| | G17 | 69 | S–M | Warn near the phantom process limit, and say so when the guest goes away |
-| | G5 | 62 | S | Recent keeps folders that no longer exist |
-| | – | – | S | The list of files kept offline never drops deleted ones (seen in batch 52); the unsaved dot once seen after saving a restored deleted file (batch 39); a notebook tab not restored after a force stop (batch 55, maybe a preview tab) |
+| **2. Guest away** | G17 | 69 | S, the user's | Check the "guest stopped" banner with the guest stopped on purpose while connected; the rest was done in batch 57 (G14 and G5 too) |
 | **3. Backends, and running without Terminal** | G13 | 65 | S–M to explore, L+ to adopt | Other backends: proot, Termux and others |
 | | G16 | 68 | S to try the grant, L+ to do | Bundle the image and use AVF without Terminal: not for store installs |
 | | G18 | 70 | L overall | Mode without Terminal: local backend, ML on another machine, glibc if proven (continuing the glibc test is the user's decision) |
@@ -2467,11 +2481,9 @@ Grouped (11-08) so that what's cheaper done together is done together; the numbe
 | | G8 | 56 | M–L | Widgets not drawn yet |
 | **6. Large workspaces** | G4 | 61 | S–M | Files beyond Quick Open's 20,000 |
 | | G7 | 55 | S | Deep Rust projects on the tablet (about 1 GB of Rust) |
-| **7. Window and layout** | G6 | 63 | S–M | App can reopen as a partly off-screen floating window |
-| | – | – | S | The terminal's toolbar row at phone width (batch 40) |
+| **7. Window and layout** | – | – | S | The terminal's toolbar row at phone width (batch 40). G6 was done in batch 57 |
 | **On its own** | G12 | 64 | S–M or L | Replace Gemini CLI with Antigravity CLI |
 | | G19 | – | S–M | Debugger: values in the hover while paused, and Copilot's partial accept (word by word): in neither engine (batch 55) |
-| | G20 | – | S–M | Hover card: an expand button that shows the whole of it in a split panel, or in a docs tab in the bottom panel (user's idea, 11-08) |
 | | G11 | – | ? | Copilot exits after a daemon restart (watching) |
 | | G21 | – | S–M | Line numbers in notebook cells (VS Code's `notebook.lineNumbers` setting, and Shift+L for a cell). Cheaper after A20, where cells in Aardink get its gutter (user, 11-08) |
 
@@ -2523,14 +2535,14 @@ Loose ends: placed in the groups above (11-08).
 
 #### Release backlog (first release)
 
-Decisions and options are in [RELEASE-PLAN.md](RELEASE-PLAN.md). **Next batch (user, 11-08):** A5, A6, A7, G20, G6 and group 2 of the general backlog (G14, G17, G5 and its loose ends); then
-0.1.0. Registered 11-08, from the user: "let us think about releasing… items in the backlog I don't want to sweep under the rug…
+Decisions and options are in [RELEASE-PLAN.md](RELEASE-PLAN.md). **The batch before it is done (57)**, but A7 (the user's) and
+G17's check; **next: 0.1.0**, R2 to R11. Registered 11-08, from the user: "let us think about releasing… items in the backlog I don't want to sweep under the rug…
 we have to polish the app for an initial release cycle". Nothing here is started. R1 decides which G and A items the first
 release waits for; the rest stay in their lists for later releases.
 
 | Group | # | Size | Description |
 |---|---|---|---|
-| **1. Decide** | R1 | Decided 11-08 | 0.1.0 follows the next batch: A5, A6, A7, G20, G6 and the whole of group 2 (G14, G17, G5 and its loose ends) |
+| **1. Decide** | R1 | Decided 11-08; its batch done (57) | 0.1.0 follows batch 57: A5, A6, A7, G20, G6 and the whole of group 2 (G14, G17, G5 and its loose ends) |
 | | R2 | S, the user's | Name and icon: shortlist Burrow, Quire, Traveler, Clarity, with icon ideas in [RELEASE-PLAN.md](RELEASE-PLAN.md); goes to the repository, app id and daemon |
 | | R3 | S | Licence **Apache-2.0** (decided 11-08): LICENSE and NOTICE files, Cargo's MIT changed, third-party notices in the app (Aardink, tm4e EPL-2.0, termlib…) |
 | **2. Build and ship** | R4 | M | Release builds: a signing key and where it's kept, R8 with keep rules (Aardink's reflection in `AardinkGeometry` needs them), version numbers from tags, APK size |

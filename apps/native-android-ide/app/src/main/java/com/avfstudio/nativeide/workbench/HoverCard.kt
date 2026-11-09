@@ -29,6 +29,18 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 
+/** The identifier at [column] of [line] (or just before it), for the Docs tab's title; null off one. */
+internal fun wordAt(line: String, column: Int): String? {
+    fun part(c: Char) = c.isLetterOrDigit() || c == '_' || c == '$'
+    var start = column.coerceIn(0, line.length)
+    if ((start == line.length || !part(line[start])) && start > 0 && part(line[start - 1])) start--
+    if (start >= line.length || !part(line[start])) return null
+    var end = start
+    while (start > 0 && part(line[start - 1])) start--
+    while (end < line.length && part(line[end])) end++
+    return line.substring(start, end)
+}
+
 /** A problem as the hover card lists it: VS Code's "message  source(code)". */
 data class HoverProblem(val severity: Int?, val message: String, val origin: String)
 

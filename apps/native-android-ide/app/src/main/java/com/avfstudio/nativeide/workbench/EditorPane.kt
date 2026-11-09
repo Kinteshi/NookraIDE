@@ -606,7 +606,9 @@ internal fun HoverCardSurface(controller: WorkbenchController, card: HoverCard, 
             HoverProblem(problem.severity, problem.message, origin)
         }
         HoverCardContent(controller, card.path, problems, card.markdown) {
-            controller.expandHover(ExpandedDocs(card.path, "${card.path.substringAfterLast('/')}:${card.position.line + 1}", problems, card.markdown))
+            val place = "${card.path.substringAfterLast('/')}:${card.position.line + 1}"
+            val word = controller.editorSurface?.lineText(card.position.line)?.let { wordAt(it, card.position.character) }
+            controller.expandHover(ExpandedDocs(card.path, word?.let { "$it · $place" } ?: place, problems, card.markdown))
         }
     }
 }

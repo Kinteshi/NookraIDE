@@ -4,9 +4,9 @@ Decisions and open questions for the first release, from the user's discussion o
 R11) is in [NATIVE-IDE-BATCHES.md](NATIVE-IDE-BATCHES.md#release-backlog-first-release); this file holds what was decided
 and the options still open, so they survive a context reset. Nothing here is implemented yet.
 
-## Next batch, then 0.1.0 (decided)
+## Next batch, then 0.1.0 (decided; the batch is done)
 
-The next batch does, in this order of dependency:
+Done in batch 57, except A7 (the user's) and G17's check with the guest stopped on purpose. It did, in this order:
 
 * **A5, A6, A7:** the user's daily use of Aardink ends with this batch, and sora-editor is removed (phase 7 of the
   [switch plan](AARDINK-SWITCH-PLAN.md): the setting, `SoraEditorSurface`, `SoraCompletion`, `NativeCodeEditor`,

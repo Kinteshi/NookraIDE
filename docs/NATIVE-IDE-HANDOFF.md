@@ -6,12 +6,12 @@ the engine seam, batches, testing on the device) is in [CONTRIBUTING.md](../CONT
 
 ## Current state (2026-11-08)
 
-* **Progress:** batches 1–56 are done (41 was exploration with no app change). Each is described in the batch plan.
+* **Progress:** batches 1–57 are done (41 was exploration with no app change). Each is described in the batch plan.
 * **What's open:** [Open backlog](NATIVE-IDE-BATCHES.md#open-backlog-11-08), in two lists: general, and the Aardink switch's, which replaces this file's old "Remaining" list.
-* **Next batch (user, 11-08), then release 0.1.0:** A5 and A6 (sora out), A7, G20, G6, and the whole "Guest away, and offline" group (G14, G17, G5 and its loose ends). Then the release backlog. Everything decided and still open (licence Apache-2.0, the name shortlist, the repository clean-up) is in [RELEASE-PLAN.md](RELEASE-PLAN.md).
-* **The switch to Aardink:** [AARDINK-SWITCH-PLAN.md](AARDINK-SWITCH-PLAN.md). Phases 0 to 6 are done (batches 42 to 55), on Aardink 0.9.0 (batch 45): **Aardink is the default editor**, sora-editor a setting away until phase 7 removes it, after the user's period of daily use. The workbench's own Material You cards are drawn over Aardink from its geometry (batch 54). Review each Aardink release against the plan (its "Release reviews"). Requests to Aardink are drafted or listed, not filed.
+* **Next: release 0.1.0** (the release backlog, R2 to R11). Batch 57, the one before it, is done: sora-editor removed (A6), offline fixes (G14, G5), the guest stopping explained (G17), the hover card's Docs tab (G20), an off-screen window (G6). Left from it: A7 (the user's try on the Book Cover and on-screen keyboard) and G17's check with the guest stopped on purpose. Everything decided and still open (licence Apache-2.0, the name shortlist, the repository clean-up) is in [RELEASE-PLAN.md](RELEASE-PLAN.md).
+* **The switch to Aardink:** [AARDINK-SWITCH-PLAN.md](AARDINK-SWITCH-PLAN.md). All phases are done (batches 42 to 57), on Aardink 0.9.0 (batch 45): **Aardink is the editor**; sora-editor was removed in batch 57, and tm4e is the app's own `tm4e` module. The workbench's own Material You cards are drawn over Aardink from its geometry (batch 54). Review each Aardink release against the plan (its "Release reviews"). Requests to Aardink are drafted or listed, not filed.
 * **Waiting on the user:** whether to continue the glibc test (backlog item 70 d). Claude Code's permission system blocked it, so it needs the user's approval.
-* **Tablet:** the latest build is installed (batch 55, Aardink the default and the user's choice). The sections "Reference tablet" and "Done" below mostly date from 10-23, so some of what they describe may have moved on. The batch plan is the record since then.
+* **Tablet:** the latest build is installed (batch 57). The sections "Reference tablet" and "Done" below mostly date from 10-23, so some of what they describe may have moved on. The batch plan is the record since then.
 
 ## Where things are
 

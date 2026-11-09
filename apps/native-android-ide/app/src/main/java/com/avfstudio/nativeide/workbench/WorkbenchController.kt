@@ -3125,11 +3125,20 @@ class WorkbenchController(private val context: Context) {
         check(0)
     }
 
-    /** After connecting: Recent folders of this guest that no longer exist are forgotten (G5). */
+    /**
+     * After connecting: folders of this guest that no longer exist are forgotten (G5): from Recent, and with them what this
+     * device kept for them (their offline list, their copies without unsaved edits, their last session's tabs).
+     */
     private fun forgetMissingRecentFolders(guestRoots: List<String>) {
-        recentWorkspaces.filter { recent -> guestRoots.any { isPathWithinRoot(recent, it) } }.forEach { folder ->
+        val kept = preferences.all.keys.filter { it.startsWith(OFFLINE_FILES_PREFIX) }.map { it.removePrefix(OFFLINE_FILES_PREFIX) }
+        (recentWorkspaces + kept).distinct().filter { folder -> guestRoots.any { isPathWithinRoot(folder, it) } }.forEach { folder ->
             vfs.stat(folder).whenComplete { entry, error ->
-                post { if (error.isNotFound() || error == null && !entry.isDirectory) forgetRecentWorkspace(folder) }
+                post {
+                    if (!error.isNotFound() && (error != null || entry.isDirectory)) return@post
+                    if (folder in recentWorkspaces) forgetRecentWorkspace(folder)
+                    offlineFiles(folder).filterNot { path -> documents.any { it.path == path } }.forEach(repository::forgetCleanCopy)
+                    preferences.edit().remove(OFFLINE_FILES_PREFIX + folder).remove(workspaceSessionKey(folder)).apply()
+                }
             }
         }
     }
