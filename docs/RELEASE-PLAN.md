@@ -2,7 +2,20 @@
 
 Decisions and open questions for the first release, from the user's discussion on 2026-11-08. The release backlog (R1 to
 R11) is in [NATIVE-IDE-BATCHES.md](NATIVE-IDE-BATCHES.md#release-backlog-first-release); this file holds what was decided
-and the options still open, so they survive a context reset. Nothing here is implemented yet.
+and the options still open, so they survive a context reset.
+
+## Status (11-09)
+
+R1 to R11 are done (batch 58). The release-signed build was installed on the tablet and walked through as a new user's
+first run (R7), which found and fixed four problems, one of them the installer able to stop the VM. CI and the release
+workflow's dry run pass. Left, in this order:
+
+1. **The user protects `main`** on GitHub (Settings > Branches): only the admin can.
+2. **Tag `v0.1.0`** on `main` and push the tag: the release workflow builds, signs, checks and publishes the release with
+   [releases/0.1.0.md](releases/0.1.0.md) as its notes.
+
+Still open from batch 57, for after the release: A7 (the user's own try of the Book Cover and the on-screen keyboard)
+and G17's check with the guest stopped on purpose.
 
 ## Next batch, then 0.1.0 (decided; the batch is done)
 

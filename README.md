@@ -13,8 +13,8 @@ that the app installs there. The daemon can also run on a Linux or Windows compu
 
 * An Android tablet with Android 14 or later and the **Linux Terminal** app, set up with its Debian guest. Android
   offers Linux Terminal on some devices, from Developer options. QuireCode is made and tested on a Galaxy Tab S11 Ultra.
-* About 1.5 GB free in the guest for the daemon and its tools (uv, ty, ruff, ripgrep, Jupyter, debugpy, TypeScript,
-  Copilot). More tools can be installed later from the app.
+* Free space and an internet connection in the guest: setup installs the daemon and its tools (uv, ty, ruff, ripgrep,
+  Jupyter, debugpy, TypeScript, Copilot). More tools can be installed later from the app.
 * A hardware keyboard is recommended. The on-screen keyboard works too, with a key bar for Esc, Tab, Ctrl, Alt and the arrows.
 
 ## Install
