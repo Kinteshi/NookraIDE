@@ -2773,6 +2773,11 @@ Grouped (11-08) so that what's cheaper done together is done together; the numbe
 | | G19 | – | S–M | Debugger: values in the hover while paused, and Copilot's partial accept (word by word): in neither engine (batch 55) |
 | | G11 | – | ? | Copilot exits after a daemon restart (watching) |
 | **8. First run and connections** | – | – | – | Done in batch 61 (G22): the status in the chip, a calm banner, the Connections dialog. The request was: Rework the first run, setup, connection management and the offline experience (user, 11-09). The red banner when the guest is away is alarming while the app is still usable offline: say it calmly. The connection chip shows the whole status; a tap opens one dialog to choose a connection, create new ones (tablet guest, computer), and troubleshoot (port forwarding, guest stopped, pairing again). Builds on R7's Get started card and Connect-leads-to-setup |
+| **9. Files in and out of the app** (user, 11-09) | G24 | – | S–M | **Explorer's selection, with an action bar below.** The multi-selection exists (Ctrl+tap, Shift+tap, Select in a row's menu) but only drag and drop uses it: while something is selected, a bar under Explorer with what applies to all of it (share, download, copy path, move, delete, clear the selection), and an easy way in by touch (long press). The other items' actions go there |
+| | G25 | – | M | **Share files out of the app**: a file, or the selection, through Android's share sheet (from Explorer's row menu and the selection bar, and an editor tab's menu). The guest's files are read into a cache and offered through a FileProvider; folders zipped (G27's option). Today only a plot can be shared |
+| | G26 | – | S | **Share the editor's selection**: the selected text (in a file, a cell, an output) through the share sheet, from the editor's context and touch menus and the command palette |
+| | G27 | – | M | **Download to the device's storage**: files or folders from Explorer to a place the user picks (Android's file picker), kept there; the option to zip them into one archive (a setting for the default). Progress and the size before starting, as large folders come from the guest over the connection |
+| | G28 | – | M | **Import into Explorer**: files or a whole folder from the device (Android's file picker) into the folder chosen in Explorer, with replace or keep both on name clashes. Builds on receiving shared files (the share sheet into the workspace) and Open from device |
 
 Why these groups:
 1. Most of the memory and the frame time is the editor's. Tuning sora's would be thrown away, so both wait for the flip (A5),
@@ -2788,6 +2793,9 @@ Why these groups:
 7. Both are window size and placement, checked by resizing the same window.
 8. One flow, from the first launch to a lost connection: designing the chip, its dialog, setup and offline together keeps
    one voice and one place for every connection question.
+9. One way between the guest and the device in both directions: the selection bar is where the actions live, and sharing,
+   downloading and importing share the file picker, the cache, zipping and progress. One pass with the same test folder
+   checks them all.
 
 #### Aardink switch backlog
 
