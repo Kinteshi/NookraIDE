@@ -133,6 +133,13 @@ data class WorkbenchSettings(
     val stickyCellHeader: Boolean = true,
     /** Each code cell's run time and how it ended (done, running, queued, failed) in its gutter. */
     val cellStatistics: Boolean = true,
+    /**
+     * What edits a notebook cell (`avf.notebook.cellEditor`): "aardink", the code editor (its gutter, folding, brackets,
+     * multi-cursor), or "text", the plain text field cells had before (A20). The code editor since batch 59.
+     */
+    val cellEditor: String = "aardink",
+    /** Line numbers in notebook cells (VS Code's `notebook.lineNumbers`, "on" or "off"; G21). */
+    val notebookLineNumbers: Boolean = false,
     /** Save each run's start and end in the cell's metadata (JupyterLab's `execution`), so they show on reopen. */
     val recordTiming: Boolean = false,
     /** Outputs that need JavaScript (Altair/Vega, Bokeh, folium) in an isolated WebView, as VS Code runs them. */
@@ -279,6 +286,8 @@ data class WorkbenchSettings(
         const val NOTEBOOK_TAB_COMPLETION = "avf.notebook.tabCompletion"
         const val STICKY_CELL_HEADER = "avf.notebook.stickyCellHeader"
         const val CELL_STATISTICS = "avf.notebook.cellStatistics"
+        const val CELL_EDITOR = "avf.notebook.cellEditor"
+        const val NOTEBOOK_LINE_NUMBERS = "notebook.lineNumbers"
         const val RECORD_TIMING = "avf.notebook.recordTiming"
         const val NATIVE_TABLES = "avf.notebook.nativeTables"
         const val SCRIPT_OUTPUTS = "avf.notebook.scriptOutputs"
@@ -399,6 +408,8 @@ data class WorkbenchSettings(
                 notebookTabCompletion = bool(NOTEBOOK_TAB_COMPLETION, defaults.notebookTabCompletion),
                 stickyCellHeader = bool(STICKY_CELL_HEADER, defaults.stickyCellHeader),
                 cellStatistics = bool(CELL_STATISTICS, defaults.cellStatistics),
+                cellEditor = string(CELL_EDITOR)?.takeIf { it == "aardink" || it == "text" } ?: defaults.cellEditor,
+                notebookLineNumbers = string(NOTEBOOK_LINE_NUMBERS)?.let { it == "on" } ?: defaults.notebookLineNumbers,
                 recordTiming = bool(RECORD_TIMING, defaults.recordTiming),
                 nativeTables = bool(NATIVE_TABLES, defaults.nativeTables),
                 scriptOutputs = bool(SCRIPT_OUTPUTS, defaults.scriptOutputs),

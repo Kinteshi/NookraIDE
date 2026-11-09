@@ -523,6 +523,20 @@ private fun LazyListScope.notebooks(settings: WorkbenchSettings, set: SetSetting
         }
     }
     item { SwitchRow(Icons.Outlined.AutoFixHigh, "Tab completes in notebooks", "After a name or a dot, Tab asks the kernel (as in Jupyter); Ctrl+Space always does", settings.notebookTabCompletion) { set(WorkbenchSettings.NOTEBOOK_TAB_COMPLETION, it) } }
+    item {
+        ChoiceRow(
+            Icons.Outlined.Code,
+            "Cell editor",
+            "The code editor (line numbers, folding, brackets, several cursors) or the simple text field cells had before",
+            listOf("aardink" to "Code editor", "text" to "Text field"),
+            settings.cellEditor,
+        ) { set(WorkbenchSettings.CELL_EDITOR, it) }
+    }
+    item {
+        SwitchRow(Icons.Outlined.FormatListNumbered, "Line numbers in cells", "With the code editor; Shift+L turns them on or off for the selected cell", settings.notebookLineNumbers) {
+            set(WorkbenchSettings.NOTEBOOK_LINE_NUMBERS, if (it) "on" else "off")
+        }
+    }
     item { SwitchRow(Icons.Outlined.PushPin, "Sticky cell header", "A tall cell keeps its run button and actions at the top while it scrolls", settings.stickyCellHeader) { set(WorkbenchSettings.STICKY_CELL_HEADER, it) } }
     item { SwitchRow(Icons.Outlined.Speed, "Cell run statistics", "Run time and how the run ended (done, queued, running, failed) beside each code cell", settings.cellStatistics) { set(WorkbenchSettings.CELL_STATISTICS, it) } }
     item {

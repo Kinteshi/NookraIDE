@@ -273,6 +273,14 @@ class NotebookSession(
     val executing = ArrayDeque<io.github.kinteshi.quirecode.notebook.NotebookCell>()
     var kernelName by mutableStateOf<String?>(null)
     var kernelState by mutableStateOf("No kernel")
+    /** Each cell's Aardink editor state (A20), kept while the cell scrolls out of view so its undo and cursor stay. */
+    val cellEditors = mutableMapOf<String, com.aardarch.aardink.core.CodeEditorState>()
+    /** The column Up or Down left a cell's edge in, for the cell it moves to (Aardink cells). */
+    var caretColumn: Int? = null
+    /** Aardink's row pitch and the space above a cell's first row, in pixels, measured once for [fontSize] (A20). */
+    var cellRowMetrics by mutableStateOf<CellRowMetrics?>(null)
+    /** Cells whose line numbers Shift+L turned the other way from `notebook.lineNumbers` (G21). */
+    val cellLineNumbersToggled = androidx.compose.runtime.mutableStateSetOf<String>()
     var busy by mutableStateOf(false)
     var selectedCell by mutableStateOf(notebook.cells.firstOrNull()?.id)
     /** Set when find selects a cell: the keys stay in the find box instead of moving into the cell. */
@@ -394,3 +402,6 @@ data class CellHover(val cellId: String, val offset: Int, val problems: List<Cel
 
 /** The field Edit Breakpoint starts in. */
 enum class BreakpointField { Condition, HitCount, LogMessage }
+
+/** How Aardink lays out a cell's rows at [fontSize]: [pitch] from one row to the next, [top] above the first (A20). */
+data class CellRowMetrics(val fontSize: Float, val pitch: Float, val top: Float)

@@ -2607,7 +2607,7 @@ app id and the icon, so the work that doesn't depend on it goes first. 368 app u
   `0.1.0` until versions come from tags (R4); the repository link in tm4e's notice points at `main`, which this branch
   becomes (R11).
 
-## 59. Notebook cells in Aardink, and the panel's tabs (11-09; under way)
+## 59. Notebook cells in Aardink, and the panel's tabs (11-09; done, checked on the tablet)
 User's request (11-09): "Go for batch 59 like you suggested", with two additions. The release is on hold (R11).
 * **A20:** notebook cells in Aardink, so they get the editor's features; decide how, then move them.
 * **G21:** line numbers in notebook cells (`notebook.lineNumbers`, Shift+L for a cell), from Aardink's gutter.
@@ -2616,6 +2616,55 @@ User's request (11-09): "Go for batch 59 like you suggested", with two additions
 * **Auto-hide the panel's tabs** (user): a setting per tab hiding it while it has nothing (Ports with no forwarded
   port, Variables with no kernel running, and so on).
 * Registered, not in this batch: G22, the first run, setup, connections and offline reworked (user).
+
+Checked on the tablet in a separate **QuireCode Dev** app (`io.github.kinteshi.quirecode.dev`, debug builds; the user's
+choice, 11-09), paired with the same guest and working in `~/Projects` on test notebooks of its own (`a20-test`, 150
+cells in `a20-big`, a 5 000-row DataFrame in `a20-df`), removed afterwards. Debug builds are that app from now on, so
+the release-signed QuireCode on the tablet is never replaced by a test build.
+
+* **Settings > Code intelligence** (user: "badly formatted"): "Snippets in suggestions" has four long choices beside the
+  text, which squeezed its title into a column of single letters. Every choice row now measures its buttons and puts
+  them below the text when they'd take more than half the row (also at phone width; Auto save's four too).
+* **The panel's tabs hide while empty** (user): one switch per tab in Settings > Appearance > Panel
+  (`avf.panel.autoHide.terminal`, `.debug`, `.problems`, `.output`, `.ports`, `.variables`, `.interactive`). On by
+  default for Ports (no port open), Variables (no kernel running) and Interactive (nothing run there); off for the
+  rest. The tab being shown stays until another is chosen. Seen: Variables appears once a kernel runs, Interactive
+  stays away. 2 settings tests.
+* **A20, notebook cells in Aardink** (decided: moved; `avf.notebook.cellEditor`, "aardink" by default, "text" for the
+  text field cells had, in Settings > Notebooks):
+  * Each cell is an Aardink editor: Python's (or Markdown's) colours, bracket colours and matching, folding, several
+    cursors, undo per cell kept while it scrolls away. Aardink has no height-of-its-text mode, so a cell is given its
+    rows' height: measured once from Aardink (row pitch and top space, from the caret positions of a two-line cell)
+    and an estimate with a spare row until then. The notebook's list scrolls; a cell's own scrolling has nowhere to go.
+  * What the text field cells had, kept: Shift+Enter and the notebook's keys, Up and Down across cells in the same
+    column, the kernel's completions (Ctrl+Space, Tab after a name; Up, Down, Enter, Tab, Esc in the list), Copilot's
+    ghost text (through Aardink's inline completions, from the notebook's copy at the language server), the language
+    server's problems as Aardink's squiggles and gutter dots, go to a problem or definition, find's current match.
+    Not yet: the hover card in cells with a mouse, find's other matches drawn in cells.
+  * A tap on a cell that isn't selected selects it with the cursor where it was tapped (past a line's end: the end of
+    that line); a drag over it scrolls the notebook. Without this, every swipe put a cursor, and the on-screen
+    keyboard, in the cell it started on.
+  * Hardware Enter and the moving keys skip the input method in cells too (A11's workaround, as in files); Ctrl+Space
+    is a notebook key now, before the input method (Samsung's took it). Aardink's own keyboard toolbar is hidden in
+    cells (it covered a short cell; the app's key bar is there).
+  * Found on the way, in the released app too: **tm4e's grammar isn't thread-safe** and one grammar is shared by every
+    tokenizer of its language (the file, cells, hover code). Several cells tokenizing at once crashed the dev app
+    (ConcurrentModificationException in tm4e's scope cache); the file and a hover card could in theory. Tokenizing is
+    serialized per grammar now.
+  * Checked: colours, exact heights, line numbers, typing and the unsaved dot, Down into a Markdown cell and back,
+    Shift+Enter (ran, no newline added), a tap at a word and past a line's end, a drag scrolling over unselected cells,
+    a problem drawn as you type (ty's unresolved name), Undo, the kernel's completions after `items.` chosen with
+    Down and Enter. 150 cells flung to the end: memory went from 209 to 227 MB PSS (the debug build), no crash.
+  * The on-screen keyboard (Samsung's): typing works, but its Enter is unreliable in Aardink, files included (A11,
+    updated). And with it up and the panel open, the notebook is a sliver (G23, registered).
+* **G21, line numbers in cells:** `notebook.lineNumbers` ("on"/"off", Settings > Notebooks > Line numbers in cells),
+  and per cell the command **Notebook: Toggle Cell Line Numbers** (the app has no command mode for VS Code's L);
+  **Notebook: Toggle Notebook Line Numbers** flips the setting. With the code editor.
+* **G3, the data viewer's filter with the on-screen keyboard** (batch 39's leftover): with Android's "show the on-screen
+  keyboard with a physical keyboard" on for the test (then back off), the dialog shrinks above the keyboard, its
+  filter stays in view, and "row12" typed on the on-screen keys stays whole while the rows reload: 111 of 5 000.
+* Debug builds are their own app (`.dev`, "QuireCode Dev"): CI's debug build and local ones no longer clash with the
+  release-signed app.
 
 ## Backlog
 ### Open backlog (11-08)
@@ -2637,15 +2686,13 @@ Grouped (11-08) so that what's cheaper done together is done together; the numbe
 | | G18 | 70 | L overall | Mode without Terminal: local backend, ML on another machine, glibc if proven (continuing the glibc test is the user's decision) |
 | **4. Tests and accessibility** | G9 | 22 | M | Accessibility pass |
 | | G10 | 23 | L | Automated on-device tests and screenshot comparisons |
-| **5. Notebook outputs** | G3 | 57 | S | Data viewer filter with the on-screen keyboard |
-| | G8 | 56 | M–L | Widgets not drawn yet |
+| **5. Notebook outputs** | G8 | 56 | M–L | Widgets not drawn yet. (G3, the data viewer's filter with the on-screen keyboard, done in batch 59) |
 | **6. Large workspaces** | G4 | 61 | S–M | Files beyond Quick Open's 20,000 |
 | | G7 | 55 | S | Deep Rust projects on the tablet (about 1 GB of Rust) |
-| **7. Window and layout** | – | – | – | Done: the terminal's toolbar row at phone width was checked in batch 58 (R8). G6 was done in batch 57 |
+| **7. Window and layout** | G23 | – | S–M | With the on-screen keyboard up and the panel open, the editor or notebook is left a sliver (batch 59): give the editor the room while typing (shrink or hide the panel, as VS Code's does on phones). Done before: G6 (batch 57), the terminal toolbar at phone width (58) |
 | **On its own** | G12 | 64 | S–M or L | Replace Gemini CLI with Antigravity CLI |
 | | G19 | – | S–M | Debugger: values in the hover while paused, and Copilot's partial accept (word by word): in neither engine (batch 55) |
 | | G11 | – | ? | Copilot exits after a daemon restart (watching) |
-| | G21 | – | S–M | Line numbers in notebook cells (VS Code's `notebook.lineNumbers` setting, and Shift+L for a cell). Cheaper after A20, where cells in Aardink get its gutter (user, 11-08) |
 | **8. First run and connections** | G22 | – | L | Rework the first run, setup, connection management and the offline experience (user, 11-09). The red banner when the guest is away is alarming while the app is still usable offline: say it calmly. The connection chip shows the whole status; a tap opens one dialog to choose a connection, create new ones (tablet guest, computer), and troubleshoot (port forwarding, guest stopped, pairing again). Builds on R7's Get started card and Connect-leads-to-setup |
 
 Why these groups:
@@ -2676,11 +2723,11 @@ A2, A3, A4, A8, A16, A17 and A19 were done in batches 47–54, and A5's checks i
 | **C. Asks to Aardink, filed together** | A9 | 71 | S to ask | Public text positions: Next Edit's card, the peek and our suggestion list at their line. Drafted |
 | | A13 | 77 | S to ask | The completion list at the caret on Android with a hardware keyboard; our list stands in (batch 51). Drafted |
 | | A10 | 72 | S to ask | Gutter icons and taps (real breakpoints after the bars). Drafted |
-| | A11 | 73 | S to ask | Samsung's keyboard: Enter, Shift+arrows, and words composed even from a hardware keyboard; our workarounds go when it's fixed |
+| | A11 | 73 | S to ask | Samsung's keyboard: Enter, Shift+arrows, and words composed even from a hardware keyboard; our workarounds go when it's fixed. Also its on-screen Enter (batch 59): in a file it only took the word suggestion, in a cell it left the cursor before the new line |
 | | A14 | 75 | S to ask | `LanguageConfiguration` can't load on Android (regex); ours reads the files meanwhile |
 | | A15 | 76 | S to ask | Typing over auto-inserted closers; ours does it for hardware keys |
 | | A18 | – | S to ask | Backspace back to a tab stop in leading spaces (VS Code's `useTabStops`); ours does it for hardware keys (batch 53) |
-| **E. After sora is out** | A20 | – | M–L | Notebook cells in Aardink: today they're the app's own text fields, so they lack the editor's features (folding, hints, lenses, multi-cursor…); decide, then move them (the plan's phase 7 note) |
+| **E. After sora is out** | – | – | – | A20 done in batch 59: notebook cells in Aardink (`avf.notebook.cellEditor`, the text field kept as a choice) |
 | **D. Each release** | A12 | habit | S per release | Review each Aardink release against the plan and these lists, bump the pin, recheck (plan, "Release reviews"); with A19, check its reflection still works |
 
 Why these groups:

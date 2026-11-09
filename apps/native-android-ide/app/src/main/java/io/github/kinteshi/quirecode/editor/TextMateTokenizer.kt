@@ -180,7 +180,10 @@ class TextMateTokenizer(
     }
 
     private fun scanLine(line: String, state: IStateStack?, offset: Int): Pair<List<Token>, IStateStack?> {
-        val result = grammar.tokenizeLine2(line, state, null)
+        // One grammar is shared by every tokenizer of its language (the registry caches it): the file, notebook cells, code
+        // in hover cards. tm4e's grammar keeps caches that aren't safe across threads (a HashMap's computeIfAbsent threw
+        // ConcurrentModificationException with several cells tokenizing at once, 11-09), so one line at a time per grammar.
+        val result = synchronized(grammar) { grammar.tokenizeLine2(line, state, null) }
         val raw = result.tokens
         val tokens = ArrayList<Token>(raw.size / 2)
         var i = 0

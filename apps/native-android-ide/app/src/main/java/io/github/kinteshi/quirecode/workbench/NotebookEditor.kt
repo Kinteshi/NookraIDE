@@ -263,6 +263,8 @@ private fun NotebookCellView(
                     if (cell.type == CellType.Markdown && !selected) {
                         val source = remember(session.notebook.path, cell.attachments) { controller.markdownSource(session.notebook.path, cell.attachments) }
                         NotebookMarkdown(controller, cell.source.ifBlank { "*Empty Markdown cell*" }, source, Modifier.padding(12.dp))
+                    } else if (controller.settings.cellEditor == "aardink") {
+                        AardinkCellEditor(controller, session, cell, selected)
                     } else {
                         CellSourceEditor(controller, session, cell, dark, selected)
                     }

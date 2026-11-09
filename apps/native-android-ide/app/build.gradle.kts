@@ -22,6 +22,7 @@ android {
         versionName = version
         versionCode = versionCodeOf(version)
         buildConfigField("String", "AARDINK_VERSION", "\"$aardinkVersion\"")
+        manifestPlaceholders["appLabel"] = "QuireCode"
     }
 
     signingConfigs {
@@ -38,6 +39,12 @@ android {
     }
 
     buildTypes {
+        // A debug build is its own app beside the release-signed one ("QuireCode Dev"), so trying a change on the
+        // tablet doesn't need the release key or replace the installed app; it pairs with the guest like any client.
+        debug {
+            applicationIdSuffix = ".dev"
+            manifestPlaceholders["appLabel"] = "QuireCode Dev"
+        }
         release {
             // Without the release key, the debug key: a local release build then installs over the debug app, data kept.
             signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")

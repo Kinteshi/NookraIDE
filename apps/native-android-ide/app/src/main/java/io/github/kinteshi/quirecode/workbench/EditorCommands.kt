@@ -210,6 +210,8 @@ object EditorCommands {
         command("jupyter.interruptKernel", "Notebook: Interrupt Kernel", ""),
         command("jupyter.restartKernel", "Notebook: Restart Kernel", ""),
         command("jupyter.showVariables", "Jupyter: Show Variables", ""),
+        command("notebook.cell.toggleLineNumbers", "Notebook: Toggle Cell Line Numbers", ""),
+        command("notebook.toggleLineNumbers", "Notebook: Toggle Notebook Line Numbers", ""),
         command("github.signIn", "GitHub: Sign In (Copilot Chat and Git)", ""),
         command("github.copilot.chat.signIn", "GitHub Copilot: Sign In to Chat", ""),
         command("github.copilot.chat.signInCli", "Copilot: Sign In to Chat with copilot login", ""),
@@ -257,6 +259,8 @@ object EditorCommands {
         command("notebook.outline", "Notebook: Show Outline", ""),
         command("notebook.cell.showHover", "Notebook: Show Hover", "Ctrl+K Ctrl+I"),
         command("notebook.cell.goToDefinition", "Notebook: Go to Definition", "F12"),
+        // Before the input method, which can take Ctrl+Space for itself (Samsung's switches language).
+        command("notebook.cell.triggerSuggest", "Notebook: Trigger Suggest in Cell", "Ctrl+Space"),
     )
 
     /** The editor's find keys, which a notebook takes too (its widget searches every cell). */

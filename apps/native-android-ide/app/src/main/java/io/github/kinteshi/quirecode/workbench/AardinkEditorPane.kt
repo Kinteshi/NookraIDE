@@ -401,7 +401,7 @@ internal fun AardinkNextEditCard(controller: WorkbenchController) {
 }
 
 /** A row of monospace text with no line spacing, as a multiple of the font size: the font's ascent and descent, no spacing. */
-private val MONOSPACE_ROW_RATIO: Float by lazy {
+internal val MONOSPACE_ROW_RATIO: Float by lazy {
     val metrics = android.graphics.Paint().apply {
         typeface = android.graphics.Typeface.MONOSPACE
         textSize = 100f

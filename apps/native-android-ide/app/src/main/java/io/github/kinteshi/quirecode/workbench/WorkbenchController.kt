@@ -9206,7 +9206,11 @@ class WorkbenchController(private val context: Context) {
         }
     }
 
-    fun onCellInput(session: NotebookSession, cell: NotebookCell, value: TextFieldValue, textChanged: Boolean) {
+    /**
+     * A cell's text or cursor changed. [scheduleCopilot] off for Aardink cells, which ask Copilot through the editor's
+     * own inline completions ([cellInlineCompletions]) instead of the text field's timer.
+     */
+    fun onCellInput(session: NotebookSession, cell: NotebookCell, value: TextFieldValue, textChanged: Boolean, scheduleCopilot: Boolean = true) {
         session.cellCompletion?.let { completion ->
             if (completion.cellId != cell.id || completion.visibleItems(value) == null) session.cellCompletion = null
         }
@@ -9221,7 +9225,7 @@ class WorkbenchController(private val context: Context) {
         if (!textChanged) return
         scheduleCellMirrorSync(session)
         scheduledCellRequest?.cancel(false)
-        if (!copilotEnabled || !settings.notebookCopilot || !copilot.language.isReady || cell.type != CellType.Code ||
+        if (!scheduleCopilot || !copilotEnabled || !settings.notebookCopilot || !copilot.language.isReady || cell.type != CellType.Code ||
             !value.selection.collapsed
         ) return
         val caret = value.selection.start
@@ -9231,6 +9235,45 @@ class WorkbenchController(private val context: Context) {
             settings.inlineSuggestDelayMs.toLong(),
             TimeUnit.MILLISECONDS,
         )
+    }
+
+    /** Copilot's suggestions at [caret] in an Aardink cell, in the cell's offsets (A20); null when Copilot can't ask. */
+    internal fun cellInlineCompletions(session: NotebookSession, cell: NotebookCell, caret: Int): CompletableFuture<List<CellSuggestion>>? {
+        if (!copilotEnabled || !settings.notebookCopilot || !copilot.language.isReady || cell.type != CellType.Code) return null
+        if (notebooks[session.document.path] !== session) return null
+        val (mirror, version) = syncNotebookMirror(session)
+        val startLine = mirror.startLines[cell.id] ?: return null
+        val (line, column) = cellPosition(cell.source, caret)
+        copilotLog { "aardink cell request ${cell.id} $line:$column v$version" }
+        return copilot.inlineCompletion(
+            mirrorPath(session.document.path), version, LspPosition(startLine + line, column),
+            settings.tabSize, settings.insertSpaces, invoked = false,
+        ).thenApply { suggestions ->
+            suggestions.filter { it.insertText.isNotBlank() }.mapNotNull { cellSuggestion(cell, startLine, it) }
+                .also { shown -> shown.firstOrNull()?.let { post { copilot.didShow(it.source) } } }
+        }
+    }
+
+    /** Ctrl+Space in a cell: the kernel's completions at its cursor (an Aardink cell's, or the text field's last caret). */
+    private fun triggerCellSuggest() {
+        val session = activeNotebook ?: return
+        val cell = session.notebook.cells.firstOrNull { it.id == session.selectedCell } ?: return
+        if (cell.type != CellType.Code) return
+        val state = session.cellEditors[cell.id]?.takeIf { settings.cellEditor == "aardink" }
+        val value = if (state != null) {
+            TextFieldValue(state.text, state.selection)
+        } else {
+            TextFieldValue(cell.source, androidx.compose.ui.text.TextRange(session.cellCaret.coerceIn(0, cell.source.length)))
+        }
+        requestCellCompletion(session, cell, value)
+    }
+
+    /** Line numbers on or off in the selected cell, against `notebook.lineNumbers` (G21; VS Code's L in command mode). */
+    fun toggleCellLineNumbers() {
+        val session = activeNotebook ?: return
+        val cellId = session.selectedCell ?: return
+        if (!session.cellLineNumbersToggled.remove(cellId)) session.cellLineNumbersToggled.add(cellId)
+        if (settings.cellEditor != "aardink") status = "Line numbers in cells need the code editor (Settings > Notebooks > Cell editor)"
     }
 
     private fun requestCellSuggestion(session: NotebookSession, cell: NotebookCell, source: String, caret: Int) {
@@ -9808,7 +9851,7 @@ class WorkbenchController(private val context: Context) {
 
     /** Enter and the moving keys in the Aardink editor skip the input method (see [KeyRouter.bypassesIme]). */
     fun bypassesIme(event: AndroidKeyEvent): Boolean =
-        focusArea == FocusArea.Editor && dialog == null &&
+        (focusArea == FocusArea.Editor || focusArea == FocusArea.Notebook && settings.cellEditor == "aardink") && dialog == null &&
             event.keyCode in IME_BYPASS_KEYS
 
     private fun sendTerminalControlKey(event: AndroidKeyEvent): Boolean {
@@ -9909,6 +9952,9 @@ class WorkbenchController(private val context: Context) {
             // The app's former name's ids, which keybindings.json files may still use, run the same commands.
             "quirecode.resetPaneSizes", "materialcode.resetPaneSizes" -> resetPaneSizes()
             "quirecode.copyDiagnostics" -> copyDiagnostics()
+            "notebook.cell.toggleLineNumbers" -> toggleCellLineNumbers()
+            "notebook.cell.triggerSuggest" -> triggerCellSuggest()
+            "notebook.toggleLineNumbers" -> updateSetting(WorkbenchSettings.NOTEBOOK_LINE_NUMBERS, if (settings.notebookLineNumbers) "off" else "on")
             "quirecode.restartLanguageServers", "materialcode.restartLanguageServers" -> activePath?.let { path ->
                 val languages = languageClientsFor(path).mapNotNull { client -> languageClients.entries.firstOrNull { it.value === client }?.key }
                 if (languages.isEmpty()) status = "No language server works on ${path.substringAfterLast('/')}"
@@ -10080,7 +10126,7 @@ class WorkbenchController(private val context: Context) {
             "editor.showOutgoingCalls" -> showCallHierarchy(incoming = false)
             "closeReferenceSearch" -> closePeek()
             "editor.action.rename" -> beginRename()
-            "editor.action.triggerSuggest" -> surface?.triggerSuggest()
+            "editor.action.triggerSuggest" -> if (focusArea == FocusArea.Notebook) triggerCellSuggest() else surface?.triggerSuggest()
             "editor.action.triggerParameterHints" -> activePath?.let { requestSignature(it, trigger = null, invoked = true) }
             "closeParameterHints" -> closeParameterHints()
             // Aardink's own hover only when the workbench's card can't be placed over it.

@@ -97,4 +97,16 @@ class WorkbenchSettingsTest {
         assertTrue(PanelTab.Debug in WorkbenchSettings.from(written).panelAutoHide)
         assertFalse(PanelTab.Docs in WorkbenchSettings.AUTO_HIDING_PANEL_TABS)
     }
+
+    @Test
+    fun notebookCellEditorAndLineNumbers() {
+        val defaults = WorkbenchSettings()
+        assertEquals("aardink", defaults.cellEditor)
+        assertFalse(defaults.notebookLineNumbers)
+        val set = JsonParser.parseString("""{"avf.notebook.cellEditor":"text","notebook.lineNumbers":"on"}""").asJsonObject
+        assertEquals("text", WorkbenchSettings.from(set).cellEditor)
+        assertTrue(WorkbenchSettings.from(set).notebookLineNumbers)
+        val unknown = JsonParser.parseString("""{"avf.notebook.cellEditor":"monaco"}""").asJsonObject
+        assertEquals("aardink", WorkbenchSettings.from(unknown).cellEditor)
+    }
 }
