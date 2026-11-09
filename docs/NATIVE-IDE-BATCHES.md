@@ -2607,6 +2607,16 @@ app id and the icon, so the work that doesn't depend on it goes first. 368 app u
   `0.1.0` until versions come from tags (R4); the repository link in tm4e's notice points at `main`, which this branch
   becomes (R11).
 
+## 59. Notebook cells in Aardink, and the panel's tabs (11-09; under way)
+User's request (11-09): "Go for batch 59 like you suggested", with two additions. The release is on hold (R11).
+* **A20:** notebook cells in Aardink, so they get the editor's features; decide how, then move them.
+* **G21:** line numbers in notebook cells (`notebook.lineNumbers`, Shift+L for a cell), from Aardink's gutter.
+* **G3:** the data viewer's filter with the on-screen keyboard.
+* **Settings > Code intelligence** looks badly formatted (user): find why, fix it.
+* **Auto-hide the panel's tabs** (user): a setting per tab hiding it while it has nothing (Ports with no forwarded
+  port, Variables with no kernel running, and so on).
+* Registered, not in this batch: G22, the first run, setup, connections and offline reworked (user).
+
 ## Backlog
 ### Open backlog (11-08)
 The current lists of what's open, in two: the general backlog, and the Aardink switch's until it's complete. The older
@@ -2636,6 +2646,7 @@ Grouped (11-08) so that what's cheaper done together is done together; the numbe
 | | G19 | – | S–M | Debugger: values in the hover while paused, and Copilot's partial accept (word by word): in neither engine (batch 55) |
 | | G11 | – | ? | Copilot exits after a daemon restart (watching) |
 | | G21 | – | S–M | Line numbers in notebook cells (VS Code's `notebook.lineNumbers` setting, and Shift+L for a cell). Cheaper after A20, where cells in Aardink get its gutter (user, 11-08) |
+| **8. First run and connections** | G22 | – | L | Rework the first run, setup, connection management and the offline experience (user, 11-09). The red banner when the guest is away is alarming while the app is still usable offline: say it calmly. The connection chip shows the whole status; a tap opens one dialog to choose a connection, create new ones (tablet guest, computer), and troubleshoot (port forwarding, guest stopped, pairing again). Builds on R7's Get started card and Connect-leads-to-setup |
 
 Why these groups:
 1. Most of the memory and the frame time is the editor's. Tuning sora's would be thrown away, so both wait for the flip (A5),
@@ -2649,6 +2660,8 @@ Why these groups:
 5. Both are notebook outputs, in the same code and checked with the same notebooks.
 6. Both are about big folders on the tablet (indexing, walking, memory), checked with the same large workspace.
 7. Both are window size and placement, checked by resizing the same window.
+8. One flow, from the first launch to a lost connection: designing the chip, its dialog, setup and offline together keeps
+   one voice and one place for every connection question.
 
 #### Aardink switch backlog
 
