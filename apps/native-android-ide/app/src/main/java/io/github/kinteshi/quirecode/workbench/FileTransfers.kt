@@ -156,20 +156,25 @@ internal class FileTransfers(
     fun saveToTree(plan: TransferPlan, tree: Uri, onFile: () -> Unit, onBytes: (Int) -> Unit) {
         val root = DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree))
         val made = mutableMapOf("" to root)
+        // What this save put directly in the picked folder, taken away again if it fails or is cancelled.
+        val topLevel = mutableListOf<Uri>()
+        fun create(parent: Uri, mime: String, name: String): Uri =
+            (DocumentsContract.createDocument(resolver, parent, mime, name) ?: throw IOException("Couldn't make $name"))
+                .also { if (parent == root) topLevel += it }
         fun folder(name: String): Uri = made.getOrPut(name) {
-            val parent = folder(name.substringBeforeLast('/', ""))
-            DocumentsContract.createDocument(resolver, parent, DocumentsContract.Document.MIME_TYPE_DIR, name.substringAfterLast('/'))
-                ?: throw IOException("Couldn't make the folder ${name.substringAfterLast('/')}")
+            create(folder(name.substringBeforeLast('/', "")), DocumentsContract.Document.MIME_TYPE_DIR, name.substringAfterLast('/'))
         }
-        plan.folders.forEach { folder(it) }
-        plan.files.forEach { file ->
-            checkCancelled()
-            val parent = folder(file.name.substringBeforeLast('/', ""))
-            val leaf = file.name.substringAfterLast('/')
-            val document = DocumentsContract.createDocument(resolver, parent, "application/octet-stream", leaf)
-                ?: throw IOException("Couldn't make $leaf")
-            (resolver.openOutputStream(document, "w") ?: throw IOException("Couldn't write $leaf")).use { copyOut(file, it, onBytes) }
-            onFile()
+        try {
+            plan.folders.forEach { folder(it) }
+            plan.files.forEach { file ->
+                checkCancelled()
+                val document = create(folder(file.name.substringBeforeLast('/', "")), "application/octet-stream", file.name.substringAfterLast('/'))
+                (resolver.openOutputStream(document, "w") ?: throw IOException("Couldn't write ${file.name}")).use { copyOut(file, it, onBytes) }
+                onFile()
+            }
+        } catch (error: Exception) {
+            topLevel.forEach { runCatching { DocumentsContract.deleteDocument(resolver, it) } }
+            throw error
         }
     }
 

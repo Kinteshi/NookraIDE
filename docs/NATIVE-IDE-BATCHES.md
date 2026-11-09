@@ -2780,9 +2780,22 @@ suggestions, as group 10.
   anyone.
 * **Fixed after the check:** the selection bar's six buttons left no room for "n selected" in Explorer's width: the
   count and Clear on one row, the five actions on a row below.
-* Removed afterwards: the zip, `b62-save`, the staged files and the setup folders the dev app's pairings made. The test
-  folder in the guest (`~/Projects/b62-test`) and the dev app's test connection are left: the user was using the tablet
-  again by then, and removing them needs taps.
+* **Second pass** (user: "have you checked everything?"), the paths the first one didn't take, with a 381 MB file and a
+  notebook added to the test folder: a single file saved as itself (400 000 000 bytes; its SHA-256 matched the guest's)
+  with the progress card ("0 of 1 file · 72.0 MB of 381.5 MB"); Cancel during a zip of the folder ("cancelled", no zip
+  left); one file shared as itself ("1 item, hello.py") and a folder as `sub.zip`; import's Keep both (`b62-import
+  (2).txt`) and Replace (the file's text replaced, no copy); Share output (the output's text); Copy paths (two paths,
+  one per line, pasted to check).
+* **Found and fixed in the second pass:**
+  * The daemon refused any read of a file over 256 MiB ("file exceeds the 256 MiB VFS paging limit"), even in 4 MiB
+    chunks, so large files couldn't be saved or shared. Each read is bounded by the chunk size, so the file-size check
+    went (a test reads past 256 MiB of a sparse 300 MiB file); the guest's daemon was updated again. With an older
+    daemon the app says to update it.
+  * A cancelled or failed save left a partial file (or the folders made so far) on the device; an import left a partial
+    file in the guest: both are removed now. A failed save was checked to leave nothing (the 256 MiB failure).
+* Removed afterwards: the zip, `b62-save`, the 400 MB copy, the test folder in the guest, the staged files, the setup
+  folders the dev app's pairings made, and the dev app's computer test connection. My taps opened the user's
+  `main.ipynb` once (the list shifted under a tap); it was closed unchanged, no kernel started.
 
 ## 63. The daemon reachable from anywhere over Tailscale, and hardened (G30 steps 1 and 4) (11-09; done, checked on the tablet and with this machine as the computer)
 User's request (11-09): "Go for suggestion 2" (G30's private network and hardening).
@@ -2833,6 +2846,12 @@ User's request (11-09): "Go for suggestion 2" (G30's private network and hardeni
   machine serves are kept. A `wss://` connection on localhost (a tunnel) counted as the tablet's guest: an encrypted
   connection is always a computer now (a test). Deleting the current connection clears Troubleshoot's last check.
   Checked: pairing the computer again and switching both ways, no error.
+* **The installer's `--tailscale` path**, run here with stand-ins for systemctl, loginctl, sudo, uv, the tools and
+  `tailscale` (an address and a MagicDNS name): the unit binds to the tailnet address with TLS and
+  `StartLimitIntervalSec=0`, the service is enabled and started, lingering asked for, and the connection string printed
+  with the address and the name; `--remote --address` unchanged. Without Tailscale it says to install it; with
+  Tailscale down it **stopped silently** (`set -e` and `pipefail` on the failing `tailscale ip`): fixed, it now says to
+  run `sudo tailscale up`.
 * G30 left: steps 2 (Cloudflare Tunnel, checking a public certificate) and 3 (port forwarding), and managing devices
   from the app (list and revoke over the protocol) rather than the command line.
 

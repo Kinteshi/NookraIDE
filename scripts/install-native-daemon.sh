@@ -68,7 +68,8 @@ if $tailscale; then
   # Listen on the tailnet's address only: other devices on your Tailscale network reach it from anywhere,
   # and nothing is opened on the LAN or the internet. TLS and the pinned certificate stay as for --remote.
   command -v tailscale >/dev/null || { echo "Tailscale isn't installed here: see https://tailscale.com/download, then 'sudo tailscale up'" >&2; exit 1; }
-  address=$(tailscale ip -4 2>/dev/null | head -1)
+  # It fails while Tailscale is down: say so below rather than stopping silently (set -e, pipefail).
+  address=$(tailscale ip -4 2>/dev/null | head -1 || true)
   [[ -n "$address" ]] || { echo "Tailscale isn't connected: run 'sudo tailscale up', then this again" >&2; exit 1; }
   bind="$address:$port"
   tls_line="Environment=AVF_TLS=1"

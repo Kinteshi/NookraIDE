@@ -2,7 +2,6 @@
 use avf_protocol::GitStatusEntry;
 use avf_protocol::{
     EntryKind, FileEntry, GitFileStatus, VfsErrorCode, MAX_CHUNK_SIZE, MAX_FILE_SIZE,
-    MAX_PAGED_FILE_SIZE,
 };
 use cap_std::{
     ambient_authority,
@@ -393,12 +392,8 @@ impl Vfs {
                     "cannot read a directory as a file",
                 ));
             }
-            if metadata.len() > MAX_PAGED_FILE_SIZE as u64 {
-                return Err(VfsFailure::new(
-                    VfsErrorCode::TooLarge,
-                    "file exceeds the 256 MiB VFS paging limit",
-                ));
-            }
+            // No limit on the file's size: each read is at most MAX_CHUNK_SIZE, so memory stays bounded, and
+            // carrying a large file out of the guest in chunks (save to the device, share) needs any size.
             let modified_ts =
                 modified_timestamp(metadata.modified().map_err(VfsFailure::from_io)?)?;
             file.seek(SeekFrom::Start(offset))
@@ -1339,6 +1334,26 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(error.code, VfsErrorCode::TooLarge);
+    }
+
+    #[tokio::test]
+    async fn chunked_reads_reach_past_256_mib() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("project");
+        std::fs::create_dir(&root).unwrap();
+        let vfs = Vfs::new(std::slice::from_ref(&root)).unwrap();
+        let big = root.join("big.bin");
+        // Sparse: 300 MiB on paper, a few bytes on disk.
+        let file = std::fs::File::create(&big).unwrap();
+        file.set_len(300 * 1024 * 1024).unwrap();
+        drop(file);
+        let (content, eof, _, size) = vfs
+            .read_file_range(big.to_string_lossy().into_owned(), 299 * 1024 * 1024, 4 * 1024 * 1024)
+            .await
+            .unwrap();
+        assert_eq!(size, 300 * 1024 * 1024);
+        assert_eq!(content.len(), 1024 * 1024);
+        assert!(eof);
     }
 
     #[tokio::test]

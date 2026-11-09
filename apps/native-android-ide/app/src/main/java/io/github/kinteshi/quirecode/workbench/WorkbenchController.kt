@@ -4314,7 +4314,13 @@ class WorkbenchController(private val context: Context) {
                 transfer = null
                 result.onSuccess { status = it }
                 result.onFailure { error ->
-                    status = if (error is TransferCancelled) "$title: cancelled" else "$title failed: ${failureMessage(error)}"
+                    val message = failureMessage(error)
+                    status = when {
+                        error is TransferCancelled -> "$title: cancelled"
+                        // Older daemons read at most 256 MiB of a file, even in chunks (lifted in batch 62's check).
+                        "paging limit" in message -> "$title failed: the guest's daemon can't send files over 256 MB yet; update it (Set up the guest again)"
+                        else -> "$title failed: $message"
+                    }
                 }
             }
         }
@@ -4477,11 +4483,17 @@ class WorkbenchController(private val context: Context) {
         if (uri == null) return
         runTransfer("Saving to the device") { progress ->
             val counter = Counter(save.plan, progress)
-            (context.contentResolver.openOutputStream(uri, "w") ?: throw java.io.IOException("Couldn't write there")).use { out ->
-                if (save.zip) fileTransfers.zip(save.plan, out, counter::file, counter::bytes) else {
-                    fileTransfers.copyOut(save.plan.files.single(), out, counter::bytes)
-                    counter.file()
+            try {
+                (context.contentResolver.openOutputStream(uri, "w") ?: throw java.io.IOException("Couldn't write there")).use { out ->
+                    if (save.zip) fileTransfers.zip(save.plan, out, counter::file, counter::bytes) else {
+                        fileTransfers.copyOut(save.plan.files.single(), out, counter::bytes)
+                        counter.file()
+                    }
                 }
+            } catch (error: Exception) {
+                // Cancelled or failed: no half-written file left where it was saved.
+                runCatching { android.provider.DocumentsContract.deleteDocument(context.contentResolver, uri) }
+                throw error
             }
             "Saved ${if (save.zip) archiveName(save.paths) else save.plan.files.single().name} to the device"
         }
@@ -4566,8 +4578,15 @@ class WorkbenchController(private val context: Context) {
             var bytes = 0L
             folders.forEach { fileTransfers.makeFolder("$target/$it") }
             work.forEach { (item, name) ->
-                (context.contentResolver.openInputStream(item.uri) ?: throw java.io.IOException("Couldn't read ${item.name}")).use { input ->
-                    fileTransfers.copyIn(input, "$target/$name") { count -> bytes += count; progress(files, work.size, bytes, total) }
+                try {
+                    (context.contentResolver.openInputStream(item.uri) ?: throw java.io.IOException("Couldn't read ${item.name}")).use { input ->
+                        fileTransfers.copyIn(input, "$target/$name") { count -> bytes += count; progress(files, work.size, bytes, total) }
+                    }
+                } catch (error: Exception) {
+                    // The file it was partway through goes (to the daemon's trash); the finished ones stay.
+                    runCatching { vfs.delete("$target/$name").get(30, java.util.concurrent.TimeUnit.SECONDS) }
+                    post { afterFileSystemChange() }
+                    throw if (error is TransferCancelled) TransferCancelled() else error
                 }
                 files++
                 progress(files, work.size, bytes, total)
