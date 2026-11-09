@@ -2388,6 +2388,7 @@ Grouped (11-08) so that what's cheaper done together is done together; the numbe
 | | G19 | – | S–M | Debugger: values in the hover while paused, and Copilot's partial accept (word by word): in neither engine (batch 55) |
 | | G20 | – | S–M | Hover card: an expand button that shows the whole of it in a split panel, or in a docs tab in the bottom panel (user's idea, 11-08) |
 | | G11 | – | ? | Copilot exits after a daemon restart (watching) |
+| | G21 | – | S–M | Line numbers in notebook cells (VS Code's `notebook.lineNumbers` setting, and Shift+L for a cell). Cheaper after A20, where cells in Aardink get its gutter (user, 11-08) |
 
 Why these groups:
 1. Most of the memory and the frame time is the editor's. Tuning sora's would be thrown away, so both wait for the flip (A5),
