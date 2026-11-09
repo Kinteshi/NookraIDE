@@ -195,6 +195,7 @@ object EditorCommands {
         command("rust-analyzer.restartServer", "rust-analyzer: Restart server", ""),
         command("quirecode.restartLanguageServers", "Restart Language Servers of the Active File", ""),
         command("quirecode.resetPaneSizes", "View: Reset Pane Sizes", ""),
+        command("quirecode.copyDiagnostics", "Help: Copy Diagnostics (for a bug report)", ""),
         command("editor.action.fontZoomIn", "Editor Font Zoom In", "Ctrl+="),
         command("editor.action.fontZoomOut", "Editor Font Zoom Out", "Ctrl+-"),
         command("workbench.action.openSettingsJson", "Open User Settings (JSON)", ""),

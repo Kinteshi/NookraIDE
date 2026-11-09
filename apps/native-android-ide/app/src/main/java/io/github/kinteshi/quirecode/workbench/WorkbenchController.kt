@@ -3,6 +3,7 @@ package io.github.kinteshi.quirecode.workbench
 import io.github.kinteshi.quirecode.IdeTileService
 import io.github.kinteshi.quirecode.notebook.NotebookWidgets
 import android.content.ClipData
+import io.github.kinteshi.quirecode.BuildConfig
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
@@ -2768,6 +2769,53 @@ class WorkbenchController(private val context: Context) {
     fun dismissDaemonVersionNotice() {
         daemonVersionDismissed = daemonVersionNotice
         daemonVersionNotice = null
+    }
+
+    /** Copy Diagnostics (R9): versions, device, guest state and recent messages, to the clipboard for a bug report. */
+    fun copyDiagnostics() {
+        val packageInfo = runCatching { context.packageManager.getPackageInfo(context.packageName, 0) }.getOrNull()
+        val terminal = runCatching { context.packageManager.getPackageInfo(LINUX_TERMINAL_PACKAGE, 0) }.getOrNull()
+        val configuration = context.resources.configuration
+        val memoryInfo = android.app.ActivityManager.MemoryInfo().also {
+            context.getSystemService(android.app.ActivityManager::class.java)?.getMemoryInfo(it)
+        }
+        fun gigabytes(bytes: Long) = String.format(java.util.Locale.ROOT, "%.1f GB", bytes / 1_073_741_824.0)
+        val guestDaemon = vfs.guestDaemonVersion
+        val info = DiagnosticsInfo(
+            appVersion = appVersion,
+            versionCode = packageInfo?.longVersionCode ?: 0,
+            debuggable = (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0,
+            editor = "Aardink ${BuildConfig.AARDINK_VERSION}",
+            android = android.os.Build.VERSION.RELEASE,
+            sdk = android.os.Build.VERSION.SDK_INT,
+            securityPatch = android.os.Build.VERSION.SECURITY_PATCH,
+            device = "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}",
+            abis = android.os.Build.SUPPORTED_ABIS.toList(),
+            linuxTerminal = terminal?.let { "${it.versionName} (${it.longVersionCode})" },
+            window = "${configuration.screenWidthDp}×${configuration.screenHeightDp} dp, smallest width ${configuration.smallestScreenWidthDp} dp",
+            memory = "${gigabytes(memoryInfo.availMem)} free of ${gigabytes(memoryInfo.totalMem)}" +
+                if (memoryInfo.lowMemory) ", low" else "",
+            connected = connected,
+            endpoint = endpoint,
+            daemonVersion = guestDaemon,
+            daemonStatus = guestDaemon?.let {
+                when (daemonVersionStatus(it, appVersion)) {
+                    DaemonVersionStatus.Current -> "matches the app"
+                    DaemonVersionStatus.Older -> "older than the app's"
+                    DaemonVersionStatus.Newer -> "newer than the app's"
+                    DaemonVersionStatus.Unknown -> null
+                }
+            },
+            guestStoppedAt = guestStoppedAt?.let { java.text.DateFormat.getDateTimeInstance().format(java.util.Date(it)) },
+            languageServers = languageClients.filterValues { it.isStarted }.map { (id, client) ->
+                id to if (client.isReady) "ready" else "starting"
+            },
+            notebooks = notebooks.map { (path, session) -> path.substringAfterLast('/') to session.kernelState },
+            recentMessages = outputLog.toList(),
+        )
+        val report = diagnosticsReport(info, secrets = listOf(token))
+        context.getSystemService(ClipboardManager::class.java)?.setPrimaryClip(ClipData.newPlainText("QuireCode diagnostics", report))
+        status = "Diagnostics copied: paste them in your bug report (read them first; nothing was sent)"
     }
 
     /** Update: the setup flow, which installs the daemon this app carries and keeps the pairing. */
@@ -9815,6 +9863,7 @@ class WorkbenchController(private val context: Context) {
             "rust-analyzer.restartServer" -> restartServerCommand(OtherLanguageServer.Rust.id)
             // The app's former name's ids, which keybindings.json files may still use, run the same commands.
             "quirecode.resetPaneSizes", "materialcode.resetPaneSizes" -> resetPaneSizes()
+            "quirecode.copyDiagnostics" -> copyDiagnostics()
             "quirecode.restartLanguageServers", "materialcode.restartLanguageServers" -> activePath?.let { path ->
                 val languages = languageClientsFor(path).mapNotNull { client -> languageClients.entries.firstOrNull { it.value === client }?.key }
                 if (languages.isEmpty()) status = "No language server works on ${path.substringAfterLast('/')}"

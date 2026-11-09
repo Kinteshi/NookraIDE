@@ -3,6 +3,9 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+/** The editor engine; also in BuildConfig, for Copy Diagnostics. */
+val aardinkVersion = "0.9.0"
+
 android {
     namespace = "io.github.kinteshi.quirecode"
     compileSdk = 37
@@ -15,6 +18,7 @@ android {
         val version = providers.gradleProperty("avf.version").orNull ?: "0.1.0-dev"
         versionName = version
         versionCode = versionCodeOf(version)
+        buildConfigField("String", "AARDINK_VERSION", "\"$aardinkVersion\"")
     }
 
     signingConfigs {
@@ -47,6 +51,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
@@ -99,7 +104,7 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material:material-icons-extended:1.7.8")
     implementation("org.connectbot:termlib:0.3.14")
-    implementation("com.aardarch:aardink:0.9.0")
+    implementation("com.aardarch:aardink:$aardinkVersion")
     implementation(project(":tm4e"))
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.google.code.gson:gson:2.13.1")

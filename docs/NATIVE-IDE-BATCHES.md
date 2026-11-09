@@ -2536,6 +2536,15 @@ app id and the icon, so the work that doesn't depend on it goes first. 368 app u
     daemon restarts), and **Not now** for this run of the app. A newer one: the banner says to update the app.
   * Not seen on the tablet: the guest's daemon and the app are both 0.1.0, and the renamed app (a new app id) isn't
     installed yet.
+* **R9, Copy Diagnostics** (built; unit-tested, not seen on the tablet):
+  * **Help: Copy Diagnostics** in the command palette, and **Copy diagnostics** in Settings > About, put a plain-text
+    report on the clipboard for a bug report: the app's version and build, Aardink's, Android's and its security patch,
+    the device and ABI, Linux Terminal's version, the window size, free memory, the guest's state (host and port only,
+    the daemon's version against the app's, when it went away), the language servers and notebook kernels running, and
+    the Output panel's last 30 messages.
+  * Nothing is sent: there's no telemetry. The connection token is replaced wherever it appears, and the user reads the
+    report before pasting it.
+  * Aardink's version now comes from one place in app/build.gradle.kts (the dependency and BuildConfig).
 * Also: the remaining "AVF Studio" in what users read (the daemon's log and errors, the guest tools' descriptions, the
   installers, HOSTING-THE-DAEMON.md) is QuireCode; the Windows script's task and firewall-rule ids stay, as its
   uninstall looks for them. A compiled Python cache (`guest/tools/__pycache__`) had been committed: removed, and ignored.
@@ -2636,7 +2645,7 @@ release waits for; the rest stay in their lists for later releases.
 | | R6 | Done (58), unchecked on the tablet | The app compares the guest daemon's version with its own and offers to update it, keeping the pairing |
 | **3. Polish** | R7 | M | First run and setup: what's needed (Android version, Linux Terminal, AVF), Set up guest, pairing, offline; a README for users, apart from the specs |
 | | R8 | M | Material You pass: cards, dialogs and banners consistent (as the large-file banner wasn't), empty states, phone width (the terminal toolbar loose end) |
-| | R9 | S–M | Diagnostics for bug reports: a Copy Diagnostics command (versions, device, guest state, recent errors); no telemetry |
+| | R9 | Done (58), unchecked on the tablet | Diagnostics for bug reports: a Copy Diagnostics command (versions, device, guest state, recent errors); no telemetry |
 | | R10 | S | Out of the release: the aardink-lab module, debug probes, Track A's leftovers (SPEC.md, the untracked `android/`), developer docs kept apart from users' |
 | **4. The repository** | R11 | S–M | This branch becomes the definitive `main`; the other branches and trials (old `main`, the four `agents/*` on GitHub) are scrapped, after a check of the history for secrets; release tags from then on (user, 11-08) |
 

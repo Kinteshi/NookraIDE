@@ -150,7 +150,7 @@ enum class SettingsCategory(val title: String, val summary: String, val icon: Im
     Ai("Copilot and Chat", "Inline suggestions, next edits, chat agent", Icons.Outlined.AutoAwesome),
     Guest("Guest", "Linux tools, fixes, connections", Icons.Outlined.Dns),
     Keyboard("Keyboard and device", "Shortcuts, key bar, haptics, settings.json", Icons.Outlined.Keyboard),
-    About("About", "Version, licence, open-source licences", Icons.Outlined.Info),
+    About("About", "Version, licence, open-source licences, diagnostics", Icons.Outlined.Info),
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -741,6 +741,7 @@ private fun LazyListScope.about(controller: WorkbenchController) {
     }
     item { SettingRow(Icons.Outlined.Gavel, "Licence", "Apache License 2.0") {} }
     item { ActionRow(Icons.Outlined.Description, "Open-source licences", "The libraries, crates and files the app ships, and their licences") { controller.dialog = WorkbenchDialog.Licenses } }
+    item { ActionRow(Icons.Outlined.BugReport, "Copy diagnostics", "Versions, device, guest state and recent messages, for a bug report. Nothing is sent") { controller.copyDiagnostics() } }
 }
 
 @Composable
