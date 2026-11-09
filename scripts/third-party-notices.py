@@ -30,7 +30,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 APP = os.path.join(ROOT, "apps", "native-android-ide")
 OUT = os.path.join(APP, "app", "src", "main", "assets", "licenses", "notices.json")
 STANDARD = os.path.join(ROOT, "scripts", "licenses")
-GRADLE_CACHE = os.path.expanduser("~/.gradle/caches/modules-2/files-2.1")
+GRADLE_CACHE = os.path.join(os.path.expanduser(os.environ.get("GRADLE_USER_HOME", "~/.gradle")), "caches", "modules-2", "files-2.1")
 PREFERRED = ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Zlib", "Unlicense", "BSL-1.0"]
 
 # Licence names as POMs write them.

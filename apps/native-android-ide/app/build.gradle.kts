@@ -1,3 +1,6 @@
+import org.gradle.maven.MavenModule
+import org.gradle.maven.MavenPomArtifact
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
@@ -147,5 +150,37 @@ tasks.register("thirdPartyArtifacts") {
             seen.filterNot { it.startsWith("project ") }.sorted()
         }
     }
-    doLast { components.get().forEach { println(it) } }
+    val dependencyHandler = dependencies
+    doLast {
+        val listed = components.get()
+        // The script reads each library's POM, and its parents', from Gradle's cache. Gradle skips POMs it doesn't need
+        // (a library with Gradle module metadata), so a fresh cache (CI's) may lack them: fetch them, parents included.
+        val fetched = mutableSetOf<String>()
+        var wanted = listed.toSet()
+        repeat(5) {
+            wanted = wanted - fetched
+            if (wanted.isEmpty()) return@repeat
+            fetched += wanted
+            val query = dependencyHandler.createArtifactResolutionQuery()
+            wanted.forEach { coordinates ->
+                val (group, name, version) = coordinates.split(":")
+                query.forModule(group, name, version)
+            }
+            val parents = mutableSetOf<String>()
+            query.withArtifacts(MavenModule::class.java, MavenPomArtifact::class.java).execute().resolvedComponents.forEach { component ->
+                component.getArtifacts(MavenPomArtifact::class.java)
+                    .filterIsInstance<org.gradle.api.artifacts.result.ResolvedArtifactResult>()
+                    .forEach { pom ->
+                        val parent = Regex("(?s)<parent>(.*?)</parent>").find(pom.file.readText())?.groupValues?.get(1) ?: return@forEach
+                        fun tag(name: String) = Regex("<$name>\\s*([^<]+?)\\s*</$name>").find(parent)?.groupValues?.get(1)
+                        val group = tag("groupId") ?: return@forEach
+                        val artifact = tag("artifactId") ?: return@forEach
+                        val version = tag("version") ?: return@forEach
+                        parents += "$group:$artifact:$version"
+                    }
+            }
+            wanted = parents
+        }
+        listed.forEach { println(it) }
+    }
 }
