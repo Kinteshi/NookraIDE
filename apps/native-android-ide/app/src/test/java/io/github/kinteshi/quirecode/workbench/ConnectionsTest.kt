@@ -45,6 +45,8 @@ class ConnectionsTest {
         assertTrue(isTabletGuestEndpoint("ws://localhost:19870/ws"))
         assertTrue(isTabletGuestEndpoint(""))
         assertFalse(isTabletGuestEndpoint("wss://192.168.1.10:19870/ws"))
+        // Encrypted means a computer, even through a tunnel on localhost.
+        assertFalse(isTabletGuestEndpoint("wss://127.0.0.1:19871/ws"))
         assertEquals("127.0.0.1" to 19870, endpointHostPort(GUEST_DAEMON_ENDPOINT))
         assertEquals("host.lan" to 443, endpointHostPort("wss://host.lan/ws"))
         assertNull(endpointHostPort("http://host.lan:80"))

@@ -113,8 +113,12 @@ fun connectionSummary(facts: ConnectionFacts): ConnectionSummary {
     }
 }
 
-/** A connection to this tablet's own guest (Linux Terminal forwards it to localhost) rather than to a computer. */
+/**
+ * A connection to this tablet's own guest (Linux Terminal forwards it to localhost, unencrypted) rather than to a
+ * computer. A `wss://` connection is a computer's even on localhost (through a tunnel: adb, SSH).
+ */
 fun isTabletGuestEndpoint(endpoint: String): Boolean {
+    if (endpoint.trim().startsWith("wss://", ignoreCase = true)) return false
     val host = runCatching { java.net.URI(endpoint.trim()).host }.getOrNull() ?: return endpoint.isBlank()
     return host == "127.0.0.1" || host == "localhost" || host == "::1" || host == "[::1]"
 }

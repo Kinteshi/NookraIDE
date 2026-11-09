@@ -344,27 +344,32 @@ private fun Modifier.explorerDragSource(controller: WorkbenchController, drag: E
 
 @Composable
 private fun SelectionBar(controller: WorkbenchController, selection: List<String>) {
+    // Two rows: Explorer is often narrower than six buttons and the count side by side (G24).
     Surface(color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.fillMaxWidth().padding(6.dp), shape = MaterialTheme.shapes.medium) {
-        Row(Modifier.padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("${selection.size} selected", style = MaterialTheme.typography.labelLarge, maxLines = 1, modifier = Modifier.weight(1f))
-            Tooltip("Share") { IconButton(onClick = { controller.shareEntries(selection) }) {
-                Icon(Icons.Outlined.Share, contentDescription = "Share")
-            } }
-            Tooltip("Save to the device") { IconButton(onClick = { controller.beginSaveToDevice(selection) }) {
-                Icon(Icons.Outlined.Download, contentDescription = "Save to the device")
-            } }
-            Tooltip("Copy paths") { IconButton(onClick = { controller.copyPaths(selection) }) {
-                Icon(Icons.Outlined.ContentCopy, contentDescription = "Copy paths")
-            } }
-            Tooltip("Move to…") { IconButton(onClick = { controller.beginMoveEntries(selection) }) {
-                Icon(Icons.AutoMirrored.Outlined.DriveFileMove, contentDescription = "Move to…")
-            } }
-            Tooltip("Delete") { IconButton(onClick = { controller.beginDeleteEntries(selection) }) {
-                Icon(Icons.Outlined.Delete, contentDescription = "Delete")
-            } }
-            Tooltip("Clear selection") { IconButton(onClick = controller::clearExplorerSelection) {
-                Icon(Icons.Outlined.Close, contentDescription = "Clear selection")
-            } }
+        Column(Modifier.padding(top = 2.dp, bottom = 2.dp)) {
+            Row(Modifier.padding(start = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("${selection.size} selected", style = MaterialTheme.typography.labelLarge, maxLines = 1, modifier = Modifier.weight(1f))
+                Tooltip("Clear selection") { IconButton(onClick = controller::clearExplorerSelection) {
+                    Icon(Icons.Outlined.Close, contentDescription = "Clear selection")
+                } }
+            }
+            Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
+                Tooltip("Share") { IconButton(onClick = { controller.shareEntries(selection) }) {
+                    Icon(Icons.Outlined.Share, contentDescription = "Share")
+                } }
+                Tooltip("Save to the device") { IconButton(onClick = { controller.beginSaveToDevice(selection) }) {
+                    Icon(Icons.Outlined.Download, contentDescription = "Save to the device")
+                } }
+                Tooltip("Copy paths") { IconButton(onClick = { controller.copyPaths(selection) }) {
+                    Icon(Icons.Outlined.ContentCopy, contentDescription = "Copy paths")
+                } }
+                Tooltip("Move to…") { IconButton(onClick = { controller.beginMoveEntries(selection) }) {
+                    Icon(Icons.AutoMirrored.Outlined.DriveFileMove, contentDescription = "Move to…")
+                } }
+                Tooltip("Delete") { IconButton(onClick = { controller.beginDeleteEntries(selection) }) {
+                    Icon(Icons.Outlined.Delete, contentDescription = "Delete")
+                } }
+            }
         }
     }
 }

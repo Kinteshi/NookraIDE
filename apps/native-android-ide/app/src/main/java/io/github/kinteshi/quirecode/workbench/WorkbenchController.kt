@@ -1093,6 +1093,7 @@ class WorkbenchController(private val context: Context) {
         profiles = profileStore.profiles()
         if (profileId == id) {
             newProfile()
+            connectionCheck = null
             // Its problems go with it; away, the next saved connection is the one to connect to.
             resetConnectionProblems()
             if (!connected) {
@@ -1131,6 +1132,11 @@ class WorkbenchController(private val context: Context) {
                 }
                 connected = true
                 roots = guestRoots
+                // Only what this machine serves: a folder from another one (a connection switched) is dropped.
+                val served = { path: String -> guestRoots.any { isPathWithinRoot(path, it) } }
+                if (currentDirectory.isNotEmpty() && !served(currentDirectory)) currentDirectory = ""
+                expandedFolders.removeAll { !served(it) }
+                folderChildren.keys.filterNot(served).forEach(folderChildren::remove)
                 if (dialog == WorkbenchDialog.Connect) dialog = null
                 io.execute {
                     val saved = profileStore.save(profileId, profileName, endpoint, token, pin)
@@ -2838,6 +2844,7 @@ class WorkbenchController(private val context: Context) {
     /** Connects to [profile] instead of the current connection. */
     fun switchConnection(profile: io.github.kinteshi.quirecode.transport.ConnectionProfile) {
         replacingConnection = connected
+        if (profile.endpoint != endpoint) forgetMachineExplorer()
         selectProfile(profile)
         resetConnectionProblems()
         guestStoppedAt = null
@@ -2847,6 +2854,18 @@ class WorkbenchController(private val context: Context) {
 
     /** A switch to another connection closes the current one on purpose: not the guest stopping. */
     private var replacingConnection = false
+
+    /**
+     * Another machine's folders mean nothing on the next one: Explorer's folder, its open folders and its roots go, so
+     * refreshing them doesn't ask the new machine for paths it doesn't serve ("outside the configured project roots").
+     */
+    private fun forgetMachineExplorer() {
+        currentDirectory = ""
+        entries = emptyList()
+        roots = emptyList()
+        expandedFolders.clear()
+        folderChildren.clear()
+    }
 
     private fun resetConnectionProblems() {
         pairingRejected = false
@@ -3169,6 +3188,10 @@ class WorkbenchController(private val context: Context) {
                     status = pairingError!!
                     return@post
                 }
+                if (target != endpoint) {
+                    replacingConnection = connected
+                    forgetMachineExplorer()
+                }
                 profileId = existing?.id
                 profileName = existing?.name ?: "Linux guest"
                 endpoint = target
@@ -3211,6 +3234,10 @@ class WorkbenchController(private val context: Context) {
                     return@post
                 }
                 val existing = profiles.firstOrNull { it.endpoint == parsed.endpoint }
+                if (parsed.endpoint != endpoint) {
+                    replacingConnection = connected
+                    forgetMachineExplorer()
+                }
                 profileId = existing?.id
                 profileName = existing?.name ?: parsed.host
                 endpoint = parsed.endpoint

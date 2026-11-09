@@ -2745,7 +2745,7 @@ the dev app installed alongside the release one".
 * The dev app stays installed beside the release app (user, 11-09); stopped after the checks, its terminal closed.
 * README and the hosting guide follow the chip and its dialog. 379 unit tests.
 
-## 62. Files in and out of the app (group 9: G24–G28) (11-09; built and unit-tested, tablet check pending)
+## 62. Files in and out of the app (group 9: G24–G28) (11-09; done, checked on the tablet)
 User's request (11-09): "I accept your 1 batch suggestion. Go for it! You can commit and push when you're done."
 Registered at the same time: G29 (fully usable offline, without a guest) and G30 (the daemon over the internet), with
 suggestions, as group 10.
@@ -2770,11 +2770,21 @@ suggestions, as group 10.
   progress card under the top bar (files, bytes, Cancel). The guest's files need the connection; offline it says so.
 * `FileTransfers.kt` (walking, zipping, device folders, streaming in and out), `FilesUi.kt` (the dialogs, the progress
   card, the Import button). 385 unit tests (names, archive names, sizes, progress, the setting).
-* **Not checked on the tablet yet:** when the build was ready, the dev app was open with the user's own work in it
-  (example.py, main.ipynb, private-notebook-2.ipynb, two unsaved), and installing a build restarts it. Left
-  alone until the user says; the staged test files were removed.
+* **Checked on the tablet** (after the user said it was idle), in the dev app with a test folder `~/Projects/b62-test`
+  (two files, a subfolder with a 3 MB file, an empty folder): the row menu's new entries; Save to the device as a zip
+  (the picker suggested `b62-test.zip`; pulled and checked: every file at its size, the empty folder kept, the zip
+  sound) and into a device folder (a new `b62-save` folder in Documents made in the picker, so the app was granted that
+  folder only; structure, empty folder and sizes kept); two files shared from the selection bar (the share sheet said
+  "2 items"); Share Selection from the editor's touch menu (the text in the share sheet); a file and a folder imported
+  into the test folder (the file opened; the folder kept `deeper/b.txt`). The share sheet was closed without choosing
+  anyone.
+* **Fixed after the check:** the selection bar's six buttons left no room for "n selected" in Explorer's width: the
+  count and Clear on one row, the five actions on a row below.
+* Removed afterwards: the zip, `b62-save`, the staged files and the setup folders the dev app's pairings made. The test
+  folder in the guest (`~/Projects/b62-test`) and the dev app's test connection are left: the user was using the tablet
+  again by then, and removing them needs taps.
 
-## 63. The daemon reachable from anywhere over Tailscale, and hardened (G30 steps 1 and 4) (11-09; built and tested on this machine, tablet check pending)
+## 63. The daemon reachable from anywhere over Tailscale, and hardened (G30 steps 1 and 4) (11-09; done, checked on the tablet and with this machine as the computer)
 User's request (11-09): "Go for suggestion 2" (G30's private network and hardening).
 
 * **Device tokens.** Pairing now gives each device a token of its own (`devices.json` in `~/.config/quirecode`, only
@@ -2804,9 +2814,25 @@ User's request (11-09): "Go for suggestion 2" (G30's private network and hardeni
   end-to-end test over this machine's own network address: a device token connects, the shared token is refused from
   the network, and ten failures bring "too many attempts". The app: 386 tests (the new reason decoded and said, the
   device name sent).
-* **Not done on the tablet:** updating the guest's daemon restarts it, which would end the terminals and kernels of the
-  dev app the user was working in (batch 62's note); and Tailscale needs a computer. Nothing changes for the tablet's
-  apps until the daemon is updated, and then they keep their pairing (loopback).
+* **Checked on the tablet:** the guest's daemon updated to this build (binary only, through a `systemd-run` unit,
+  stopped and started; the old one kept as `~/.local/bin/quirecode-daemon.previous`). Both apps kept their pairing (the
+  shared token from loopback, logged as such). The dev app paired again from Connections (the connection's menu, Pair
+  again): `quirecode-daemon devices` listed "QuireCode Dev on reference tablet" from 127.0.0.1, and the log
+  had the pairing and the connection. Revoked from Linux Terminal: the app was cut off, its reconnect refused, the chip
+  said Pair again (no banner: the user had turned `avf.connection.banner` off in the dev app; left as is), and
+  Troubleshoot said the port answers but the pairing is refused. Paired again to restore it.
+* **This machine as the computer:** the build's daemon ran here with TLS on 127.0.0.1:19871, reached from the tablet
+  through `adb reverse` (WSL's NAT keeps it off the LAN without changing Windows' settings). The connection string
+  typed into "A computer on your network" paired with the pinned certificate; the daemon here listed and logged the
+  device; revoking it here cut the tablet off within 12 s and refused its reconnect. Tailscale itself wasn't tried
+  (installing it and signing in to the user's account), nor the network-only rules on a real network (the
+  end-to-end test covers them).
+* **Found and fixed:** after switching between the tablet's guest and the computer, Explorer refreshed the previous
+  machine's folder on the new one ("Explorer error: path is outside the configured project roots"): switching or
+  pairing to another endpoint now forgets Explorer's folder, open folders and roots, and on connecting only folders the
+  machine serves are kept. A `wss://` connection on localhost (a tunnel) counted as the tablet's guest: an encrypted
+  connection is always a computer now (a test). Deleting the current connection clears Troubleshoot's last check.
+  Checked: pairing the computer again and switching both ways, no error.
 * G30 left: steps 2 (Cloudflare Tunnel, checking a public certificate) and 3 (port forwarding), and managing devices
   from the app (list and revoke over the protocol) rather than the command line.
 
