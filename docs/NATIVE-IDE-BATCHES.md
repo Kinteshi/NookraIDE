@@ -2561,6 +2561,14 @@ app id and the icon, so the work that doesn't depend on it goes first. 368 app u
     keystore aliases, the crate and folder names.
   * The old app (`com.avfstudio.nativeide`) on the tablet runs `avf-native-daemon …` for tool installs: once the guest
     is moved over, that stops working there. It's to be uninstalled anyway.
+* **R10, out of the release** (the user's go-ahead, 11-09):
+  * Removed: the `:aardink-lab` module (the editor trials, the last code using sora), Track A's `SPEC.md` and
+    `scripts/bootstrap-avf.sh` (its guest installer), `docs/model-guide-arc-b580.md` (unrelated), and the untracked
+    `android/` folder (only a `local.properties` was left in it). The specs citing SPEC.md say where it went.
+  * Debug logging stays: every log tag (`AVFPERF`, `AVFNB`, `AVFLSP`…) is off unless switched on with `setprop`, so a
+    release says nothing in logcat by itself.
+  * Users' and developers' docs: the README (R7) is for users; CONTRIBUTING.md leads to the specs, batches and plans in
+    `docs/`. HOSTING-THE-DAEMON.md is for users and linked from the README.
 * Also: the remaining "AVF Studio" in what users read (the daemon's log and errors, the guest tools' descriptions, the
   installers, HOSTING-THE-DAEMON.md) is QuireCode; the Windows script's task and firewall-rule ids stay, as its
   uninstall looks for them. A compiled Python cache (`guest/tools/__pycache__`) had been committed: removed, and ignored.
@@ -2662,7 +2670,7 @@ release waits for; the rest stay in their lists for later releases.
 | **3. Polish** | R7 | M | First run and setup: what's needed (Android version, Linux Terminal, AVF), Set up guest, pairing, offline; a README for users, apart from the specs |
 | | R8 | M | Material You pass: cards, dialogs and banners consistent (as the large-file banner wasn't), empty states, phone width (the terminal toolbar loose end) |
 | | R9 | Done (58), unchecked on the tablet | Diagnostics for bug reports: a Copy Diagnostics command (versions, device, guest state, recent errors); no telemetry |
-| | R10 | S | Out of the release: the aardink-lab module, debug probes, Track A's leftovers (SPEC.md, the untracked `android/`), developer docs kept apart from users' |
+| | R10 | Done (58) | Out of the release: the aardink-lab module, debug probes, Track A's leftovers (SPEC.md, the untracked `android/`), developer docs kept apart from users' |
 | **4. The repository** | R11 | S–M | This branch becomes the definitive `main`; the other branches and trials (old `main`, the four `agents/*` on GitHub) are scrapped, after a check of the history for secrets; release tags from then on (user, 11-08) |
 
 Why these groups: 1 sets the scope and the name, which everything else is labelled with; 2 is one pipeline, built once; 3 is

@@ -113,7 +113,7 @@ and 31 the same way). Debug hover values and partial accept aren't in the app wi
 ### Phase 7: remove sora (done 11-08, batch 57)
 Done as below. tm4e is sora-editor 0.23.6's copy of tm4e core (EPL-2.0), as a plain Java module (`tm4e`, its README says
 what changed); sora's two helpers it used were rewritten. sora's line-end hints, scrollbar marks and its overlays went
-with it. The aardink-lab module still has sora for its comparison screen; it isn't part of the app, and goes in R10.
+with it. The aardink-lab module, which still had sora for its comparison screen, was removed in R10 (batch 58).
 
 * Remove the setting, `SoraEditorSurface`, `SoraCompletion`, `NativeCodeEditor`, `BracketColorizer`, the
   `FoldingLayout` and `EditorLayoutAccess` files in sora's package, and both sora dependencies.

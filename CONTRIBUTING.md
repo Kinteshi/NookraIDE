@@ -22,8 +22,8 @@ and recorded here. When a change would go against one of them, raise it first ra
   device rather than estimating.
 
 The full specification is [docs/NATIVE-ANDROID-IDE-SPEC.md](docs/NATIVE-ANDROID-IDE-SPEC.md); its "Scope reset" section
-overrides the older sections where they disagree. [SPEC.md](SPEC.md) describes Track A (the code-server workbench), which is
-separate.
+overrides the older sections where they disagree. It cites `SPEC.md`, Track A's specification (a code-server workbench,
+abandoned); that file was removed for 0.1.0 and is in the history before it.
 
 ## Look and feel: Material You
 
