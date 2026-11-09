@@ -2685,6 +2685,10 @@ Loose ends: placed in the groups above (11-08).
 
 #### Release backlog (first release)
 
+**On hold (user, 11-09):** everything is done but the tag. The repository is private, and GitHub enforces the user's
+ruleset for `main` only on a public repository (or with Pro), and a private release can't be downloaded by others. The
+user holds the release and keeps developing; `v0.1.0` is tagged when they decide on the repository's visibility.
+
 Decisions and options are in [RELEASE-PLAN.md](RELEASE-PLAN.md). **The batch before it is done (57)**, but A7 (the user's) and
 G17's check; **next: 0.1.0**, R2 to R11. Registered 11-08, from the user: "let us think about releasing… items in the backlog I don't want to sweep under the rug…
 we have to polish the app for an initial release cycle". Nothing here is started. R1 decides which G and A items the first
@@ -2695,14 +2699,14 @@ release waits for; the rest stay in their lists for later releases.
 | **1. Decide** | R1 | Decided 11-08; its batch done (57) | 0.1.0 follows batch 57: A5, A6, A7, G20, G6 and the whole of group 2 (G14, G17, G5 and its loose ends) |
 | | R2 | Done (58) | **QuireCode**, app id `io.github.kinteshi.quirecode`, Quire's icon; the guest daemon is `quirecode-daemon` (`quirecode.service`, `~/.config/quirecode`); the repository is `Kinteshi/QuireCode` |
 | | R3 | Done (58) | Licence **Apache-2.0**: LICENSE and NOTICE, Cargo changed, notices generated from what ships and shown in Settings > About |
-| **2. Build and ship** | R4 | Done but the key (58) | Release builds: version from the tag, signing from the environment, R8 (25 MB). Left: the user creates and keeps the release key |
-| | R5 | Written (58), runs once pushed | CI and releases (GitHub Actions): tests, notices check, daemon for the guest and hosts, signed APK, checksums, release from a tag; notes in docs/releases/ |
+| **2. Build and ship** | R4 | Done (58) | Release builds: version from the tag, signing from the environment, R8 (25 MB); the user's release key, checked by CI's dry run |
+| | R5 | Done (58) | CI and releases (GitHub Actions): tests, notices check, daemon for the guest and hosts, signed APK, checksums, release from a tag; notes in docs/releases/ |
 | | R6 | Done (58) | The app compares the guest daemon's version with its own and offers to update it, keeping the pairing |
 | **3. Polish** | R7 | Done (58) | First run and setup: what's needed (Android version, Linux Terminal, AVF), Set up guest, pairing, offline; a README for users, apart from the specs |
 | | R8 | Done (58) | Material You pass: cards, dialogs and banners consistent (as the large-file banner wasn't), empty states, phone width (the terminal toolbar loose end) |
 | | R9 | Done (58), checked on the tablet | Diagnostics for bug reports: a Copy Diagnostics command (versions, device, guest state, recent errors); no telemetry |
 | | R10 | Done (58) | Out of the release: the aardink-lab module, debug probes, Track A's leftovers (SPEC.md, the untracked `android/`), developer docs kept apart from users' |
-| **4. The repository** | R11 | S–M | This branch becomes the definitive `main`; the other branches and trials (old `main`, the four `agents/*` on GitHub) are scrapped, after a check of the history for secrets; release tags from then on (user, 11-08) |
+| **4. The repository** | R11 | Done (58) but the tag | This branch becomes the definitive `main`; the other branches and trials (old `main`, the four `agents/*` on GitHub) are scrapped, after a check of the history for secrets; release tags from then on (user, 11-08) |
 
 Why these groups: 1 sets the scope and the name, which everything else is labelled with; 2 is one pipeline, built once; 3 is
 one pass through the app as a new user meets it.
