@@ -240,6 +240,18 @@ class DocumentRepositoryTest {
         val binaryKept = repo.storeCopy("/workspace/binary.dat", 4, 30).join()
         assertFalse(binaryKept)
         assertEquals(CopyState.None, repo.copyState("/workspace/binary.dat"))
+
+        // Image files are kept as raw bytes and remain readable offline via readBytes, without polluting text search
+        val pngBytes = byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x00, 0x0A)
+        vfs.replaceExternally(pngBytes, 40)
+        val imageKept = repo.storeCopy("/workspace/chart.png", pngBytes.size.toLong(), 40).join()
+        assertTrue(imageKept)
+        assertEquals(CopyState.Clean(40L), repo.copyState("/workspace/chart.png"))
+        assertEquals(null, repo.copyText("/workspace/chart.png"))
+
+        vfs.connected = false
+        assertTrue(pngBytes.contentEquals(repo.readBytes("/workspace/chart.png", 1024).join()))
+        assertEquals("local edits\n", String(repo.readBytes("/workspace/main.py", 1024).join(), Charsets.UTF_8))
     }
 }
 

@@ -287,7 +287,7 @@ internal class MarkdownSource(
         src.startsWith("attachment:") -> attachmentData(attachments, src.removePrefix("attachment:"))?.let { Base64.decode(it.second, Base64.DEFAULT) }
         src.startsWith("data:") -> src.substringAfter(',', "").takeIf { ";base64" in src.substringBefore(',') }?.let { Base64.decode(it, Base64.DEFAULT) }
         src.startsWith("http://") || src.startsWith("https://") -> download(src)
-        else -> URI(resolve(src)).takeIf { it.host == MARKDOWN_BASE_HOST }?.path?.let(readWorkspaceImage)
+        else -> markdownUrlPath(resolve(src))?.let(readWorkspaceImage)
     }
 
     private fun download(url: String): ByteArray? {
@@ -709,7 +709,7 @@ private fun MarkdownCellPage(
                     override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
                         val url = request.url
                         if (url.host != MARKDOWN_BASE_HOST) return null
-                        val bytes = url.path?.let(source.readWorkspaceImage)
+                        val bytes = markdownUrlPath(url.toString())?.let(source.readWorkspaceImage)
                             ?: return WebResourceResponse("text/plain", "utf-8", 404, "Not found", emptyMap(), ByteArrayInputStream(ByteArray(0)))
                         val type = android.webkit.MimeTypeMap.getSingleton()
                             .getMimeTypeFromExtension(url.lastPathSegment?.substringAfterLast('.', "")?.lowercase().orEmpty())

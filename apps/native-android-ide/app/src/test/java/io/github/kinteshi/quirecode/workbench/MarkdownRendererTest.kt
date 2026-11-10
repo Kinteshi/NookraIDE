@@ -34,4 +34,16 @@ class MarkdownRendererTest {
         assertTrue(isMarkdownPath("/w/notes.MARKDOWN"))
         assertFalse(isMarkdownPath("/w/main.py"))
     }
+
+    @Test
+    fun markdownBaseUrlPreservesGuestAndDeviceTreePaths() {
+        val guestBase = markdownBaseUrl("/home/droid/My Project/docs")
+        val resolvedGuest = java.net.URI(guestBase).resolve("../images/chart%201.svg").toString()
+        org.junit.Assert.assertEquals("/home/droid/My Project/images/chart 1.svg", markdownUrlPath(resolvedGuest))
+
+        val treeRoot = "tree:/content%3A%2F%2Fcom.android.externalstorage.documents%2Ftree%2Fprimary%253ANotes"
+        val treeBase = markdownBaseUrl("$treeRoot/sub")
+        val resolvedTree = java.net.URI(treeBase).resolve("../diagram.svg").toString()
+        org.junit.Assert.assertEquals("$treeRoot/diagram.svg", markdownUrlPath(resolvedTree))
+    }
 }

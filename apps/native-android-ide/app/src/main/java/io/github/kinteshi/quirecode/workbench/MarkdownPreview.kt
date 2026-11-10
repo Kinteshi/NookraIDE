@@ -66,6 +66,33 @@ internal object MarkdownRenderer {
 
 internal fun Color.css(): String = "#%06X".format(toArgb() and 0xFFFFFF)
 
+/**
+ * The base URL for a Markdown file in [directory] (guest `/...`, device folder `tree:/...`, or
+ * device file `device:`), with each path segment encoded once so percent-encoded SAF roots
+ * (`%3A`, `%2F`) and spaces survive URL resolution intact.
+ */
+internal fun markdownBaseUrl(directory: String): String {
+    val clean = directory.trimEnd('/')
+    if (clean.isEmpty()) return "https://$MARKDOWN_BASE_HOST/"
+    val encoded = clean.split('/').filter { it.isNotEmpty() }.joinToString("/") { segment ->
+        java.net.URLEncoder.encode(segment, "UTF-8")
+            .replace("+", "%20")
+            .replace("%3A", ":")
+    }
+    return "https://$MARKDOWN_BASE_HOST/$encoded/"
+}
+
+/**
+ * Maps a resolved `https://markdown.avf/...` URL back to its workspace/guest/device path
+ * (`/home/...`, `tree:/...`, or `device:/...`), or null when [url] is not on [MARKDOWN_BASE_HOST].
+ */
+internal fun markdownUrlPath(url: String): String? {
+    val parsed = runCatching { java.net.URI(url) }.getOrNull() ?: return null
+    if (parsed.host != MARKDOWN_BASE_HOST) return null
+    val path = parsed.path?.takeIf { it.isNotEmpty() } ?: return null
+    return if (path.startsWith("/tree:/") || path.startsWith("/device:/")) path.removePrefix("/") else path
+}
+
 /** The preview's look in the app's colours (shared with notebook Markdown cells drawn as pages). */
 internal fun markdownStyles(colors: ColorScheme): String = """
     html,body{margin:0;background:transparent;color:${colors.onSurface.css()};font:15px/1.6 sans-serif;word-wrap:break-word}
@@ -132,7 +159,7 @@ internal fun MarkdownPreview(controller: WorkbenchController, document: Document
     }
     val nonce = remember { ByteArray(16).also(random::nextBytes).joinToString("") { "%02x".format(it) } }
     val directory = document.path.substringBeforeLast('/', "")
-    val baseUrl = "https://$MARKDOWN_BASE_HOST$directory/"
+    val baseUrl = markdownBaseUrl(directory)
     val holder = remember { arrayOfNulls<WebView>(1) }
     // What the page should show; an edit before the page finished loading is applied then.
     val latest = remember { arrayOfNulls<String>(1) }
@@ -160,7 +187,7 @@ internal fun MarkdownPreview(controller: WorkbenchController, document: Document
                     override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
                         val url = request.url
                         if (url.host != MARKDOWN_BASE_HOST) return null
-                        val bytes = url.path?.let(controller::readPreviewImage)
+                        val bytes = markdownUrlPath(url.toString())?.let(controller::readPreviewImage)
                             ?: return WebResourceResponse("text/plain", "utf-8", 404, "Not found", emptyMap(), ByteArrayInputStream(ByteArray(0)))
                         val type = android.webkit.MimeTypeMap.getSingleton()
                             .getMimeTypeFromExtension(url.lastPathSegment?.substringAfterLast('.', "")?.lowercase().orEmpty())

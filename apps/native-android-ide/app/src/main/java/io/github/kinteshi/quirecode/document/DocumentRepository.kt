@@ -14,6 +14,12 @@ const val MAX_EDITABLE_FILE_SIZE = 16L * 1024 * 1024
 const val MAX_PAGED_FILE_SIZE = 256L * 1024 * 1024
 const val LARGE_FILE_PAGE_SIZE = 1024 * 1024
 const val VFS_CHUNK_SIZE = 4 * 1024 * 1024
+const val BINARY_CACHE_ENCODING = "BASE64"
+
+private val CACHEABLE_IMAGE_EXTENSIONS = setOf("png", "jpg", "jpeg", "gif", "webp", "bmp", "ico")
+
+internal fun isCacheableImagePath(path: String): Boolean =
+    path.substringAfterLast('.', "").lowercase() in CACHEABLE_IMAGE_EXTENSIONS
 
 data class DocumentSnapshot(
     val path: String,
@@ -182,10 +188,10 @@ class DocumentRepository(
             }
         }.exceptionallyCompose { error ->
             val cached = cache.load(path)
-            if (cached == null) {
-                CompletableFuture.failedFuture(unwrap(error))
-            } else {
-                CompletableFuture.completedFuture(
+            when {
+                cached == null -> CompletableFuture.failedFuture(unwrap(error))
+                cached.encoding == BINARY_CACHE_ENCODING -> CompletableFuture.failedFuture(BinaryFileException())
+                else -> CompletableFuture.completedFuture(
                     OpenDocument.Editable(
                         DocumentSession(
                             path = cached.path,
@@ -285,11 +291,18 @@ class DocumentRepository(
     }
 
     /**
-     * Keeps a clean copy of the guest's [path] (G29 "keep available offline"): read whole, decoded as when opened.
-     * False for a binary file (a NUL in its first 8 KB), which isn't kept. Never replaces unsaved edits.
+     * Keeps a clean copy of the guest's [path] (G29 "keep available offline"): read whole, decoded as when opened
+     * (or kept as bytes for an image). False for a non-image binary file (a NUL in its first 8 KB), which isn't kept.
+     * Never replaces unsaved edits.
      */
     fun storeCopy(path: String, size: Long, modifiedTs: Long): CompletableFuture<Boolean> {
         if (cache.load(path)?.dirty == true) return CompletableFuture.completedFuture(true)
+        if (isCacheableImagePath(path)) {
+            return readBytes(path, size.toInt().coerceAtLeast(1)).thenApply { bytes ->
+                storeBytesCopy(path, bytes, modifiedTs)
+                true
+            }
+        }
         return readAll(path, size).handle { decoded, error ->
             // A binary file isn't kept; any other failure (the guest went away) stops the sync.
             if (error != null) {
@@ -312,8 +325,38 @@ class DocumentRepository(
         }
     }
 
-    /** A copy's text, for searching what's kept offline. */
-    fun copyText(path: String): String? = cache.load(path)?.text
+    /** Keeps a binary/image copy of [path] so the image viewer, Markdown previews and hex view work offline. */
+    fun storeBytesCopy(path: String, bytes: ByteArray, modifiedTs: Long?) {
+        if (cache.load(path)?.dirty == true) return
+        cache.save(
+            DocumentSnapshot(
+                path = path,
+                text = java.util.Base64.getEncoder().encodeToString(bytes),
+                modifiedTs = modifiedTs,
+                dirty = false,
+                encoding = BINARY_CACHE_ENCODING,
+                eol = "\n",
+            ),
+        )
+    }
+
+    /** A copy's text, for searching what's kept offline (binary copies have no searchable text). */
+    fun copyText(path: String): String? = cache.load(path)?.takeIf { it.encoding != BINARY_CACHE_ENCODING }?.text
+
+    /** This device's copy of [path] as raw bytes (for images, previews, workspace settings, snippets and hex offline). */
+    fun copyBytes(path: String): ByteArray? {
+        val snapshot = cache.load(path) ?: return null
+        if (snapshot.encoding == BINARY_CACHE_ENCODING) {
+            return runCatching { java.util.Base64.getDecoder().decode(snapshot.text) }.getOrNull()
+        }
+        val charset = when (snapshot.encoding.uppercase()) {
+            "ISO-8859-1" -> StandardCharsets.ISO_8859_1
+            "UTF-16LE" -> StandardCharsets.UTF_16LE
+            "UTF-16BE" -> StandardCharsets.UTF_16BE
+            else -> StandardCharsets.UTF_8
+        }
+        return snapshot.text.toByteArray(charset)
+    }
 
     /** Drops this device's copy of [path] unless it holds edits not saved to the guest. */
     fun forgetCleanCopy(path: String) {
@@ -323,6 +366,26 @@ class DocumentRepository(
     /** A whole file's bytes, for files the editor doesn't open (preview images); fails past [limit]. */
     fun readBytes(path: String, limit: Int): CompletableFuture<ByteArray> {
         if (isDevicePath(path)) return readDeviceBytes(path, limit)
+        if (cache.load(path)?.dirty == true) {
+            val dirtyBytes = copyBytes(path)
+            if (dirtyBytes != null) {
+                return if (dirtyBytes.size > limit) {
+                    CompletableFuture.failedFuture(IOException("$path is not a file under ${limit / (1024 * 1024)} MiB"))
+                } else {
+                    CompletableFuture.completedFuture(dirtyBytes)
+                }
+            }
+        }
+        if (!vfs.isConnected(path)) {
+            val cached = copyBytes(path)
+            if (cached != null) {
+                return if (cached.size > limit) {
+                    CompletableFuture.failedFuture(IOException("$path is not a file under ${limit / (1024 * 1024)} MiB"))
+                } else {
+                    CompletableFuture.completedFuture(cached)
+                }
+            }
+        }
         return vfs.stat(path).thenCompose { entry ->
             if (entry.isDirectory || entry.size > limit) {
                 return@thenCompose CompletableFuture.failedFuture<ByteArray>(IOException("$path is not a file under ${limit / (1024 * 1024)} MiB"))
@@ -339,6 +402,13 @@ class DocumentRepository(
                     }
                 }
             readNext(0)
+        }.exceptionallyCompose { error ->
+            val cached = copyBytes(path)?.takeIf { it.size <= limit }
+            if (cached != null) {
+                CompletableFuture.completedFuture(cached)
+            } else {
+                CompletableFuture.failedFuture(unwrap(error))
+            }
         }
     }
 

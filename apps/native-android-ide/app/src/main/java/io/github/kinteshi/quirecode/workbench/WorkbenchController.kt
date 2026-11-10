@@ -1077,12 +1077,9 @@ class WorkbenchController(private val context: Context) {
                     IllegalStateException("Workspace settings exceed the 1 MiB limit: $path"),
                 )
                 entry.size == 0L -> CompletableFuture.completedFuture(JsonObject())
-                else -> vfs.read(path, 0L, entry.size.toInt()).thenApply { packet ->
-                    check(packet.eof && packet.content.size.toLong() == entry.size) {
-                        "Workspace settings could not be read completely: $path"
-                    }
+                else -> repository.readBytes(path, 1024 * 1024).thenApply { bytes ->
                     try {
-                        JsonParser.parseString(packet.content.toString(Charsets.UTF_8)).asJsonObject
+                        JsonParser.parseString(bytes.toString(Charsets.UTF_8)).asJsonObject
                     } catch (error: RuntimeException) {
                         throw IllegalStateException("Workspace settings are invalid JSON: $path", error)
                     }
@@ -3363,17 +3360,17 @@ class WorkbenchController(private val context: Context) {
         // tabs close one by one: neither may overwrite what was saved.
         val workspace = sessionWorkspace ?: return
         if (!sessionRestored || switchingWorkspace) return
-        val loaded = documents.map { it.path }.filter(::isWorkspaceFile)
+        val loaded = documents.map { it.path }.filter { isWorkspaceFile(it) && isPathWithinRoot(it, workspace) }
         // Tabs still loading, or waiting for the guest, keep their place.
-        val waiting = restorePending.filter { isWorkspaceFile(it) && it !in loaded }
+        val waiting = restorePending.filter { isWorkspaceFile(it) && isPathWithinRoot(it, workspace) && it !in loaded }
         val open = sessionTabs(loaded, waiting, restoreOrder)
         val session = WorkspaceSession(
             open = open,
-            active = activePath?.takeIf(::isWorkspaceFile) ?: restoreActive?.takeIf { it in waiting },
+            active = activePath?.takeIf { isWorkspaceFile(it) && isPathWithinRoot(it, workspace) } ?: restoreActive?.takeIf { it in waiting },
             directory = currentDirectory.ifEmpty { null },
             expanded = expandedFolders.toList(),
-            pinned = pinnedTabs.filter(::isWorkspaceFile),
-            preview = previewTab?.takeIf(::isWorkspaceFile),
+            pinned = pinnedTabs.filter { isWorkspaceFile(it) && isPathWithinRoot(it, workspace) },
+            preview = previewTab?.takeIf { isWorkspaceFile(it) && isPathWithinRoot(it, workspace) },
         )
         preferences.edit().putString(workspaceSessionKey(workspace), gson.toJson(session)).apply()
     }
@@ -3490,6 +3487,8 @@ class WorkbenchController(private val context: Context) {
         workspaceRoot = target
         sessionWorkspace = target
         sessionRestored = false
+        reloadWorkspaceSnippets(target)
+        reloadLaunchConfigurations(target)
         restoreSession(target)
         // A kept folder (G29 b) is listed as of its last sync: Explorer, Quick Open and search work on it.
         if (files.servesOffline(target)) {
@@ -3509,7 +3508,7 @@ class WorkbenchController(private val context: Context) {
         val tabs = runCatching {
             com.google.gson.Gson().fromJson(preferences.getString(workspaceSessionKey(workspace), null), WorkspaceSession::class.java).open.orEmpty()
         }.getOrDefault(emptyList())
-        return (remembered + tabs).distinct().filter(repository::hasCopy)
+        return (remembered + tabs).distinct().filter { isPathWithinRoot(it, workspace) && repository.hasCopy(it) }
     }
 
     private fun rememberOfflineFile(path: String) {
@@ -4169,8 +4168,8 @@ class WorkbenchController(private val context: Context) {
         addTab(DocumentSession(path, "", null, dirty = false, binary = true), asPreview = previewRequests.remove(path))
         selectDocument(path)
         status = "${path.substringAfterLast('/')} is binary: shown in the hex view"
-        if (isDevicePath(path)) {
-            // Device files come whole (from their content provider), then split into pages.
+        if (isDevicePath(path) || !files.isConnected(path)) {
+            // Device files (and offline cached copies) come whole, then split into pages.
             repository.readBytes(path, MAX_HEX_DEVICE_BYTES).whenComplete { bytes, error ->
                 post {
                     if (error != null || bytes == null) {
@@ -4188,8 +4187,16 @@ class WorkbenchController(private val context: Context) {
         }
         repository.fileSize(path).whenComplete { size, error ->
             post {
-                if (error != null || size == null) status = "Hex view failed: ${error?.cause?.message ?: error?.message}"
-                else hexFiles[path] = HexFile(path, size)
+                if (error != null || size == null) {
+                    status = "Hex view failed: ${error?.cause?.message ?: error?.message}"
+                } else {
+                    hexFiles[path] = HexFile(path, size)
+                    if (isGuestPath(path) && size <= MAX_OFFLINE_FILE_BYTES) {
+                        repository.readBytes(path, MAX_OFFLINE_FILE_BYTES.toInt()).thenAccept { bytes ->
+                            repository.storeBytesCopy(path, bytes, null)
+                        }
+                    }
+                }
             }
         }
     }
@@ -4964,11 +4971,18 @@ class WorkbenchController(private val context: Context) {
      * in the browser.
      */
     fun openMarkdownLink(url: String) {
-        val uri = android.net.Uri.parse(url)
-        if (uri.host == MARKDOWN_BASE_HOST) {
-            val path = uri.path?.takeIf { it.startsWith("/") } ?: return
-            if (roots.none { isPathWithinRoot(path, it) }) {
+        val path = markdownUrlPath(url)
+        if (path != null) {
+            val allowed = isTreePath(path) ||
+                roots.any { isPathWithinRoot(path, it) } ||
+                (workspaceRoot != null && isPathWithinRoot(path, workspaceRoot!!)) ||
+                repository.hasCopy(path)
+            if (!allowed) {
                 status = "$path is outside the guest's folders"
+                return
+            }
+            if (!files.isConnected(path) && !files.servesOffline(path) && repository.hasCopy(path)) {
+                openPath(path)
                 return
             }
             files.stat(path).whenComplete { entry, error ->
@@ -4980,7 +4994,10 @@ class WorkbenchController(private val context: Context) {
                     }
                 }
             }
-        } else if (uri.scheme in setOf("http", "https", "mailto")) {
+            return
+        }
+        val uri = android.net.Uri.parse(url)
+        if (uri.scheme in setOf("http", "https", "mailto")) {
             openLink(url)
         }
     }
@@ -4988,7 +5005,7 @@ class WorkbenchController(private val context: Context) {
     /** Links and images of a notebook's Markdown, relative to [notebookPath]'s folder. */
     internal fun markdownSource(notebookPath: String, attachments: JsonObject?): MarkdownSource =
         MarkdownSource(
-            "https://$MARKDOWN_BASE_HOST${notebookPath.substringBeforeLast('/', "")}/",
+            markdownBaseUrl(notebookPath.substringBeforeLast('/', "")),
             attachments,
             { url -> post { openMarkdownLink(url) } },
             ::readPreviewImage,
@@ -4997,10 +5014,16 @@ class WorkbenchController(private val context: Context) {
     /** Markdown and SVG files have a preview beside or instead of their text. */
     fun hasPreview(path: String): Boolean = isMarkdownPath(path) || isSvgPath(path)
 
-    /** The image viewer's file, read on its loader thread (guest or device; up to [MAX_PREVIEW_IMAGE_BYTES]). */
+    /** The image viewer's file, read on its loader thread (guest, offline copy or device; up to [MAX_PREVIEW_IMAGE_BYTES]). */
     fun readImageBytes(path: String): ByteArray {
-        if (isGuestPath(path) && !vfs.isConnected()) throw java.io.IOException("Connect to the guest to show this image")
-        return repository.readBytes(path, MAX_PREVIEW_IMAGE_BYTES).get(30, TimeUnit.SECONDS)
+        if (isGuestPath(path) && !vfs.isConnected() && !repository.hasCopy(path)) {
+            throw java.io.IOException("Connect to the guest to show this image")
+        }
+        val bytes = repository.readBytes(path, MAX_PREVIEW_IMAGE_BYTES).get(30, TimeUnit.SECONDS)
+        if (isGuestPath(path) && vfs.isConnected() && bytes.size <= MAX_OFFLINE_FILE_BYTES) {
+            runCatching { repository.storeBytesCopy(path, bytes, null) }
+        }
+        return bytes
     }
 
     /** Ctrl+= and Ctrl+- on an image tab: the viewer zooms by [ImageZoomRequest.step]. */
@@ -5016,9 +5039,15 @@ class WorkbenchController(private val context: Context) {
         }
     }
 
-    /** An image the preview shows, read from the guest (on the WebView's loader thread). */
+    /** An image the preview shows, read from the guest, this device's folder or an offline copy (on the loader thread). */
     fun readPreviewImage(path: String): ByteArray? {
-        if (!files.isConnected(path) || isGuestPath(path) && roots.none { isPathWithinRoot(path, it) }) return null
+        if (isGuestPath(path)) {
+            val allowed = roots.any { isPathWithinRoot(path, it) } ||
+                (workspaceRoot != null && isPathWithinRoot(path, workspaceRoot!!)) ||
+                repository.hasCopy(path)
+            if (!allowed) return null
+            if (!files.isConnected(path) && !repository.hasCopy(path)) return null
+        }
         return runCatching { repository.readBytes(path, MAX_PREVIEW_IMAGE_BYTES).get(15, TimeUnit.SECONDS) }.getOrNull()
     }
 
@@ -5114,6 +5143,8 @@ class WorkbenchController(private val context: Context) {
                     }
                     SaveResult.QueuedOffline -> {
                         status = "Saved locally; queued until guest reconnects"
+                        if (document.path.endsWith(".code-snippets")) workspaceRoot?.let(::reloadWorkspaceSnippets)
+                        if (document.path.endsWith("/.vscode/launch.json")) workspaceRoot?.let(::reloadLaunchConfigurations)
                         closeIfPendingAfterSave(document.path)
                     }
                     is SaveResult.Conflict -> {
@@ -5614,10 +5645,10 @@ class WorkbenchController(private val context: Context) {
     }
 
     /** The URI a language server reports a document's diagnostics under. */
-    fun diagnosticUri(path: String): String = lspDocumentUri(path, workspaceRoot)
+    fun diagnosticUri(path: String): String = lspDocumentUri(path, guestWorkspace)
 
     /** Maps a path from a language server back to the open document, untitled ones included. */
-    fun documentPathFor(lspPath: String): String = untitledPathFor(lspPath, workspaceRoot) ?: lspPath
+    fun documentPathFor(lspPath: String): String = untitledPathFor(lspPath, guestWorkspace) ?: lspPath
 
     private fun onEditorEvent(event: EditorEvent) {
         when (event) {
@@ -6016,7 +6047,7 @@ class WorkbenchController(private val context: Context) {
         }
     }
 
-    /** Reads the `.code-snippets` files in the workspace's `.vscode` folder (at connect, and when one is saved). */
+    /** Reads the `.code-snippets` files in the workspace's `.vscode` folder (at connect, offline, and when one is saved). */
     private fun reloadWorkspaceSnippets(root: String) {
         val folder = "${root.trimEnd('/')}/.vscode"
         files.listDir(folder).thenCompose { entries ->
@@ -6025,6 +6056,15 @@ class WorkbenchController(private val context: Context) {
             CompletableFuture.allOf(*reads.map { it.second }.toTypedArray()).thenApply {
                 reads.flatMap { (entry, read) -> parseSnippetFile(String(read.join(), Charsets.UTF_8), null, ".vscode/${entry.name}") }
             }
+        }.exceptionally {
+            val prefix = "$folder/"
+            (documents.map { it.path } + offlineFiles() + "$folder/workspace.code-snippets")
+                .distinct()
+                .filter { it.startsWith(prefix) && it.endsWith(".code-snippets") && '/' !in it.removePrefix(prefix) }
+                .flatMap { path ->
+                    val text = repository.copyText(path) ?: return@flatMap emptyList()
+                    parseSnippetFile(text, null, ".vscode/${path.substringAfterLast('/')}")
+                }
         }.whenComplete { snippets, _ -> post { workspaceSnippets = snippets.orEmpty() } }
     }
 
@@ -6068,10 +6108,22 @@ class WorkbenchController(private val context: Context) {
         return parseSnippet(indentSnippetBody(body, indentation, unit)) { name -> snippetVariable(name, context) }
     }
 
-    /** Snippets: Insert Snippet: the active file's snippets in a palette; the pick goes at the cursor. */
+    private fun selectedNotebookCellForSnippet(): Triple<NotebookSession, NotebookCell, String>? {
+        val session = activeNotebook ?: return null
+        val cell = session.notebook.cells.firstOrNull { it.id == session.selectedCell } ?: return null
+        val ext = when (cell.type) {
+            CellType.Code -> "py"
+            CellType.Markdown -> "md"
+            CellType.Raw -> return null
+        }
+        return Triple(session, cell, "${session.document.path}.$ext")
+    }
+
+    /** Snippets: Insert Snippet: the active file's (or notebook cell's) snippets in a palette; the pick goes at the cursor. */
     fun showInsertSnippet() {
-        val path = activePath
-        if (path == null || activeNotebook != null || editorSurface == null) {
+        val notebookCell = selectedNotebookCellForSnippet()
+        val path = notebookCell?.third ?: activePath?.takeIf { activeNotebook == null && editorSurface != null }
+        if (path == null) {
             status = "Open a file to insert a snippet"
             return
         }
@@ -6086,6 +6138,49 @@ class WorkbenchController(private val context: Context) {
 
     fun insertSnippet(snippet: Snippet) {
         dialog = null
+        val notebookCell = selectedNotebookCellForSnippet()
+        if (notebookCell != null) {
+            val (session, cell, snippetPath) = notebookCell
+            val state = session.cellEditors[cell.id]?.takeIf { settings.cellEditor == "aardink" }
+            val text = state?.text ?: cell.source
+            val from = (state?.selection?.min ?: session.cellCaret).coerceIn(0, text.length)
+            val to = (state?.selection?.max ?: from).coerceIn(from, text.length)
+            val (line, column) = cellPosition(text, from)
+            val lineText = text.lines().getOrElse(line) { "" }
+            val indentation = lineText.takeWhile { it == ' ' || it == '\t' }
+            val unit = if (settings.insertSpaces) " ".repeat(settings.tabSize) else "\t"
+            val selected = text.substring(from, to)
+            var wordStart = column.coerceAtMost(lineText.length)
+            while (wordStart > 0 && isIdentifierCharacter(lineText[wordStart - 1])) wordStart--
+            var wordEnd = column.coerceAtMost(lineText.length)
+            while (wordEnd < lineText.length && isIdentifierCharacter(lineText[wordEnd])) wordEnd++
+            val comments = commentTokens(snippetPath.substringAfterLast('.', "").lowercase())
+            val context = SnippetContext(
+                filePath = session.document.path,
+                workspace = workspaceRoot,
+                selectedText = selected,
+                currentLine = lineText,
+                currentWord = lineText.substring(wordStart, wordEnd),
+                lineIndex = line,
+                clipboard = runCatching { this.context.getSystemService(ClipboardManager::class.java)?.primaryClip?.getItemAt(0)?.coerceToText(this.context)?.toString() }.getOrNull(),
+                lineComment = comments.line,
+                blockComment = comments.block,
+            )
+            val parsed = parseSnippet(indentSnippetBody(snippet.body, indentation, unit)) { name -> snippetVariable(name, context) }
+            if (state != null) {
+                val syntax = snippetSyntax(parsed).let { if (indentation.isEmpty()) it else it.replace("\n$indentation", "\n") }
+                state.selection = androidx.compose.ui.text.TextRange(from, to)
+                state.execute(com.aardarch.aardink.core.EditorCommand.InsertSnippet(syntax))
+            } else {
+                val nextText = text.substring(0, from) + parsed.text + text.substring(to)
+                val firstStop = parsed.stops.firstOrNull()?.spans?.firstOrNull()?.start ?: parsed.text.length
+                cell.source = nextText
+                onCellEdited(session)
+                session.cellCaretRequest = cell.id to (from + firstStop)
+            }
+            session.focusRequest++
+            return
+        }
         val surface = editorSurface ?: return
         val path = activePath ?: return
         val start = surface.selectionStart()
@@ -6101,6 +6196,10 @@ class WorkbenchController(private val context: Context) {
             return
         }
         val path = "${root.trimEnd('/')}/.vscode/workspace.code-snippets"
+        if (!files.isConnected(root)) {
+            if (repository.hasCopy(path)) openPath(path) else status = "Connect to the guest to create workspace snippets"
+            return
+        }
         files.stat(path).whenComplete { _, missing ->
             post {
                 if (missing == null) {
@@ -7704,7 +7803,7 @@ class WorkbenchController(private val context: Context) {
         val waitForServer = when {
             copilot.language.isReady -> CompletableFuture.completedFuture(Unit)
             copilot.language.isStarted -> CompletableFuture.supplyAsync({ Unit }, CompletableFuture.delayedExecutor(3, TimeUnit.SECONDS))
-            else -> copilot.start(workspaceRoot ?: return)
+            else -> copilot.start(guestWorkspace ?: roots.firstOrNull() ?: return)
         }
         status = "Requesting a Copilot sign-in code"
         waitForServer.thenCompose { copilot.signIn() }.whenComplete { signIn, error ->
@@ -9046,6 +9145,14 @@ class WorkbenchController(private val context: Context) {
     /** Lists kernels from the guest (conda, venvs, system Python with ipykernel) and asks which to use. */
     /** Finds kernels; starts [preferredSpec] (or the notebook's own kernel) directly when it exists. */
     fun chooseKernel(session: NotebookSession, preferredSpec: String? = null) {
+        if (onDevice(session.document.path) || !vfs.isConnected()) {
+            status = if (onDevice(session.document.path)) {
+                "Kernels run in the guest; a notebook on this device keeps its saved outputs"
+            } else {
+                "Running cells needs the guest; the outputs are kept"
+            }
+            return
+        }
         val directory = session.document.path.substringBeforeLast('/')
         // Opening the picker while a kernel runs must not make it look stopped.
         val running = session.kernelName != null
@@ -9174,9 +9281,13 @@ class WorkbenchController(private val context: Context) {
     fun runCell(session: NotebookSession, cell: NotebookCell, advance: Boolean = false) {
         if (advance) selectNextCell(session, cell, insertIfLast = true)
         if (cell.type != CellType.Code || cell.running || cell.queued) return
-        // Kernels run in the guest. Offline, a run would clear the outputs, then fail: they're kept instead.
-        if (!vfs.isConnected()) {
-            status = "Running cells needs the guest; the outputs are kept"
+        // Kernels run in the guest. Offline or on this device, a run would clear the outputs, then fail: they're kept instead.
+        if (onDevice(session.document.path) || !vfs.isConnected()) {
+            status = if (onDevice(session.document.path)) {
+                "Kernels run in the guest; a notebook on this device keeps its saved outputs"
+            } else {
+                "Running cells needs the guest; the outputs are kept"
+            }
             return
         }
         if (session.kernelName == null) {
@@ -9652,17 +9763,27 @@ class WorkbenchController(private val context: Context) {
     fun runAllCells(session: NotebookSession) = session.notebook.cells.forEach { runCell(session, it) }
 
     fun interruptKernel(session: NotebookSession) {
+        if (session.kernelName == null || !session.kernel.isStarted) {
+            status = "No kernel is running"
+            return
+        }
         session.kernel.interrupt().whenComplete { _, error -> post { if (error != null) status = "Interrupt failed: ${error.message}" } }
     }
 
     fun restartKernel(session: NotebookSession) {
+        if (session.kernelName == null || !session.kernel.isStarted) {
+            status = "No kernel is running"
+            return
+        }
         session.kernelState = "Restarting…"
         session.kernel.restart().whenComplete { _, error ->
             post {
                 session.kernelState = if (error == null) "Idle" else "Restart failed"
-                session.notebook.cells.forEach { it.executionCount = null }
-                session.variables = null
-                refreshVariablesIfShown(session)
+                if (error == null) {
+                    session.notebook.cells.forEach { it.executionCount = null }
+                    session.variables = null
+                    refreshVariablesIfShown(session)
+                }
             }
         }
     }
@@ -9855,7 +9976,7 @@ class WorkbenchController(private val context: Context) {
     /** Sends the cells to the Python server (starting it if needed); the mirror, or null while it starts. */
     private fun syncCellMirror(session: NotebookSession): NotebookMirror? {
         val path = session.document.path
-        if (!settings.notebookLanguageServer || notebooks[path] !== session || !vfs.isConnected()) return null
+        if (onDevice(path) || !settings.notebookLanguageServer || notebooks[path] !== session || !vfs.isConnected()) return null
         val client = cellServer(session)
         val python = if (client === notebookServer) session.kernelPython else null
         if (!client.isStarted || (python != null && python != notebookServerPython)) {
@@ -9878,7 +9999,7 @@ class WorkbenchController(private val context: Context) {
 
     /** Starts [client] (the notebook server with [python]'s environment, else the workspace's Python server). */
     private fun startNotebookLanguageServer(session: NotebookSession, client: LanguageClient, python: String?) {
-        val workspace = workspaceRoot ?: return
+        val workspace = guestWorkspace ?: return
         if (python != null && client.isStarted) {
             // Another kernel's Python: the notebook server starts again with it; its files open again.
             cellMirrors.entries.removeAll { it.value.client === client }
@@ -10095,7 +10216,7 @@ class WorkbenchController(private val context: Context) {
         if (!textChanged) return
         scheduleCellMirrorSync(session)
         scheduledCellRequest?.cancel(false)
-        if (!scheduleCopilot || !copilotEnabled || !settings.notebookCopilot || !copilot.language.isReady || cell.type != CellType.Code ||
+        if (!scheduleCopilot || onDevice(session.document.path) || !copilotEnabled || !settings.notebookCopilot || !copilot.language.isReady || cell.type != CellType.Code ||
             !value.selection.collapsed
         ) return
         val caret = value.selection.start
@@ -10109,7 +10230,7 @@ class WorkbenchController(private val context: Context) {
 
     /** Copilot's suggestions at [caret] in an Aardink cell, in the cell's offsets (A20); null when Copilot can't ask. */
     internal fun cellInlineCompletions(session: NotebookSession, cell: NotebookCell, caret: Int): CompletableFuture<List<CellSuggestion>>? {
-        if (!copilotEnabled || !settings.notebookCopilot || !copilot.language.isReady || cell.type != CellType.Code) return null
+        if (onDevice(session.document.path) || !copilotEnabled || !settings.notebookCopilot || !copilot.language.isReady || cell.type != CellType.Code) return null
         if (notebooks[session.document.path] !== session) return null
         val (mirror, version) = syncNotebookMirror(session)
         val startLine = mirror.startLines[cell.id] ?: return null
@@ -10147,7 +10268,7 @@ class WorkbenchController(private val context: Context) {
     }
 
     private fun requestCellSuggestion(session: NotebookSession, cell: NotebookCell, source: String, caret: Int) {
-        if (cell.source != source || notebooks[session.document.path] !== session) return
+        if (onDevice(session.document.path) || cell.source != source || notebooks[session.document.path] !== session) return
         val (mirror, version) = syncNotebookMirror(session)
         val startLine = mirror.startLines[cell.id] ?: return
         val (line, column) = cellPosition(source, caret)
@@ -10164,961 +10285,5 @@ class WorkbenchController(private val context: Context) {
                     cellGhostText(source, caret, suggestion) != null
                 ) {
                     session.cellSuggestion = suggestion
-                    copilot.didShow(suggestion.source)
-                }
-            }
-        }
-    }
-
-    /** Tab with a suggestion showing: the cell text with it applied, caret after it. */
-    fun acceptCellSuggestion(session: NotebookSession, cell: NotebookCell, value: TextFieldValue): TextFieldValue? {
-        val suggestion = session.cellSuggestion?.takeIf { it.cellId == cell.id } ?: return null
-        if (cellGhostText(value.text, value.selection.start, suggestion) == null) return null
-        session.cellSuggestion = null
-        val end = suggestion.end.coerceIn(suggestion.start, value.text.length)
-        val text = value.text.substring(0, suggestion.start) + suggestion.text + value.text.substring(end)
-        copilot.accepted(suggestion.source)
-        return TextFieldValue(text, TextRange(suggestion.start + suggestion.text.length))
-    }
-
-    /** `adb shell setprop log.tag.AVFLSP DEBUG` logs documents opened in language servers and their diagnostics. */
-    private inline fun lspLog(message: () -> String) {
-        if (android.util.Log.isLoggable("AVFLSP", android.util.Log.DEBUG)) android.util.Log.d("AVFLSP", message())
-    }
-
-    /** `adb shell setprop log.tag.AVFCOP DEBUG` logs inline suggestion requests and replies. */
-    private inline fun copilotLog(message: () -> String) {
-        if (android.util.Log.isLoggable("AVFCOP", android.util.Log.DEBUG)) android.util.Log.d("AVFCOP", message())
-    }
-
-    private fun selectNextCell(session: NotebookSession, cell: NotebookCell, insertIfLast: Boolean) {
-        val cells = session.notebook.cells
-        val index = cells.indexOf(cell)
-        if (index == cells.lastIndex && insertIfLast) addCell(session, cell) else {
-            session.selectedCell = cells.getOrNull(index + 1)?.id ?: cell.id
-        }
-    }
-
-    fun saveNotebook(session: NotebookSession) {
-        if (session.document.path in deletedFiles) {
-            restoreDeletedFile(session.document) { saveNotebook(session) }
-            return
-        }
-        session.document.updateText(session.notebook.toJson())
-        status = "Saving ${session.document.path}"
-        repository.save(session.document).whenComplete { result, error ->
-            post {
-                when {
-                    error != null -> status = "Save failed: ${error.cause?.message ?: error.message}"
-                    result is SaveResult.Saved -> {
-                        session.notebook.dirty = false
-                        status = "Saved ${session.document.path}"
-                        closeIfPendingAfterSave(session.document.path)
-                    }
-                    result is SaveResult.QueuedOffline -> {
-                        status = "Saved locally; queued until guest reconnects"
-                        closeIfPendingAfterSave(session.document.path)
-                    }
-                    result is SaveResult.Conflict -> {
-                        dialog = WorkbenchDialog.Conflict(session.document)
-                        status = "Save conflict: remote notebook changed"
-                    }
-                }
-                documentRevision++
-            }
-        }
-    }
-
-    // Asset packs and themes ------------------------------------------------------------------
-
-    // Language packs (syntax colours on demand) -------------------------------------------------
-
-    /** Bumped when a grammar arrives or goes, so open editors are made again with it. */
-    var grammarRevision by mutableIntStateOf(0)
-        private set
-    /** Packs being downloaded, by id. */
-    val languagePackDownloads = mutableStateListOf<String>()
-    /** File types the user said "Not now" to in this session. */
-    private val languagePacksPostponed = mutableStateListOf<String>()
-    private var languagePacksDeclined by mutableStateOf(preferences.getStringSet(LANGUAGES_DECLINED_KEY, emptySet()).orEmpty())
-
-    private val packsDirectory: File get() = File(context.filesDir, "asset-packs")
-
-    /** Whether some grammar colours [path] (Python's built in, or an installed pack's). */
-    fun hasGrammar(path: String): Boolean {
-        val name = path.substringAfterLast('/')
-        return name.substringAfterLast('.', "").lowercase() in setOf("py", "pyi") || AssetPackGrammarLoader.scopeNameFor(name) != null
-    }
-
-    /**
-     * The pack the editor offers for the active file: a text file with no grammar whose type a
-     * VS Code built-in extension colours, unless the user turned the offer down
-     * (`avf.languages.download`: ask, always, never).
-     */
-    val languagePackOffer: LanguagePack?
-        get() {
-            grammarRevision
-            val document = activeDocument?.takeUnless { it.binary || activeNotebook != null } ?: return null
-            if (settings.languageDownloads != LanguageDownloads.Ask || hasGrammar(document.path)) return null
-            val pack = languagePackFor(document.path.substringAfterLast('/')) ?: return null
-            return pack.takeUnless { it.id in languagePacksPostponed || it.id in languagePacksDeclined }
-        }
-
-    /** With `always`, a file without colours fetches its pack as soon as it opens. */
-    private fun fetchLanguagePackIfWanted(path: String) {
-        if (settings.languageDownloads != LanguageDownloads.Always || hasGrammar(path)) return
-        languagePackFor(path.substringAfterLast('/'))?.let(::installLanguagePack)
-    }
-
-    fun postponeLanguagePack(pack: LanguagePack) {
-        languagePacksPostponed += pack.id
-    }
-
-    fun declineLanguagePack(pack: LanguagePack) {
-        languagePacksDeclined = languagePacksDeclined + pack.id
-        preferences.edit().putStringSet(LANGUAGES_DECLINED_KEY, languagePacksDeclined).apply()
-        status = "${pack.languageName} files stay without colours; Settings → Languages can fetch them later"
-    }
-
-    /** Downloads [pack] from Open VSX, checks its pinned SHA-256, installs it, and colours open tabs. */
-    fun installLanguagePack(pack: LanguagePack) {
-        if (pack.id in languagePackDownloads) return
-        languagePackDownloads += pack.id
-        status = "Downloading ${pack.languageName} colours from Open VSX…"
-        io.execute {
-            val result = runCatching {
-                val directory = File(packsDirectory, pack.id)
-                if (!directory.isDirectory) {
-                    val request = okhttp3.Request.Builder().url(pack.downloadUrl).build()
-                    val bytes = languagePackHttp.newCall(request).execute().use { response ->
-                        if (!response.isSuccessful) throw IOException("Open VSX answered ${response.code}")
-                        val body = response.body ?: throw IOException("Open VSX sent nothing")
-                        if (body.contentLength() > MAX_LANGUAGE_PACK_BYTES) throw IOException("The pack is larger than expected")
-                        body.byteStream().use { input ->
-                            val output = java.io.ByteArrayOutputStream()
-                            val buffer = ByteArray(16 * 1024)
-                            while (output.size() <= MAX_LANGUAGE_PACK_BYTES) {
-                                val count = input.read(buffer)
-                                if (count < 0) break
-                                output.write(buffer, 0, count)
-                            }
-                            output.toByteArray()
-                        }
-                    }
-                    if (bytes.size > MAX_LANGUAGE_PACK_BYTES) throw IOException("The pack is larger than expected")
-                    val digest = java.security.MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
-                    if (digest != pack.sha256) throw IOException("The download doesn't match the checksum QuireCode expects")
-                    AssetPackInstaller(packsDirectory).install(bytes.inputStream())
-                }
-                AssetPackGrammarLoader.loadPack(directory)
-            }
-            post {
-                languagePackDownloads -= pack.id
-                result.onSuccess {
-                    grammarRevision++
-                    status = "${pack.languageName} files are coloured now"
-                }.onFailure { error ->
-                    status = "Couldn't get ${pack.languageName} colours: ${error.message ?: error.javaClass.simpleName}"
-                }
-            }
-        }
-    }
-
-    /** The language packs on this device (downloaded or imported .vsix files with grammars), for Settings. */
-    fun installedLanguagePacks(): List<Pair<String, String>> {
-        grammarRevision
-        return packsDirectory.listFiles()?.filter { File(it, "extension/package.json").isFile }?.mapNotNull { directory ->
-            val known = LANGUAGE_PACKS.firstOrNull { it.id == directory.name }
-            val manifest = runCatching { JsonParser.parseString(File(directory, "extension/package.json").readText()).asJsonObject }.getOrNull()
-            if (manifest?.getAsJsonObject("contributes")?.has("grammars") != true) return@mapNotNull null
-            directory.name to (known?.languageName ?: manifest.get("displayName")?.asString?.takeUnless { it.startsWith("%") } ?: directory.name)
-        }.orEmpty().sortedBy { it.second.lowercase() }
-    }
-
-    fun removeLanguagePack(id: String) {
-        AssetPackGrammarLoader.forgetPack(id)
-        File(packsDirectory, id).deleteRecursively()
-        grammarRevision++
-        status = "Removed $id; its files open without colours"
-    }
-
-    fun installAssetPack(uri: Uri, mode: String) {
-        status = "Installing asset pack…"
-        io.execute {
-            try {
-                val importer = VsCodeThemeImporter()
-                val installed: InstalledAssetPack?
-                val theme: ImportedTheme?
-                if (mode == "theme") {
-                    val json = context.contentResolver.openInputStream(uri)?.use { it.readUtf8Limited(MAX_IMPORTED_THEME_BYTES) }
-                        ?: throw IOException("Could not open the selected theme")
-                    theme = importer.importJson(json, uri.lastPathSegment ?: "Imported Theme")
-                    installed = null
-                } else {
-                    installed = context.contentResolver.openInputStream(uri)?.use { input ->
-                        AssetPackInstaller(File(context.filesDir, "asset-packs")).install(input)
-                    } ?: throw IOException("Could not open the selected asset pack")
-                    AssetPackGrammarLoader.loadPack(installed.directory)
-                    theme = installed.themes.firstOrNull()?.let { contribution ->
-                        importer.import(
-                            File(installed.directory, "extension/${contribution.path.removePrefix("./")}"),
-                            File(installed.directory, "extension"),
-                        )
-                    }
-                }
-                theme?.semanticTokenColors?.values?.forEach(::parseThemeColor)
-                val iconThemes = installed?.let { pack -> FileIconTheme.installed(assetPacksDirectory).filter { it.pack == pack.id } }.orEmpty()
-                post {
-                    if (theme != null) {
-                        saveImportedTheme(context, theme)
-                        editorThemeRevision++
-                        status = if (installed == null) "Applied syntax theme ${theme.name}" else {
-                            "Installed ${installed.displayName} and applied syntax theme ${theme.name}"
-                        }
-                    } else if (installed == null || iconThemes.isEmpty()) {
-                        status = "Installed ${installed?.displayName ?: "asset pack"}; no theme contribution was found"
-                    }
-                    // A pack with file icons: use them, as VS Code offers right after installing one.
-                    iconThemes.firstOrNull()?.let { choice ->
-                        refreshIconThemeChoices()
-                        updateSetting(WorkbenchSettings.ICON_THEME, choice.id)
-                        status = "Installed ${installed?.displayName}: file icons ${choice.label}"
-                    }
-                }
-            } catch (error: Exception) {
-                post { status = "Asset pack import failed: ${error.message ?: error.javaClass.simpleName}" }
-            }
-        }
-    }
-
-    fun clearImportedTheme() {
-        clearSavedImportedTheme(context)
-        editorThemeRevision++
-        status = "Syntax colours follow the app theme again"
-    }
-
-    /** Bumped when the syntax theme changes so open editors re-apply their colour scheme. */
-    var editorThemeRevision by mutableIntStateOf(0)
-        private set
-
-    // Keyboard shortcuts --------------------------------------------------------------------------
-
-    /** Every command's bindings now: the user's rules over the defaults (several when a command has more than one). */
-    val effectiveCommands: List<EditorCommand> get() = applyKeybindings(EditorCommands.all, keybindingRules)
-
-    /** The first key [commandId] answers to, for menus and the palette; empty when it has none. */
-    fun keybindingFor(commandId: String): String =
-        effectiveCommands.firstOrNull { it.id == commandId && it.keybinding.isNotEmpty() }?.keybinding.orEmpty()
-
-    /** Whether the user changed [commandId]'s binding (Keyboard Shortcuts marks it and offers Reset). */
-    fun keybindingChanged(commandId: String): Boolean = keybindingRules.any { it.commandId == commandId }
-
-    private fun applyKeybindingRules(rules: List<KeybindingRule>, text: String = formatKeybindings(rules)): Boolean {
-        if (!preferences.edit().putString(KEYBINDINGS_KEY, text).commit()) {
-            status = "Keyboard shortcuts could not be saved"
-            return false
-        }
-        keybindingRules = rules
-        editorDispatcher = EditorKeybindingDispatcher(applyKeybindings(EditorCommands.editor, rules))
-        cellEditorDispatcher = EditorKeybindingDispatcher(applyKeybindings(EditorCommands.interactive + EditorCommands.editor, rules))
-        globalDispatcher = EditorKeybindingDispatcher(applyKeybindings(EditorCommands.global, rules))
-        notebookDispatcher = EditorKeybindingDispatcher(applyKeybindings(EditorCommands.global + EditorCommands.notebook + EditorCommands.notebookFind, rules))
-        terminalDispatcher = EditorKeybindingDispatcher(applyKeybindings(EditorCommands.terminal + EditorCommands.global, rules))
-        return true
-    }
-
-    /** Keys recorded for [WorkbenchDialog.RecordKeybinding]: one stroke, or two for a chord. */
-    var recordedKeys by mutableStateOf(emptyList<KeyStroke>())
-        private set
-
-    fun beginRecordingKeybinding(commandId: String) {
-        recordedKeys = emptyList()
-        dialog = WorkbenchDialog.RecordKeybinding(commandId)
-    }
-
-    /**
-     * A key pressed while Keyboard Shortcuts records (the dialog's own window gets it, so the
-     * IME never does): modifiers alone wait, Enter saves, Escape cancels, a third stroke starts over.
-     */
-    fun recordKey(event: AndroidKeyEvent): Boolean {
-        val recording = dialog as? WorkbenchDialog.RecordKeybinding ?: return false
-        if (event.action != AndroidKeyEvent.ACTION_DOWN) return true
-        if (AndroidKeyEvent.isModifierKey(event.keyCode)) return true
-        val plain = !event.isCtrlPressed && !event.isAltPressed && !event.isShiftPressed
-        if (plain && event.keyCode == AndroidKeyEvent.KEYCODE_ESCAPE) {
-            dialog = WorkbenchDialog.Keybindings
-            return true
-        }
-        if (plain && event.keyCode == AndroidKeyEvent.KEYCODE_ENTER) {
-            if (recordedKeys.isNotEmpty()) saveRecordedKeybinding(recording.commandId)
-            return true
-        }
-        val stroke = editorKeyStroke(event.keyCode, event.isCtrlPressed, event.isShiftPressed, event.isAltPressed, allowUnmodified = true)
-            ?: return true
-        recordedKeys = if (recordedKeys.size >= 2) listOf(stroke) else recordedKeys + stroke
-        return true
-    }
-
-    /** Other commands the recorded keys already run, shown under them in the recorder. */
-    fun recordedKeyConflicts(commandId: String): List<String> {
-        val keys = recordedKeys.joinToString(" ") { it.label() }
-        if (keys.isEmpty()) return emptyList()
-        val strokes = keys.split(' ').map(KeyStroke::parse)
-        return effectiveCommands.filter { it.id != commandId && it.keybinding.isNotEmpty() && it.keybinding.split(' ').map(KeyStroke::parse) == strokes }
-            .map { it.title }.distinct()
-    }
-
-    fun saveRecordedKeybinding(commandId: String) {
-        val keys = recordedKeys.joinToString(" ") { it.label() }.ifEmpty { return }
-        if (applyKeybindingRules(rebind(keybindingRules, commandId, keys))) {
-            status = "${commandTitle(commandId)}: $keys"
-            dialog = WorkbenchDialog.Keybindings
-        }
-    }
-
-    fun removeKeybinding(commandId: String) {
-        if (applyKeybindingRules(rebind(keybindingRules, commandId, null))) {
-            status = "${commandTitle(commandId)} has no shortcut now"
-            dialog = WorkbenchDialog.Keybindings
-        }
-    }
-
-    fun resetKeybinding(commandId: String) {
-        if (applyKeybindingRules(resetKeybinding(keybindingRules, commandId))) {
-            status = "${commandTitle(commandId)} uses its default shortcut again"
-            dialog = WorkbenchDialog.Keybindings
-        }
-    }
-
-    private fun commandTitle(commandId: String) = EditorCommands.all.firstOrNull { it.id == commandId }?.title ?: commandId
-
-    /** Preferences: Open Keyboard Shortcuts (JSON): the rules as VS Code writes them. */
-    fun openKeybindingsJson() {
-        settingsDraft = preferences.getString(KEYBINDINGS_KEY, null)?.takeIf(String::isNotBlank) ?: KEYBINDINGS_TEMPLATE
-        dialog = WorkbenchDialog.KeybindingsJson
-    }
-
-    fun saveKeybindingsJson() {
-        val parsed = try {
-            parseKeybindings(settingsDraft)
-        } catch (error: RuntimeException) {
-            status = "keybindings.json: ${error.message}"
-            return
-        }
-        // The text is kept as typed (comments too); rules that can't apply are only reported.
-        if (!applyKeybindingRules(parsed.rules, settingsDraft)) return
-        dialog = null
-        status = if (parsed.problems.isEmpty()) "Keyboard shortcuts saved" else {
-            "Keyboard shortcuts saved; skipped ${parsed.problems.size}: ${parsed.problems.joinToString("; ")}"
-        }
-    }
-
-    // Quick Open --------------------------------------------------------------------------------
-
-    /** Opens Quick Open in the mode [prefix] picks (`>` commands, `@` symbols, `#` workspace symbols, `:` line). */
-    fun openQuickOpen(prefix: String = "") {
-        quickOpenFilter = prefix
-        workspaceSymbols = emptyList()
-        dialog = WorkbenchDialog.QuickOpen
-    }
-
-    /** `workspace/symbol` matches for Quick Open's `#`, from every running server that offers them. */
-    var workspaceSymbols by mutableStateOf(emptyList<QuickOpenItem.Symbol>())
-        private set
-    var workspaceSymbolsSearching by mutableStateOf(false)
-        private set
-    private var scheduledSymbolSearch: java.util.concurrent.ScheduledFuture<*>? = null
-    private var symbolSearchGeneration = 0
-
-    private fun workspaceSymbolClients(): List<LanguageClient> =
-        languageClients.values.filter { it.isReady && it.supportsWorkspaceSymbols }
-
-    fun searchWorkspaceSymbols(query: String) {
-        scheduledSymbolSearch?.cancel(false)
-        val generation = ++symbolSearchGeneration
-        val clients = workspaceSymbolClients()
-        if (query.isBlank() || clients.isEmpty()) {
-            workspaceSymbols = emptyList()
-            workspaceSymbolsSearching = false
-            return
-        }
-        workspaceSymbolsSearching = true
-        scheduledSymbolSearch = timer.schedule(
-            {
-                val requests = clients.map { client -> client.workspaceSymbols(query.trim()).exceptionally { null } }
-                CompletableFuture.allOf(*requests.toTypedArray()).whenComplete { _, _ ->
-                    val root = workspaceRoot.orEmpty().trimEnd('/')
-                    val items = requests.flatMap { request ->
-                        workspaceSymbolItems(request.getNow(null)) { path -> path.removePrefix("$root/") }
-                    }.distinctBy { Triple(it.name, it.location.uri, it.detail) }
-                    post {
-                        if (generation != symbolSearchGeneration) return@post
-                        workspaceSymbols = rankSymbols(items, query).take(200)
-                        workspaceSymbolsSearching = false
-                    }
-                }
-            },
-            200,
-            TimeUnit.MILLISECONDS,
-        )
-    }
-
-    /** What Quick Open lists for [query] in its current mode. */
-    fun quickOpenItems(query: String): List<QuickOpenItem> {
-        val mode = quickOpenMode(query)
-        val text = query.removePrefix(mode.prefix)
-        return when (mode) {
-            QuickOpenMode.Files -> {
-                val root = workspaceRoot.orEmpty().trimEnd('/')
-                val index = quickOpenIndex
-                quickOpenFilesCache?.takeIf { it.first == text && it.second === index }?.third
-                    ?: index
-                        .filter { fuzzyMatch(text, it.path.removePrefix(root)) }
-                        .sortedBy { matchRank(text, it.name) }
-                        .take(200)
-                        .map(QuickOpenItem::File)
-                        .also { quickOpenFilesCache = Triple(text, index, it) }
-            }
-            QuickOpenMode.Commands -> EditorCommands.all.distinctBy { it.id }
-                .filter { fuzzyMatch(text.trim(), it.title) || it.id.contains(text.trim(), true) }
-                .sortedBy { matchRank(text, it.title) }
-                .map { QuickOpenItem.Command(it, keybindingFor(it.id)) }
-            QuickOpenMode.EditorSymbols -> {
-                val document = activeDocument
-                when {
-                    document == null || activeNotebook != null -> listOf(QuickOpenItem.Message("Open a text file to go to its symbols"))
-                    languageClientFor(document.path)?.isReady != true ->
-                        listOf(QuickOpenItem.Message("No language server for ${document.path.substringAfterLast('/')}; symbols come from Python and TypeScript servers"))
-                    else -> editorSymbolItems(outlineSymbols, diagnosticUri(document.path), text)
-                        .ifEmpty { listOf(QuickOpenItem.Message("No matching symbols")) }
-                }
-            }
-            QuickOpenMode.WorkspaceSymbols -> when {
-                workspaceSymbolClients().isEmpty() ->
-                    listOf(QuickOpenItem.Message("Open a Python or TypeScript file first: its language server finds the workspace's symbols"))
-                text.isBlank() -> listOf(QuickOpenItem.Message("Type the name of a class, function or variable"))
-                workspaceSymbols.isEmpty() -> listOf(QuickOpenItem.Message(if (workspaceSymbolsSearching) "Searching…" else "No matching symbols"))
-                else -> workspaceSymbols
-            }
-            QuickOpenMode.Line -> {
-                val surface = editorSurface
-                if (surface == null || activeDocument == null || activeNotebook != null) {
-                    listOf(QuickOpenItem.Message("Open a text file to go to a line"))
-                } else {
-                    listOf(lineItem(text, surface.lineCount, (cursorPosition?.line ?: 0) + 1))
-                }
-            }
-            QuickOpenMode.Help -> QuickOpenMode.entries.filter { it != QuickOpenMode.Help }.map(QuickOpenItem::Prefix)
-        }
-    }
-
-    fun pickQuickOpen(item: QuickOpenItem) {
-        when (item) {
-            is QuickOpenItem.Message -> return
-            is QuickOpenItem.Prefix -> {
-                quickOpenFilter = item.mode.prefix
-                return
-            }
-            else -> Unit
-        }
-        dialog = null
-        when (item) {
-            is QuickOpenItem.File -> if (quickOpenAttachesToChat) attachFileToChat(item.entry.path) else openPath(item.entry.path)
-            is QuickOpenItem.Command -> runCommand(item.command.id)
-            is QuickOpenItem.Symbol -> navigateToLocation(item.location)
-            is QuickOpenItem.Line -> editorSurface?.let { surface ->
-                val line = (item.line - 1).coerceIn(0, surface.lineCount - 1)
-                // Past the line's end the cursor goes to its end, as in VS Code.
-                val length = activeDocument?.text?.lineSequence()?.elementAtOrNull(line)?.length ?: 0
-                surface.moveCursor(LspPosition(line, ((item.column ?: 1) - 1).coerceIn(0, length)))
-            }
-            else -> Unit
-        }
-        quickOpenAttachesToChat = false
-    }
-
-    // Commands and keys -------------------------------------------------------------------------
-
-    /**
-     * Handles a hardware key press. Both the root composable and the code editor call this, so a
-     * key seen twice (same down time and key code) is consumed but not run again.
-     */
-    /**
-     * Window-level entry point (see [KeyRouter]): runs before the IME and regardless of which view
-     * has focus. In the code editor, plain Tab/Enter/Escape stay with the editor (completion
-     * popup, inline suggestions); in a terminal, unbound Ctrl+letter goes to the shell as a
-     * control byte so an IME can't swallow Ctrl+C.
-     */
-    fun routeHardwareKey(event: AndroidKeyEvent): Boolean {
-        // Quick Open's window takes a moment to get focus; what's typed by then goes in its box, not the editor or terminal.
-        if (dialog == WorkbenchDialog.QuickOpen && !event.isCtrlPressed && !event.isAltPressed && !event.isMetaPressed) {
-            val character = event.unicodeChar
-            if (character >= 32 && character != 127) {
-                if (event.action == AndroidKeyEvent.ACTION_DOWN) quickOpenFilter += character.toChar()
-                return true
-            }
-        }
-        if (dialog != null) return false
-        if (event.action == AndroidKeyEvent.ACTION_UP) return consumedKeyDowns.remove(event.keyCode)
-        if (event.action != AndroidKeyEvent.ACTION_DOWN) return false
-        // Our suggestion list in the Aardink editor takes its keys first (arrows, Enter, Tab, Escape),
-        // before Tab, Enter and Escape are left to the editor below.
-        if (focusArea == FocusArea.Editor && (editorSurface as? AardinkEditorSurface)?.suggestions?.handleKey(event) == true) {
-            consumedKeyDowns += event.keyCode
-            return true
-        }
-        // The workbench's cards over the editor close with Escape, as in VS Code: the peek, the hover card, then
-        // parameter hints (Copilot's next edit just below).
-        if (focusArea == FocusArea.Editor && editorSurface is AardinkEditorSurface && nextEdit == null &&
-            event.keyCode == AndroidKeyEvent.KEYCODE_ESCAPE && !event.isCtrlPressed && !event.isAltPressed && !event.isShiftPressed &&
-            (peek != null || hoverCard != null || signatureHint != null)
-        ) {
-            when {
-                peek != null -> closePeek()
-                hoverCard != null -> hideHoverCard()
-                else -> closeParameterHints()
-            }
-            consumedKeyDowns += event.keyCode
-            return true
-        }
-        // Copilot's next edit: Tab goes to it or accepts it, Escape dismisses it. Ghost text Aardink shows at the same
-        // time is accepted or dismissed first.
-        if (focusArea == FocusArea.Editor && nextEdit != null && editorSurface is AardinkEditorSurface &&
-            !event.isCtrlPressed && !event.isAltPressed && !event.isShiftPressed &&
-            (event.keyCode == AndroidKeyEvent.KEYCODE_TAB || event.keyCode == AndroidKeyEvent.KEYCODE_ESCAPE)
-        ) {
-            runCommand(if (event.keyCode == AndroidKeyEvent.KEYCODE_TAB) "editor.action.inlineSuggest.commit" else "editor.action.inlineSuggest.hide")
-            consumedKeyDowns += event.keyCode
-            return true
-        }
-        val modified = event.isCtrlPressed || event.isAltPressed
-        if (focusArea == FocusArea.Editor && !modified &&
-            event.keyCode in setOf(AndroidKeyEvent.KEYCODE_TAB, AndroidKeyEvent.KEYCODE_ENTER, AndroidKeyEvent.KEYCODE_ESCAPE)
-        ) {
-            return false
-        }
-        val handled = backspaceToTabStop(event) || handleKeyDown(event) || sendTerminalControlKey(event) || typePairKey(event)
-        if (handled) consumedKeyDowns += event.keyCode
-        return handled
-    }
-
-    /**
-     * Pairs on a hardware keyboard in the Aardink editor (closing, stepping over, surrounding), and `else:` moving back a
-     * level as it's typed, before the input method sees the key.
-     */
-    private fun typePairKey(event: AndroidKeyEvent): Boolean {
-        if (focusArea != FocusArea.Editor || event.isCtrlPressed || event.isAltPressed) return false
-        val typed = event.unicodeChar.takeIf { it > 0 }?.toChar() ?: return false
-        val surface = editorSurface as? AardinkEditorSurface ?: return false
-        return surface.typePairKey(typed) || surface.typeOutdentKey(typed)
-    }
-
-    /** Backspace in the Aardink editor: a pair auto-closing made goes whole, leading spaces back a tab stop; before the input method. */
-    private fun backspaceToTabStop(event: AndroidKeyEvent): Boolean {
-        if (focusArea != FocusArea.Editor || event.keyCode != AndroidKeyEvent.KEYCODE_DEL || event.isCtrlPressed || event.isAltPressed || event.isShiftPressed) return false
-        return (editorSurface as? AardinkEditorSurface)?.backspace() == true
-    }
-
-    /** Enter and the moving keys in the Aardink editor skip the input method (see [KeyRouter.bypassesIme]). */
-    fun bypassesIme(event: AndroidKeyEvent): Boolean =
-        (focusArea == FocusArea.Editor || focusArea == FocusArea.Notebook && settings.cellEditor == "aardink") && dialog == null &&
-            event.keyCode in IME_BYPASS_KEYS
-
-    private fun sendTerminalControlKey(event: AndroidKeyEvent): Boolean {
-        if (focusArea != FocusArea.Terminal || !event.isCtrlPressed || event.isAltPressed || event.isShiftPressed) return false
-        val code = when (event.keyCode) {
-            in AndroidKeyEvent.KEYCODE_A..AndroidKeyEvent.KEYCODE_Z -> event.keyCode - AndroidKeyEvent.KEYCODE_A + 1
-            AndroidKeyEvent.KEYCODE_LEFT_BRACKET -> 27
-            AndroidKeyEvent.KEYCODE_BACKSLASH -> 28
-            AndroidKeyEvent.KEYCODE_RIGHT_BRACKET -> 29
-            else -> return false
-        }
-        val terminal = terminals.firstOrNull { it.id == activeTerminalId && !it.exited } ?: return false
-        if (event.repeatCount == 0 || code != 3) vfs.ptyInput(terminal.id, byteArrayOf(code.toByte()))
-        return true
-    }
-
-    fun handleKeyDown(event: AndroidKeyEvent): Boolean {
-        if (event.action != AndroidKeyEvent.ACTION_DOWN) return false
-        val identity = event.downTime to event.keyCode
-        if (identity == lastHandledKey) return true
-        activeNotebook?.takeIf { it.cellHover != null && focusArea == FocusArea.Notebook && event.keyCode == AndroidKeyEvent.KEYCODE_ESCAPE && event.hasNoModifiers() }?.let { session ->
-            lastHandledKey = identity
-            hideCellHover(session)
-            return true
-        }
-        if (peek != null && focusArea == FocusArea.Editor && event.keyCode == AndroidKeyEvent.KEYCODE_ESCAPE && event.hasNoModifiers()) {
-            lastHandledKey = identity
-            closePeek()
-            return true
-        }
-        if (hoverCard != null && focusArea == FocusArea.Editor && event.keyCode == AndroidKeyEvent.KEYCODE_ESCAPE && event.hasNoModifiers()) {
-            lastHandledKey = identity
-            hideHoverCard()
-            return true
-        }
-        // Escape in the editor closes the find widget first, as in VS Code.
-        if (findVisible && focusArea in setOf(FocusArea.Editor, FocusArea.Notebook) && event.keyCode == AndroidKeyEvent.KEYCODE_ESCAPE && event.hasNoModifiers()) {
-            lastHandledKey = identity
-            closeFind()
-            return true
-        }
-        val dispatcher = when {
-            focusArea == FocusArea.Editor -> if (activePythonCells().isNotEmpty()) cellEditorDispatcher else editorDispatcher
-            activeNotebook != null && focusArea in setOf(FocusArea.Notebook, FocusArea.Other) -> notebookDispatcher
-            focusArea == FocusArea.Terminal -> terminalDispatcher
-            else -> globalDispatcher
-        }
-        val stroke = editorKeyStroke(
-            event.keyCode,
-            event.isCtrlPressed,
-            event.isShiftPressed,
-            event.isAltPressed,
-            dispatcher.isAwaitingChord,
-        ) ?: return false
-        if (stroke.key == "TAB" && !stroke.ctrl && !stroke.alt && focusArea != FocusArea.Editor) return false
-        val command = dispatcher.dispatch(stroke)
-        if (command == null) {
-            if (dispatcher.isAwaitingChord) lastHandledKey = identity
-            return dispatcher.isAwaitingChord
-        }
-        lastHandledKey = identity
-        runCommand(command)
-        return true
-    }
-
-    fun runCommand(commandId: String) {
-        val surface = editorSurface
-        when (commandId) {
-            "workbench.action.files.save" -> saveActiveDocument()
-            "workbench.action.files.openFolder", "workbench.action.openRecent" -> showOpenFolder()
-            "workbench.action.files.newUntitledFile" -> newUntitledFile()
-            "workbench.action.files.saveAs" -> beginSaveAs()
-            "workbench.action.debug.start" -> startOrContinueDebugging()
-            "workbench.action.debug.stop" -> stopDebugging()
-            "workbench.action.debug.restart" -> restartDebugging()
-            "workbench.action.debug.pause" -> pauseDebugging()
-            "workbench.action.debug.stepOver" -> debugStep("next")
-            "workbench.action.debug.stepInto" -> debugStep("stepIn")
-            "workbench.action.debug.stepOut" -> debugStep("stepOut")
-            "editor.debug.action.toggleBreakpoint" -> toggleBreakpoint()
-            "editor.debug.action.conditionalBreakpoint" -> editBreakpoint(focus = BreakpointField.Condition)
-            "editor.debug.action.addLogPoint" -> editBreakpoint(focus = BreakpointField.LogMessage)
-            "editor.debug.action.editBreakpoint" -> editBreakpoint()
-            "editor.debug.action.selectionToWatch" -> addSelectionToWatch()
-            "debug.addConfiguration", "workbench.action.debug.configure" -> openLaunchJson()
-            "workbench.action.debug.selectandstart" -> {
-                panelVisible = true
-                panelTab = PanelTab.Debug
-                status = "Pick a configuration in the Debug panel, then Start (F5)"
-            }
-            "python.setInterpreter" -> chooseInterpreter()
-            "python.analysis.restartLanguageServer" -> restartServerCommand("python")
-            "ruff.restart" -> restartServerCommand("python-format")
-            "typescript.restartTsServer" -> restartServerCommand("typescript")
-            "go.languageserver.restart" -> restartServerCommand(OtherLanguageServer.Go.id)
-            "clangd.restart" -> restartServerCommand(OtherLanguageServer.C.id)
-            "rust-analyzer.restartServer" -> restartServerCommand(OtherLanguageServer.Rust.id)
-            // The app's former name's ids, which keybindings.json files may still use, run the same commands.
-            "quirecode.resetPaneSizes", "materialcode.resetPaneSizes" -> resetPaneSizes()
-            "quirecode.copyDiagnostics" -> copyDiagnostics()
-            "quirecode.shareSelection" -> shareText(focusedSelection())
-            "quirecode.shareActiveFile" -> shareActiveFile()
-            "quirecode.saveActiveFileToDevice" -> activePath?.takeIf(::isGuestPath)?.let { beginSaveToDevice(listOf(it)) }
-                ?: run { status = "Only the guest's files can be saved to the device from here" }
-            "quirecode.importFiles" -> beginImportFiles()
-            "quirecode.openDeviceFolder" -> beginOpenDeviceFolder()
-            "quirecode.keepWorkspaceOffline" -> guestWorkspace?.let(::keepOffline) ?: run { status = "Open a guest folder to keep it offline" }
-            "quirecode.stopKeepingWorkspaceOffline" -> guestWorkspace?.let(::stopKeepingOffline)
-            "quirecode.importFolder" -> beginImportFolder()
-            "notebook.cell.toggleLineNumbers" -> toggleCellLineNumbers()
-            "notebook.cell.triggerSuggest" -> triggerCellSuggest()
-            "notebook.toggleLineNumbers" -> updateSetting(WorkbenchSettings.NOTEBOOK_LINE_NUMBERS, if (settings.notebookLineNumbers) "off" else "on")
-            "quirecode.restartLanguageServers", "materialcode.restartLanguageServers" -> activePath?.let { path ->
-                val languages = languageClientsFor(path).mapNotNull { client -> languageClients.entries.firstOrNull { it.value === client }?.key }
-                if (languages.isEmpty()) status = "No language server works on ${path.substringAfterLast('/')}"
-                languages.forEach(::restartServerCommand)
-            }
-            "workbench.view.scm" -> {
-                sidebar = if (sidebar == SidebarView.SourceControl) null else SidebarView.SourceControl
-                if (sidebar == SidebarView.SourceControl) refreshGitStatus()
-            }
-            "git.refresh" -> refreshGitStatus()
-            "git.commit" -> commit()
-            "git.checkout" -> showBranches()
-            "git.pull" -> gitPull()
-            "git.push" -> gitPush()
-            "git.sync" -> gitSync()
-            "git.fetch" -> gitFetch()
-            "git.clone" -> dialog = WorkbenchDialog.GitClone
-            "git.init" -> gitInit()
-            "workbench.view.search" -> if (sidebar == SidebarView.Search && focusArea == FocusArea.Other) sidebar = null else showSearch()
-            "explorer.newFile" -> beginNewEntry(folder = false)
-            "explorer.newFolder" -> beginNewEntry(folder = true)
-            "renameFile" -> beginRenameEntry()
-            "deleteFile" -> beginDeleteEntry()
-            "workbench.action.files.openFile", "workbench.action.quickOpen" -> openQuickOpen()
-            "workbench.action.showCommands" -> openQuickOpen(">")
-            "workbench.action.gotoSymbol" -> openQuickOpen("@")
-            "workbench.action.showAllSymbols" -> openQuickOpen("#")
-            "outline.focus" -> toggleSidebar(SidebarView.Outline)
-            "workbench.action.closeActiveEditor" -> activePath?.let(::requestCloseDocument)
-            "workbench.action.closeOtherEditors" -> activePath?.let(::closeOtherTabs)
-            "workbench.action.closeAllEditors" -> closeAllTabs()
-            "workbench.action.keepEditor" -> activePath?.let(::keepTab)
-            "workbench.action.pinEditor" -> activePath?.let { if (it in pinnedTabs) unpinTab(it) else pinTab(it) }
-            "workbench.action.unpinEditor" -> activePath?.let(::unpinTab)
-            "workbench.action.reopenClosedEditor" -> closedDocuments.removeLastOrNull()?.let { document ->
-                if (document.path.endsWith(".ipynb")) openPath(document.path) else {
-                    documents.add(document)
-                    selectDocument(document.path)
-                    notifyDocumentOpened(document)
-                }
-            }
-            "workbench.action.quickSwitchEditor", "workbench.action.nextEditor" -> cycleEditor(1)
-            "workbench.action.previousEditor" -> cycleEditor(-1)
-            "workbench.action.toggleSidebarVisibility" -> sidebar = if (sidebar == null) SidebarView.Explorer else null
-            "workbench.action.togglePanel" -> panelVisible = !panelShown
-            "workbench.view.explorer" -> toggleSidebar(SidebarView.Explorer)
-            "workbench.actions.view.problems" -> {
-                panelVisible = true
-                panelTab = PanelTab.Problems
-            }
-            "workbench.action.output.toggleOutput" -> {
-                panelVisible = !(panelShown && panelTab == PanelTab.Output)
-                panelTab = PanelTab.Output
-            }
-            "avf.guest.showResources" -> dialog = WorkbenchDialog.GuestResources
-            "workbench.action.terminal.toggleTerminal" -> toggleTerminal()
-            "workbench.action.terminal.new" -> newTerminal()
-            "workbench.action.chat.open" -> {
-                chatVisible = !chatVisible
-                if (chatVisible) compactDestination = CompactDestination.Chat
-            }
-            "workbench.action.openSettings" -> settingsVisible = true
-            "workbench.action.openSettingsJson" -> openSettingsJson()
-            "workbench.action.openGlobalKeybindings" -> {
-                commandFilter = ""
-                dialog = WorkbenchDialog.Keybindings
-            }
-            "workbench.action.openGlobalKeybindingsFile" -> openKeybindingsJson()
-            "jupyter.showVariables" -> showVariables()
-            "workbench.action.terminal.focusFind" -> showTerminalFind()
-            "workbench.action.terminal.split" -> splitTerminal()
-            "workbench.action.terminal.unsplit" -> unsplitTerminal()
-            "workbench.action.terminal.rename" -> activeTerminal?.let { dialog = WorkbenchDialog.TerminalRename(it.id, it.title) }
-            "workbench.action.terminal.newWithProfile" -> {
-                commandFilter = ""
-                dialog = WorkbenchDialog.TerminalProfiles
-            }
-            "workbench.action.terminal.copyLastCommandOutput" -> activeTerminal?.let { session ->
-                val last = terminalCommands(session).lastOrNull { it.endLine != null }
-                if (last == null) status = "No finished command in this terminal (shell integration marks them)"
-                else copyTerminalText(session.textLog.output(last), "Copied the output of ${last.command.ifBlank { "the last command" }}")
-            }
-            "workbench.action.terminal.scrollToPreviousCommand" -> scrollToTerminalCommand(previous = true)
-            "workbench.action.terminal.scrollToNextCommand" -> scrollToTerminalCommand(previous = false)
-            "workbench.action.terminal.openDetectedLink" -> showTerminalLinks()
-            "merge-conflict.accept.current", "merge-conflict.accept.incoming", "merge-conflict.accept.both" -> {
-                val line = cursorPosition?.line ?: 0
-                val conflict = activeConflicts().firstOrNull { line in it.start..it.end }
-                val choice = when (commandId) {
-                    "merge-conflict.accept.current" -> ConflictChoice.Current
-                    "merge-conflict.accept.incoming" -> ConflictChoice.Incoming
-                    else -> ConflictChoice.Both
-                }
-                if (conflict == null) status = "Put the cursor in a conflict first" else resolveConflict(conflict, choice)
-            }
-            "merge-conflict.accept.all-current" -> resolveAllConflicts(ConflictChoice.Current)
-            "merge-conflict.accept.all-incoming" -> resolveAllConflicts(ConflictChoice.Incoming)
-            "merge-conflict.next" -> goToConflict(forward = true)
-            "merge-conflict.previous" -> goToConflict(forward = false)
-            "ports.focus" -> {
-                panelVisible = true
-                panelTab = PanelTab.Ports
-                compactDestination = CompactDestination.Terminal
-            }
-            "workbench.action.debug.run" -> runActiveFile()
-            "editor.action.fontZoomIn" -> zoomEditorOrImage(1)
-            "editor.action.fontZoomOut" -> zoomEditorOrImage(-1)
-            "workbench.action.connect" -> openConnect()
-            "undo" -> surface?.undo()
-            "redo" -> surface?.redo()
-            "editor.action.clipboardCopyAction" -> copySelection(false)
-            "editor.action.clipboardCutAction" -> copySelection(true)
-            "editor.action.clipboardPasteAction" -> pasteClipboard()
-            "editor.action.selectAll" -> surface?.selectAll()
-            "editor.action.indentLines" -> surface?.let { indentOrInsertTab(it, indentation().tabSize, indentation().insertSpaces) }
-            "editor.action.outdentLines" -> surface?.outdentSelection(indentation().tabSize)
-            "editor.action.indentUsingSpaces", "editor.action.indentUsingTabs", "changeEditorIndentation" ->
-                if (activeDocument != null && activeNotebook == null) dialog = WorkbenchDialog.IndentationPicker
-            "editor.action.detectIndentation" -> redetectIndentation()
-            "editor.action.indentationToSpaces" -> convertIndentationTo(Indentation(true, indentation().tabSize))
-            "editor.action.indentationToTabs" -> convertIndentationTo(Indentation(false, indentation().tabSize))
-            "editor.action.commentLine" -> toggleLineComment()
-            "editor.action.blockComment" -> toggleBlockComment()
-            "editor.action.marker.next" -> goToProblem(forward = true)
-            "editor.action.marker.prev" -> goToProblem(forward = false)
-            "cursorUndo" -> undoCursorMove()
-            "editor.action.moveLinesUpAction",
-            "editor.action.moveLinesDownAction",
-            "editor.action.copyLinesUpAction",
-            "editor.action.copyLinesDownAction",
-            "editor.action.deleteLines",
-            "editor.action.insertLineAfter",
-            "editor.action.insertLineBefore",
-            -> activeDocument?.let { document ->
-                if (surface != null && editCurrentLine(document, surface, commandId)) onDocumentEdited(document)
-            }
-            "actions.find" -> showFind(replace = false)
-            "editor.action.startFindReplaceAction" -> showFind(replace = true)
-            "editor.action.nextMatchFindAction" -> findNext(forward = true)
-            "editor.action.previousMatchFindAction" -> findNext(forward = false)
-            "closeFindWidget" -> closeFind()
-            "editor.action.replaceAll" -> if (findVisible) replaceAll()
-            "editor.action.replaceOne" -> if (findVisible) replaceOne()
-            "toggleFindInSelection" -> if (findVisible) toggleFindInSelection()
-            "workbench.action.gotoLine" -> openQuickOpen(":")
-            "editor.action.formatDocument" -> formatActiveDocument()
-            "editor.action.formatSelection" -> formatSelection()
-            "editor.fold", "editor.unfold", "editor.toggleFold", "editor.foldAll", "editor.unfoldAll" ->
-                if (surface?.runFoldCommand(commandId) != true) {
-                    status = if (!settings.folding) "Folding is off in Settings" else if (settings.wordWrap) "Folding needs word wrap off" else "Nothing to fold here"
-                }
-            "editor.action.smartSelect.expand" -> expandSelection()
-            "editor.action.smartSelect.shrink" -> shrinkSelection()
-            "editor.action.joinLines", "editor.action.transposeLetters", "editor.action.sortLinesAscending",
-            "editor.action.sortLinesDescending", "editor.action.removeDuplicateLines", "editor.action.trimTrailingWhitespace",
-            in CASE_COMMANDS.keys,
-            -> runTextTransform(commandId)
-            "editor.action.goToDefinition" -> goToDefinition()
-            "editor.action.peekDefinition" -> goToLocations(LocationKind.Definition, peek = true)
-            "editor.action.goToTypeDefinition" -> goToLocations(LocationKind.TypeDefinition, peek = false)
-            "editor.action.peekTypeDefinition" -> goToLocations(LocationKind.TypeDefinition, peek = true)
-            "editor.action.goToImplementation" -> goToLocations(LocationKind.Implementation, peek = false)
-            "editor.action.peekImplementation" -> goToLocations(LocationKind.Implementation, peek = true)
-            "editor.action.revealDeclaration" -> goToLocations(LocationKind.Declaration, peek = false)
-            "editor.action.peekDeclaration" -> goToLocations(LocationKind.Declaration, peek = true)
-            "editor.action.goToReferences" -> goToLocations(LocationKind.References, peek = true)
-            "references-view.findReferences" -> findReferences()
-            "editor.showCallHierarchy", "editor.showIncomingCalls" -> showCallHierarchy(incoming = true)
-            "editor.showOutgoingCalls" -> showCallHierarchy(incoming = false)
-            "closeReferenceSearch" -> closePeek()
-            "editor.action.rename" -> beginRename()
-            "editor.action.triggerSuggest" -> if (focusArea == FocusArea.Notebook) triggerCellSuggest() else surface?.triggerSuggest()
-            "editor.action.triggerParameterHints" -> activePath?.let { requestSignature(it, trigger = null, invoked = true) }
-            "closeParameterHints" -> closeParameterHints()
-            // Aardink's own hover only when the workbench's card can't be placed over it.
-            "editor.action.showHover" -> if (aardinkGeometry() != null || aardinkState()?.execute(AardinkCommand.ShowHover) != true) showHover()
-            "editor.action.insertSnippet" -> showInsertSnippet()
-            "git.viewFileHistory" -> showFileHistory()
-            "git.blame.toggleEditorDecoration" -> toggleBlame()
-            "git.stash" -> stashChanges(includeUntracked = false)
-            "git.stashIncludeUntracked" -> stashChanges(includeUntracked = true)
-            "git.stashPopLatest" -> popLatestStash()
-            "git.stashes" -> showStashes()
-            "workbench.action.openSnippets" -> configureWorkspaceSnippets()
-            "notebook.cell.showHover" -> selectedCodeCell()?.let { (session, cell) -> showCellHover(session, cell, session.cellCaret, fromPointer = false) }
-            "notebook.cell.goToDefinition" -> selectedCodeCell()?.let { (session, cell) -> goToCellDefinition(session, cell, session.cellCaret) }
-            "editor.action.quickFix" -> showCodeActions()
-            "editor.action.inlineSuggest.trigger" -> when {
-                !copilotEnabled || !copilot.language.isReady -> status = "Copilot is not ready; run GitHub Copilot: Sign In"
-                else -> aardinkState()?.execute(AardinkCommand.CycleInlineCompletion(forward = true))
-            }
-            "editor.action.inlineSuggest.commit" -> if (aardinkState()?.execute(AardinkCommand.AcceptInlineCompletion) != true) jumpOrAcceptNextEdit()
-            "editor.action.inlineSuggest.hide" -> if (aardinkState()?.execute(AardinkCommand.DismissInlineCompletion) != true) clearNextEdit()
-            "editor.action.inlineSuggest.acceptNextEdit" -> acceptNextEdit()
-            "editor.action.inlineSuggest.triggerNextEdit" -> requestNextEdit(invoked = true)
-            "github.copilot.signIn" -> beginCopilotSignIn()
-            "github.copilot.signOut" -> signOutCopilot()
-            "github.copilot.toggleInlineSuggestions" -> {
-                enableCopilot(!copilotEnabled)
-                status = if (copilotEnabled) "Copilot inline suggestions on" else "Copilot inline suggestions off"
-            }
-            "github.copilot.chat.signIn" -> signInGitHubInTerminal()
-            "github.copilot.chat.signInCli" -> signInChatInTerminal()
-            "avf.chat.selectCopilot" -> selectChatAgent(ChatAgentKind.Copilot)
-            "avf.chat.selectClaudeCode" -> selectChatAgent(ChatAgentKind.ClaudeCode)
-            "avf.chat.selectGemini" -> selectChatAgent(ChatAgentKind.Gemini)
-            "avf.chat.signIn" -> signInChatAgent()
-            "markdown.showPreview" -> toggleMarkdownPreview(MarkdownPreviewMode.Only)
-            "markdown.showPreviewToSide" -> toggleMarkdownPreview(MarkdownPreviewMode.Side)
-            "workbench.action.files.openLocalFile" -> pickLocalFile?.invoke()
-            "github.signIn" -> signInGitHubInTerminal()
-            "github.copilot.chat.attachFile" -> attachFileToChat()
-            "github.copilot.chat.attachSelection" -> attachSelectionToChat()
-            "notebook.cell.executeAndSelectBelow", "notebook.cell.execute", "notebook.cell.executeAndInsertBelow" ->
-                activeNotebook?.let { session ->
-                    val cell = session.notebook.cells.firstOrNull { it.id == session.selectedCell } ?: return@let
-                    when (commandId) {
-                        "notebook.cell.executeAndSelectBelow" -> runCell(session, cell, advance = true)
-                        "notebook.cell.execute" -> runCell(session, cell)
-                        else -> {
-                            runCell(session, cell)
-                            addCell(session, cell)
-                        }
-                    }
-                }
-            "notebook.cell.insertCodeCellBelow" -> activeNotebook?.let { session ->
-                addCell(session, session.notebook.cells.firstOrNull { it.id == session.selectedCell })
-            }
-            "notebook.cell.moveUp", "notebook.cell.moveDown", "notebook.cell.delete" -> activeNotebook?.let { session ->
-                val cell = session.notebook.cells.firstOrNull { it.id == session.selectedCell } ?: return@let
-                when (commandId) {
-                    "notebook.cell.delete" -> deleteCell(session, cell)
-                    else -> {
-                        moveCell(session, cell, if (commandId == "notebook.cell.moveDown") 1 else -1)
-                        session.focusRequest++
-                    }
-                }
-            }
-            "notebook.cell.changeToCode", "notebook.cell.changeToMarkdown", "notebook.cell.changeToRaw" -> activeNotebook?.let { session ->
-                val cell = session.notebook.cells.firstOrNull { it.id == session.selectedCell } ?: return@let
-                setCellType(session, cell, when (commandId) {
-                    "notebook.cell.changeToCode" -> CellType.Code
-                    "notebook.cell.changeToMarkdown" -> CellType.Markdown
-                    else -> CellType.Raw
-                })
-            }
-            "notebook.undoDeleteCell" -> activeNotebook?.let(::undoDeleteCell)
-            "notebook.outline" -> sidebar = SidebarView.Outline
-            "notebook.focusPreviousEditor", "notebook.focusNextEditor" -> activeNotebook?.let { session ->
-                val cell = session.notebook.cells.firstOrNull { it.id == session.selectedCell } ?: return@let
-                selectAdjacentCell(session, cell, if (commandId == "notebook.focusNextEditor") 1 else -1)
-            }
-            "jupyter.runcurrentcell" -> runPythonCells(CellRange.Current)
-            "jupyter.runcurrentcelladvance" -> runPythonCells(CellRange.Current, advance = true)
-            "jupyter.runallcells" -> runPythonCells(CellRange.All)
-            "jupyter.runallcellsabove" -> runPythonCells(CellRange.Above)
-            "jupyter.runcurrentcellandallbelow" -> runPythonCells(CellRange.CurrentAndBelow)
-            "jupyter.execSelectionInteractive" -> runSelectionInteractive()
-            "jupyter.createnewinteractive" -> showInteractive()
-            "jupyter.showPlotViewer" -> showPlotViewer()
-            "jupyter.selectKernel" -> activeNotebook?.let(::chooseKernel)
-            "jupyter.runAll" -> activeNotebook?.let(::runAllCells)
-            "jupyter.restartKernel" -> activeNotebook?.let(::restartKernel)
-            "jupyter.interruptKernel" -> activeNotebook?.let(::interruptKernel)
-            "editor.action.jumpToBracket" -> {
-                val matched = activeDocument?.let { document -> surface?.let { jumpToMatchingBracket(document, it) } } ?: false
-                if (!matched) status = "No matching bracket"
-            }
-            "editor.action.selectHighlights" -> if (aardinkState()?.execute(AardinkCommand.SelectAllOccurrences) != true) status = "Select All Occurrences needs the editor"
-            "editor.action.addSelectionToNextFindMatch",
-            "editor.action.insertCursorAbove",
-            "editor.action.insertCursorBelow",
-            -> status = "${EditorCommands.all.firstOrNull { it.id == commandId }?.title ?: commandId} is not available yet"
-            "editor.action.toggleWordWrap" -> updateSetting(WorkbenchSettings.WORD_WRAP, if (settings.wordWrap) "off" else "on")
-            else -> status = "${EditorCommands.all.firstOrNull { it.id == commandId }?.title ?: commandId} is not available yet"
-        }
-    }
-
-    private fun toggleSidebar(view: SidebarView) {
-        sidebar = if (sidebar == view) null else view
-    }
-
-    private fun cycleEditor(delta: Int) {
-        if (documents.size < 2) return
-        val index = documents.indexOfFirst { it.path == activePath }.coerceAtLeast(0)
-        selectDocument(documents[(index + delta).mod(documents.size)].path)
-    }
-}
+                    copilot.didShow(suggestion.
+... [truncated for diff preview]
