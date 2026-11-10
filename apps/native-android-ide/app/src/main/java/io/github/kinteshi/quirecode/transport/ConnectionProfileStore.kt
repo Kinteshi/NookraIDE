@@ -59,9 +59,16 @@ class ConnectionProfileStore(
 
     /**
      * Creates or updates a profile; a blank token keeps the previously saved token. A null
-     * [fingerprint] keeps the saved pin unless the endpoint changed.
+     * [fingerprint] keeps the saved pin unless the endpoint changed or [clearFingerprint] is true.
      */
-    fun save(id: String?, name: String, endpoint: String, token: String, fingerprint: String? = null): ConnectionProfile {
+    fun save(
+        id: String?,
+        name: String,
+        endpoint: String,
+        token: String,
+        fingerprint: String? = null,
+        clearFingerprint: Boolean = false,
+    ): ConnectionProfile {
         val entries = readEntries()
         val profileId = id?.takeIf { existing -> entries.any { it.get("id").asString == existing } }
             ?: UUID.randomUUID().toString()
@@ -74,7 +81,11 @@ class ConnectionProfileStore(
                 token.isNotEmpty() -> addProperty("token", cipher.encrypt(token))
                 previous?.has("token") == true -> add("token", previous.get("token"))
             }
-            val pin = fingerprint ?: previous?.takeIf { it.get("endpoint")?.asString == endpoint.trim() }?.get("fingerprint")?.asString
+            val pin = if (clearFingerprint) {
+                null
+            } else {
+                fingerprint ?: previous?.takeIf { it.get("endpoint")?.asString == endpoint.trim() }?.get("fingerprint")?.asString
+            }
             pin?.let { addProperty("fingerprint", it) }
         }
         val updated = JsonArray().apply {

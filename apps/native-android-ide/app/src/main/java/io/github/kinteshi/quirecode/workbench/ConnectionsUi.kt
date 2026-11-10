@@ -338,7 +338,19 @@ private fun Troubleshooting(controller: WorkbenchController) {
         when {
             controller.connected -> CheckRow(true, "The daemon answers, and accepts this device")
             check == null || check.checking -> CheckRow(null, "Checking $target…")
-            check.daemonAnswers == true -> CheckRow(true, "Something answers at $target")
+            check.daemonAnswers == true -> CheckRow(true, "The daemon answers at $target")
+            check.portOpen == true -> CheckRow(
+                false,
+                if (facts.tabletGuest) {
+                    "Port $target is open, but nothing answers through it: the daemon isn't running in the guest, or Linux " +
+                        "Terminal's port forwarding stopped (turning on a VPN such as Tailscale can do this). Open Linux Terminal; if " +
+                        "it's already open, force stop it in App info and open it again. If you use Tailscale, exclude Linux Terminal in " +
+                        "Tailscale's app split tunneling."
+                } else {
+                    "Port $target is open, but the daemon didn't answer through it: if this connects through a tunnel or reverse " +
+                        "proxy, check that quirecode-daemon is running on the computer behind it."
+                },
+            )
             else -> CheckRow(
                 false,
                 if (facts.tabletGuest) {
@@ -388,6 +400,8 @@ internal fun ConnectionEditorDialog(controller: WorkbenchController, editor: Wor
     var name by remember(editor) { mutableStateOf(profile?.name.orEmpty()) }
     var url by remember(editor) { mutableStateOf(profile?.endpoint ?: GUEST_DAEMON_ENDPOINT) }
     var token by remember(editor) { mutableStateOf("") }
+    var clearPin by remember(editor) { mutableStateOf(false) }
+    val pinnedFingerprint = profile?.fingerprint?.takeIf { !clearPin && url.trim() == profile.endpoint }
     val hasToken = controller.connectionHasToken(editor.profileId)
     val valid = url.trim().let { it.startsWith("ws://") || it.startsWith("wss://") } && (hasToken || token.isNotBlank())
     AlertDialog(
@@ -409,25 +423,44 @@ internal fun ConnectionEditorDialog(controller: WorkbenchController, editor: Wor
                     keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
                     modifier = Modifier.fillMaxWidth(),
                 )
+                if (url.trim().startsWith("wss://", ignoreCase = true)) {
+                    if (pinnedFingerprint != null) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(
+                                "Pinned to certificate ${pinnedFingerprint.take(12)}…",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.weight(1f),
+                            )
+                            TextButton(onClick = { clearPin = true }) { Text("Use public TLS") }
+                        }
+                    } else {
+                        Text(
+                            "Verified by Android's trusted CAs (Cloudflare Tunnel or a public certificate).",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
                 OutlinedTextField(
                     token, { token = it.trim() },
                     label = { Text(if (hasToken) "Token (blank keeps the saved one)" else "Token") },
                     visualTransformation = PasswordVisualTransformation(),
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(onDone = { if (valid) controller.saveConnection(editor.profileId, name, url, token, connect = true) }),
+                    keyboardActions = KeyboardActions(onDone = { if (valid) controller.saveConnection(editor.profileId, name, url, token, connect = true, clearFingerprint = clearPin) }),
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
         },
         confirmButton = {
-            TextButton(onClick = { controller.saveConnection(editor.profileId, name, url, token, connect = true) }, enabled = valid && !controller.busy) {
+            TextButton(onClick = { controller.saveConnection(editor.profileId, name, url, token, connect = true, clearFingerprint = clearPin) }, enabled = valid && !controller.busy) {
                 Text("Save and connect")
             }
         },
         dismissButton = {
             Row {
-                TextButton(onClick = { controller.saveConnection(editor.profileId, name, url, token, connect = false) }, enabled = valid) { Text("Save") }
+                TextButton(onClick = { controller.saveConnection(editor.profileId, name, url, token, connect = false, clearFingerprint = clearPin) }, enabled = valid) { Text("Save") }
                 TextButton(onClick = { controller.dialog = WorkbenchDialog.Connect }) { Text("Cancel") }
             }
         },
@@ -450,9 +483,9 @@ internal fun ComputerPairingDialog(controller: WorkbenchController) {
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 Text(
-                    "1. On the computer, run the release's install-native-daemon.sh with --remote (on Windows, install-host-daemon-wsl.ps1; " +
+                    "1. On the computer, run the release's install-native-daemon.sh with --remote or --tailscale (on Windows, install-host-daemon-wsl.ps1; " +
                         "see docs/HOSTING-THE-DAEMON.md on GitHub). It prints a connection string starting with avf://. To pair again " +
-                        "later, run `quirecode-daemon pair --remote <its address>:19870` there.",
+                        "later, run `quirecode-daemon pair --remote <address>:19870` (or `--tunnel <hostname>` behind Cloudflare Tunnel).",
                     style = MaterialTheme.typography.bodyMedium,
                     color = colors.onSurfaceVariant,
                 )

@@ -97,18 +97,37 @@ pub fn now_secs() -> u64 {
 }
 
 /// Pairs a device called [name]: a new token for it, returned once and kept here only as a digest.
+/// Earlier pairings with the same device name are replaced so pairing again doesn't leave stale entries.
+#[cfg(test)]
 pub fn issue(path: &Path, name: &str) -> Result<(Device, String), String> {
+    let (device, token, _) = issue_replacing(path, name)?;
+    Ok((device, token))
+}
+
+/// Like [issue], also returning the IDs of any earlier pairings for the same named device that were replaced.
+pub fn issue_replacing(path: &Path, name: &str) -> Result<(Device, String, Vec<String>), String> {
     let _guard = REGISTRY_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let mut registry = read(path)?;
     let token = random_hex(32);
+    let clean_name: String = name.chars().filter(|c| !c.is_control()).take(80).collect();
+    let trimmed = clean_name.trim();
+    let mut replaced = Vec::new();
+    if !trimmed.is_empty() {
+        registry.devices.retain(|existing| {
+            let same = existing.name.eq_ignore_ascii_case(trimmed);
+            if same {
+                replaced.push(existing.id.clone());
+            }
+            !same
+        });
+    }
     let mut id = random_hex(3);
-    while registry.devices.iter().any(|device| device.id == id) {
+    while registry.devices.iter().any(|device| device.id == id) || replaced.contains(&id) {
         id = random_hex(3);
     }
-    let name: String = name.chars().filter(|c| !c.is_control()).take(80).collect();
     let device = Device {
         id,
-        name: if name.trim().is_empty() { "Unnamed device".to_owned() } else { name.trim().to_owned() },
+        name: if trimmed.is_empty() { "Unnamed device".to_owned() } else { trimmed.to_owned() },
         token_sha256: digest(&token),
         paired_at: now_secs(),
         last_seen: None,
@@ -116,7 +135,7 @@ pub fn issue(path: &Path, name: &str) -> Result<(Device, String), String> {
     };
     registry.devices.push(device.clone());
     write(path, &registry)?;
-    Ok((device, token))
+    Ok((device, token, replaced))
 }
 
 /// The device [token] belongs to, its last use noted; None when no paired device has it.
@@ -356,6 +375,23 @@ mod tests {
         // By name, when only one has it.
         assert!(revoke(&path, "quirecode on pixel").is_ok());
         assert!(revoke(&path, "nobody").is_err());
+    }
+
+    #[test]
+    fn pairing_again_with_the_same_name_replaces_the_earlier_pairing() {
+        let dir = temp_dir("repair");
+        let path = devices_path(&dir);
+        let (first, first_token, first_replaced) = issue_replacing(&path, "QuireCode on SM-X930").unwrap();
+        assert!(first_replaced.is_empty());
+        let (_, other_token) = issue(&path, "QuireCode on Pixel").unwrap();
+        let (second, second_token, replaced) = issue_replacing(&path, "QuireCode on SM-X930").unwrap();
+        assert_eq!(replaced, vec![first.id.clone()]);
+        assert_ne!(first.id, second.id);
+        assert!(!is_paired(&path, &first.id));
+        assert!(authenticate(&path, &first_token, None).unwrap().is_none());
+        assert_eq!(authenticate(&path, &second_token, None).unwrap().unwrap().id, second.id);
+        assert!(authenticate(&path, &other_token, None).unwrap().is_some());
+        assert_eq!(list(&path).unwrap().len(), 2);
     }
 
     #[test]

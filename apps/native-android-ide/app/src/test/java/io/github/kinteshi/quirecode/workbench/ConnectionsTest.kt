@@ -39,6 +39,38 @@ class ConnectionsTest {
         assertTrue(connectionSummary(guest.copy(failure = "Handshake timed out")).detail!!.startsWith("Handshake timed out. "))
         assertTrue(connectionSummary(guest.copy(name = "100.64.0.1", tabletGuest = false, pairingRejected = true)).detail!!.contains("revoked"))
         assertTrue(connectionSummary(guest.copy(pairingRejected = true)).detail!!.contains("Linux Terminal is reset"))
+        assertTrue(connectionSummary(guest.copy(forwardingStuck = true)).detail!!.contains("Tailscale"))
+    }
+
+    @Test
+    fun probeDaemonPortDistinguishesRefusedFromOpenWithoutAnswerAndAnswering() {
+        // 1. Refused port: nothing listening.
+        val closedPort = java.net.ServerSocket(0).use { it.localPort }
+        assertEquals(false to false, probeDaemonPort("ws://127.0.0.1:$closedPort/ws", timeoutMs = 500))
+
+        // 2. Port open, but closes without sending HTTP (e.g. wedged Linux Terminal port forwarder).
+        java.net.ServerSocket(0).use { silentServer ->
+            val thread = Thread {
+                runCatching { silentServer.accept().close() }
+            }.apply { isDaemon = true; start() }
+            assertEquals(true to false, probeDaemonPort("ws://127.0.0.1:${silentServer.localPort}/ws", timeoutMs = 500))
+            thread.join(1_000)
+        }
+
+        // 3. Port open and daemon answers /health with HTTP 200 OK.
+        java.net.ServerSocket(0).use { healthServer ->
+            val thread = Thread {
+                runCatching {
+                    healthServer.accept().use { client ->
+                        val out = client.getOutputStream()
+                        out.write("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok".toByteArray(Charsets.US_ASCII))
+                        out.flush()
+                    }
+                }
+            }.apply { isDaemon = true; start() }
+            assertEquals(true to true, probeDaemonPort("ws://127.0.0.1:${healthServer.localPort}/ws", timeoutMs = 500))
+            thread.join(1_000)
+        }
     }
 
     @Test

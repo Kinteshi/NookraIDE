@@ -47,6 +47,19 @@ class ConnectionProfileStoreTest {
     }
 
     @Test
+    fun clearFingerprintRemovesPreviouslyPinnedCertificate() {
+        val store = ConnectionProfileStore(MemoryValues(), ReversingCipher)
+        val pinned = store.save(null, "Tunnel", "wss://quirecode.example.com:443/ws", "tok", fingerprint = "a".repeat(64))
+        assertEquals("a".repeat(64), pinned.fingerprint)
+
+        val kept = store.save(pinned.id, "Tunnel", "wss://quirecode.example.com:443/ws", "")
+        assertEquals("a".repeat(64), kept.fingerprint)
+
+        val publicTls = store.save(pinned.id, "Tunnel", "wss://quirecode.example.com:443/ws", "", clearFingerprint = true)
+        assertNull(publicTls.fingerprint)
+    }
+
+    @Test
     fun deleteRemovesProfileAndLastUsedPointer() {
         val store = ConnectionProfileStore(MemoryValues(), ReversingCipher)
         val saved = store.save(null, "", "ws://a/ws", "tok")

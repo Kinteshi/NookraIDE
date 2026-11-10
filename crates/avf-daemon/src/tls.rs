@@ -56,6 +56,13 @@ pub fn connection_string(host: &str, port: u16, fingerprint: &str, code: &str) -
     format!("avf://{host}:{port}?fp={fingerprint}&code={code}")
 }
 
+/// `avf://HOST:PORT?fp=public&code=…` for a daemon behind a public TLS certificate (Cloudflare Tunnel
+/// or a reverse proxy with Let's Encrypt): the app verifies the certificate with Android's Root CAs.
+pub fn public_connection_string(host: &str, port: u16, code: &str) -> String {
+    let host = if host.contains(':') && !host.starts_with('[') { format!("[{host}]") } else { host.to_owned() };
+    format!("avf://{host}:{port}?fp=public&code={code}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -79,5 +86,6 @@ mod tests {
     fn connection_strings_bracket_ipv6_hosts() {
         assert_eq!(connection_string("192.168.1.10", 19870, "ab", "K7QM-2XPA"), "avf://192.168.1.10:19870?fp=ab&code=K7QM-2XPA");
         assert_eq!(connection_string("fe80::1", 19870, "ab", "C"), "avf://[fe80::1]:19870?fp=ab&code=C");
+        assert_eq!(public_connection_string("quirecode.example.com", 443, "K7QM-2XPA"), "avf://quirecode.example.com:443?fp=public&code=K7QM-2XPA");
     }
 }

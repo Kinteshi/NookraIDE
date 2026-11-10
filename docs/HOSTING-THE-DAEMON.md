@@ -92,6 +92,64 @@ The tablet reaches the computer whenever Tailscale is on, on any network. A new 
 On Windows, run Tailscale inside the WSL distro (it needs systemd, as the daemon does) and install
 the daemon there with `--tailscale`; the PowerShell script isn't needed then.
 
+> **Using Tailscale alongside the tablet's own Linux guest:** Turning on Android's VPN (such as
+> Tailscale) while **Linux Terminal** is already running can stop Linux Terminal from forwarding
+> `127.0.0.1:19870` to the tablet's local guest — the port still accepts a TCP connection on the
+> tablet, so nothing looks closed, but no HTTP response comes back from the guest daemon. To avoid
+> this:
+> 1. In the Tailscale Android app, open **App Split Tunneling** and exclude **Terminal**
+>    (`com.android.virtualization.terminal`) from the VPN, while leaving **QuireCode** included so it
+>    still reaches your tailnet.
+> 2. If local guest forwarding already stopped after toggling the VPN, open Android's **App info**
+>    for **Terminal**, tap **Force stop**, and open **Terminal** again.
+
+## Away from home without a VPN on the tablet: Cloudflare Tunnel
+
+If you can't run Tailscale on the tablet (or prefer a domain with a standard public certificate),
+you can put the daemon behind a [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/).
+The daemon stays on loopback (`127.0.0.1:19870`, nothing opened on your LAN or router), `cloudflared`
+makes an outbound-only connection to Cloudflare, and the tablet connects over `wss://<your-hostname>:443/ws`
+validated by Android's trusted Root CAs (`fp=public`).
+
+1. On the computer, install the daemon on loopback (without `--remote`):
+
+   ```sh
+   bash scripts/install-native-daemon.sh target/release/quirecode-daemon ~/Projects
+   ```
+
+2. Point a Cloudflare Tunnel at `http://127.0.0.1:19870` (for a quick test, `cloudflared tunnel --url http://127.0.0.1:19870`;
+   for everyday use, a named tunnel on your domain, ideally behind a Cloudflare Access service token or policy).
+
+3. Issue a pairing string for the tunnel's hostname:
+
+   ```sh
+   quirecode-daemon pair --tunnel quirecode.example.com
+   ```
+
+   It prints `avf://quirecode.example.com:443?fp=public&code=XXXX-XXXX`. Paste that into **Add a
+   connection → A computer on your network** in QuireCode.
+
+## Router port forwarding
+
+If you prefer a direct connection without Tailscale or Cloudflare Tunnel, you can forward a TCP port
+on your home router to the computer running `--remote`:
+
+1. Give the computer a static DHCP lease on your router so its LAN address doesn't change, and set
+   up dynamic DNS (or use your public IP).
+2. Forward external TCP port `19870` (or another port of your choice) on the router to the
+   computer's LAN address and port `19870`.
+3. Issue a pairing string with your public hostname or IP:
+
+   ```sh
+   quirecode-daemon pair --remote home.example.com:19870
+   ```
+
+Because an open router port is reachable by internet scanners, **Tailscale** (`--tailscale`) or
+**Cloudflare Tunnel** (`--tunnel`) is strongly preferred whenever possible. When a port is forwarded,
+the daemon still requires TLS with the pinned certificate fingerprint, rejects the shared loopback
+token from the network, requires a one-time pairing code (5 minutes, 5 attempts), and blocks any
+address after 10 failed attempts within 10 minutes (`quirecode-daemon log`).
+
 ## Paired devices and the connection log
 
 ```sh
@@ -103,9 +161,10 @@ quirecode-daemon log                   # the last 40 connections, pairings and r
 The same list is in the app: the connection chip's **Connections** dialog, while connected, shows the devices paired
 with that computer (the one in use marked "This device"), revokes one, and shows the recent connections.
 
-A device's name is what the app sends when it pairs: "QuireCode on" and the tablet's name. The
-log is `~/.config/quirecode/connections.log`, kept under 256 KB. A device paired before these
-existed has the shared token: from the network it's refused, so pair it again.
+A device's name is what the app sends when it pairs: "QuireCode on" and the tablet's name. Pairing
+again from the same named device automatically replaces its earlier pairing so stale entries don't
+accumulate. The log is `~/.config/quirecode/connections.log`, kept under 256 KB. A device paired
+before these existed has the shared token: from the network it's refused, so pair it again.
 
 ## Windows computer (WSL2)
 
@@ -156,6 +215,7 @@ exposes it on your network.
 | Symptom in the app | Likely cause |
 |---|---|
 | "Can't reach HOST:PORT" | Different network, firewall closed, the daemon isn't running (`systemctl --user status quirecode`), or on Windows the WSL distro stopped (run the logon task: `Start-ScheduledTask "AVF Studio daemon (WSL)"`). |
+| "Port 127.0.0.1:19870 is open, but nothing answers through it" | On the tablet, Linux Terminal's port forwarder accepted the socket on `127.0.0.1:19870` but nothing reached the guest daemon (often after turning on a VPN such as Tailscale). Force stop **Terminal** in Android's **App info** and open it again, and exclude **Terminal** in Tailscale's **App Split Tunneling**. |
 | "doesn't match the connection string" | The certificate changed (for example `~/.config/quirecode/tls` was deleted). Run `pair --remote` again and paste the new string. |
 | "No pairing code is active" | The code expired, was used, or ran out of attempts. Run `pair --remote` again. |
 | "The guest rejected the saved token" | The daemon was reinstalled with a new token, the device was revoked, or it was paired before device tokens existed (the shared token works only on the machine itself). Pair again. |

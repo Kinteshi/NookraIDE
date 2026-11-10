@@ -107,9 +107,10 @@ pub fn run_devices_cli(command: &str, args: &[String]) -> Result<(), String> {
 }
 
 pub fn print_pairing_code(args: &[String]) -> Result<(), String> {
-    const USAGE: &str = "usage: avf-daemon pair [--minutes N] [--remote HOST[:PORT]]";
+    const USAGE: &str = "usage: avf-daemon pair [--minutes N] [--remote HOST[:PORT] | --tunnel HOST[:PORT]]";
     let mut minutes = pairing::PAIRING_TTL.as_secs() / 60;
     let mut remote: Option<String> = None;
+    let mut tunnel: Option<String> = None;
     let mut rest = args.iter();
     while let Some(flag) = rest.next() {
         let value = rest.next().ok_or(USAGE)?;
@@ -122,33 +123,59 @@ pub fn print_pairing_code(args: &[String]) -> Result<(), String> {
                     .ok_or("--minutes must be between 1 and 60")?
             }
             "--remote" => remote = Some(value.clone()),
+            "--tunnel" => tunnel = Some(value.clone()),
             _ => return Err(USAGE.to_owned()),
         }
+    }
+    if remote.is_some() && tunnel.is_some() {
+        return Err(USAGE.to_owned());
     }
     let path = pairing::pairing_path()?;
     let code = pairing::create(&path, Duration::from_secs(minutes * 60))?;
     println!();
-    match remote {
-        None => {
+    match (remote, tunnel) {
+        (None, None) => {
             println!("    Pairing code:  {code}");
             println!();
             println!("In QuireCode, tap the connection chip, then Add a connection > This tablet's Linux guest,");
             println!("and enter it. The code works once,");
         }
-        Some(host) => {
-            let (host, port) = match host.rsplit_once(':').filter(|(name, _)| !name.contains(':') || name.ends_with(']')) {
-                Some((name, port)) => (name.trim_matches(['[', ']']).to_owned(), port.parse::<u16>().map_err(|_| "invalid port in --remote")?),
-                None => (host.trim_matches(['[', ']']).to_owned(), 19870),
-            };
+        (Some(host), None) => {
+            let (host, port) = parse_host_port(&host, 19870, "invalid port in --remote")?;
             let material = tls::load_or_create(&pairing::config_dir()?)?;
             println!("    {}", tls::connection_string(&host, port, &material.fingerprint, &code));
             println!();
             println!("In QuireCode, tap the connection chip, then Add a connection > A computer on your network,");
             println!("and paste this. The code in it works once,");
         }
+        (None, Some(host)) => {
+            let stripped = host
+                .trim()
+                .trim_start_matches("https://")
+                .trim_start_matches("wss://")
+                .trim_end_matches("/ws")
+                .trim_end_matches('/');
+            let (host, port) = parse_host_port(stripped, 443, "invalid port in --tunnel")?;
+            println!("    {}", tls::public_connection_string(&host, port, &code));
+            println!();
+            println!("In QuireCode, tap the connection chip, then Add a connection > A computer on your network,");
+            println!("and paste this. The code in it works once,");
+        }
+        (Some(_), Some(_)) => unreachable!(),
     }
     println!("for {minutes} minutes, and allows {} wrong attempts.", pairing::MAX_ATTEMPTS);
     Ok(())
+}
+
+fn parse_host_port(raw: &str, default_port: u16, port_error: &'static str) -> Result<(String, u16), String> {
+    let (host, port) = match raw.rsplit_once(':').filter(|(name, _)| !name.contains(':') || name.ends_with(']')) {
+        Some((name, port)) => (name.trim_matches(['[', ']']).to_owned(), port.parse::<u16>().map_err(|_| port_error.to_owned())?),
+        None => (raw.trim_matches(['[', ']']).to_owned(), default_port),
+    };
+    if host.is_empty() {
+        return Err("host cannot be empty".to_owned());
+    }
+    Ok((host, port))
 }
 
 #[derive(Clone)]
@@ -455,13 +482,18 @@ async fn pair_client(
             let token = match state.config.devices_file.clone() {
                 Some(path) => {
                     let name = client_name.to_owned();
-                    let issued = tokio::task::spawn_blocking(move || devices::issue(&path, &name))
+                    let issued = tokio::task::spawn_blocking(move || devices::issue_replacing(&path, &name))
                         .await
                         .map_err(|error| error.to_string())
                         .and_then(|issued| issued);
                     match issued {
-                        Ok((device, token)) => {
-                            state.log_connection(peer, &format!("paired device {} ({})", device.id, device.name));
+                        Ok((device, token, replaced)) => {
+                            let message = if replaced.is_empty() {
+                                format!("paired device {} ({})", device.id, device.name)
+                            } else {
+                                format!("paired device {} ({}), replacing {}", device.id, device.name, replaced.join(", "))
+                            };
+                            state.log_connection(peer, &message);
                             token
                         }
                         Err(error) => {

@@ -99,8 +99,8 @@ fun connectionSummary(facts: ConnectionFacts): ConnectionSummary {
         )
         ConnectionState.ForwardingStuck -> ConnectionSummary(
             state, "Offline", "The guest doesn't answer",
-            "If Linux Terminal is already open, it may have stopped forwarding the connection. Force stop it in App info " +
-                "(that restarts the guest) and open it again. $meanwhile",
+            "If Linux Terminal is already open, it may have stopped forwarding the connection (turning on a VPN such as Tailscale can do this). " +
+                "Force stop it in App info (that restarts the guest) and open it again; if you use Tailscale, exclude Linux Terminal in its app split tunneling. $meanwhile",
         )
         ConnectionState.PairingRejected -> ConnectionSummary(
             state, "Pair again", "${where.replaceFirstChar(Char::uppercase)} needs pairing again",
@@ -137,13 +137,69 @@ fun endpointHostPort(endpoint: String): Pair<String, Int>? = runCatching {
     (uri.host ?: return null) to port
 }.getOrNull()
 
-/** The Connections dialog's checks (G22): null where it doesn't apply or isn't known yet. */
+/** The Connections dialog's checks (G22, G31): null where it doesn't apply or isn't known yet. */
 data class ConnectionCheck(
     /** Linux Terminal can be opened (only asked for the tablet's guest). */
     val terminalAvailable: Boolean?,
-    /** Something answers on the daemon's port. */
+    /** Something answers HTTP on the daemon's port. */
     val daemonAnswers: Boolean?,
     /** "127.0.0.1:19870". */
     val target: String?,
     val checking: Boolean,
+    /**
+     * Whether the TCP port accepted a socket connection at all (G31). When [portOpen] is true and
+     * [daemonAnswers] is false on the tablet, Linux Terminal's forwarder accepted `127.0.0.1:19870`
+     * on the host side, but nothing reached `quirecode-daemon` in the guest (e.g. after toggling a VPN).
+     */
+    val portOpen: Boolean? = null,
 )
+
+/**
+ * Probes [endpoint]'s port (G31), returning `(portOpen, daemonAnswers)`:
+ * - `(false, false)`: nothing is listening on the TCP port.
+ * - `(true, false)`: the TCP port accepted the connection (Linux Terminal's forwarder or a tunnel),
+ *   but nothing answered `GET /health` through it.
+ * - `(true, true)`: the daemon answered `GET /health` over the port.
+ */
+fun probeDaemonPort(endpoint: String, fingerprint: String? = null, timeoutMs: Int = 2_000): Pair<Boolean, Boolean> {
+    val (host, port) = endpointHostPort(endpoint) ?: return false to false
+    val tls = endpoint.trim().startsWith("wss://", ignoreCase = true)
+    return try {
+        java.net.Socket().use { tcp ->
+            tcp.soTimeout = timeoutMs
+            tcp.connect(java.net.InetSocketAddress(host, port), timeoutMs)
+            // TCP connected: the port itself is open. Now check whether the daemon answers /health through it.
+            val answers = runCatching {
+                val streamSocket: java.net.Socket = if (tls) {
+                    val factory = if (fingerprint != null) {
+                        val trust = io.github.kinteshi.quirecode.transport.PinnedCertificateTrustManager(fingerprint)
+                        javax.net.ssl.SSLContext.getInstance("TLS").apply { init(null, arrayOf(trust), null) }.socketFactory
+                    } else {
+                        javax.net.ssl.SSLSocketFactory.getDefault() as javax.net.ssl.SSLSocketFactory
+                    }
+                    (factory.createSocket(tcp, host, port, true) as javax.net.ssl.SSLSocket).apply {
+                        soTimeout = timeoutMs
+                        startHandshake()
+                    }
+                } else {
+                    tcp
+                }
+                val request = "GET /health HTTP/1.1\r\nHost: $host:$port\r\nConnection: close\r\n\r\n"
+                streamSocket.getOutputStream().apply {
+                    write(request.toByteArray(Charsets.US_ASCII))
+                    flush()
+                }
+                val statusLine = java.io.BufferedReader(java.io.InputStreamReader(streamSocket.getInputStream(), Charsets.US_ASCII)).readLine()
+                statusLine != null &&
+                    statusLine.startsWith("HTTP/") &&
+                    !statusLine.contains(" 502 ") &&
+                    !statusLine.contains(" 503 ") &&
+                    !statusLine.contains(" 504 ") &&
+                    !statusLine.contains(" 530 ")
+            }.getOrDefault(false)
+            true to answers
+        }
+    } catch (_: Exception) {
+        false to false
+    }
+}

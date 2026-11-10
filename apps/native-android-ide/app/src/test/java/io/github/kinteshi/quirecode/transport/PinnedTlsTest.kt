@@ -17,6 +17,15 @@ class PinnedTlsTest {
     }
 
     @Test
+    fun parsesPublicTlsTunnelConnectionStrings() {
+        val tunnel = parseConnectionString("avf://quirecode.example.com:443?fp=public&code=K7QM-2XPA")
+        assertEquals(ConnectionString("quirecode.example.com", 443, null, "K7QM-2XPA"), tunnel)
+        assertEquals("wss://quirecode.example.com:443/ws", tunnel!!.endpoint)
+        assertEquals(443, parseConnectionString("avf://quirecode.example.com?fp=public&code=C")!!.port)
+        assertNull(parseConnectionString("avf://quirecode.example.com?fp=public&code=C")!!.fingerprint)
+    }
+
+    @Test
     fun rejectsMissingOrMalformedFingerprints() {
         assertNull(parseConnectionString("avf://h:1?code=C"))
         assertNull(parseConnectionString("avf://h:1?fp=abc&code=C"))
