@@ -353,11 +353,28 @@ class DeviceTreeFs(private val resolver: ContentResolver, private val executor: 
 class RoutingVfs(
     private val guest: io.github.kinteshi.quirecode.transport.GuestVfsClient,
     val device: DeviceTreeFs,
+    /** Guest folders kept offline (G29 b): listed from here while the guest is away. */
+    val offline: OfflineIndex? = null,
 ) : io.github.kinteshi.quirecode.transport.GuestVfs {
     override fun connect(url: String, token: String): CompletableFuture<Unit> = guest.connect(url, token)
     override fun roots(): CompletableFuture<List<String>> = guest.roots()
-    override fun listDir(path: String) = if (isTreePath(path)) device.listDir(path) else guest.listDir(path)
-    override fun stat(path: String) = if (isTreePath(path)) device.stat(path) else guest.stat(path)
+
+    /** Whether [path] is listed from a kept folder's last sync now: the guest is away and the folder is kept. */
+    fun servesOffline(path: String): Boolean = !isTreePath(path) && !guest.isConnected() && offline?.serves(path) == true
+
+    override fun listDir(path: String) = when {
+        isTreePath(path) -> device.listDir(path)
+        servesOffline(path) -> offline?.listDir(path)?.let { CompletableFuture.completedFuture(it) }
+            ?: CompletableFuture.failedFuture(GuestVfsException("NotFound", "Not in the offline copy"))
+        else -> guest.listDir(path)
+    }
+
+    override fun stat(path: String) = when {
+        isTreePath(path) -> device.stat(path)
+        servesOffline(path) -> offline?.stat(path)?.let { CompletableFuture.completedFuture(it) }
+            ?: CompletableFuture.failedFuture(GuestVfsException("NotFound", "Not in the offline copy"))
+        else -> guest.stat(path)
+    }
     override fun read(path: String, offset: Long, length: Int) = if (isTreePath(path)) device.read(path, offset, length) else guest.read(path, offset, length)
     override fun write(path: String, offset: Long, content: ByteArray, truncate: Boolean, expectedModifiedTs: Long?) =
         if (isTreePath(path)) device.write(path, offset, content, truncate, expectedModifiedTs) else guest.write(path, offset, content, truncate, expectedModifiedTs)

@@ -101,6 +101,13 @@ data class RemoteConflict(
 
 data class DecodedDocument(val text: String, val encoding: String)
 
+/** This device's copy of a guest file (G29). */
+sealed interface CopyState {
+    data object None : CopyState
+    data object Edited : CopyState
+    data class Clean(val modifiedTs: Long?) : CopyState
+}
+
 sealed interface SaveResult {
     data class Saved(val modifiedTs: Long) : SaveResult
     data object QueuedOffline : SaveResult
@@ -267,6 +274,46 @@ class DocumentRepository(
 
     /** Whether this device keeps a copy of [path], so it opens without the guest. */
     fun hasCopy(path: String): Boolean = cache.contains(path)
+
+    /** What this device holds for [path]: nothing, a clean copy as of a modification time, or unsaved edits. */
+    fun copyState(path: String): CopyState = cache.load(path).let { snapshot ->
+        when {
+            snapshot == null -> CopyState.None
+            snapshot.dirty -> CopyState.Edited
+            else -> CopyState.Clean(snapshot.modifiedTs)
+        }
+    }
+
+    /**
+     * Keeps a clean copy of the guest's [path] (G29 "keep available offline"): read whole, decoded as when opened.
+     * False for a binary file (a NUL in its first 8 KB), which isn't kept. Never replaces unsaved edits.
+     */
+    fun storeCopy(path: String, size: Long, modifiedTs: Long): CompletableFuture<Boolean> {
+        if (cache.load(path)?.dirty == true) return CompletableFuture.completedFuture(true)
+        return readAll(path, size).handle { decoded, error ->
+            // A binary file isn't kept; any other failure (the guest went away) stops the sync.
+            if (error != null) {
+                if (generateSequence(error) { it.cause }.any { it is BinaryFileException }) return@handle false
+                throw java.util.concurrent.CompletionException(unwrap(error))
+            }
+            if (decoded.text.take(8_192).contains('\u0000')) return@handle false
+            if (cache.load(path)?.dirty == true) return@handle true
+            cache.save(
+                DocumentSnapshot(
+                    path,
+                    decoded.text,
+                    modifiedTs,
+                    dirty = false,
+                    encoding = decoded.encoding,
+                    eol = if (decoded.text.contains("\r\n")) "\r\n" else "\n",
+                ),
+            )
+            true
+        }
+    }
+
+    /** A copy's text, for searching what's kept offline. */
+    fun copyText(path: String): String? = cache.load(path)?.text
 
     /** Drops this device's copy of [path] unless it holds edits not saved to the guest. */
     fun forgetCleanCopy(path: String) {

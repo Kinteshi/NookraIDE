@@ -206,6 +206,41 @@ class DocumentRepositoryTest {
         draft.updateText("x")
         assertTrue(draft.dirty)
     }
+
+    @Test
+    fun storeCopyKeepsCleanTextFilesAndSkipsBinary() {
+        val vfs = FakeGuestVfs("print('hi')\n".toByteArray(), 10)
+        val cache = MemoryDocumentCache()
+        val repo = DocumentRepository(vfs, cache)
+        assertEquals(CopyState.None, repo.copyState("/workspace/main.py"))
+
+        val kept = repo.storeCopy("/workspace/main.py", 12, 10).join()
+        assertTrue(kept)
+        assertEquals(CopyState.Clean(10L), repo.copyState("/workspace/main.py"))
+        assertEquals("print('hi')\n", repo.copyText("/workspace/main.py"))
+
+        // Unsaved local edits are never replaced
+        cache.save(DocumentSnapshot("/workspace/main.py", "local edits\n", 10, dirty = true, encoding = "UTF-8", eol = "\n"))
+        assertEquals(CopyState.Edited, repo.copyState("/workspace/main.py"))
+        assertTrue(repo.storeCopy("/workspace/main.py", 12, 20).join())
+        assertEquals("local edits\n", repo.copyText("/workspace/main.py"))
+
+        // forgetCleanCopy leaves dirty edits alone
+        repo.forgetCleanCopy("/workspace/main.py")
+        assertEquals(CopyState.Edited, repo.copyState("/workspace/main.py"))
+
+        // forgetCleanCopy removes clean copies
+        cache.save(DocumentSnapshot("/workspace/other.py", "clean\n", 5, dirty = false, encoding = "UTF-8", eol = "\n"))
+        assertEquals(CopyState.Clean(5L), repo.copyState("/workspace/other.py"))
+        repo.forgetCleanCopy("/workspace/other.py")
+        assertEquals(CopyState.None, repo.copyState("/workspace/other.py"))
+
+        // Binary files with NUL in the first 8 KB are skipped
+        vfs.replaceExternally(byteArrayOf(0, 1, 2, 3), 30)
+        val binaryKept = repo.storeCopy("/workspace/binary.dat", 4, 30).join()
+        assertFalse(binaryKept)
+        assertEquals(CopyState.None, repo.copyState("/workspace/binary.dat"))
+    }
 }
 
 private class MemoryDeviceFiles(val files: MutableMap<String, ByteArray>) : DeviceFileStore {

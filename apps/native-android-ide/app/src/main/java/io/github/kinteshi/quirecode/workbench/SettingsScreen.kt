@@ -56,6 +56,7 @@ import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.FolderCopy
 import androidx.compose.material.icons.outlined.FolderZip
+import androidx.compose.material.icons.outlined.OfflinePin
 import androidx.compose.material.icons.outlined.FormatIndentIncrease
 import androidx.compose.material.icons.outlined.FormatListNumbered
 import androidx.compose.material.icons.outlined.FormatPaint
@@ -417,6 +418,33 @@ private fun LazyListScope.saving(settings: WorkbenchSettings, set: SetSetting) {
 }
 
 private fun LazyListScope.files(controller: WorkbenchController, settings: WorkbenchSettings, set: SetSetting) {
+    // Guest folders kept on this device (G29 b): set from Explorer's menu on a folder, listed here.
+    item { Section("Kept offline") }
+    val kept = controller.keptOfflineFolders
+    if (kept.isEmpty()) {
+        item {
+            SettingRow(
+                Icons.Outlined.OfflinePin,
+                "No folder kept offline",
+                "In Explorer, a folder's menu: Keep available offline. Its text files are then on this device, updated each time the guest connects, and Explorer, Quick Open and search work on it while the guest is away",
+            ) {}
+        }
+    }
+    kept.forEach { folder ->
+        item {
+            val tree = controller.offlineTree(folder)
+            val left = tree?.skipped?.size ?: 0
+            val count = (tree?.entries?.count { !it.isDirectory } ?: 0) - left
+            val updated = tree?.syncedAt?.let { java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT).format(java.util.Date(it)) }
+            ActionRow(
+                Icons.Outlined.OfflinePin,
+                folder.substringAfterLast('/'),
+                "$folder · $count files kept, ${formatBytes(tree?.bytes ?: 0)}" +
+                    (if (left > 0) ", $left left out (binary or too large)" else "") + (updated?.let { " · updated $it" } ?: "") +
+                    if (controller.connected) ". Tap to update now; Explorer's menu stops keeping it" else ". Updated when the guest connects",
+            ) { controller.keepOffline(folder) }
+        }
+    }
     item { Section("Explorer") }
     item { SwitchRow(Icons.Outlined.AccountTree, "Explorer tree", "Folders open in place below themselves; off opens one folder at a time", settings.explorerTree) { set(WorkbenchSettings.EXPLORER_TREE, it) } }
     item { SwitchRow(Icons.Outlined.FolderCopy, "Compact folders", "A folder holding only one folder shows as one row, like src/main/java", settings.compactFolders) { set(WorkbenchSettings.COMPACT_FOLDERS, it) } }

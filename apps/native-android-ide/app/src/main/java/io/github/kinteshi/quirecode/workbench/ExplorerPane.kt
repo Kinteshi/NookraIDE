@@ -25,6 +25,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.OfflinePin
 import androidx.compose.material.icons.outlined.DriveFolderUpload
 import androidx.compose.material.icons.outlined.FileUpload
 import androidx.compose.material.icons.outlined.ContentCopy
@@ -104,9 +105,10 @@ fun ExplorerList(controller: WorkbenchController) {
     // Changes made in a terminal since the last save or Git action show when Explorer opens.
     LaunchedEffect(controller.connected) { if (controller.connected && controller.settings.gitDecorations) controller.refreshGitStatus() }
     when {
-        controller.offline -> OfflineFilesList(controller)
+        // A kept folder (G29 b) is listed as of its last sync, as Explorer always does; otherwise the files with copies.
+        controller.offline && !controller.offlineServed -> OfflineFilesList(controller)
         // The connection's own words (G22): set up, connecting, offline and why.
-        !controller.workspaceAvailable && controller.roots.isEmpty() -> controller.connection.let { summary ->
+        !controller.workspaceAvailable && !controller.offlineServed && controller.roots.isEmpty() -> controller.connection.let { summary ->
             EmptyState(Icons.Outlined.CloudOff, summary.title, "Explorer shows the files of the machine QuireCode is connected to.") {
                 androidx.compose.material3.FilledTonalButton(onClick = controller::openConnect) {
                     Text(if (summary.state == ConnectionState.NotSetUp) "Set up" else "Connections")
@@ -249,7 +251,17 @@ private fun ExplorerTree(controller: WorkbenchController, directory: String) {
                             } else {
                                 Modifier
                             },
-                            trailing = mark?.let { { ExplorerMark(it, dark) } },
+                            // A folder kept offline (G29 b) carries a pin, before any Git or problem mark.
+                            trailing = if (entry.isDirectory && controller.isKeptOffline(entry.path)) {
+                                {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Icon(Icons.Outlined.OfflinePin, contentDescription = "Kept offline", modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
+                                        mark?.let { ExplorerMark(it, dark) }
+                                    }
+                                }
+                            } else {
+                                mark?.let { { ExplorerMark(it, dark) } }
+                            },
                             labelColor = mark?.tone?.color(dark),
                         ) {
                             when {
@@ -463,6 +475,14 @@ private fun EntryMenu(
         item("Select", Icons.Outlined.CheckBox) { controller.toggleExplorerSelection(entry.path) }
         item("Share…", Icons.Outlined.Share) { controller.shareEntries(listOf(entry.path)) }
         item("Save to the device…", Icons.Outlined.Download) { controller.beginSaveToDevice(listOf(entry.path)) }
+        if (entry.isDirectory && io.github.kinteshi.quirecode.document.isGuestPath(entry.path)) {
+            // Its text files on this device too, kept up to date on each connect (G29 b).
+            if (controller.isKeptOffline(entry.path)) {
+                item("Stop keeping offline", Icons.Outlined.CloudOff) { controller.stopKeepingOffline(entry.path) }
+            } else if (controller.connected) {
+                item("Keep available offline", Icons.Outlined.OfflinePin) { controller.keepOffline(entry.path) }
+            }
+        }
         if (entry.isDirectory) {
             item("Import files here…", Icons.Outlined.FileUpload) { controller.beginImportFiles(entry.path) }
             item("Import a folder here…", Icons.Outlined.DriveFolderUpload) { controller.beginImportFolder(entry.path) }

@@ -1,17 +1,18 @@
 # Native IDE (Track B) — handoff
 
-Last updated: 2026-11-08 (UTC−3). Read this first when resuming. The batch plan and its status are in [NATIVE-IDE-BATCHES.md](NATIVE-IDE-BATCHES.md). Scope decisions are in
+Last updated: 2026-11-09 (UTC−3). Read this first when resuming. The batch plan and its status are in [NATIVE-IDE-BATCHES.md](NATIVE-IDE-BATCHES.md). Scope decisions are in
 [NATIVE-ANDROID-IDE-SPEC.md](NATIVE-ANDROID-IDE-SPEC.md) under "Scope reset (2026-10-23)". How work is done here (Material You,
 the engine seam, batches, testing on the device) is in [CONTRIBUTING.md](../CONTRIBUTING.md).
 
-## Current state (2026-11-08)
+## Current state (2026-11-09)
 
-* **Progress:** batches 1–57 are done, 58 under way (41 was exploration with no app change). Each is described in the batch plan.
+* **Progress:** batches 1–66 are done (41 was exploration with no app change). Each is described in the batch plan.
 * **What's open:** [Open backlog](NATIVE-IDE-BATCHES.md#open-backlog-11-08), in two lists: general, and the Aardink switch's, which replaces this file's old "Remaining" list.
-* **Release 0.1.0 under way (batch 58):** R3 (Apache-2.0, NOTICE, notices generated and shown in Settings > About), R4 (release builds with R8, signing from the environment), R5 (CI and release workflows, release notes drafted) and R11's secrets scan are done. Waiting on the user: the name (R2), the release key, the copyright line in NOTICE, and what to do with the first two commits' personal email. Next: R6 (daemon version check), R7 to R10 (first run, Material You pass, diagnostics, what stays out), then R11's repository steps, each destructive one confirmed first. Batch 57, the one before it, is done: sora-editor removed (A6), offline fixes (G14, G5), the guest stopping explained (G17), the hover card's Docs tab (G20), an off-screen window (G6). Left from it: A7 (the user's try on the Book Cover and on-screen keyboard) and G17's check with the guest stopped on purpose. Everything decided and still open (licence Apache-2.0, the name shortlist, the repository clean-up) is in [RELEASE-PLAN.md](RELEASE-PLAN.md).
+* **Release 0.1.0 on hold:** all release backlog items (R1–R10: Apache-2.0, notices, signing, CI workflows, QuireCode renaming, diagnostics) and branch consolidation (R11) are finished. Tagging and release are paused awaiting user decision on repository visibility.
+* **Offline & remote features (batches 62–66):** file sharing/import/export (group 9, batch 62), Tailscale daemon hardening (batch 63), device folder workspaces without a guest (batch 64), paired device management UI (batch 65), and guest folders kept offline with sync, offline Explorer, Quick Open, and offline search (batch 66).
 * **The switch to Aardink:** [AARDINK-SWITCH-PLAN.md](AARDINK-SWITCH-PLAN.md). All phases are done (batches 42 to 57), on Aardink 0.9.0 (batch 45): **Aardink is the editor**; sora-editor was removed in batch 57, and tm4e is the app's own `tm4e` module. The workbench's own Material You cards are drawn over Aardink from its geometry (batch 54). Review each Aardink release against the plan (its "Release reviews"). Requests to Aardink are drafted or listed, not filed.
 * **Waiting on the user:** whether to continue the glibc test (backlog item 70 d). Claude Code's permission system blocked it, so it needs the user's approval.
-* **Tablet:** the latest build is installed (batch 57). The sections "Reference tablet" and "Done" below mostly date from 10-23, so some of what they describe may have moved on. The batch plan is the record since then.
+* **Tablet:** the latest build is installed (batch 66). The sections "Reference tablet" and "Done" below mostly date from 10-23, so some of what they describe may have moved on. The batch plan is the record since then.
 
 ## Where things are
 
@@ -34,7 +35,7 @@ cargo test -p avf-daemon -p avf-protocol
 PATH=$HOME/.cargo/bin:$PATH cargo zigbuild --release -p avf-daemon --target aarch64-unknown-linux-gnu.2.28
 ```
 
-At last run (batch 65): 391 app unit tests (on Java 21, installed beside 17) and 136 daemon tests, all passing; CI runs both on every push.
+At last run (batch 66): 394 app unit tests (on Java 21, installed beside 17) and 143 daemon/protocol tests, all passing; CI runs both on every push.
 
 ## Reference tablet (Galaxy Tab S11 Ultra, SM-X930)
 

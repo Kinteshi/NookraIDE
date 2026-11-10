@@ -2942,6 +2942,41 @@ User's request (11-09): "Go for 1" (the paired devices in the app).
   itself after pairing, knowing its old device id); the tablet's own guest daemon needs updating (the app's Update, or
   the installer) before its devices show here.
 
+## 66. A guest folder kept available offline (G29 step b) (11-09; done, checked on the tablet)
+User's request (11-09): "Please, resume the ongoing work of G29. You have access to everything you need."
+
+* **"Keep available offline" on guest folders (G29 step b):**
+  * **Explorer & palette:** Explorer's folder context menu gains *Keep available offline* / *Stop keeping offline* (with an
+    `OfflinePin` icon); kept folders show the pin icon in the Explorer tree. The palette gains *Files: Keep Workspace Available
+    Offline* and *Files: Stop Keeping Workspace Offline*.
+  * **Offline index & persistence:** `OfflineIndex` stores a JSON tree description per folder under `files/offline-folders/`
+    (SHA-256 hash filename), recording entry paths, sizes, modification times, sync timestamps, skipped paths, and total bytes.
+  * **Sync engine:** `WorkbenchController.syncOfflineFolder` walks the folder via guest VFS, enforces safety bounds (max 2 MB per
+    file, max 5,000 files, max 256 MB in all), stores clean text copies in `EncryptedDocumentCache` via `DocumentRepository.storeCopy`
+    (skips binary files with NUL in first 8 KB; never overwrites dirty local edits), and prunes deleted files via `forgetCleanCopy`.
+    On reconnect, `updateOfflineFolders` automatically refreshes each kept folder once pending dirty saves are reconciled.
+  * **Seamless offline browsing:** `RoutingVfs` routes `listDir` and `stat` calls to `OfflineIndex` while `servesOffline` is true
+    (guest is disconnected and path is inside or leading down to a kept folder). Explorer tree displays the synced folder structure
+    instead of the empty or offline-fallback list.
+  * **File operations offline:** opening a cached file (`openPath`) loads the clean copy from cache without failing; saves queue
+    optimistically (`SaveResult.QueuedOffline`) and mark documents dirty; Quick Open (`refreshQuickOpenIndex`) walks the kept tree
+    offline; and Find in Files (`searchOfflineCopies`) streams regex/case/word search results over cached text without a guest.
+  * **Settings:** Files & Explorer displays a *Kept offline* section listing each kept folder, file count, size, skipped count,
+    and formatted sync time. Tapping updates the folder immediately if connected.
+  * **Stop keeping offline:** removes the saved tree index and evicts clean cached file copies from device storage (open tabs and
+    dirty edits are preserved).
+* **Checked on the tablet (SM-X930):**
+  * Dev app connected to `Linux guest`: kept `/home/droid/Projects` offline (3 files, 1.0 MB synced).
+  * Checked Settings > Files & Explorer: displayed `Projects` with 3 files kept, 1.0 MB, and the sync timestamp.
+  * Switched connection to an unreachable offline profile: verified Explorer tree remained visible and pinned, `example.py`
+    opened cleanly from local cache with syntax highlighting and breadcrumbs, Quick Open listed the workspace files, and Find in
+    Files for "DataFrame" streamed 22 matches across 3 files offline.
+  * Switched connection back to `Linux guest`, deleted test profile, tested *Stop keeping offline* (verified `offline-folders/` was
+    cleared), closed open editor tab, and returned to clean state.
+* **Tests:** 394 app unit tests passing (added `storeCopyKeepsCleanTextFilesAndSkipsBinary` in `DocumentRepositoryTest`),
+  143 daemon/protocol cargo tests passing.
+* **Left for G29:** (c) notebooks without a kernel, and offline previews (Markdown, SVG, images).
+
 ## Backlog
 ### Open backlog (11-08)
 The current lists of what's open, in two: the general backlog, and the Aardink switch's until it's complete. The older
@@ -2975,7 +3010,7 @@ Grouped (11-08) so that what's cheaper done together is done together; the numbe
 | | G26 | – | S | **Share the editor's selection**: the selected text (in a file, a cell, an output) through the share sheet, from the editor's context and touch menus and the command palette |
 | | G27 | – | M | **Download to the device's storage**: files or folders from Explorer to a place the user picks (Android's file picker), kept there; the option to zip them into one archive (a setting for the default). Progress and the size before starting, as large folders come from the guest over the connection |
 | | G28 | – | M | **Import into Explorer**: files or a whole folder from the device (Android's file picker) into the folder chosen in Explorer, with replace or keep both on name clashes. Builds on receiving shared files (the share sheet into the workspace) and Open from device |
-| **10. Beyond the tablet's guest** (user, 11-09) | G29 | – | Step (a) done (64); (b), (c) left | **Fully usable offline, without a guest** (user: "where possible"). What can be: (a) **a device folder as the workspace** (Android's folder picker: Documents, a synced folder), with Explorer, tabs, editing, Quick Open, find and replace in files done in the app and saves straight to the device (M–L, the first step); (b) **"Keep available offline"** for a guest folder: all of it copied to the device and synced back with conflict checks, beyond today's copies of opened files (M–L); (c) what already needs no guest, made whole: colours, snippets, previews (Markdown, SVG, images, hex), notebooks edited with their saved outputs (no kernel). What can't be without some machine: language servers, debuggers, kernels, terminals, Copilot and the agents (they run in the guest). Later, research: a Python kernel in the browser engine (Pyodide in a WebView) for notebooks (L+). Overlaps G18 |
+| **10. Beyond the tablet's guest** (user, 11-09) | G29 | – | Steps (a) done (64), (b) done (66); (c) left | **Fully usable offline, without a guest** (user: "where possible"). What can be: (a) **a device folder as the workspace** (Android's folder picker: Documents, a synced folder), with Explorer, tabs, editing, Quick Open, find and replace in files done in the app and saves straight to the device (M–L, the first step); (b) **"Keep available offline"** for a guest folder: all of it copied to the device and synced back with conflict checks, beyond today's copies of opened files (M–L); (c) what already needs no guest, made whole: colours, snippets, previews (Markdown, SVG, images, hex), notebooks edited with their saved outputs (no kernel). What can't be without some machine: language servers, debuggers, kernels, terminals, Copilot and the agents (they run in the guest). Later, research: a Python kernel in the browser engine (Pyodide in a WebView) for notebooks (L+). Overlaps G18 |
 | | G30 | – | Steps 1 and 4 done (63), devices in the app (65); left: Cloudflare Tunnel, port forwarding, the earlier pairing revoked by itself on pairing again | **The daemon reachable over the internet.** Done in batch 63: Tailscale (`--tailscale`), device tokens, revoking, limits, the connection log. Left: (2) Cloudflare Tunnel with a public certificate, (3) port forwarding, and the paired devices listed and revoked from the app. The original suggestions: Suggested, in order: (1) **a private network** (Tailscale, or ZeroTier or WireGuard) on the computer and the tablet: the daemon listens on that network's address, nothing is open to the internet, and today's pinned certificate and token work as they are; an installer option that puts that address in the connection string, and a guide (S–M). (2) **A public address through Cloudflare Tunnel** (or similar), behind Cloudflare Access: the app then checks a public certificate instead of pinning one (a per-connection setting) (M). (3) **Router port forwarding with dynamic DNS**: works with pinning today but exposes the daemon; not without (4). (4) **Hardening first**, for any of them: limits on handshake attempts, revoking a paired device, a log of connections (S–M) |
 | | G31 | – | S | (One restart with the VPN on fixed it, batch 64; left: whether turning the VPN on breaks it each time.) **Linux Terminal stopped forwarding the guest's port when the tablet's Tailscale VPN came on** (batch 63's live test): the daemon was healthy inside the guest, the port answered nothing. Find out whether restarting Linux Terminal with the VPN on fixes it for good or the VPN breaks it each time; then say so in the app (Troubleshoot can tell "port open, no answer" apart) and in the guide (a Tailscale exclusion or split tunnelling for Linux Terminal, if that helps) |
 

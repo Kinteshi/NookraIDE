@@ -36,6 +36,10 @@ import io.github.kinteshi.quirecode.document.devicePath
 import io.github.kinteshi.quirecode.document.isDevicePath
 import io.github.kinteshi.quirecode.document.isGuestPath
 import io.github.kinteshi.quirecode.document.DeviceTreeFs
+import io.github.kinteshi.quirecode.document.OfflineIndex
+import io.github.kinteshi.quirecode.document.globMatches
+import io.github.kinteshi.quirecode.document.lineMatcher
+import io.github.kinteshi.quirecode.document.CopyState
 import io.github.kinteshi.quirecode.document.RoutingVfs
 import io.github.kinteshi.quirecode.document.isTreePath
 import io.github.kinteshi.quirecode.document.treeDisplayPath
@@ -251,6 +255,10 @@ internal fun sessionTabs(loaded: List<String>, waiting: List<String>, order: Map
 /** Per folder, the guest files this device has a copy of (the document cache), for Explorer offline. */
 private const val OFFLINE_FILES_PREFIX = "offline-files:"
 private const val OFFLINE_FILES_LIMIT = 200
+/** Keeping a folder offline (G29 b): files kept up to this size each, this many, and this much in all. */
+private const val MAX_OFFLINE_FILE_BYTES = 2L * 1024 * 1024
+private const val MAX_OFFLINE_FILES = 5_000
+private const val MAX_OFFLINE_TOTAL_BYTES = 256L * 1024 * 1024
 
 /** Copilot starts again after 3, 6 and 12 s when its server fails to start. */
 private const val COPILOT_START_RETRIES = 3
@@ -314,7 +322,11 @@ class WorkbenchController(private val context: Context) {
     private val preferences = context.getSharedPreferences("native-ide-settings", Context.MODE_PRIVATE)
     private val cache = EncryptedDocumentCache(context)
     /** The guest's files and device folders' (G29), each call sent where its path lives. */
-    val files = RoutingVfs(vfs, DeviceTreeFs(context.contentResolver, Executors.newFixedThreadPool(2)))
+    val files = RoutingVfs(
+        vfs,
+        DeviceTreeFs(context.contentResolver, Executors.newFixedThreadPool(2)),
+        OfflineIndex(java.io.File(context.filesDir, "offline-folders")),
+    )
     val repository = DocumentRepository(files, cache, ContentResolverFileStore(context))
     val editorHost = EditorSurfaceHost()
     private val io = Executors.newSingleThreadExecutor()
@@ -1194,6 +1206,8 @@ class WorkbenchController(private val context: Context) {
                 documents.filter { it.dirty && isGuestPath(it.path) }.forEach(::reconcileDocument)
                 refreshCleanDocuments()
                 forgetMissingRecentFolders(guestRoots)
+                // Kept folders catch up with what changed in the guest meanwhile (after the queued saves above).
+                updateOfflineFolders(guestRoots)
             }
         }
     }
@@ -1240,7 +1254,7 @@ class WorkbenchController(private val context: Context) {
 
     fun runSearch() {
         scheduledSearch?.cancel(false)
-        activeSearch?.let { if (!files.device.cancelSearch(it)) vfs.cancelSearch(it) }
+        activeSearch?.let { if (offlineSearches.remove(it)?.set(true) == null && !files.device.cancelSearch(it)) vfs.cancelSearch(it) }
         activeSearch = null
         searchResults.clear()
         val text = searchText
@@ -1250,7 +1264,7 @@ class WorkbenchController(private val context: Context) {
             return
         }
         val root = workspaceRoot
-        if (root == null || !files.isConnected(root)) {
+        if (root == null || !files.isConnected(root) && !files.servesOffline(root)) {
             searchRunning = false
             searchSummary = "Connect to a guest to search"
             return
@@ -1302,7 +1316,12 @@ class WorkbenchController(private val context: Context) {
             }
         }
         // A device folder is searched by the app (G29), the guest's by ripgrep in the guest.
-        requestId = if (isTreePath(root)) files.device.search(query, ::isExcluded, onEvent) else vfs.search(query, onEvent)
+        requestId = when {
+            isTreePath(root) -> files.device.search(query, ::isExcluded, onEvent)
+            // A kept folder while the guest is away (G29 b): its copies, searched here.
+            files.servesOffline(root) -> searchOfflineCopies(query, onEvent)
+            else -> vfs.search(query, onEvent)
+        }
         activeSearch = requestId
         if (requestId == null) {
             searchRunning = false
@@ -3107,7 +3126,8 @@ class WorkbenchController(private val context: Context) {
                 unreachableFailures++
                 // Seen on the tablet: the guest and daemon run, but Terminal reports no forwarded
                 // port until it is force-stopped and opened again.
-                guestForwardingSuspected = unreachableFailures >= 2
+                // Only the tablet's own guest is behind Linux Terminal's forwarding; a computer is just away.
+                guestForwardingSuspected = unreachableFailures >= 2 && isTabletGuestEndpoint(endpoint)
                 val stoppedAt = guestStoppedAt
                 guestProblem = if (guestForwardingSuspected) {
                     "Still can't reach the guest daemon. If Linux Terminal is already open, it may have stopped " +
@@ -3119,7 +3139,9 @@ class WorkbenchController(private val context: Context) {
                     "Can't reach the guest daemon. Open Linux Terminal so the guest starts; if it was reset, set it up again."
                 }
                 status = guestProblem!!
-                if (reconnectAttempt > 0) scheduleReconnect()
+                // Always retry (with backoff): the first attempt after launch failing scheduled none before, so a
+                // computer that came back later (or a guest started from outside the app) was never noticed.
+                scheduleReconnect()
             }
             else -> {
                 connectFailure = rejected?.message ?: error.cause?.message ?: error.message
@@ -3388,8 +3410,8 @@ class WorkbenchController(private val context: Context) {
         restoreActive = active
         restorePreview = saved.preview
         open.sortedBy { it == active }.forEach { openPath(it, preview = it == saved.preview, background = it != active) }
-        // Offline there is no folder to list; Explorer shows the files this device has instead.
-        if (!files.isConnected(workspace)) return
+        // Offline there is no folder to list (but a kept one's last sync); Explorer shows the files this device has instead.
+        if (!files.isConnected(workspace) && !files.servesOffline(workspace)) return
         saved.directory?.takeIf { isPathWithinRoot(it, workspace) && it != workspace }?.let(::loadDirectory)
         saved.expanded.orEmpty().filter { isPathWithinRoot(it, workspace) }.forEach { path ->
             expandedFolders.add(path)
@@ -3469,6 +3491,12 @@ class WorkbenchController(private val context: Context) {
         sessionWorkspace = target
         sessionRestored = false
         restoreSession(target)
+        // A kept folder (G29 b) is listed as of its last sync: Explorer, Quick Open and search work on it.
+        if (files.servesOffline(target)) {
+            loadDirectory(target)
+            quickOpenIndex = emptyList()
+            refreshQuickOpenIndex()
+        }
         status = "Offline: ${target.substringAfterLast('/')} from this device; saves wait for the guest"
     }
 
@@ -3982,7 +4010,7 @@ class WorkbenchController(private val context: Context) {
     // Explorer and documents -----------------------------------------------------------------
 
     fun loadDirectory(path: String) {
-        if (!files.isConnected(path)) {
+        if (!files.isConnected(path) && !files.servesOffline(path)) {
             status = "Connect to a guest to browse files"
             return
         }
@@ -4003,7 +4031,7 @@ class WorkbenchController(private val context: Context) {
     fun refreshQuickOpenIndex() {
         val root = workspaceRoot ?: return
         if (quickOpenIndexing && quickOpenWalkRoot == root) return
-        if (!files.isConnected(root)) return
+        if (!files.isConnected(root) && !files.servesOffline(root)) return
         quickOpenWalk?.cancel()
         quickOpenIndexing = true
         quickOpenWalkRoot = root
@@ -4765,6 +4793,144 @@ class WorkbenchController(private val context: Context) {
         }
     }
 
+    // Folders kept available offline (G29 b) -----------------------------------------------------------
+
+    private val offlineSearches = java.util.concurrent.ConcurrentHashMap<Long, java.util.concurrent.atomic.AtomicBoolean>()
+    private val offlineSearchIds = java.util.concurrent.atomic.AtomicLong(2_000_000_000L)
+
+    /** Find in files over a kept folder's copies, streamed as the daemon's search is (same results panel). */
+    private fun searchOfflineCopies(query: io.github.kinteshi.quirecode.transport.SearchQuery, listener: (SearchEvent) -> Unit): Long {
+        val requestId = offlineSearchIds.incrementAndGet()
+        val cancelled = java.util.concurrent.atomic.AtomicBoolean(false)
+        offlineSearches[requestId] = cancelled
+        val root = query.roots.first().trimEnd('/')
+        Thread({
+            val started = System.currentTimeMillis()
+            var total = 0
+            var truncated = false
+            runCatching {
+                val matcher = lineMatcher(query)
+                for (file in offlineIndex.filesUnder(root).sortedBy { it.path }) {
+                    if (cancelled.get() || truncated) break
+                    val relative = file.path.removePrefix("$root/")
+                    if (isExcluded(file.path)) continue
+                    if (query.include.isNotEmpty() && query.include.none { globMatches(it, relative) }) continue
+                    if (query.exclude.any { globMatches(it, relative) }) continue
+                    val text = repository.copyText(file.path) ?: continue
+                    text.lineSequence().forEachIndexed { index, line ->
+                        if (truncated) return@forEachIndexed
+                        matcher(line).forEach { (column, length) ->
+                            if (total >= query.maxResults) { truncated = true; return@forEach }
+                            total++
+                            listener(SearchEvent.Match(requestId, file.path, index + 1, column, length, line.take(2_048)))
+                        }
+                    }
+                }
+            }.onFailure { error -> if (!cancelled.get()) listener(SearchEvent.Error(requestId, error.message ?: "Search failed")) }
+            if (!cancelled.get()) listener(SearchEvent.Done(requestId, total, truncated, (System.currentTimeMillis() - started).toInt()))
+            offlineSearches.remove(requestId)
+        }, "offline-search").start()
+        return requestId
+    }
+
+    private val offlineIndex get() = files.offline!!
+
+    /** Bumped when a folder is kept or dropped, so Explorer's marks and menus redraw. */
+    var offlineFoldersRevision by mutableStateOf(0)
+        private set
+
+    /** A kept folder's last sync, for Settings. */
+    fun offlineTree(folder: String): OfflineIndex.Tree? = offlineFoldersRevision.let { offlineIndex.tree(folder) }
+
+    fun isKeptOffline(folder: String): Boolean = offlineFoldersRevision.let { offlineIndex.isKept(folder) }
+
+    /** The kept folders of the open workspace's guest, for Settings. */
+    val keptOfflineFolders: List<String> get() = offlineFoldersRevision.let { offlineIndex.folders }
+
+    /** Explorer and Quick Open are served from a kept folder's last sync: the workspace is the guest's, which is away. */
+    val offlineServed: Boolean get() = offlineFoldersRevision.let { workspaceRoot?.let(files::servesOffline) == true }
+
+    /** Explorer's "Keep available offline" on [folder]: its text files copied to this device and its listing kept. */
+    fun keepOffline(folder: String) {
+        if (!connected || !isGuestPath(folder)) {
+            status = "Connect to the guest to keep its files on this device"
+            return
+        }
+        runTransfer("Keeping ${folder.substringAfterLast('/')} offline") { progress -> syncOfflineFolder(folder, progress) }
+    }
+
+    /** Stops keeping [folder]: its listing goes, and its copies without unsaved edits (open tabs keep theirs). */
+    fun stopKeepingOffline(folder: String) {
+        val tree = offlineIndex.tree(folder) ?: return
+        offlineIndex.remove(folder)
+        offlineFoldersRevision++
+        val open = documents.map { it.path }.toSet()
+        io.execute { tree.entries.filter { !it.isDirectory && it.path !in open }.forEach { repository.forgetCleanCopy(it.path) } }
+        status = "${folder.substringAfterLast('/')} is no longer kept offline"
+    }
+
+    /** After connecting: each kept folder of this guest syncs, one after the other, in one progress card. */
+    private fun updateOfflineFolders(guestRoots: List<String>) {
+        val kept = offlineIndex.folders.filter { folder -> guestRoots.any { isPathWithinRoot(folder, it) } }
+        if (kept.isEmpty() || transfer != null) return
+        runTransfer("Updating offline copies") { progress ->
+            kept.joinToString("; ") { folder -> syncOfflineFolder(folder, progress) }
+        }
+    }
+
+    /**
+     * Walks [folder] in the guest, keeps a copy of each text file that changed since (up to the limits), drops the copies
+     * of files gone from it, and saves its listing. Unsaved edits are never touched. Blocking, on the transfer thread.
+     */
+    private fun syncOfflineFolder(folder: String, progress: (Int, Int, Long, Long) -> Unit): String {
+        fun cancelled() { if (transferCancelled.get()) throw TransferCancelled() }
+        val entries = mutableListOf<FileEntry>()
+        val queue = ArrayDeque(listOf(folder))
+        while (queue.isNotEmpty()) {
+            cancelled()
+            val dir = queue.removeFirst()
+            files.listDir(dir).get(2, TimeUnit.MINUTES).sortedBy { it.name }.forEach { entry ->
+                if (isExcluded(entry.path)) return@forEach
+                entries += entry
+                if (entry.isDirectory && walksIntoForQuickOpen(entry.name)) queue.addLast(entry.path)
+            }
+        }
+        val candidates = entries.filter { !it.isDirectory }
+        val skipped = mutableListOf<String>()
+        var total = 0L
+        val kept = candidates.filter { file ->
+            val fits = file.size <= MAX_OFFLINE_FILE_BYTES && total + file.size <= MAX_OFFLINE_TOTAL_BYTES
+            if (fits) total += file.size else skipped += file.path
+            fits
+        }.let { list -> list.take(MAX_OFFLINE_FILES).also { skipped += list.drop(MAX_OFFLINE_FILES).map(FileEntry::path) } }
+        var done = 0
+        var bytes = 0L
+        var binary = 0
+        kept.forEach { file ->
+            cancelled()
+            val state = repository.copyState(file.path)
+            val current = state is CopyState.Edited ||
+                (state as? CopyState.Clean)?.modifiedTs == file.modifiedTs
+            if (!current && !repository.storeCopy(file.path, file.size, file.modifiedTs).get(2, TimeUnit.MINUTES)) {
+                skipped += file.path
+                binary++
+            }
+            done++
+            bytes += file.size
+            progress(done, kept.size, bytes, total)
+        }
+        // Files gone from the guest since the last sync: their copies go too (unless edited here).
+        val present = candidates.map { it.path }.toSet()
+        val open = documents.map { it.path }.toSet()
+        offlineIndex.tree(folder)?.entries?.filter { !it.isDirectory && it.path !in present && it.path !in open }
+            ?.forEach { repository.forgetCleanCopy(it.path) }
+        offlineIndex.save(OfflineIndex.Tree(folder, entries, System.currentTimeMillis(), skipped, total))
+        post { offlineFoldersRevision++ }
+        val name = folder.substringAfterLast('/')
+        return "$name kept offline: ${kept.size - binary} files, ${formatBytes(total)}" +
+            if (skipped.isNotEmpty()) " (${skipped.size} left out: binary or too large)" else ""
+    }
+
     /** Copy the paths of [paths] (the selection bar), one per line. */
     fun copyPaths(paths: List<String>) {
         val clipboard = context.getSystemService(android.content.ClipboardManager::class.java) ?: return
@@ -5385,7 +5551,7 @@ class WorkbenchController(private val context: Context) {
 
     /** Lists Explorer's folder and the folders open in it again, and checks the open files are still there. */
     fun refreshExplorer() {
-        if (!workspaceAvailable) return
+        if (!workspaceAvailable && !offlineServed) return
         documents.forEach { checkFileExists(it.path) }
         currentDirectory.takeIf(String::isNotEmpty)?.let(::loadDirectory)
         // Reload open folders; ones that went away (deleted, renamed) close.
@@ -10662,6 +10828,8 @@ class WorkbenchController(private val context: Context) {
                 ?: run { status = "Only the guest's files can be saved to the device from here" }
             "quirecode.importFiles" -> beginImportFiles()
             "quirecode.openDeviceFolder" -> beginOpenDeviceFolder()
+            "quirecode.keepWorkspaceOffline" -> guestWorkspace?.let(::keepOffline) ?: run { status = "Open a guest folder to keep it offline" }
+            "quirecode.stopKeepingWorkspaceOffline" -> guestWorkspace?.let(::stopKeepingOffline)
             "quirecode.importFolder" -> beginImportFolder()
             "notebook.cell.toggleLineNumbers" -> toggleCellLineNumbers()
             "notebook.cell.triggerSuggest" -> triggerCellSuggest()
