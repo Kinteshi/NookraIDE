@@ -257,8 +257,9 @@ scripts/install-native-daemon.sh   guest and Linux installer (--remote, --tailsc
   * Each paired device has its own token, stored as a SHA-256 digest in `devices.json`.
   * The shared install token is accepted only from loopback.
   * Failed attempts are limited (10 in 10 minutes, loopback exempt), and connections are logged.
-  * Anything that makes remote traffic arrive from loopback (a reverse proxy, a tunnel) breaks these assumptions. Treat
-    it as a security change.
+  * A tunnel or reverse proxy on the machine connects from loopback. The daemon's `effective_peer` takes such a
+    connection, when it carries proxy headers, as the remote client (batch 69). A raw TCP forward carries no headers
+    and still looks local. Treat any change here as a security change.
 * **Protocol changes:** add a feature string in Welcome, and make the app check it before using the new messages. Old
   daemons must keep working.
 

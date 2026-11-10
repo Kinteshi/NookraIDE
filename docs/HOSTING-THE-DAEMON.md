@@ -20,6 +20,9 @@ with its CPU and memory.
   others (see [Paired devices and the connection log](#paired-devices-and-the-connection-log)).
 * The installer's shared token (in `~/.config/quirecode/env`) works **only from the machine itself**
   (the tablet's own guest, behind Linux Terminal). From the network, only paired devices connect.
+  A connection through a tunnel or reverse proxy on the machine (Cloudflare Tunnel, nginx) counts as
+  from the network: it comes from 127.0.0.1, but carries the proxy's headers, and the daemon goes by
+  the client address the proxy reports.
 * An address that fails 10 times in 10 minutes (wrong tokens or codes) is refused until the oldest
   failure is 10 minutes old; the app says how long to wait.
 * Anyone with a device's token has your user account's access to the workspace folder and a shell.
@@ -92,16 +95,14 @@ The tablet reaches the computer whenever Tailscale is on, on any network. A new 
 On Windows, run Tailscale inside the WSL distro (it needs systemd, as the daemon does) and install
 the daemon there with `--tailscale`; the PowerShell script isn't needed then.
 
-> **Using Tailscale alongside the tablet's own Linux guest:** Turning on Android's VPN (such as
-> Tailscale) while **Linux Terminal** is already running can stop Linux Terminal from forwarding
-> `127.0.0.1:19870` to the tablet's local guest — the port still accepts a TCP connection on the
-> tablet, so nothing looks closed, but no HTTP response comes back from the guest daemon. To avoid
-> this:
-> 1. In the Tailscale Android app, open **App Split Tunneling** and exclude **Terminal**
->    (`com.android.virtualization.terminal`) from the VPN, while leaving **QuireCode** included so it
->    still reaches your tailnet.
-> 2. If local guest forwarding already stopped after toggling the VPN, open Android's **App info**
->    for **Terminal**, tap **Force stop**, and open **Terminal** again.
+> **Using Tailscale alongside the tablet's own Linux guest:** once, turning on Tailscale on the
+> tablet while **Linux Terminal** was running stopped Linux Terminal from forwarding
+> `127.0.0.1:19870` to the guest. The port still accepted a connection, so nothing looked closed, but
+> the daemon never answered through it (Troubleshoot says "Port 127.0.0.1:19870 is open, but nothing
+> answers through it"). Force stopping **Terminal** in Android's **App info** and opening it again
+> fixed it, and it didn't come back with the VPN still on. If it keeps happening, excluding
+> **Terminal** (`com.android.virtualization.terminal`) in Tailscale's **App Split Tunneling** may
+> help; that's untested, so tell us if it does.
 
 ## Away from home without a VPN on the tablet: Cloudflare Tunnel
 
@@ -118,7 +119,7 @@ validated by Android's trusted Root CAs (`fp=public`).
    ```
 
 2. Point a Cloudflare Tunnel at `http://127.0.0.1:19870` (for a quick test, `cloudflared tunnel --url http://127.0.0.1:19870`;
-   for everyday use, a named tunnel on your domain, ideally behind a Cloudflare Access service token or policy).
+   for everyday use, a named tunnel on your domain).
 
 3. Issue a pairing string for the tunnel's hostname:
 
@@ -128,6 +129,20 @@ validated by Android's trusted Root CAs (`fp=public`).
 
    It prints `avf://quirecode.example.com:443?fp=public&code=XXXX-XXXX`. Paste that into **Add a
    connection → A computer on your network** in QuireCode.
+
+How the daemon treats tunnel traffic: `cloudflared` connects to the daemon from 127.0.0.1, but adds
+`CF-Connecting-IP` with the real client's address. The daemon goes by that address, so through the
+tunnel the shared token is refused, failed attempts are limited per client, and `quirecode-daemon log`
+shows where each connection came from. This relies on the tunnel being an **HTTP** service as above.
+A raw TCP forward to the loopback port (`cloudflared access tcp`, `ssh -L`, `socat`) adds no headers,
+so its clients look like the machine itself; use those only between machines you control.
+
+The tunnel's hostname is public: anyone can reach the daemon, and only the pairing code and device
+tokens keep them out. That is the same protection as a forwarded router port, with TLS from Cloudflare
+instead of a pinned certificate. Cloudflare decrypts the traffic on its way through (tokens and
+files included), so this means trusting Cloudflare; Tailscale's connections are end-to-end encrypted. A [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/policies/access/)
+policy in front would add a second lock, but the app can't sign in to Access or send a service token
+yet, so such a policy blocks it too. If you want that, Tailscale is the better fit today.
 
 ## Router port forwarding
 
@@ -147,7 +162,7 @@ on your home router to the computer running `--remote`:
 Because an open router port is reachable by internet scanners, **Tailscale** (`--tailscale`) or
 **Cloudflare Tunnel** (`--tunnel`) is strongly preferred whenever possible. When a port is forwarded,
 the daemon still requires TLS with the pinned certificate fingerprint, rejects the shared loopback
-token from the network, requires a one-time pairing code (5 minutes, 5 attempts), and blocks any
+token from the network, requires a one-time pairing code (10 minutes, 5 attempts), and blocks any
 address after 10 failed attempts within 10 minutes (`quirecode-daemon log`).
 
 ## Paired devices and the connection log
@@ -161,9 +176,11 @@ quirecode-daemon log                   # the last 40 connections, pairings and r
 The same list is in the app: the connection chip's **Connections** dialog, while connected, shows the devices paired
 with that computer (the one in use marked "This device"), revokes one, and shows the recent connections.
 
-A device's name is what the app sends when it pairs: "QuireCode on" and the tablet's name. Pairing
-again from the same named device automatically replaces its earlier pairing so stale entries don't
-accumulate. The log is `~/.config/quirecode/connections.log`, kept under 256 KB. A device paired
+A device's name is what the app sends when it pairs: "QuireCode on" and the tablet's name. When the
+app pairs again with a computer it already has a connection to, it sends its old token along, and
+the daemon replaces that earlier pairing (the log says "replacing its earlier pairing"). Pairings are
+never replaced by name: two tablets of one model have the same name, and any app can claim one. A
+pairing whose token the app no longer has (after reinstalling it) stays listed; revoke it. The log is `~/.config/quirecode/connections.log`, kept under 256 KB. A device paired
 before these existed has the shared token: from the network it's refused, so pair it again.
 
 ## Windows computer (WSL2)
@@ -215,7 +232,7 @@ exposes it on your network.
 | Symptom in the app | Likely cause |
 |---|---|
 | "Can't reach HOST:PORT" | Different network, firewall closed, the daemon isn't running (`systemctl --user status quirecode`), or on Windows the WSL distro stopped (run the logon task: `Start-ScheduledTask "AVF Studio daemon (WSL)"`). |
-| "Port 127.0.0.1:19870 is open, but nothing answers through it" | On the tablet, Linux Terminal's port forwarder accepted the socket on `127.0.0.1:19870` but nothing reached the guest daemon (often after turning on a VPN such as Tailscale). Force stop **Terminal** in Android's **App info** and open it again, and exclude **Terminal** in Tailscale's **App Split Tunneling**. |
+| "Port 127.0.0.1:19870 is open, but nothing answers through it" | On the tablet, Linux Terminal's port forwarder accepted the socket on `127.0.0.1:19870` but nothing reached the guest daemon (often after turning on a VPN such as Tailscale). Force stop **Terminal** in Android's **App info** and open it again. If it keeps happening with Tailscale on, try excluding **Terminal** in Tailscale's **App Split Tunneling** (untested). |
 | "doesn't match the connection string" | The certificate changed (for example `~/.config/quirecode/tls` was deleted). Run `pair --remote` again and paste the new string. |
 | "No pairing code is active" | The code expired, was used, or ran out of attempts. Run `pair --remote` again. |
 | "The guest rejected the saved token" | The daemon was reinstalled with a new token, the device was revoked, or it was paired before device tokens existed (the shared token works only on the machine itself). Pair again. |

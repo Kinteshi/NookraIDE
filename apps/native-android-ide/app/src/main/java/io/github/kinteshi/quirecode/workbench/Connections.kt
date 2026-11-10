@@ -100,7 +100,7 @@ fun connectionSummary(facts: ConnectionFacts): ConnectionSummary {
         ConnectionState.ForwardingStuck -> ConnectionSummary(
             state, "Offline", "The guest doesn't answer",
             "If Linux Terminal is already open, it may have stopped forwarding the connection (turning on a VPN such as Tailscale can do this). " +
-                "Force stop it in App info (that restarts the guest) and open it again; if you use Tailscale, exclude Linux Terminal in its app split tunneling. $meanwhile",
+                "Force stop it in App info (that restarts the guest) and open it again. $meanwhile",
         )
         ConnectionState.PairingRejected -> ConnectionSummary(
             state, "Pair again", "${where.replaceFirstChar(Char::uppercase)} needs pairing again",

@@ -1116,14 +1116,25 @@ class WorkbenchController(private val context: Context) {
     fun deleteProfile(id: String) {
         profileStore.delete(id)
         profiles = profileStore.profiles()
-        if (profileId == id) {
-            newProfile()
-            connectionCheck = null
-            // Its problems go with it; away, the next saved connection is the one to connect to.
-            resetConnectionProblems()
-            if (!connected) {
-                guestStoppedAt = null
-                profiles.firstOrNull()?.let(::selectProfile)
+        if (profileId != id) return
+        connectionCheck = null
+        // Its problems go with it; the next saved connection is the one to connect to.
+        resetConnectionProblems()
+        guestStoppedAt = null
+        val next = profiles.firstOrNull()
+        when {
+            // Connected through it: that connection closes with it (it went on, under the next connection's name, until
+            // batch 69), and the next saved connection is tried as a switch would.
+            connected && next != null -> switchConnection(next)
+            connected -> {
+                replacingConnection = true
+                forgetMachineExplorer()
+                newProfile()
+                vfs.disconnect()
+            }
+            else -> {
+                newProfile()
+                next?.let(::selectProfile)
             }
         }
     }
@@ -3288,7 +3299,9 @@ class WorkbenchController(private val context: Context) {
         busy = true
         pairingError = null
         status = "Pairing with the guest"
-        vfs.pair(target, code, deviceName = pairingDeviceName()).whenComplete { newToken, error ->
+        // The token used there before, if any: the daemon then replaces that pairing rather than keeping a stale one.
+        val previousToken = existing?.let { profileStore.token(it.id) }
+        vfs.pair(target, code, deviceName = pairingDeviceName(), previousToken = previousToken).whenComplete { newToken, error ->
             post {
                 busy = false
                 if (error != null) {
@@ -3331,7 +3344,8 @@ class WorkbenchController(private val context: Context) {
         busy = true
         pairingError = null
         status = "Pairing with ${parsed.host}"
-        vfs.pair(parsed.endpoint, parsed.code, parsed.fingerprint, pairingDeviceName()).whenComplete { newToken, error ->
+        val previousToken = profiles.firstOrNull { it.endpoint == parsed.endpoint }?.let { profileStore.token(it.id) }
+        vfs.pair(parsed.endpoint, parsed.code, parsed.fingerprint, pairingDeviceName(), previousToken).whenComplete { newToken, error ->
             post {
                 busy = false
                 if (error != null) {
@@ -4216,16 +4230,15 @@ class WorkbenchController(private val context: Context) {
             }
             return
         }
-        repository.fileSize(path).whenComplete { size, error ->
+        vfs.stat(path).whenComplete { entry, error ->
             post {
-                if (error != null || size == null) {
+                if (error != null || entry == null) {
                     status = "Hex view failed: ${error?.cause?.message ?: error?.message}"
                 } else {
-                    hexFiles[path] = HexFile(path, size)
-                    if (isGuestPath(path) && size <= MAX_OFFLINE_FILE_BYTES) {
-                        repository.readBytes(path, MAX_OFFLINE_FILE_BYTES.toInt()).thenAccept { bytes ->
-                            repository.storeBytesCopy(path, bytes, null)
-                        }
+                    hexFiles[path] = HexFile(path, entry.size)
+                    // A small file is kept so it reopens offline; read again only when it changed since the last copy.
+                    if (isGuestPath(path) && entry.size <= MAX_OFFLINE_FILE_BYTES) {
+                        repository.refreshBytesCopy(path, entry.size, entry.modifiedTs)
                     }
                 }
             }
@@ -5050,9 +5063,14 @@ class WorkbenchController(private val context: Context) {
         if (isGuestPath(path) && !vfs.isConnected() && !repository.hasCopy(path)) {
             throw java.io.IOException("Connect to the guest to show this image")
         }
+        if (!isGuestPath(path) || !vfs.isConnected()) return repository.readBytes(path, MAX_PREVIEW_IMAGE_BYTES).get(30, TimeUnit.SECONDS)
+        // A copy as of the guest's modification time is shown as is: no download, and nothing stored again. Otherwise
+        // the image is read and, when small, kept so it shows offline.
+        val entry = vfs.stat(path).get(30, TimeUnit.SECONDS)
+        repository.currentCopyBytes(path, entry.modifiedTs)?.let { return it }
         val bytes = repository.readBytes(path, MAX_PREVIEW_IMAGE_BYTES).get(30, TimeUnit.SECONDS)
-        if (isGuestPath(path) && vfs.isConnected() && bytes.size <= MAX_OFFLINE_FILE_BYTES) {
-            runCatching { repository.storeBytesCopy(path, bytes, null) }
+        if (bytes.size <= MAX_OFFLINE_FILE_BYTES) {
+            runCatching { repository.storeBytesCopy(path, bytes, entry.modifiedTs) }
         }
         return bytes
     }

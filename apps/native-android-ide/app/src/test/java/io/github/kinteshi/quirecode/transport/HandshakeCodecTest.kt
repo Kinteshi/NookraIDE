@@ -89,6 +89,15 @@ class HandshakeCodecTest {
     fun pairingSendsTheDeviceName() {
         val packet = MessagePack.newDefaultUnpacker(MessagePackVfsCodec.pair("ABCD-EFGH", "QuireCode on Galaxy Tab")).unpackValue().toString()
         assert(packet.contains("QuireCode on Galaxy Tab")) { packet }
+        assert(!packet.contains("previous_token")) { packet }
+    }
+
+    @Test
+    fun pairingAgainSendsTheOldTokenAsProofOfOwnership() {
+        val packet = MessagePack.newDefaultUnpacker(MessagePackVfsCodec.pair("ABCD-EFGH", "Tab", "f".repeat(64))).unpackValue().toString()
+        assert(packet.contains("\"previous_token\":\"${"f".repeat(64)}\"")) { packet }
+        val blank = MessagePack.newDefaultUnpacker(MessagePackVfsCodec.pair("ABCD-EFGH", "Tab", " ")).unpackValue().toString()
+        assert(!blank.contains("previous_token")) { blank }
     }
 
     @Test

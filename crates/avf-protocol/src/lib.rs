@@ -116,6 +116,11 @@ pub enum SystemMessage {
         protocol_version: u32,
         code: String,
         client_name: String,
+        /// The token this device used before, if it had one here: proof that the device owns that earlier pairing,
+        /// which the daemon then removes. Matched by token, never by name, since names repeat (two tablets of one
+        /// model) and any client can choose one.
+        #[serde(default)]
+        previous_token: Option<String>,
     },
     /// Reply to Pair; the daemon closes the connection and the client reconnects with Hello.
     Paired {
@@ -759,12 +764,21 @@ mod tests {
             other => panic!("expected a search request, got {other:?}"),
         }
         match decode(&bytes("81a653797374656d81a45061697283b070726f746f636f6c5f76657273696f6e02a4636f6465a9414243442d45464748ab636c69656e745f6e616d65b66176662d6e61746976652d616e64726f69642d696465")).unwrap() {
-            MultiplexedPacket::System(SystemMessage::Pair { code, protocol_version, .. }) => {
+            MultiplexedPacket::System(SystemMessage::Pair { code, protocol_version, previous_token, .. }) => {
                 assert_eq!(code, "ABCD-EFGH");
                 assert_eq!(protocol_version, PROTOCOL_VERSION);
+                // Apps from before batch 69 send no previous token.
+                assert_eq!(previous_token, None);
             }
             other => panic!("expected Pair, got {other:?}"),
         }
+        let again = MultiplexedPacket::System(SystemMessage::Pair {
+            protocol_version: PROTOCOL_VERSION,
+            code: "ABCD-EFGH".into(),
+            client_name: "Tab".into(),
+            previous_token: Some("f".repeat(64)),
+        });
+        assert_eq!(decode(&encode(&again)).unwrap(), again);
     }
 
     use super::*;

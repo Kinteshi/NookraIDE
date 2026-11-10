@@ -340,6 +340,25 @@ class DocumentRepository(
         )
     }
 
+    /**
+     * Keeps a byte copy of the guest's [path] for viewing it offline (the hex view), reading it only when this device
+     * has no copy as of [modifiedTs]: opening the same file again costs no second download, and its copy isn't
+     * re-encrypted each time. Unsaved edits are never replaced.
+     */
+    fun refreshBytesCopy(path: String, size: Long, modifiedTs: Long): CompletableFuture<Unit> {
+        val current = when (val state = copyState(path)) {
+            CopyState.None -> false
+            CopyState.Edited -> true
+            is CopyState.Clean -> state.modifiedTs == modifiedTs
+        }
+        if (current) return CompletableFuture.completedFuture(Unit)
+        return readBytes(path, size.toInt().coerceAtLeast(1)).thenApply { bytes -> storeBytesCopy(path, bytes, modifiedTs) }
+    }
+
+    /** This device's copy of [path] when it's current as of [modifiedTs], else null. */
+    fun currentCopyBytes(path: String, modifiedTs: Long): ByteArray? =
+        (copyState(path) as? CopyState.Clean)?.takeIf { it.modifiedTs == modifiedTs }?.let { copyBytes(path) }
+
     /** A copy's text, for searching what's kept offline (binary copies have no searchable text). */
     fun copyText(path: String): String? = cache.load(path)?.takeIf { it.encoding != BINARY_CACHE_ENCODING }?.text
 
@@ -416,7 +435,6 @@ class DocumentRepository(
     fun readRange(path: String, offset: Long, length: Int): CompletableFuture<ByteArray> =
         vfs.read(path, offset, length).thenApply { it.content }
 
-    fun fileSize(path: String): CompletableFuture<Long> = vfs.stat(path).thenApply { it.size }
 
     private fun readDeviceBytes(path: String, limit: Int): CompletableFuture<ByteArray> {
         val store = deviceFiles ?: return CompletableFuture.failedFuture(IOException("Device files can't be read here"))

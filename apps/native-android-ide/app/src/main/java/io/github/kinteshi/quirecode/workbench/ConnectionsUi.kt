@@ -344,8 +344,7 @@ private fun Troubleshooting(controller: WorkbenchController) {
                 if (facts.tabletGuest) {
                     "Port $target is open, but nothing answers through it: the daemon isn't running in the guest, or Linux " +
                         "Terminal's port forwarding stopped (turning on a VPN such as Tailscale can do this). Open Linux Terminal; if " +
-                        "it's already open, force stop it in App info and open it again. If you use Tailscale, exclude Linux Terminal in " +
-                        "Tailscale's app split tunneling."
+                        "it's already open, force stop it in App info and open it again."
                 } else {
                     "Port $target is open, but the daemon didn't answer through it: if this connects through a tunnel or reverse " +
                         "proxy, check that quirecode-daemon is running on the computer behind it."

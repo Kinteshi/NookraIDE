@@ -97,7 +97,13 @@ class GuestVfsClient(
      * Exchanges a one-time pairing code for the guest's session token over a short-lived
      * connection; the caller then connects normally with the token.
      */
-    fun pair(url: String, code: String, fingerprint: String? = null, deviceName: String = "avf-native-android-ide"): CompletableFuture<String> {
+    fun pair(
+        url: String,
+        code: String,
+        fingerprint: String? = null,
+        deviceName: String = "avf-native-android-ide",
+        previousToken: String? = null,
+    ): CompletableFuture<String> {
         validateUrl(url, fingerprint)
         val result = CompletableFuture<String>()
         val request = Request.Builder().url(url).header("Origin", NATIVE_APP_ORIGIN).build()
@@ -105,7 +111,7 @@ class GuestVfsClient(
             request,
             object : WebSocketListener() {
                 override fun onOpen(webSocket: WebSocket, response: Response) {
-                    if (!webSocket.send(ByteString.of(*MessagePackVfsCodec.pair(code.trim(), deviceName)))) {
+                    if (!webSocket.send(ByteString.of(*MessagePackVfsCodec.pair(code.trim(), deviceName, previousToken)))) {
                         result.completeExceptionally(IOException("Could not send the pairing request"))
                     }
                 }
@@ -571,6 +577,18 @@ class GuestVfsClient(
             listener(GitEvent.Error(requestId, error.message ?: "Guest connection lost"))
         }
         gitListeners.clear()
+    }
+
+    /**
+     * Closes the connection on purpose (the connection it was made with was deleted); unlike [close], [connect] works
+     * again afterwards. Listeners hear of it at once rather than when the daemon answers the close.
+     */
+    fun disconnect() {
+        val current = socket ?: return
+        socket = null
+        current.close(1000, "disconnected")
+        failPending(IOException("Guest connection closed"))
+        connectionStateListener?.invoke(false, null)
     }
 
     override fun close() {

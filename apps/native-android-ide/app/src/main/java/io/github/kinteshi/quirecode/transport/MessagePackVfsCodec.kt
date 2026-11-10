@@ -41,13 +41,17 @@ internal object MessagePackVfsCodec {
 
     /**
      * First packet of a pairing connection: trades a one-time code for a token. [deviceName] is what the daemon lists
-     * this device as (`quirecode-daemon devices`), to revoke it by.
+     * this device as (`quirecode-daemon devices`), to revoke it by. [previousToken], the token this device used there
+     * before, proves the earlier pairing is this device's, so the daemon replaces it instead of keeping both; daemons
+     * from before batch 69 ignore it.
      */
-    fun pair(code: String, deviceName: String = "avf-native-android-ide"): ByteArray = packet("System", "Pair") {
-        packMapHeader(3)
+    fun pair(code: String, deviceName: String = "avf-native-android-ide", previousToken: String? = null): ByteArray = packet("System", "Pair") {
+        val previous = previousToken?.takeIf(String::isNotBlank)
+        packMapHeader(if (previous != null) 4 else 3)
         stringField("protocol_version", 2)
         stringField("code", code)
         stringField("client_name", deviceName)
+        if (previous != null) stringField("previous_token", previous)
     }
 
     fun searchStart(requestId: Long, search: SearchQuery): ByteArray = packet("Search", "StartReq") {

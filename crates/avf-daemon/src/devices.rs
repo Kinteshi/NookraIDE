@@ -97,32 +97,32 @@ pub fn now_secs() -> u64 {
 }
 
 /// Pairs a device called [name]: a new token for it, returned once and kept here only as a digest.
-/// Earlier pairings with the same device name are replaced so pairing again doesn't leave stale entries.
 #[cfg(test)]
 pub fn issue(path: &Path, name: &str) -> Result<(Device, String), String> {
-    let (device, token, _) = issue_replacing(path, name)?;
+    let (device, token, _) = issue_replacing(path, name, None)?;
     Ok((device, token))
 }
 
-/// Like [issue], also returning the IDs of any earlier pairings for the same named device that were replaced.
-pub fn issue_replacing(path: &Path, name: &str) -> Result<(Device, String, Vec<String>), String> {
+/// Like [issue], and when [previous_token] belongs to a device paired here, that pairing is replaced: the device is
+/// pairing again (after reinstalling the app, or a pairing it no longer trusts) and proves it owned the old one by
+/// presenting its token. Returns the replaced device's id. Never matched by name: names repeat (two tablets of one
+/// model) and any client can choose one, so a name would let one device unpair another.
+pub fn issue_replacing(path: &Path, name: &str, previous_token: Option<&str>) -> Result<(Device, String, Option<String>), String> {
     let _guard = REGISTRY_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let mut registry = read(path)?;
     let token = random_hex(32);
     let clean_name: String = name.chars().filter(|c| !c.is_control()).take(80).collect();
     let trimmed = clean_name.trim();
-    let mut replaced = Vec::new();
-    if !trimmed.is_empty() {
-        registry.devices.retain(|existing| {
-            let same = existing.name.eq_ignore_ascii_case(trimmed);
-            if same {
-                replaced.push(existing.id.clone());
-            }
-            !same
-        });
-    }
+    let replaced = previous_token.filter(|token| !token.is_empty()).and_then(|previous| {
+        let presented = digest(previous);
+        let index = registry
+            .devices
+            .iter()
+            .position(|device| device.token_sha256.as_bytes().ct_eq(presented.as_bytes()).unwrap_u8() == 1)?;
+        Some(registry.devices.remove(index).id)
+    });
     let mut id = random_hex(3);
-    while registry.devices.iter().any(|device| device.id == id) || replaced.contains(&id) {
+    while registry.devices.iter().any(|device| device.id == id) || replaced.as_ref() == Some(&id) {
         id = random_hex(3);
     }
     let device = Device {
@@ -152,7 +152,7 @@ pub fn authenticate(path: &Path, token: &str, address: Option<IpAddr>) -> Result
     };
     let device = &mut registry.devices[index];
     device.last_seen = Some(now_secs());
-    device.last_address = address.map(|address| address.to_string());
+    device.last_address = address.map(|address| if address.is_unspecified() { "proxied".to_owned() } else { address.to_string() });
     let found = device.clone();
     // Noting the last use is a convenience; a failed write doesn't refuse the device.
     let _ = write(path, &registry);
@@ -256,7 +256,12 @@ pub fn log(path: &Path, address: Option<IpAddr>, what: &str) {
     let line = format!(
         "{} {} {}\n",
         format_time(now_secs()),
-        address.map(|address| address.to_string()).unwrap_or_else(|| "-".to_owned()),
+        match address {
+            None => "-".to_owned(),
+            // A client behind a local proxy that didn't say who it is (see the daemon's effective_peer).
+            Some(address) if address.is_unspecified() => "proxied".to_owned(),
+            Some(address) => address.to_string(),
+        },
         what.replace('\n', " "),
     );
     let _ = (|| -> std::io::Result<()> {
@@ -378,20 +383,27 @@ mod tests {
     }
 
     #[test]
-    fn pairing_again_with_the_same_name_replaces_the_earlier_pairing() {
+    fn pairing_again_replaces_only_the_pairing_whose_token_is_presented() {
         let dir = temp_dir("repair");
         let path = devices_path(&dir);
-        let (first, first_token, first_replaced) = issue_replacing(&path, "QuireCode on SM-X930").unwrap();
-        assert!(first_replaced.is_empty());
-        let (_, other_token) = issue(&path, "QuireCode on Pixel").unwrap();
-        let (second, second_token, replaced) = issue_replacing(&path, "QuireCode on SM-X930").unwrap();
-        assert_eq!(replaced, vec![first.id.clone()]);
+        let (first, first_token, first_replaced) = issue_replacing(&path, "QuireCode on SM-X930", None).unwrap();
+        assert!(first_replaced.is_none());
+        // A second tablet of the same model keeps the first one's pairing: names prove nothing.
+        let (twin, twin_token, twin_replaced) = issue_replacing(&path, "QuireCode on SM-X930", None).unwrap();
+        assert!(twin_replaced.is_none());
+        // A wrong or unknown token replaces nothing.
+        let (stranger, _, stranger_replaced) = issue_replacing(&path, "QuireCode on Pixel", Some("not-a-token")).unwrap();
+        assert!(stranger_replaced.is_none());
+        // The first tablet pairs again with its old token: only its own entry goes.
+        let (second, second_token, replaced) = issue_replacing(&path, "QuireCode on SM-X930", Some(&first_token)).unwrap();
+        assert_eq!(replaced, Some(first.id.clone()));
         assert_ne!(first.id, second.id);
         assert!(!is_paired(&path, &first.id));
         assert!(authenticate(&path, &first_token, None).unwrap().is_none());
         assert_eq!(authenticate(&path, &second_token, None).unwrap().unwrap().id, second.id);
-        assert!(authenticate(&path, &other_token, None).unwrap().is_some());
-        assert_eq!(list(&path).unwrap().len(), 2);
+        assert_eq!(authenticate(&path, &twin_token, None).unwrap().unwrap().id, twin.id);
+        assert!(is_paired(&path, &stranger.id));
+        assert_eq!(list(&path).unwrap().len(), 3);
     }
 
     #[test]

@@ -4,8 +4,10 @@ import io.github.kinteshi.quirecode.transport.FileEntry
 import io.github.kinteshi.quirecode.transport.GuestVfs
 import io.github.kinteshi.quirecode.transport.GuestVfsException
 import io.github.kinteshi.quirecode.transport.IncomingPacket
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.nio.charset.StandardCharsets
@@ -205,6 +207,29 @@ class DocumentRepositoryTest {
         draft.updateText("xy")
         draft.updateText("x")
         assertTrue(draft.dirty)
+    }
+
+    @Test
+    fun aViewedBinaryIsDownloadedAndStoredAgainOnlyWhenItChanged() {
+        val vfs = FakeGuestVfs(byteArrayOf(0, 1, 2, 3), 10)
+        val repo = DocumentRepository(vfs, MemoryDocumentCache())
+        val path = "/workspace/logo.png"
+
+        repo.refreshBytesCopy(path, 4, 10).join()
+        assertEquals(1, vfs.readRequests.size)
+        assertEquals(CopyState.Clean(10L), repo.copyState(path))
+        assertArrayEquals(byteArrayOf(0, 1, 2, 3), repo.currentCopyBytes(path, 10))
+
+        // Opened again unchanged: no second download.
+        repo.refreshBytesCopy(path, 4, 10).join()
+        assertEquals(1, vfs.readRequests.size)
+
+        // Changed on the guest: the copy is stale, so it's read and kept again.
+        assertNull(repo.currentCopyBytes(path, 20))
+        vfs.replaceExternally(byteArrayOf(9, 9), 20)
+        repo.refreshBytesCopy(path, 2, 20).join()
+        assertEquals(2, vfs.readRequests.size)
+        assertArrayEquals(byteArrayOf(9, 9), repo.currentCopyBytes(path, 20))
     }
 
     @Test

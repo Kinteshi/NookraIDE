@@ -2973,6 +2973,19 @@ User's request (11-09): "Please, resume the ongoing work of G29. You have access
     Files for "DataFrame" streamed 22 matches across 3 files offline.
   * Switched connection back to `Linux guest`, deleted test profile, tested *Stop keeping offline* (verified `offline-folders/` was
     cleared), closed open editor tab, and returned to clean state.
+* **Also checked before the commit, with this machine as the computer over Tailscale** (added in batch 69; this run and
+  its fixes were left out of the entry above):
+  * Kept a 3-file test folder; with the daemon stopped, the folder opened, a file was edited and saved (queued), Quick Open
+    and Find in files worked from the copies, and *Stop keeping offline* worked while offline.
+  * The queued save reached the computer when the app reconnected by itself, and the next sync picked up a file changed
+    on the computer.
+  * **Found and fixed on the way:**
+    * A binary file failed the whole sync; it's skipped now (`BinaryFileException` → not kept).
+    * The folders leading down to a kept folder weren't listed offline; `OfflineIndex.listDir` lists them now.
+    * The first failed attempt after launch scheduled no reconnect, so a computer that came back wasn't noticed;
+      reconnects are always scheduled now.
+    * The "Linux Terminal stopped forwarding" diagnosis showed for a computer; it's only for the tablet's guest now.
+    * Settings' kept count was unclear; it now says how many files were kept and how many skipped.
 * **Tests:** 394 app unit tests passing (added `storeCopyKeepsCleanTextFilesAndSkipsBinary` in `DocumentRepositoryTest`),
   143 daemon/protocol cargo tests passing.
 * **Left for G29:** (c) notebooks without a kernel, and offline previews (Markdown, SVG, images).
@@ -3023,6 +3036,82 @@ User's request (11-09): "Go for option A."
   * Verified all three `probeDaemonPort` states live in **Connections → Troubleshoot**: port refused (`127.0.0.1:19879` closed → `"Nothing answers at 127.0.0.1:19879..."`), port open without HTTP reply (`127.0.0.1:19879` with silent TCP listener → `"Port 127.0.0.1:19879 is open, but nothing answers through it... exclude Linux Terminal in Tailscale's app split tunneling."`), and daemon answering (`127.0.0.1:19870` → `"The daemon answers at 127.0.0.1:19870"`). Removed the temporary profile and left `QuireCode Dev` connected to `Linux guest` on `/home/droid/Projects`.
 * **Tests:** 398 app unit tests and 144 daemon/protocol cargo tests passing.
 
+## 69. Fixes from reviewing batches 66–68: tunnel traffic counted as remote, re-pairing by proof of ownership, and deleting the connection in use (11-10; done, checked on the tablet with this machine as the computer)
+User's request (11-10): "Go for your suggestion" (the review's fixes: Cloudflare Tunnel's loopback trust, re-pairing by
+name, the untested Tailscale advice, the image and hex caching, and batch 66's test notes).
+
+* **Connections through a tunnel or reverse proxy count as remote (`crates/avf-daemon/src/lib.rs`):**
+  * **The problem:** `cloudflared` connects to the daemon from 127.0.0.1, so since batch 68's `--tunnel`, clients from the
+    internet passed as the machine itself:
+    * the shared install token was accepted from them;
+    * failed attempts weren't limited (loopback is exempt);
+    * the log showed 127.0.0.1.
+  * **The fix:** `effective_peer` treats a loopback connection that carries proxy headers (`CF-Connecting-IP`, `CF-Ray`,
+    `True-Client-IP`, `X-Real-IP`, `X-Forwarded-For`, `Forwarded`) as the client the proxy names. It reads the addresses
+    the nearest proxy sets, and the last `X-Forwarded-For` entry rather than the client-supplied first ones. When no
+    address is given, the client counts as an unknown remote one (logged as "proxied").
+  * **Why headers are safe to trust here:** they only ever lower trust, so faking them gains nothing.
+  * **What it doesn't cover:** raw TCP forwards (`ssh -L`, `cloudflared access tcp`) add no headers, so they still look
+    local. The guide says so.
+  * **Tests:** a unit test of `effective_peer`, and an end-to-end test. Through a loopback connection with
+    `CF-Connecting-IP` the shared token is refused, a device token works, and the log shows the client's address.
+    Without the header, the shared token still works from the machine.
+* **Pairing again replaces the earlier pairing only with proof of ownership (protocol, daemon, app):**
+  * **The problem:** batch 68 replaced pairings by device *name*. Names repeat ("QuireCode on Tab S11 Ultra" for two
+    tablets of one model) and any client chooses its own, so pairing one device unpaired another.
+  * **The protocol:** `Pair` gains an optional `previous_token`. Older apps and daemons ignore it.
+  * **The daemon:** `devices::issue_replacing` removes only the device whose token digest matches that token.
+  * **The app:** it sends the saved token of the connection it re-pairs: the tablet's guest, or the profile with the same
+    endpoint.
+  * **Tests:** a daemon test where twins, wrong tokens and the owner each pair, and protocol and app codec tests (the
+    old wire bytes still decode).
+* **Deleting the connection in use closes it (`WorkbenchController.deleteProfile`, `GuestVfsClient.disconnect`), found while
+  checking this batch:**
+  * **The problem:** it stayed connected to the deleted daemon under the next connection's name. The dialog said
+    "Connected to Linux guest" while the guest was off, and showed the deleted daemon's devices and folder.
+  * **The fix:** that connection now closes, Explorer forgets that machine's folders, and the next saved connection is
+    tried as a switch would. With none left, the app disconnects.
+* **The Tailscale split-tunnelling advice is no longer stated as a fix:**
+  * Batch 68 told users to exclude Linux Terminal from Tailscale in three places: the banner, Troubleshoot and the guide.
+    It was never tried; in batch 63's live test one Terminal restart was enough.
+  * The app now says to force stop and reopen Linux Terminal. The guide describes what was seen, and offers the exclusion
+    as an untested idea.
+* **Images and the hex view don't download and store the same file again (`DocumentRepository.refreshBytesCopy` /
+  `currentCopyBytes`):**
+  * **Before:** batch 67 re-encrypted a copy on every image view, and the hex view read the whole file a second time just
+    to keep it.
+  * **Images:** a copy as of the guest's modification time is now shown without downloading.
+  * **Both:** a copy is read and stored only when there's none or the file changed. Copies now record the guest's
+    modification time (they had none before).
+  * **Test:** `aViewedBinaryIsDownloadedAndStoredAgainOnlyWhenItChanged`.
+* **Docs (`docs/HOSTING-THE-DAEMON.md`):**
+  * how the daemon treats tunnel traffic, and the raw TCP caveat;
+  * that Cloudflare decrypts the traffic it carries;
+  * that the app can't pass Cloudflare Access yet, so an Access policy blocks it;
+  * re-pairing by token;
+  * the pairing code's lifetime corrected to 10 minutes in the port-forwarding section.
+
+  Batch 66's entry gains the live Tailscale test and its fixes, which it had left out.
+* **Checked on the tablet (dev app, this machine's daemon over `adb reverse`, TLS):**
+  * **Re-pairing:** paired (device `1d25ee`), then paired again with a new code. The daemon listed one device (`83875b`)
+    and logged "replacing its earlier pairing 1d25ee".
+  * **No proof, no replacement:** after the connection was deleted, pairing once more kept the old entry, since there
+    was no token to prove it. The app then listed two same-named devices, the current one marked "This device".
+  * **Deleting the connection in use:** the app went offline on "Linux guest" (its VM was off), with Explorer cleared. It
+    did this on two runs.
+  * **The banner:** shows the softened text.
+* **Not checked on the tablet:**
+  * A real Cloudflare Tunnel: it means running `cloudflared`, a downloaded binary. The end-to-end test covers the
+    daemon's side.
+  * The image and hex copy reuse: covered by the unit test.
+* **Cleanup:**
+  * Test connections deleted.
+  * The four leftover "ws" Recent entries from batches 63–66 are gone: the app forgot them once connected to a daemon
+    whose roots covered them and they no longer existed.
+  * Test daemon stopped, `adb reverse` removed, test files deleted.
+  * The dev app is on "Linux guest" with only Projects in Recent.
+* **Tests:** 400 app unit tests and 146 daemon/protocol tests passing. Clippy reports only the five older lints.
+
 ## Backlog
 ### Open backlog (11-08)
 The current lists of what's open, in two: the general backlog, and the Aardink switch's until it's complete. The older
@@ -3057,7 +3146,7 @@ Grouped (11-08) so that what's cheaper done together is done together; the numbe
 | | G27 | – | Done in 62 | **Download to the device's storage**: files or folders from Explorer to a place the user picks (Android's file picker), kept there; the option to zip them into one archive (a setting for the default). Progress and the size before starting, as large folders come from the guest over the connection |
 | | G28 | – | Done in 62 | **Import into Explorer**: files or a whole folder from the device (Android's file picker) into the folder chosen in Explorer, with replace or keep both on name clashes. Builds on receiving shared files (the share sheet into the workspace) and Open from device |
 | **10. Beyond the tablet's guest** (user, 11-09) | G29 | – | Done: (a) 64, (b) 66, (c) 67 | **Fully usable offline, without a guest** (user: "where possible"). Done: (a) **a device folder as the workspace** (Android's folder picker: Documents, a synced folder), with Explorer, tabs, editing, Quick Open, find and replace in files done in the app and saves straight to the device (batch 64); (b) **"Keep available offline"** for a guest folder: all of it copied to the device and synced back with conflict checks, beyond today's copies of opened files (batch 66); (c) what already needs no guest, made whole: colours, snippets, previews (Markdown, SVG, images, hex), notebooks edited with their saved outputs and no kernel (batch 67). What can't be without some machine: language servers, debuggers, kernels, terminals, Copilot and the agents (they run in the guest). Later, research: a Python kernel in the browser engine (Pyodide in a WebView) for notebooks (L+). Overlaps G18 |
-| | G30 | – | Done: (1, 4) 63, devices 65, (2, 3, re-pair) 68 | **The daemon reachable over the internet.** Done: Tailscale (`--tailscale`), device tokens, revoking, attempt limits, and the connection log (batch 63); paired devices listed and revoked from the app (batch 65); Cloudflare Tunnel with public TLS (`quirecode-daemon pair --tunnel`, `fp=public`), router port forwarding guide, and automatic replacement of earlier pairings when re-pairing the same named device (batch 68) |
+| | G30 | – | Done: (1, 4) 63, devices 65, (2, 3, re-pair) 68, fixes 69 | **The daemon reachable over the internet.** Done: Tailscale (`--tailscale`), device tokens, revoking, attempt limits, and the connection log (batch 63); paired devices listed and revoked from the app (batch 65); Cloudflare Tunnel with public TLS (`quirecode-daemon pair --tunnel`, `fp=public`), router port forwarding guide, and replacing a device's earlier pairing when it pairs again (batch 68; by its old token since batch 69, not by name) |
 | | G31 | – | Done in batch 68 | **Linux Terminal stopped forwarding the guest's port when the tablet's Tailscale VPN came on** (batch 63's live test): Troubleshoot now probes `GET /health` over the open socket (`probeDaemonPort`) to tell `"Port 127.0.0.1:19870 is open, but nothing answers through it"` apart from a refused port, and both the app and `docs/HOSTING-THE-DAEMON.md` explain force-stopping Linux Terminal and excluding it in Tailscale's App Split Tunneling |
 
 Why these groups:

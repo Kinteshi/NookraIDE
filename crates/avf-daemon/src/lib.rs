@@ -404,20 +404,65 @@ async fn health() -> Json<HealthResponse> {
     })
 }
 
-/// The client's address when the server was started with it (always, outside tests).
+/// The client's address when the server was started with it (always, outside tests), as [effective_peer] sees it.
 struct PeerAddr(Option<IpAddr>);
 
 impl<S: Send + Sync> axum::extract::FromRequestParts<S> for PeerAddr {
     type Rejection = std::convert::Infallible;
 
     async fn from_request_parts(parts: &mut axum::http::request::Parts, _: &S) -> Result<Self, Self::Rejection> {
-        Ok(PeerAddr(
-            parts
-                .extensions
-                .get::<axum::extract::ConnectInfo<SocketAddr>>()
-                .map(|info| info.0.ip().to_canonical()),
-        ))
+        let tcp = parts
+            .extensions
+            .get::<axum::extract::ConnectInfo<SocketAddr>>()
+            .map(|info| info.0.ip().to_canonical());
+        Ok(PeerAddr(effective_peer(tcp, &parts.headers)))
     }
+}
+
+/// Headers a reverse proxy or tunnel adds (cloudflared, nginx, Caddy); a direct client has none of them.
+const PROXY_HEADERS: [&str; 6] = ["cf-connecting-ip", "cf-ray", "true-client-ip", "x-real-ip", "x-forwarded-for", "forwarded"];
+
+/// The address standing for a proxied client whose own address the proxy didn't give: not loopback, so it is
+/// treated as remote, and all such clients share one attempt limit.
+const UNKNOWN_PROXIED_PEER: IpAddr = IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED);
+
+/// Who the client really is. A tunnel or reverse proxy on this machine (Cloudflare Tunnel's cloudflared, nginx)
+/// connects from 127.0.0.1, so its clients from the internet would otherwise pass as this machine: the shared token
+/// would be accepted from them, failed attempts wouldn't be limited, and the log would show 127.0.0.1. A loopback
+/// connection carrying proxy headers is therefore taken as the client the proxy names, or as an unknown remote one.
+/// Headers only ever make a connection less trusted, so a client faking them gains nothing. Of the addresses, the
+/// ones the nearest proxy sets are used (Cloudflare's own, `X-Real-IP`, the last `X-Forwarded-For` entry), since
+/// earlier entries come from the client.
+fn effective_peer(tcp: Option<IpAddr>, headers: &HeaderMap) -> Option<IpAddr> {
+    let tcp = tcp?;
+    if !devices::shared_token_allowed(Some(tcp)) || !PROXY_HEADERS.iter().any(|name| headers.contains_key(*name)) {
+        return Some(tcp);
+    }
+    let value = |name: &str| headers.get(name).and_then(|value| value.to_str().ok());
+    let parse = |text: &str| {
+        let text = text.trim().trim_matches('"');
+        text.parse::<IpAddr>()
+            .ok()
+            .or_else(|| text.parse::<SocketAddr>().ok().map(|address| address.ip()))
+            .or_else(|| text.strip_prefix('[').and_then(|rest| rest.split(']').next()).and_then(|ip| ip.parse().ok()))
+            .map(|ip| ip.to_canonical())
+    };
+    let forwarded_for = || {
+        value("forwarded")?
+            .rsplit(',')
+            .next()?
+            .split(';')
+            .find_map(|pair| pair.trim().strip_prefix("for=").or_else(|| pair.trim().strip_prefix("For=")))
+            .and_then(parse)
+    };
+    let reported = value("cf-connecting-ip")
+        .and_then(parse)
+        .or_else(|| value("true-client-ip").and_then(parse))
+        .or_else(|| value("x-real-ip").and_then(parse))
+        .or_else(|| value("x-forwarded-for").and_then(|list| list.rsplit(',').next()).and_then(parse))
+        .or_else(forwarded_for);
+    // A proxy naming this machine as the client is still a proxy: the request may have come from anywhere.
+    Some(reported.filter(|ip| !devices::shared_token_allowed(Some(*ip))).unwrap_or(UNKNOWN_PROXIED_PEER))
 }
 
 impl AppState {
@@ -457,6 +502,7 @@ async fn pair_client(
     protocol_version: u32,
     code: &str,
     client_name: &str,
+    previous_token: Option<String>,
 ) {
     if protocol_version != PROTOCOL_VERSION {
         reject(
@@ -482,16 +528,15 @@ async fn pair_client(
             let token = match state.config.devices_file.clone() {
                 Some(path) => {
                     let name = client_name.to_owned();
-                    let issued = tokio::task::spawn_blocking(move || devices::issue_replacing(&path, &name))
+                    let issued = tokio::task::spawn_blocking(move || devices::issue_replacing(&path, &name, previous_token.as_deref()))
                         .await
                         .map_err(|error| error.to_string())
                         .and_then(|issued| issued);
                     match issued {
                         Ok((device, token, replaced)) => {
-                            let message = if replaced.is_empty() {
-                                format!("paired device {} ({})", device.id, device.name)
-                            } else {
-                                format!("paired device {} ({}), replacing {}", device.id, device.name, replaced.join(", "))
+                            let message = match replaced {
+                                None => format!("paired device {} ({})", device.id, device.name),
+                                Some(old) => format!("paired device {} ({}), replacing its earlier pairing {old}", device.id, device.name),
                             };
                             state.log_connection(peer, &message);
                             token
@@ -572,9 +617,9 @@ async fn handle_socket(mut socket: WebSocket, state: AppState, peer: Option<IpAd
             ..
         }) => (protocol_version, auth_token),
         MultiplexedPacket::System(SystemMessage::Pair {
-            protocol_version, code, client_name,
+            protocol_version, code, client_name, previous_token,
         }) => {
-            pair_client(&mut socket, &state, peer, protocol_version, &code, &client_name).await;
+            pair_client(&mut socket, &state, peer, protocol_version, &code, &client_name, previous_token).await;
             return;
         }
         _ => {
@@ -3726,6 +3771,7 @@ mod tests {
             protocol_version: PROTOCOL_VERSION,
             code: code.to_owned(),
             client_name: "test".into(),
+            previous_token: None,
         };
 
         assert!(matches!(
@@ -3933,6 +3979,108 @@ mod tests {
         assert!(log.contains(&format!("{local_ip} connected: device")));
         assert!(log.contains("refused: the shared token works only from this machine"));
         assert!(log.contains("refused: too many failed attempts"));
+        server.abort();
+    }
+
+    #[test]
+    fn a_proxied_loopback_connection_counts_as_its_remote_client() {
+        let loopback: IpAddr = "127.0.0.1".parse().unwrap();
+        let headers = |pairs: &[(&'static str, &'static str)]| {
+            let mut map = HeaderMap::new();
+            for (name, value) in pairs {
+                map.insert(*name, HeaderValue::from_static(value));
+            }
+            map
+        };
+        // Direct connections are what they are.
+        assert_eq!(effective_peer(None, &headers(&[("cf-connecting-ip", "203.0.113.7")])), None);
+        assert_eq!(effective_peer(Some(loopback), &headers(&[])), Some(loopback));
+        let lan: IpAddr = "192.0.2.66".parse().unwrap();
+        assert_eq!(effective_peer(Some(lan), &headers(&[("x-forwarded-for", "127.0.0.1")])), Some(lan));
+        // Through a proxy on this machine: the client it names, the nearest proxy's entry first.
+        assert_eq!(
+            effective_peer(Some(loopback), &headers(&[("cf-connecting-ip", "203.0.113.7"), ("x-forwarded-for", "198.51.100.1")])),
+            Some("203.0.113.7".parse().unwrap())
+        );
+        assert_eq!(
+            effective_peer(Some(loopback), &headers(&[("x-forwarded-for", "127.0.0.1, 198.51.100.9")])),
+            Some("198.51.100.9".parse().unwrap())
+        );
+        assert_eq!(
+            effective_peer(Some(loopback), &headers(&[("forwarded", "for=192.0.2.1, for=\"[2001:db8::1]:4711\";proto=https")])),
+            Some("2001:db8::1".parse().unwrap())
+        );
+        // A proxy that names nobody, or names this machine, is still remote.
+        assert_eq!(effective_peer(Some(loopback), &headers(&[("cf-ray", "abc")])), Some(UNKNOWN_PROXIED_PEER));
+        assert_eq!(effective_peer(Some(loopback), &headers(&[("x-real-ip", "127.0.0.1")])), Some(UNKNOWN_PROXIED_PEER));
+        assert!(!devices::shared_token_allowed(Some(UNKNOWN_PROXIED_PEER)));
+    }
+
+    /// Cloudflare Tunnel end to end: cloudflared connects from loopback and says who the client is. The shared token
+    /// must be refused as from the network, a device's token works, and the log shows the real client.
+    #[tokio::test]
+    async fn through_a_local_tunnel_the_shared_token_is_refused() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path().join("project");
+        std::fs::create_dir(&project).unwrap();
+        let devices_file = temp.path().join("devices.json");
+        let (_, device_token) = devices::issue(&devices_file, "test device").unwrap();
+        let config = AppConfig {
+            bind_addr: "127.0.0.1:0".parse().unwrap(),
+            token: "d".repeat(64),
+            allowed_origins: HashSet::from(["avf-native-android://localhost".to_owned()]),
+            workspace_roots: vec![project],
+            lsp_hibernation_secs: 30 * 60,
+            pairing_file: None,
+            tls: false,
+            devices_file: Some(devices_file),
+            log_file: Some(temp.path().join("connections.log")),
+        };
+        let listener = TcpListener::bind(config.bind_addr).await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app(config).unwrap().into_make_service_with_connect_info::<SocketAddr>()).await.unwrap();
+        });
+        let hello = |token: String, tunnel: bool| async move {
+            let mut request = format!("ws://{address}/ws").into_client_request().unwrap();
+            request
+                .headers_mut()
+                .insert(WS_ORIGIN, HeaderValue::from_static("avf-native-android://localhost"));
+            if tunnel {
+                request.headers_mut().insert("cf-connecting-ip", HeaderValue::from_static("203.0.113.7"));
+            }
+            let (mut socket, _) = tokio_tungstenite::connect_async(request).await.unwrap();
+            socket
+                .send(WsMessage::Binary(
+                    encode(&MultiplexedPacket::System(SystemMessage::Hello {
+                        protocol_version: PROTOCOL_VERSION,
+                        auth_token: token,
+                        client_name: "test".into(),
+                    }))
+                    .into(),
+                ))
+                .await
+                .unwrap();
+            let WsMessage::Binary(bytes) = socket.next().await.unwrap().unwrap() else {
+                panic!("expected a binary reply");
+            };
+            decode(&bytes).unwrap()
+        };
+        assert!(matches!(
+            hello("d".repeat(64), false).await,
+            MultiplexedPacket::System(SystemMessage::Welcome { .. })
+        ));
+        assert!(matches!(
+            hello("d".repeat(64), true).await,
+            MultiplexedPacket::System(SystemMessage::Rejected { reason: RejectReason::InvalidToken })
+        ));
+        assert!(matches!(
+            hello(device_token, true).await,
+            MultiplexedPacket::System(SystemMessage::Welcome { .. })
+        ));
+        let log = std::fs::read_to_string(temp.path().join("connections.log")).unwrap();
+        assert!(log.contains("203.0.113.7 refused: the shared token works only from this machine"), "{log}");
+        assert!(log.contains("203.0.113.7 connected: device"), "{log}");
         server.abort();
     }
 
