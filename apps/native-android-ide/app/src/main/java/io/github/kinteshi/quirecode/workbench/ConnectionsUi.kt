@@ -28,6 +28,7 @@ import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Link
+import androidx.compose.material.icons.outlined.LinkOff
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.RemoveCircleOutline
 import androidx.compose.material.icons.outlined.TabletAndroid
@@ -170,6 +171,7 @@ internal fun ConnectionsDialog(controller: WorkbenchController) {
                 } else {
                     Text(summary.detail.orEmpty(), style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
                 }
+                if (controller.managesDevices) PairedDevicesSection(controller, summary)
                 Text("Add a connection", style = MaterialTheme.typography.titleSmall, color = colors.primary)
                 Column {
                     AddRow(Icons.Outlined.TabletAndroid, "This tablet's Linux guest", "Install the daemon in Linux Terminal, or pair it again") {
@@ -478,3 +480,99 @@ internal fun ComputerPairingDialog(controller: WorkbenchController) {
         dismissButton = { TextButton(onClick = { controller.dialog = WorkbenchDialog.Connect }) { Text("Back") } },
     )
 }
+
+/**
+ * The devices paired with the connected daemon (G30): which is this one, when and from where each last connected,
+ * Revoke (asked first), and the daemon's connection log. Only daemons that list their devices show it.
+ */
+@Composable
+private fun PairedDevicesSection(controller: WorkbenchController, summary: ConnectionSummary) {
+    val colors = MaterialTheme.colorScheme
+    val info = controller.pairedDevices
+    var showLog by remember { mutableStateOf(false) }
+    var confirm by remember { mutableStateOf<io.github.kinteshi.quirecode.transport.PairedDevice?>(null) }
+    androidx.compose.runtime.LaunchedEffect(controller.connected, controller.endpoint) { controller.loadPairedDevices() }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("Devices paired with ${controller.connectionFacts.name}", style = MaterialTheme.typography.titleSmall, color = colors.primary, modifier = Modifier.weight(1f))
+        if (controller.pairedDevicesLoading) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+    }
+    controller.pairedDevicesProblem?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = colors.error) }
+    when {
+        info == null -> Unit
+        info.devices.isEmpty() -> Text(
+            "None yet. A device paired before devices had tokens of their own uses the installer's token, which works only on the same machine.",
+            style = MaterialTheme.typography.bodySmall,
+            color = colors.onSurfaceVariant,
+        )
+        else -> Column {
+            info.devices.forEach { device ->
+                val self = device.id == info.thisDevice
+                val seen = device.lastSeen?.let { "Last connected ${formatEpoch(it)}" + (device.lastAddress?.let { address -> " from $address" } ?: "") } ?: "Never connected"
+                ListItem(
+                    headlineContent = {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(device.name, maxLines = 1, modifier = Modifier.weight(1f, fill = false))
+                            if (self) {
+                                Surface(color = colors.primaryContainer, contentColor = colors.onPrimaryContainer, shape = MaterialTheme.shapes.small) {
+                                    Text("This device", style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp))
+                                }
+                            }
+                        }
+                    },
+                    supportingContent = { Text("$seen · paired ${formatEpoch(device.pairedAt)} · ${device.id}") },
+                    leadingContent = { Icon(Icons.Outlined.TabletAndroid, contentDescription = null, tint = colors.onSurfaceVariant) },
+                    trailingContent = {
+                        Tooltip("Revoke") {
+                            IconButton(onClick = { confirm = device }, enabled = !controller.pairedDevicesLoading) {
+                                Icon(Icons.Outlined.LinkOff, contentDescription = "Revoke ${device.name}")
+                            }
+                        }
+                    },
+                    colors = ListItemDefaults.colors(containerColor = colors.surfaceContainerHigh),
+                )
+            }
+        }
+    }
+    if (info != null && info.recent.isNotEmpty()) {
+        Row(
+            Modifier.fillMaxWidth().clickable { showLog = !showLog }.padding(vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Recent connections", style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
+            Icon(if (showLog) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore, contentDescription = null)
+        }
+        if (showLog) {
+            Surface(color = colors.surfaceContainerLow, shape = MaterialTheme.shapes.small, modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(10.dp)) {
+                    info.recent.asReversed().take(15).forEach { line ->
+                        Text(line, style = MaterialTheme.typography.bodySmall, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+                    }
+                }
+            }
+        }
+    }
+    confirm?.let { device ->
+        val self = device.id == info?.thisDevice
+        // Pairing again leaves the earlier pairing listed under the same name: the id tells them apart.
+        val sameName = info?.devices.orEmpty().count { it.name == device.name } > 1
+        AlertDialog(
+            onDismissRequest = { confirm = null },
+            title = { Text("Revoke ${device.name}${if (sameName) " (${device.id})" else ""}?") },
+            text = {
+                Text(
+                    if (self) {
+                        "This is the device you're using: it's disconnected within 15 seconds and has to pair again with a new code to connect."
+                    } else {
+                        "It's disconnected within 15 seconds and has to pair again with a new code to connect. Nothing else on ${controller.connectionFacts.name} changes."
+                    },
+                )
+            },
+            confirmButton = { TextButton(onClick = { confirm = null; controller.revokePairedDevice(device) }) { Text("Revoke") } },
+            dismissButton = { TextButton(onClick = { confirm = null }) { Text("Cancel") } },
+        )
+    }
+}
+
+/** Seconds since the epoch, in the device's short date and time. */
+private fun formatEpoch(seconds: Long): String =
+    java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT).format(java.util.Date(seconds * 1000))

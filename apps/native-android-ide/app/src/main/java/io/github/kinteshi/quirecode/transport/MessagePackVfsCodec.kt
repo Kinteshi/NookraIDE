@@ -26,6 +26,19 @@ internal object MessagePackVfsCodec {
         names.forEach(::packString)
     }
 
+    /** The daemon's paired devices (G30; daemons whose Welcome lists `devices`). */
+    fun listDevices(requestId: Long): ByteArray = packet("System", "ListDevices") {
+        packMapHeader(1)
+        stringField("request_id", requestId)
+    }
+
+    /** Unpairs device [id]; answered with the list as it is after. */
+    fun revokeDevice(requestId: Long, id: String): ByteArray = packet("System", "RevokeDevice") {
+        packMapHeader(2)
+        stringField("request_id", requestId)
+        stringField("id", id)
+    }
+
     /**
      * First packet of a pairing connection: trades a one-time code for a token. [deviceName] is what the daemon lists
      * this device as (`quirecode-daemon devices`), to revoke it by.
@@ -383,6 +396,29 @@ internal object MessagePackVfsCodec {
                     daemonVersion = fields["daemon_version"]?.takeUnless { it.isNilValue }?.asStringValue()?.asString(),
                 )
             }
+            "Devices" -> {
+                val fields = variant.value.asMapValue().map().mapKeys { it.key.asString() }
+                fun Value?.text(): String? = this?.takeUnless { it.isNilValue }?.asStringValue()?.asString()
+                fun Value?.number(): Long? = this?.takeUnless { it.isNilValue }?.asNumberValue()?.toLong()
+                IncomingPacket.Devices(
+                    requestId = fields.getValue("request_id").asLong(),
+                    info = PairedDevices(
+                        devices = fields["devices"]?.takeUnless { it.isNilValue }?.asArrayValue()?.list().orEmpty().map { device ->
+                            val values = device.asMapValue().map().mapKeys { it.key.asString() }
+                            PairedDevice(
+                                id = values["id"].text().orEmpty(),
+                                name = values["name"].text().orEmpty(),
+                                pairedAt = values["paired_at"].number() ?: 0,
+                                lastSeen = values["last_seen"].number(),
+                                lastAddress = values["last_address"].text(),
+                            )
+                        },
+                        thisDevice = fields["this_device"].text(),
+                        recent = fields["recent"]?.takeUnless { it.isNilValue }?.asArrayValue()?.list().orEmpty().map { it.asStringValue().asString() },
+                        error = fields["error"].text(),
+                    ),
+                )
+            }
             "CommandsProbed" -> {
                 val fields = variant.value.asMapValue().map().mapKeys { it.key.asString() }
                 IncomingPacket.CommandsProbed(
@@ -543,6 +579,7 @@ sealed interface IncomingPacket {
     ) : IncomingPacket
     /** Each probed command's path in the guest, or null when it isn't installed. */
     data class CommandsProbed(val requestId: Long, val paths: Map<String, String?>) : IncomingPacket
+    data class Devices(val requestId: Long, val info: PairedDevices) : IncomingPacket
     data class Rejected(val reason: String, val attemptsLeft: Int? = null, val retryAfterSecs: Long? = null) : IncomingPacket
     data class Paired(val token: String) : IncomingPacket
     data class Stats(val stats: GuestStats) : IncomingPacket
@@ -599,3 +636,9 @@ data class FileEntry(
     val size: Long,
     val modifiedTs: Long,
 )
+
+/** A device paired with the daemon by a code (G30); times are seconds since the epoch. */
+data class PairedDevice(val id: String, val name: String, val pairedAt: Long, val lastSeen: Long?, val lastAddress: String?)
+
+/** The daemon's paired devices, which one is this connection, its connection log's last lines, a revoke's failure. */
+data class PairedDevices(val devices: List<PairedDevice>, val thisDevice: String?, val recent: List<String>, val error: String?)

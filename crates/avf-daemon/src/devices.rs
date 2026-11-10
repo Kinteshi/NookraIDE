@@ -261,6 +261,13 @@ pub fn log(path: &Path, address: Option<IpAddr>, what: &str) {
     })();
 }
 
+/// The log's last [lines] lines, oldest first.
+pub fn recent_log(path: &Path, lines: usize) -> Vec<String> {
+    let text = fs::read_to_string(path).unwrap_or_default();
+    let all: Vec<&str> = text.lines().collect();
+    all[all.len().saturating_sub(lines)..].iter().map(|line| (*line).to_owned()).collect()
+}
+
 /// `quirecode-daemon devices [revoke ID]` and `quirecode-daemon log [-n N]`.
 pub fn run_cli(command: &str, args: &[String], config_dir: &Path) -> Result<(), String> {
     match command {

@@ -2916,6 +2916,32 @@ ahead" to restarting Linux Terminal for G31.
 * Left for G29: (b) "keep available offline" for a guest folder, (c) notebooks without a kernel and what else needs no
   guest; a device folder's files in language servers would need a server on the device.
 
+## 65. Paired devices managed from the app (G30) (11-09; done, checked on the tablet over Tailscale)
+User's request (11-09): "Go for 1" (the paired devices in the app).
+
+* **Protocol:** `SystemMessage::ListDevices { request_id }` and `RevokeDevice { request_id, id }`, both answered with
+  `Devices { request_id, devices: [PairedDevice { id, name, paired_at, last_seen, last_address }], this_device,
+  recent, error }`: the paired devices (never their tokens), which one the asking connection is, the connection log's
+  last 30 lines, and why a revoke failed. Daemons with a devices file advertise the Welcome feature `devices`; the app
+  shows nothing to older ones. Any authenticated connection may list and revoke (a paired device, or the shared token
+  from the machine itself); a revoke from the app is logged "from the app by device <id>".
+* **The Connections dialog,** while connected to such a daemon: "Devices paired with <name>", each with its name, a
+  "This device" badge on the one in use, when and from where it last connected, when it was paired and its id, and
+  Revoke, asked first (in the title with its id when two have the same name; for this device: "it's disconnected
+  within 15 seconds and has to pair again"). Below, "Recent connections": the log, newest first. No settings toggle: it
+  shows only what the daemon has and only in this dialog.
+* Checked on the tablet with this machine's daemon over Tailscale (the guest's daemon wasn't updated: that would have
+  ended the apps' terminals and kernels): hidden for the guest's older daemon; after pairing, the dev app listed with
+  "This device" and its tailnet address; paired again, both listed, the old one revoked from the app (gone from the
+  daemon's list, logged "from the app by device dbb204"); then this device revoked: cut off in 8 s, its reconnect
+  refused, "Pair again". The test connection was deleted afterwards and the dev app is back on the Linux guest.
+* Fixed from that: the status bar said "The guest no longer accepts…" for a computer (now its name).
+* Tests: the protocol round trip, a daemon test (list with this device marked, revoke another, a revoke of an unknown
+  id answered with its error, the log line), the app decoding the reply. 136 daemon tests, 391 app tests.
+* Noticed, registered: pairing again with the same computer leaves the earlier pairing listed (the app could revoke it
+  itself after pairing, knowing its old device id); the tablet's own guest daemon needs updating (the app's Update, or
+  the installer) before its devices show here.
+
 ## Backlog
 ### Open backlog (11-08)
 The current lists of what's open, in two: the general backlog, and the Aardink switch's until it's complete. The older
@@ -2950,7 +2976,7 @@ Grouped (11-08) so that what's cheaper done together is done together; the numbe
 | | G27 | – | M | **Download to the device's storage**: files or folders from Explorer to a place the user picks (Android's file picker), kept there; the option to zip them into one archive (a setting for the default). Progress and the size before starting, as large folders come from the guest over the connection |
 | | G28 | – | M | **Import into Explorer**: files or a whole folder from the device (Android's file picker) into the folder chosen in Explorer, with replace or keep both on name clashes. Builds on receiving shared files (the share sheet into the workspace) and Open from device |
 | **10. Beyond the tablet's guest** (user, 11-09) | G29 | – | Step (a) done (64); (b), (c) left | **Fully usable offline, without a guest** (user: "where possible"). What can be: (a) **a device folder as the workspace** (Android's folder picker: Documents, a synced folder), with Explorer, tabs, editing, Quick Open, find and replace in files done in the app and saves straight to the device (M–L, the first step); (b) **"Keep available offline"** for a guest folder: all of it copied to the device and synced back with conflict checks, beyond today's copies of opened files (M–L); (c) what already needs no guest, made whole: colours, snippets, previews (Markdown, SVG, images, hex), notebooks edited with their saved outputs (no kernel). What can't be without some machine: language servers, debuggers, kernels, terminals, Copilot and the agents (they run in the guest). Later, research: a Python kernel in the browser engine (Pyodide in a WebView) for notebooks (L+). Overlaps G18 |
-| | G30 | – | Steps 1 and 4 done (63); M left | **The daemon reachable over the internet.** Done in batch 63: Tailscale (`--tailscale`), device tokens, revoking, limits, the connection log. Left: (2) Cloudflare Tunnel with a public certificate, (3) port forwarding, and the paired devices listed and revoked from the app. The original suggestions: Suggested, in order: (1) **a private network** (Tailscale, or ZeroTier or WireGuard) on the computer and the tablet: the daemon listens on that network's address, nothing is open to the internet, and today's pinned certificate and token work as they are; an installer option that puts that address in the connection string, and a guide (S–M). (2) **A public address through Cloudflare Tunnel** (or similar), behind Cloudflare Access: the app then checks a public certificate instead of pinning one (a per-connection setting) (M). (3) **Router port forwarding with dynamic DNS**: works with pinning today but exposes the daemon; not without (4). (4) **Hardening first**, for any of them: limits on handshake attempts, revoking a paired device, a log of connections (S–M) |
+| | G30 | – | Steps 1 and 4 done (63), devices in the app (65); left: Cloudflare Tunnel, port forwarding, the earlier pairing revoked by itself on pairing again | **The daemon reachable over the internet.** Done in batch 63: Tailscale (`--tailscale`), device tokens, revoking, limits, the connection log. Left: (2) Cloudflare Tunnel with a public certificate, (3) port forwarding, and the paired devices listed and revoked from the app. The original suggestions: Suggested, in order: (1) **a private network** (Tailscale, or ZeroTier or WireGuard) on the computer and the tablet: the daemon listens on that network's address, nothing is open to the internet, and today's pinned certificate and token work as they are; an installer option that puts that address in the connection string, and a guide (S–M). (2) **A public address through Cloudflare Tunnel** (or similar), behind Cloudflare Access: the app then checks a public certificate instead of pinning one (a per-connection setting) (M). (3) **Router port forwarding with dynamic DNS**: works with pinning today but exposes the daemon; not without (4). (4) **Hardening first**, for any of them: limits on handshake attempts, revoking a paired device, a log of connections (S–M) |
 | | G31 | – | S | (One restart with the VPN on fixed it, batch 64; left: whether turning the VPN on breaks it each time.) **Linux Terminal stopped forwarding the guest's port when the tablet's Tailscale VPN came on** (batch 63's live test): the daemon was healthy inside the guest, the port answered nothing. Find out whether restarting Linux Terminal with the VPN on fixes it for good or the VPN breaks it each time; then say so in the app (Troubleshoot can tell "port open, no answer" apart) and in the guide (a Tailscale exclusion or split tunnelling for Linux Terminal, if that helps) |
 
 Why these groups:

@@ -21,7 +21,7 @@ mod vfs;
 
 use avf_protocol::{
     decode, encode, FsEventKind, MultiplexedPacket, PtyPayload, RejectReason, SystemMessage,
-    VfsErrorCode, VfsMessage, FEATURE_PROBE_COMMANDS, MAX_CHUNK_SIZE, MAX_FRAME_SIZE,
+    VfsErrorCode, VfsMessage, FEATURE_DEVICES, FEATURE_PROBE_COMMANDS, MAX_CHUNK_SIZE, MAX_FRAME_SIZE,
     PROTOCOL_VERSION,
 };
 #[cfg(feature = "native-protocol")]
@@ -599,7 +599,11 @@ async fn handle_socket(mut socket: WebSocket, state: AppState, peer: Option<IpAd
             protocol_version: PROTOCOL_VERSION,
             daemon_version: env!("CARGO_PKG_VERSION").to_owned(),
             pty_sessions: state.pty.sessions().await,
-            features: vec![FEATURE_PROBE_COMMANDS.to_owned()],
+            features: if state.config.devices_file.is_some() {
+                vec![FEATURE_PROBE_COMMANDS.to_owned(), FEATURE_DEVICES.to_owned()]
+            } else {
+                vec![FEATURE_PROBE_COMMANDS.to_owned()]
+            },
         }),
     )
     .await
@@ -721,6 +725,7 @@ async fn handle_socket(mut socket: WebSocket, state: AppState, peer: Option<IpAd
                         if process_packet(
                             packet,
                             &state,
+                            device_id.as_deref(),
                             &outbound,
                             &mut watches,
                             &mut pty_forwarders,
@@ -824,9 +829,40 @@ enum OutboundFrame {
 }
 
 #[allow(clippy::too_many_arguments)]
+/// The paired devices, which is the asking connection's, and the log's last lines (G30, managed from the app).
+async fn devices_reply(state: &AppState, device_id: Option<&str>, request_id: u64, error: Option<String>) -> SystemMessage {
+    let devices_file = state.config.devices_file.clone();
+    let log_file = state.config.log_file.clone();
+    let (devices, recent) = tokio::task::spawn_blocking(move || {
+        let devices = devices_file.map(|path| devices::list(&path).unwrap_or_default()).unwrap_or_default();
+        let recent = log_file.map(|path| devices::recent_log(&path, 30)).unwrap_or_default();
+        (devices, recent)
+    })
+    .await
+    .unwrap_or_default();
+    SystemMessage::Devices {
+        request_id,
+        devices: devices
+            .into_iter()
+            .map(|device| avf_protocol::PairedDevice {
+                id: device.id,
+                name: device.name,
+                paired_at: device.paired_at,
+                last_seen: device.last_seen,
+                last_address: device.last_address,
+            })
+            .collect(),
+        this_device: device_id.map(str::to_owned),
+        recent,
+        error,
+    }
+}
+
+#[allow(clippy::too_many_arguments)] // the session's state, passed rather than bundled
 async fn process_packet(
     packet: MultiplexedPacket,
     state: &AppState,
+    device_id: Option<&str>,
     outbound: &mpsc::Sender<OutboundFrame>,
     watches: &mut HashMap<String, WatchHandle>,
     pty_forwarders: &mut HashMap<uuid::Uuid, (u64, tokio::task::JoinHandle<()>)>,
@@ -873,6 +909,27 @@ async fn process_packet(
                     Err(())
                 }
             }
+        }
+        MultiplexedPacket::System(SystemMessage::ListDevices { request_id }) => {
+            send_outbound(outbound, MultiplexedPacket::System(devices_reply(state, device_id, request_id, None).await)).await
+        }
+        MultiplexedPacket::System(SystemMessage::RevokeDevice { request_id, id }) => {
+            let error = match state.config.devices_file.clone() {
+                None => Some("this daemon doesn't keep paired devices".to_owned()),
+                Some(path) => {
+                    let which = id.clone();
+                    match tokio::task::spawn_blocking(move || devices::revoke(&path, &which)).await {
+                        Ok(Ok(device)) => {
+                            let by = device_id.map(|me| format!(" by device {me}")).unwrap_or_default();
+                            state.log_connection(None, &format!("revoked device {} ({}) from the app{by}", device.id, device.name));
+                            None
+                        }
+                        Ok(Err(error)) => Some(error),
+                        Err(error) => Some(error.to_string()),
+                    }
+                }
+            };
+            send_outbound(outbound, MultiplexedPacket::System(devices_reply(state, device_id, request_id, error).await)).await
         }
         MultiplexedPacket::System(SystemMessage::ProbeCommands { request_id, names }) => {
             let home = env::var_os("HOME").map(PathBuf::from);
@@ -3690,6 +3747,82 @@ mod tests {
         assert!(log.contains(&format!("paired device {} (test)", paired[0].id)));
         assert!(log.contains("refused: invalid token"));
         assert!(log.contains("connected with the shared token"));
+        server.abort();
+    }
+
+    /// G30 in the app: a connection lists the paired devices (its own marked) and revokes another.
+    #[tokio::test]
+    async fn devices_are_listed_and_revoked_over_the_protocol() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path().join("project");
+        std::fs::create_dir(&project).unwrap();
+        let devices_file = temp.path().join("devices.json");
+        let (tablet, tablet_token) = devices::issue(&devices_file, "QuireCode on Tab").unwrap();
+        let (phone, _) = devices::issue(&devices_file, "QuireCode on Phone").unwrap();
+        let config = AppConfig {
+            bind_addr: "127.0.0.1:0".parse().unwrap(),
+            token: "f".repeat(64),
+            allowed_origins: HashSet::from(["avf-native-android://localhost".to_owned()]),
+            workspace_roots: vec![project],
+            lsp_hibernation_secs: 30 * 60,
+            pairing_file: None,
+            tls: false,
+            devices_file: Some(devices_file.clone()),
+            log_file: Some(temp.path().join("connections.log")),
+        };
+        let listener = TcpListener::bind(config.bind_addr).await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app(config).unwrap()).await.unwrap();
+        });
+        let mut request = format!("ws://{address}/ws").into_client_request().unwrap();
+        request
+            .headers_mut()
+            .insert(WS_ORIGIN, HeaderValue::from_static("avf-native-android://localhost"));
+        let (mut socket, _) = tokio_tungstenite::connect_async(request).await.unwrap();
+        let send = |packet: SystemMessage| WsMessage::Binary(encode(&MultiplexedPacket::System(packet)).into());
+        socket
+            .send(send(SystemMessage::Hello {
+                protocol_version: PROTOCOL_VERSION,
+                auth_token: tablet_token,
+                client_name: "test".into(),
+            }))
+            .await
+            .unwrap();
+        // Welcome (advertising the feature), then the three replies, in order.
+        let mut welcomed = false;
+        let mut replies = Vec::new();
+        socket.send(send(SystemMessage::ListDevices { request_id: 1 })).await.unwrap();
+        socket
+            .send(send(SystemMessage::RevokeDevice { request_id: 2, id: phone.id.clone() }))
+            .await
+            .unwrap();
+        socket
+            .send(send(SystemMessage::RevokeDevice { request_id: 3, id: "nobody".into() }))
+            .await
+            .unwrap();
+        while replies.len() < 3 {
+            let WsMessage::Binary(bytes) = socket.next().await.unwrap().unwrap() else { continue };
+            match decode(&bytes).unwrap() {
+                MultiplexedPacket::System(SystemMessage::Welcome { features, .. }) => {
+                    assert!(features.contains(&FEATURE_DEVICES.to_owned()));
+                    welcomed = true;
+                }
+                MultiplexedPacket::System(reply @ SystemMessage::Devices { .. }) => replies.push(reply),
+                _ => {}
+            }
+        }
+        assert!(welcomed);
+        let SystemMessage::Devices { request_id, devices: listed, this_device, .. } = &replies[0] else { unreachable!() };
+        assert_eq!(*request_id, 1);
+        assert_eq!(listed.len(), 2);
+        assert_eq!(this_device.as_deref(), Some(tablet.id.as_str()));
+        let SystemMessage::Devices { devices: after, error, recent, .. } = &replies[1] else { unreachable!() };
+        assert!(error.is_none());
+        assert_eq!(after.iter().map(|d| d.id.clone()).collect::<Vec<_>>(), vec![tablet.id.clone()]);
+        assert!(recent.iter().any(|line| line.contains(&format!("revoked device {} (QuireCode on Phone) from the app by device {}", phone.id, tablet.id))));
+        let SystemMessage::Devices { error, .. } = &replies[2] else { unreachable!() };
+        assert!(error.as_deref().unwrap().contains("nobody"));
         server.abort();
     }
 

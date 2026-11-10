@@ -54,6 +54,38 @@ class HandshakeCodecTest {
     }
 
     @Test
+    fun decodesPairedDevices() {
+        val packet = system("Devices") {
+            packMapHeader(5)
+            packString("request_id"); packInt(4)
+            packString("devices"); packArrayHeader(2)
+            packMapHeader(5)
+            packString("id"); packString("3fa9c1")
+            packString("name"); packString("QuireCode on Tab")
+            packString("paired_at"); packLong(1_762_000_000)
+            packString("last_seen"); packLong(1_762_000_100)
+            packString("last_address"); packString("100.64.0.2")
+            packMapHeader(5)
+            packString("id"); packString("aa0001")
+            packString("name"); packString("QuireCode on Phone")
+            packString("paired_at"); packLong(1_762_000_000)
+            packString("last_seen"); packNil()
+            packString("last_address"); packNil()
+            packString("this_device"); packString("3fa9c1")
+            packString("recent"); packArrayHeader(1); packString("2026-11-09 17:00:00 UTC - paired")
+            packString("error"); packNil()
+        }
+        val devices = MessagePackVfsCodec.decode(packet) as IncomingPacket.Devices
+        assertEquals(4L, devices.requestId)
+        assertEquals("3fa9c1", devices.info.thisDevice)
+        assertEquals(listOf("QuireCode on Tab", "QuireCode on Phone"), devices.info.devices.map { it.name })
+        assertEquals(null, devices.info.devices[1].lastSeen)
+        assertEquals("100.64.0.2", devices.info.devices[0].lastAddress)
+        assertEquals(1, devices.info.recent.size)
+        assertEquals(null, devices.info.error)
+    }
+
+    @Test
     fun pairingSendsTheDeviceName() {
         val packet = MessagePack.newDefaultUnpacker(MessagePackVfsCodec.pair("ABCD-EFGH", "QuireCode on Galaxy Tab")).unpackValue().toString()
         assert(packet.contains("QuireCode on Galaxy Tab")) { packet }

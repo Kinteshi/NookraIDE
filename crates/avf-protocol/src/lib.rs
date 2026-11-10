@@ -171,6 +171,25 @@ pub enum SystemMessage {
         request_id: u64,
         commands: Vec<ProbedCommand>,
     },
+    /// The devices paired with codes, for managing them from the app ([`FEATURE_DEVICES`]).
+    ListDevices {
+        request_id: u64,
+    },
+    /// Unpairs device `id`; answered with [`SystemMessage::Devices`], the list as it is after.
+    RevokeDevice {
+        request_id: u64,
+        id: String,
+    },
+    Devices {
+        request_id: u64,
+        devices: Vec<PairedDevice>,
+        /// The asking connection's own device, when it connected with a device token.
+        this_device: Option<String>,
+        /// The connection log's last lines, newest last.
+        recent: Vec<String>,
+        /// Why a revoke didn't happen.
+        error: Option<String>,
+    },
     PortOpened {
         port: u16,
         protocol: PortProtocol,
@@ -187,6 +206,19 @@ pub enum SystemMessage {
 
 /// Welcome feature: the daemon answers [`SystemMessage::ProbeCommands`].
 pub const FEATURE_PROBE_COMMANDS: &str = "probe_commands";
+/// Welcome feature: the daemon answers [`SystemMessage::ListDevices`] and [`SystemMessage::RevokeDevice`].
+pub const FEATURE_DEVICES: &str = "devices";
+
+/// A device paired with a code, as the daemon keeps it (no token).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PairedDevice {
+    pub id: String,
+    pub name: String,
+    /// Seconds since the epoch.
+    pub paired_at: u64,
+    pub last_seen: Option<u64>,
+    pub last_address: Option<String>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProbedCommand {
@@ -790,6 +822,24 @@ mod tests {
                         path: None,
                     },
                 ],
+            }),
+            MultiplexedPacket::System(SystemMessage::ListDevices { request_id: 3 }),
+            MultiplexedPacket::System(SystemMessage::RevokeDevice {
+                request_id: 4,
+                id: "3fa9c1".into(),
+            }),
+            MultiplexedPacket::System(SystemMessage::Devices {
+                request_id: 4,
+                devices: vec![PairedDevice {
+                    id: "3fa9c1".into(),
+                    name: "QuireCode on Tab".into(),
+                    paired_at: 1,
+                    last_seen: Some(2),
+                    last_address: Some("100.64.0.2".into()),
+                }],
+                this_device: Some("3fa9c1".into()),
+                recent: vec!["2026-11-09 17:00:00 UTC - paired".into()],
+                error: None,
             }),
             MultiplexedPacket::System(SystemMessage::Rejected {
                 reason: RejectReason::InvalidToken,

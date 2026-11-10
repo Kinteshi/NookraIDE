@@ -100,6 +100,9 @@ quirecode-daemon devices revoke 3fa9c1 # unpair one (by id, or by its name); it'
 quirecode-daemon log                   # the last 40 connections, pairings and refusals (-n 200 for more)
 ```
 
+The same list is in the app: the connection chip's **Connections** dialog, while connected, shows the devices paired
+with that computer (the one in use marked "This device"), revokes one, and shows the recent connections.
+
 A device's name is what the app sends when it pairs: "QuireCode on" and the tablet's name. The
 log is `~/.config/quirecode/connections.log`, kept under 256 KB. A device paired before these
 existed has the shared token: from the network it's refused, so pair it again.

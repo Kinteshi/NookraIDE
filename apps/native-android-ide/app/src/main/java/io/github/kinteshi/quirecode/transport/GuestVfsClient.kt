@@ -47,6 +47,8 @@ class GuestRejectedException(val reason: String, val attemptsLeft: Int? = null, 
 private const val NATIVE_APP_ORIGIN = "avf-native-android://localhost"
 /** Welcome feature of daemons that answer `ProbeCommands`. */
 const val PROBE_COMMANDS_FEATURE = "probe_commands"
+/** Welcome feature of daemons that list and revoke paired devices (G30). */
+const val DEVICES_FEATURE = "devices"
 
 class GuestVfsClient(
     private val http: OkHttpClient = OkHttpClient.Builder()
@@ -66,6 +68,7 @@ class GuestVfsClient(
     private val gitListeners = ConcurrentHashMap<Long, (GitEvent) -> Unit>()
     private val pendingPings = ConcurrentHashMap<Long, CompletableFuture<GuestStats>>()
     private val pendingProbes = ConcurrentHashMap<Long, CompletableFuture<Map<String, String?>>>()
+    private val pendingDevices = ConcurrentHashMap<Long, CompletableFuture<PairedDevices>>()
     /** Optional requests the connected daemon understands (its Welcome `features`). */
     @Volatile var guestFeatures: Set<String> = emptySet()
         private set
@@ -203,6 +206,7 @@ class GuestVfsClient(
                         is IncomingPacket.Search -> searchListeners[packet.event.requestId]?.invoke(packet.event)
                         is IncomingPacket.Git -> gitListeners[packet.event.requestId]?.invoke(packet.event)
                         is IncomingPacket.CommandsProbed -> pendingProbes.remove(packet.requestId)?.complete(packet.paths)
+                        is IncomingPacket.Devices -> pendingDevices.remove(packet.requestId)?.complete(packet.info)
                         is IncomingPacket.Stats -> pendingPings.remove(packet.stats.timestamp)?.complete(packet.stats)
                         is IncomingPacket.Pty -> ptyListeners[packet.event.sessionId]?.invoke(packet.event)
                         is IncomingPacket.Port -> portListener?.invoke(packet.port, packet.open)
@@ -462,6 +466,31 @@ class GuestVfsClient(
         return result
     }
 
+    /** Whether the connected daemon lists and revokes paired devices. */
+    val managesDevices: Boolean get() = DEVICES_FEATURE in guestFeatures
+
+    /** The daemon's paired devices (G30). */
+    fun listDevices(): CompletableFuture<PairedDevices> = devicesRequest { MessagePackVfsCodec.listDevices(it) }
+
+    /** Unpairs device [id]; the list as it is after (its `error` says why not, if it wasn't). */
+    fun revokeDevice(id: String): CompletableFuture<PairedDevices> = devicesRequest { MessagePackVfsCodec.revokeDevice(it, id) }
+
+    private fun devicesRequest(frame: (Long) -> ByteArray): CompletableFuture<PairedDevices> {
+        if (!managesDevices) {
+            return CompletableFuture.failedFuture(UnsupportedOperationException("This daemon can't list its devices; update it"))
+        }
+        val requestId = requestIds.incrementAndGet()
+        val result = CompletableFuture<PairedDevices>()
+        pendingDevices[requestId] = result
+        if (!sendFrame(frame(requestId))) {
+            pendingDevices.remove(requestId)
+            result.completeExceptionally(IOException("Guest is not connected"))
+        } else {
+            scheduler.schedule({ pendingDevices.remove(requestId)?.completeExceptionally(IOException("The daemon didn't answer")) }, 10, TimeUnit.SECONDS)
+        }
+        return result
+    }
+
     fun answerGitPrompt(requestId: Long, promptId: Long, answer: String) {
         sendFrame(MessagePackVfsCodec.gitPromptAnswer(requestId, promptId, answer))
     }
@@ -532,6 +561,8 @@ class GuestVfsClient(
         pendingRpcStarts.clear()
         pendingProbes.values.forEach { it.completeExceptionally(error) }
         pendingProbes.clear()
+        pendingDevices.values.forEach { it.completeExceptionally(error) }
+        pendingDevices.clear()
         searchListeners.entries.toList().forEach { (requestId, listener) ->
             listener(SearchEvent.Error(requestId, error.message ?: "Guest connection lost"))
         }

@@ -2856,6 +2856,52 @@ class WorkbenchController(private val context: Context) {
         }
     }
 
+    // Paired devices, managed from the app (G30) -------------------------------------------------------
+
+    /** The connected daemon's paired devices, once asked; null before, or when it can't list them. */
+    var pairedDevices by mutableStateOf<io.github.kinteshi.quirecode.transport.PairedDevices?>(null)
+        private set
+    var pairedDevicesProblem by mutableStateOf<String?>(null)
+        private set
+    var pairedDevicesLoading by mutableStateOf(false)
+        private set
+
+    /** Whether the connected daemon can list its devices (it's from this batch or later). */
+    val managesDevices: Boolean get() = connected && vfs.managesDevices
+
+    fun loadPairedDevices() {
+        if (!managesDevices) {
+            pairedDevices = null
+            return
+        }
+        pairedDevicesLoading = true
+        vfs.listDevices().whenComplete { info, error -> post { onPairedDevices(info, error) } }
+    }
+
+    /** Unpairs [device] at the daemon: it has to pair again to connect (this device too, if it's this one). */
+    fun revokePairedDevice(device: io.github.kinteshi.quirecode.transport.PairedDevice) {
+        val self = device.id == pairedDevices?.thisDevice
+        pairedDevicesLoading = true
+        vfs.revokeDevice(device.id).whenComplete { info, error ->
+            post {
+                onPairedDevices(info, error)
+                if (error == null && info?.error == null) {
+                    status = if (self) "Revoked this device: it has to pair again to connect" else "Revoked ${device.name}"
+                }
+            }
+        }
+    }
+
+    private fun onPairedDevices(info: io.github.kinteshi.quirecode.transport.PairedDevices?, error: Throwable?) {
+        pairedDevicesLoading = false
+        if (error != null) {
+            pairedDevicesProblem = generateSequence(error) { it.cause }.last().message ?: "The daemon didn't answer"
+            return
+        }
+        pairedDevices = info
+        pairedDevicesProblem = info?.error
+    }
+
     /** Connects to [profile] instead of the current connection. */
     fun switchConnection(profile: io.github.kinteshi.quirecode.transport.ConnectionProfile) {
         replacingConnection = connected
@@ -2885,6 +2931,9 @@ class WorkbenchController(private val context: Context) {
     }
 
     private fun resetConnectionProblems() {
+        // Another connection, or the same one again: its devices are asked for afresh.
+        pairedDevices = null
+        pairedDevicesProblem = null
         pairingRejected = false
         connectFailure = null
         guestUnreachable = false
@@ -3049,7 +3098,8 @@ class WorkbenchController(private val context: Context) {
             rejected?.reason == "InvalidToken" -> {
                 // Said by the chip and the banner, with Pair again; no dialog opens by itself (G22).
                 pairingRejected = true
-                guestProblem = "The guest no longer accepts this device's pairing. Pair again to reconnect."
+                guestProblem = (if (isTabletGuestEndpoint(endpoint)) "The guest" else connectionFacts.name) +
+                    " no longer accepts this device's pairing. Pair again to reconnect."
                 status = guestProblem!!
             }
             unreachable -> {
