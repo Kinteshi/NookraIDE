@@ -114,3 +114,5 @@ says what was changed.
 
 Read [docs/NATIVE-IDE-HANDOFF.md](docs/NATIVE-IDE-HANDOFF.md) for the current state, then the open backlog at the end of
 [docs/NATIVE-IDE-BATCHES.md](docs/NATIVE-IDE-BATCHES.md) for what's next.
+
+Coding agents: also read [docs/AGENT-GUIDE.md](docs/AGENT-GUIDE.md).

@@ -2,7 +2,7 @@
 
 Last updated: 2026-11-09 (UTC−3). Read this first when resuming. The batch plan and its status are in [NATIVE-IDE-BATCHES.md](NATIVE-IDE-BATCHES.md). Scope decisions are in
 [NATIVE-ANDROID-IDE-SPEC.md](NATIVE-ANDROID-IDE-SPEC.md) under "Scope reset (2026-10-23)". How work is done here (Material You,
-the engine seam, batches, testing on the device) is in [CONTRIBUTING.md](../CONTRIBUTING.md).
+the engine seam, batches, testing on the device) is in [CONTRIBUTING.md](../CONTRIBUTING.md). For agents: how to work with the maintainer, the device's hard rules and the lessons so far are in [AGENT-GUIDE.md](AGENT-GUIDE.md).
 
 ## Current state (2026-11-09)
 
