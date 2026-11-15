@@ -3189,6 +3189,7 @@ Grouped (11-08) so that what's cheaper done together is done together; the numbe
 | | G36 | – | S–M | **No typing the connection string**: `quirecode-daemon pair` also prints it as a QR code in the terminal, and the app scans it with the camera (ZXing, Apache-2.0; camera permission asked only then). A connection string on the clipboard is offered when the dialog opens |
 | | G37 | – | M | **One computer, several routes**: a computer's connection keeps more than one address under the same certificate and token (its home network, its Tailscale address, a tunnel). The app tries them in order: the network address at home, Tailscale away. The chip says which one it's on. `pair` prints every address the daemon is reachable at (network and Tailscale), so one pairing covers them. Settings: the preferred route per connection |
 | | G38 | – | S | **Checks that know the route**: Troubleshoot says what's wrong for the route in use. A Tailscale address while the tablet's VPN is off: "Turn on Tailscale". A home network address on mobile data: "You're away from home: use Tailscale" (G37). A tunnel: check `cloudflared` on the computer. The guest's "stopped forwarding" banner only shows when the port is open but nothing answers (`probeDaemonPort`), not when nothing listens at all (it showed with the VM off in batch 69) |
+| | G39 | – | M–L | **Workspace-first, recoverable connection behavior** (user, 11-15). Keep the last folder and the connection that owns it as the app's primary context. If the user is working offline, discovering another daemon must not silently connect to it or replace that context; determine whether auto-connect should follow the last folder/connection. Treat a lost connection as a recoverable workspace state: offer an explicit reconnect (including after closing and reopening), keep the current folder and activity context where possible, and ask before reconnecting, switching workspaces/connections, or closing in a way that would discard or interrupt that context. Design the lost-connection and app-restart flow together; don't assume an interruption can preserve live processes |
 | | G32 | – | S–M | **Cloudflare Access in a connection** (batch 69's review): a tunnel connection can carry an Access service token (Client ID and Secret, stored encrypted like the token) sent as headers, so the tunnel can sit behind an Access policy as a second lock. `HOSTING-THE-DAEMON.md` then explains creating the service token. Fits G35's tunnel path |
 
 Why these groups:
@@ -3211,8 +3212,9 @@ Why these groups:
 10. Both are about working without the tablet's guest: with no machine at all, or with one far away. The connection
     work of group 8 (the chip, the dialog) is where both show.
 11. One model of where work happens (a connection's kind, its routes, the folders opened through it) underlies the dialog,
-    Recent and the setup guide. Designing them together keeps one vocabulary and one place for every connection question.
-    Suggested order: G35, G36 and G38 (the guide), then G37 and G32.
+    Recent and the setup guide. G39 follows that model: keep the workspace primary and make reconnect/switch behavior
+    explicit and recoverable. The user asked to hold off the next batch; discuss G39's behavior before choosing what to
+    implement next. When work resumes, G35, G36 and G38 (the guide), then G37 and G32 remain candidates.
 
 #### Aardink switch backlog
 
