@@ -28,6 +28,8 @@ data class DocumentSnapshot(
     val dirty: Boolean,
     val encoding: String = "UTF-8",
     val eol: String = if (text.contains("\r\n")) "\r\n" else "\n",
+    /** The connection whose guest owns this copy; device files and legacy drafts have no scope. */
+    val cacheScope: String? = null,
 )
 
 interface DocumentCache {
@@ -57,6 +59,8 @@ data class DocumentSession(
     var eol: String = if (text.contains("\r\n")) "\r\n" else "\n",
     /** Shown but not held as text (an image in the viewer): never cached, saved or sent to servers. */
     val binary: Boolean = false,
+    /** Captured at open time so a delayed draft/save remains with the guest it came from. */
+    var cacheScope: String? = null,
 ) {
     /** Chosen in the status bar (or converted to); wins over detection and the settings. */
     var indentation: io.github.kinteshi.quirecode.editor.Indentation? = null
@@ -122,14 +126,60 @@ sealed interface SaveResult {
 
 class DocumentRepository(
     private val vfs: GuestVfs,
-    private val cache: DocumentCache,
+    documentCache: DocumentCache,
     private val deviceFiles: DeviceFileStore? = null,
+    private val cacheScopeForPath: (String) -> String? = { null },
+    private val legacyCacheScope: () -> String? = { null },
 ) {
+    private val cache = object : DocumentCache {
+        private fun key(path: String, scope: String?) =
+            if (scope != null && isGuestPath(path)) "connection:$scope:$path" else path
+
+        fun loadScoped(path: String, scope: String?): DocumentSnapshot? {
+            val scopedKey = key(path, scope)
+            documentCache.load(scopedKey)?.let { return it.copy(path = path, cacheScope = scope) }
+            if (scope != null && scope == legacyCacheScope()) {
+                documentCache.load(path)?.let { legacy ->
+                    documentCache.save(legacy.copy(path = scopedKey))
+                    documentCache.delete(path)
+                    return legacy.copy(path = path, cacheScope = scope)
+                }
+            }
+            return null
+        }
+
+        override fun load(path: String): DocumentSnapshot? =
+            loadScoped(path, if (isGuestPath(path)) cacheScopeForPath(path) else null)
+
+        override fun save(snapshot: DocumentSnapshot) {
+            val scope = snapshot.cacheScope ?: if (isGuestPath(snapshot.path)) cacheScopeForPath(snapshot.path) else null
+            documentCache.save(snapshot.copy(path = key(snapshot.path, scope), cacheScope = null))
+        }
+
+        override fun delete(path: String) {
+            val scope = if (isGuestPath(path)) cacheScopeForPath(path) else null
+            documentCache.delete(key(path, scope))
+        }
+
+        override fun contains(path: String): Boolean {
+            val scope = if (isGuestPath(path)) cacheScopeForPath(path) else null
+            return containsScoped(path, scope)
+        }
+
+        fun containsScoped(path: String, scope: String?): Boolean {
+            return documentCache.contains(key(path, scope))
+        }
+    }
+
     fun open(path: String): CompletableFuture<OpenDocument> =
         if (isDevicePath(path)) openDeviceFile(path) else openGuestFile(path)
 
-    private fun openGuestFile(path: String): CompletableFuture<OpenDocument> =
-        vfs.stat(path).thenCompose { entry ->
+    private fun openGuestFile(path: String): CompletableFuture<OpenDocument> {
+        val cacheScope = cacheScopeForPath(path)
+        return vfs.stat(path).thenCompose { entry ->
+            if (cacheScopeForPath(path) != cacheScope) {
+                return@thenCompose CompletableFuture.failedFuture(IOException("Connection changed while opening $path"))
+            }
             if (entry.isDirectory) {
                 return@thenCompose CompletableFuture.failedFuture(
                     IllegalArgumentException("Cannot open a directory as a document"),
@@ -146,7 +196,7 @@ class DocumentRepository(
                 }
             }
 
-            val cached = cache.load(path)
+            val cached = cache.loadScoped(path, cacheScope)
             if (cached?.dirty == true) {
                 val document = DocumentSession(
                     path = path,
@@ -155,9 +205,11 @@ class DocumentRepository(
                     dirty = true,
                     encoding = cached.encoding,
                     eol = cached.eol,
+                    cacheScope = cached.cacheScope,
                 )
                 if (cached.modifiedTs != entry.modifiedTs) {
                     return@thenCompose readAll(path, entry.size).thenApply { remote ->
+                        if (cacheScopeForPath(path) != cacheScope) throw IOException("Connection changed while opening $path")
                         document.conflict = RemoteConflict(remote.text, entry.modifiedTs, remote.encoding)
                         OpenDocument.Editable(document)
                     }
@@ -166,6 +218,7 @@ class DocumentRepository(
             }
 
             readAll(path, entry.size).thenApply { decoded ->
+                if (cacheScopeForPath(path) != cacheScope) throw IOException("Connection changed while opening $path")
                 val document = DocumentSession(
                     path,
                     decoded.text,
@@ -173,6 +226,7 @@ class DocumentRepository(
                     dirty = false,
                     encoding = decoded.encoding,
                     eol = if (decoded.text.contains("\r\n")) "\r\n" else "\n",
+                    cacheScope = cacheScope,
                 )
                 cache.save(
                     DocumentSnapshot(
@@ -182,12 +236,13 @@ class DocumentRepository(
                         dirty = false,
                         encoding = decoded.encoding,
                         eol = document.eol,
+                        cacheScope = cacheScope,
                     ),
                 )
                 OpenDocument.Editable(document)
             }
         }.exceptionallyCompose { error ->
-            val cached = cache.load(path)
+            val cached = cache.loadScoped(path, cacheScope)
             when {
                 cached == null -> CompletableFuture.failedFuture(unwrap(error))
                 cached.encoding == BINARY_CACHE_ENCODING -> CompletableFuture.failedFuture(BinaryFileException())
@@ -200,11 +255,13 @@ class DocumentRepository(
                             dirty = cached.dirty,
                             encoding = cached.encoding,
                             eol = cached.eol,
+                            cacheScope = cached.cacheScope,
                         ),
                     ),
                 )
             }
         }
+    }
 
     fun save(document: DocumentSession): CompletableFuture<SaveResult> {
         val charset = when (document.encoding.uppercase()) {
@@ -239,9 +296,13 @@ class DocumentRepository(
                 dirty = true,
                 encoding = document.encoding,
                 eol = document.eol,
+                cacheScope = document.cacheScope,
             ),
         )
         if (isDevicePath(document.path)) return saveDeviceFile(document, savingText, bytes)
+        if (isGuestPath(document.path) && cacheScopeForPath(document.path) != document.cacheScope) {
+            return CompletableFuture.failedFuture(IOException("The connection changed; reconnect to the document's guest before saving"))
+        }
         if (!vfs.isConnected(document.path)) {
             return CompletableFuture.completedFuture(SaveResult.QueuedOffline)
         }
@@ -259,6 +320,7 @@ class DocumentRepository(
                         dirty = document.dirty,
                         encoding = document.encoding,
                         eol = document.eol,
+                        cacheScope = document.cacheScope,
                     ),
                 )
                 SaveResult.Saved(modifiedTs)
@@ -282,13 +344,14 @@ class DocumentRepository(
     fun hasCopy(path: String): Boolean = cache.contains(path)
 
     /** What this device holds for [path]: nothing, a clean copy as of a modification time, or unsaved edits. */
-    fun copyState(path: String): CopyState = cache.load(path).let { snapshot ->
+    fun copyState(path: String): CopyState = copyState(cache.load(path))
+
+    private fun copyState(snapshot: DocumentSnapshot?): CopyState =
         when {
             snapshot == null -> CopyState.None
             snapshot.dirty -> CopyState.Edited
             else -> CopyState.Clean(snapshot.modifiedTs)
         }
-    }
 
     /**
      * Keeps a clean copy of the guest's [path] (G29 "keep available offline"): read whole, decoded as when opened
@@ -296,10 +359,12 @@ class DocumentRepository(
      * Never replaces unsaved edits.
      */
     fun storeCopy(path: String, size: Long, modifiedTs: Long): CompletableFuture<Boolean> {
-        if (cache.load(path)?.dirty == true) return CompletableFuture.completedFuture(true)
+        val cacheScope = cacheScopeForPath(path)
+        if (cache.loadScoped(path, cacheScope)?.dirty == true) return CompletableFuture.completedFuture(true)
         if (isCacheableImagePath(path)) {
             return readBytes(path, size.toInt().coerceAtLeast(1)).thenApply { bytes ->
-                storeBytesCopy(path, bytes, modifiedTs)
+                if (cacheScopeForPath(path) != cacheScope) throw IOException("Connection changed while keeping $path offline")
+                storeBytesCopy(path, bytes, modifiedTs, cacheScope)
                 true
             }
         }
@@ -309,8 +374,11 @@ class DocumentRepository(
                 if (generateSequence(error) { it.cause }.any { it is BinaryFileException }) return@handle false
                 throw java.util.concurrent.CompletionException(unwrap(error))
             }
+            if (cacheScopeForPath(path) != cacheScope) {
+                throw java.util.concurrent.CompletionException(IOException("Connection changed while keeping $path offline"))
+            }
             if (decoded.text.take(8_192).contains('\u0000')) return@handle false
-            if (cache.load(path)?.dirty == true) return@handle true
+            if (cache.loadScoped(path, cacheScope)?.dirty == true) return@handle true
             cache.save(
                 DocumentSnapshot(
                     path,
@@ -319,6 +387,7 @@ class DocumentRepository(
                     dirty = false,
                     encoding = decoded.encoding,
                     eol = if (decoded.text.contains("\r\n")) "\r\n" else "\n",
+                    cacheScope = cacheScope,
                 ),
             )
             true
@@ -326,8 +395,13 @@ class DocumentRepository(
     }
 
     /** Keeps a binary/image copy of [path] so the image viewer, Markdown previews and hex view work offline. */
-    fun storeBytesCopy(path: String, bytes: ByteArray, modifiedTs: Long?) {
-        if (cache.load(path)?.dirty == true) return
+    fun storeBytesCopy(
+        path: String,
+        bytes: ByteArray,
+        modifiedTs: Long?,
+        cacheScope: String? = cacheScopeForPath(path),
+    ) {
+        if (cache.loadScoped(path, cacheScope)?.dirty == true) return
         cache.save(
             DocumentSnapshot(
                 path = path,
@@ -336,6 +410,7 @@ class DocumentRepository(
                 dirty = false,
                 encoding = BINARY_CACHE_ENCODING,
                 eol = "\n",
+                cacheScope = cacheScope,
             ),
         )
     }
@@ -346,13 +421,17 @@ class DocumentRepository(
      * re-encrypted each time. Unsaved edits are never replaced.
      */
     fun refreshBytesCopy(path: String, size: Long, modifiedTs: Long): CompletableFuture<Unit> {
-        val current = when (val state = copyState(path)) {
+        val cacheScope = cacheScopeForPath(path)
+        val current = when (val state = copyState(cache.loadScoped(path, cacheScope))) {
             CopyState.None -> false
             CopyState.Edited -> true
             is CopyState.Clean -> state.modifiedTs == modifiedTs
         }
         if (current) return CompletableFuture.completedFuture(Unit)
-        return readBytes(path, size.toInt().coerceAtLeast(1)).thenApply { bytes -> storeBytesCopy(path, bytes, modifiedTs) }
+        return readBytes(path, size.toInt().coerceAtLeast(1)).thenApply { bytes ->
+            if (cacheScopeForPath(path) != cacheScope) throw IOException("Connection changed while keeping $path offline")
+            storeBytesCopy(path, bytes, modifiedTs, cacheScope)
+        }
     }
 
     /** This device's copy of [path] when it's current as of [modifiedTs], else null. */
@@ -502,6 +581,7 @@ class DocumentRepository(
                 dirty = document.dirty,
                 encoding = document.encoding,
                 eol = document.eol,
+                cacheScope = document.cacheScope,
             ),
         )
     }

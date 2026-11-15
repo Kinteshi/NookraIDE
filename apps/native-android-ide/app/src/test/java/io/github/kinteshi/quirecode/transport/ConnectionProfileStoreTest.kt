@@ -30,6 +30,8 @@ class ConnectionProfileStoreTest {
 
         assertEquals(listOf("Home", "Work PC"), store.profiles().map { it.name })
         assertEquals("secret-token", store.token(home.id))
+        assertNull(store.lastUsedId())
+        store.markUsed(work.id)
         assertEquals(work.id, store.lastUsedId())
         assertFalse(values.map.values.any { it.contains("secret-token") })
     }
@@ -70,6 +72,60 @@ class ConnectionProfileStoreTest {
         assertTrue(store.profiles().isEmpty())
         assertNull(store.lastUsedId())
         assertNull(store.token(saved.id))
+    }
+
+    @Test
+    fun autoConnectAndOrderArePersistedWithLastUsedTime() {
+        val store = ConnectionProfileStore(MemoryValues(), ReversingCipher)
+        val guest = store.save(null, "Guest", "ws://127.0.0.1:19870/ws", "guest-token")
+        val computer = store.save(null, "Work PC", "wss://work.example.com/ws", "computer-token")
+
+        store.setAutoConnect(guest.id, false)
+        store.markUsed(computer.id, atMillis = 1234L)
+        store.reorder(listOf(computer.id, guest.id))
+
+        assertEquals(listOf(computer.id, guest.id), store.profiles().map { it.id })
+        assertFalse(store.profiles().last().autoConnect)
+        assertEquals(1234L, store.profiles().first().lastUsedAt)
+        assertEquals(computer.id, store.lastUsedId())
+    }
+
+    @Test
+    fun editingAProfileDoesNotMarkItAsUsed() {
+        val store = ConnectionProfileStore(MemoryValues(), ReversingCipher)
+        val guest = store.save(null, "Guest", "ws://127.0.0.1:19870/ws", "guest-token")
+        val computer = store.save(null, "Work PC", "wss://work.example.com/ws", "computer-token")
+        store.markUsed(guest.id, atMillis = 1234L)
+
+        store.save(computer.id, "Work PC", "wss://work.example.com/ws", "")
+
+        assertEquals(guest.id, store.lastUsedId())
+    }
+
+    @Test
+    fun legacyDataOwnerDoesNotChangeWhenTheLastUsedProfileChangesOrIsDeleted() {
+        val store = ConnectionProfileStore(MemoryValues(), ReversingCipher)
+        val original = store.save(null, "Old guest", "ws://127.0.0.1:19870/ws", "old-token")
+        val next = store.save(null, "Work PC", "wss://work.example.com/ws", "work-token")
+        store.markUsed(original.id)
+
+        assertEquals(original.id, store.legacyCacheOwnerId(next.id))
+        store.delete(original.id)
+
+        assertNull(store.lastUsedId())
+        assertEquals(original.id, store.legacyCacheOwnerId())
+        store.markUsed(next.id)
+        assertEquals(next.id, store.lastUsedId())
+        assertEquals(original.id, store.legacyCacheOwnerId())
+    }
+
+    @Test
+    fun oldProfilesDefaultToAutoConnect() {
+        val values = MemoryValues().apply {
+            map["profiles"] = """[{"id":"old","name":"Old","endpoint":"ws://host/ws","token":"enc:tok"}]"""
+        }
+
+        assertTrue(ConnectionProfileStore(values, ReversingCipher).profiles().single().autoConnect)
     }
 
     @Test

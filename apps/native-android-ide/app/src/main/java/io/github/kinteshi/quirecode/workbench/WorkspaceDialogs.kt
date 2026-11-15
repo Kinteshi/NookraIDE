@@ -66,17 +66,17 @@ internal fun OpenFolderDialog(controller: WorkbenchController, dialog: Workbench
                 val recent = controller.recentWorkspaceChoices
                 if (recent.isNotEmpty()) {
                     Text("Recent", style = MaterialTheme.typography.labelLarge, color = colors.primary)
-                    recent.take(5).forEach { path ->
+                    recent.take(5).forEach { item ->
                         FolderRow(
-                            name = path.substringAfterLast('/').ifEmpty { path },
-                            detail = path,
+                            name = item.path.substringAfterLast('/').ifEmpty { item.path },
+                            detail = "${item.path} · ${controller.recentWorkspaceOrigin(item)}",
                             icon = { Icon(Icons.Outlined.History, contentDescription = null) },
                             trailing = {
-                                Tooltip("Remove from recent") { IconButton(onClick = { controller.forgetRecentWorkspace(path) }) {
+                                Tooltip("Remove from recent") { IconButton(onClick = { controller.forgetRecentWorkspace(item) }) {
                                     Icon(Icons.Outlined.Close, contentDescription = "Remove from recent")
                                 } }
                             },
-                        ) { controller.openWorkspace(path) }
+                        ) { controller.openRecentWorkspace(item) }
                     }
                     HorizontalDivider(Modifier.padding(vertical = 6.dp))
                 }

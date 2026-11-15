@@ -718,7 +718,7 @@ private fun LazyListScope.ai(controller: WorkbenchController, settings: Workbenc
 
 private fun LazyListScope.guest(controller: WorkbenchController, settings: WorkbenchSettings, set: SetSetting) {
     item { Section("Connection") }
-    item { ActionRow(Icons.Outlined.Cable, "Connections", controller.connection.title) { controller.openConnect() } }
+    item { ActionRow(Icons.Outlined.Cable, "Connections", "Manage routes, auto-connect and order") { controller.openConnect() } }
     item {
         SwitchRow(
             Icons.Outlined.CloudOff,

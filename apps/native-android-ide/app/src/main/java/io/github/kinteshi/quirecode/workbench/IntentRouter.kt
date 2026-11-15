@@ -16,6 +16,7 @@ import io.github.kinteshi.quirecode.R
 object IntentRouter {
     const val ACTION_OPEN_FOLDER = "io.github.kinteshi.quirecode.OPEN_FOLDER"
     const val EXTRA_FOLDER = "folder"
+    const val EXTRA_CONNECTION = "connection"
 
     private var pending: Intent? = null
 
@@ -38,21 +39,23 @@ object IntentRouter {
  * The launcher's long-press menu: the most recent folders (up to four), each opening that folder
  * (`avf.launcher.recentFolders`). Empty [folders] removes them.
  */
-fun updateLauncherShortcuts(context: Context, folders: List<String>) {
+fun updateLauncherShortcuts(context: Context, folders: List<RecentWorkspace>) {
     val manager = context.getSystemService(ShortcutManager::class.java) ?: return
     runCatching {
         val limit = manager.maxShortcutCountPerActivity.coerceAtMost(4)
-        val shortcuts = folders.take(limit).mapIndexed { rank, folder ->
-            val name = folder.trimEnd('/').substringAfterLast('/').ifEmpty { folder }
-            ShortcutInfo.Builder(context, "folder:$folder")
+        val shortcuts = folders.take(limit).mapIndexed { rank, recent ->
+            val name = recent.path.trimEnd('/').substringAfterLast('/').ifEmpty { recent.path }
+            val connectionKey = recent.connectionId.orEmpty()
+            ShortcutInfo.Builder(context, "folder:$connectionKey:${recent.path}")
                 .setShortLabel(name)
-                .setLongLabel(folder)
+                .setLongLabel(recent.path)
                 .setRank(rank)
                 .setIcon(Icon.createWithResource(context, R.drawable.ic_shortcut_folder))
                 .setIntent(
                     Intent(context, MainActivity::class.java)
                         .setAction(IntentRouter.ACTION_OPEN_FOLDER)
-                        .putExtra(IntentRouter.EXTRA_FOLDER, folder)
+                        .putExtra(IntentRouter.EXTRA_FOLDER, recent.path)
+                        .putExtra(IntentRouter.EXTRA_CONNECTION, recent.connectionId)
                         .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP),
                 )
                 .build()

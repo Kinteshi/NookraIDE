@@ -78,6 +78,7 @@ class ConnectionsTest {
         assertTrue(isTabletGuestEndpoint(GUEST_DAEMON_ENDPOINT))
         assertTrue(isTabletGuestEndpoint("ws://localhost:19870/ws"))
         assertTrue(isTabletGuestEndpoint(""))
+        assertFalse(isTabletGuestEndpoint("ws://127.0.0.1:39495/ws"))
         assertFalse(isTabletGuestEndpoint("wss://192.168.1.10:19870/ws"))
         // Encrypted means a computer, even through a tunnel on localhost.
         assertFalse(isTabletGuestEndpoint("wss://127.0.0.1:19871/ws"))
@@ -85,5 +86,35 @@ class ConnectionsTest {
         assertEquals("host.lan" to 443, endpointHostPort("wss://host.lan/ws"))
         assertNull(endpointHostPort("http://host.lan:80"))
         assertNull(endpointHostPort("not a url"))
+    }
+
+    @Test
+    fun onDeviceIsAWorkStateNotAnOfflineError() {
+        val facts = guest.copy(hasConnections = false, connected = true, workingOnDevice = true)
+        assertEquals(ConnectionState.OnDevice, connectionState(facts))
+        assertEquals("On this device", connectionSummary(facts).chip)
+        assertTrue(connectionSummary(facts).detail!!.contains("doesn't need a Linux connection"))
+        assertTrue(connectionSummary(facts.copy(workingOffline = true)).detail!!.contains("sync when its guest is available"))
+    }
+
+    @Test
+    fun connectionRoutesAreOnlySpecificWhenTheEndpointShowsThem() {
+        assertEquals(ConnectionKind.TabletGuest, connectionKind("ws://127.0.0.1:19870/ws"))
+        assertEquals(ConnectionRoute.LinuxTerminal, connectionRoute("ws://127.0.0.1:19870/ws"))
+        assertEquals(ConnectionRoute.Wifi, connectionRoute("ws://192.168.1.20:19870/ws"))
+        assertEquals(ConnectionRoute.Tailscale, connectionRoute("ws://100.100.10.20:19870/ws"))
+        assertEquals(ConnectionRoute.Tailscale, connectionRoute("wss://example-host.ts.net/ws"))
+        assertEquals(ConnectionRoute.Tunnel, connectionRoute("wss://random.trycloudflare.com/ws"))
+        assertEquals(ConnectionRoute.LocalForward, connectionRoute("ws://127.0.0.1:39495/ws"))
+        assertEquals(ConnectionRoute.LocalForward, connectionRoute("wss://127.0.0.1:8443/ws"))
+        assertEquals(ConnectionRoute.SecureWebSocket, connectionRoute("wss://work.example.com/ws"))
+        assertEquals(ConnectionRoute.SecureWebSocket, connectionRoute("wss://host.name.invalid.extra/ws"))
+    }
+
+    @Test
+    fun guestSessionKeysIncludeTheConnectionButDeviceKeysDoNot() {
+        assertEquals("session:tree:/device/uri/Projects", workspaceSessionKey("tree:/device/uri/Projects", "profile-a"))
+        assertEquals("session:profile-a:/home/u/Projects", workspaceSessionKey("/home/u/Projects", "profile-a"))
+        assertEquals("session:profile-b:/home/u/Projects", workspaceSessionKey("/home/u/Projects", "profile-b"))
     }
 }

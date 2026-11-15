@@ -21,6 +21,8 @@ data class ConnectionProfile(
     val endpoint: String,
     val hasToken: Boolean,
     val fingerprint: String? = null,
+    val autoConnect: Boolean = true,
+    val lastUsedAt: Long? = null,
 )
 
 interface SecretCipher {
@@ -47,10 +49,20 @@ class ConnectionProfileStore(
             entry.get("endpoint").asString,
             entry.has("token"),
             entry.get("fingerprint")?.takeIf { it.isJsonPrimitive }?.asString,
+            entry.get("autoConnect")?.takeIf { it.isJsonPrimitive }?.asBoolean ?: true,
+            entry.get("lastUsedAt")?.takeIf { it.isJsonPrimitive && !it.isJsonNull }?.asLong,
         )
     }
 
     fun lastUsedId(): String? = values.getString(LAST_USED_KEY)
+
+    /** The profile that owns unscoped data created before paths and caches were connection-aware. */
+    fun legacyCacheOwnerId(fallback: String? = null): String? {
+        values.getString(LEGACY_OWNER_KEY)?.let { return it }
+        val owner = lastUsedId() ?: fallback ?: return null
+        values.putString(LEGACY_OWNER_KEY, owner)
+        return owner
+    }
 
     fun token(id: String): String? = readEntries()
         .firstOrNull { it.get("id").asString == id }
@@ -87,6 +99,9 @@ class ConnectionProfileStore(
                 fingerprint ?: previous?.takeIf { it.get("endpoint")?.asString == endpoint.trim() }?.get("fingerprint")?.asString
             }
             pin?.let { addProperty("fingerprint", it) }
+            addProperty("autoConnect", previous?.get("autoConnect")?.asBoolean ?: true)
+            previous?.get("lastUsedAt")?.takeIf { it.isJsonPrimitive && !it.isJsonNull }?.asLong
+                ?.let { addProperty("lastUsedAt", it) }
         }
         val updated = JsonArray().apply {
             var replaced = false
@@ -101,7 +116,6 @@ class ConnectionProfileStore(
             if (!replaced) add(entry)
         }
         values.putString(PROFILES_KEY, gson.toJson(updated))
-        values.putString(LAST_USED_KEY, profileId)
         return profiles().first { it.id == profileId }
     }
 
@@ -109,6 +123,37 @@ class ConnectionProfileStore(
         val updated = JsonArray().apply { readEntries().filter { it.get("id").asString != id }.forEach(::add) }
         values.putString(PROFILES_KEY, gson.toJson(updated))
         if (lastUsedId() == id) values.putString(LAST_USED_KEY, null)
+    }
+
+    fun setAutoConnect(id: String, enabled: Boolean) {
+        updateEntry(id) { addProperty("autoConnect", enabled) }
+    }
+
+    fun markUsed(id: String, atMillis: Long = System.currentTimeMillis()) {
+        updateEntry(id) { addProperty("lastUsedAt", atMillis) }
+        if (readEntries().any { it.get("id").asString == id }) {
+            values.putString(LAST_USED_KEY, id)
+        }
+    }
+
+    /** Keeps only known ids and appends any omitted profiles in their existing order. */
+    fun reorder(ids: List<String>) {
+        val entries = readEntries()
+        val byId = entries.associateBy { it.get("id").asString }
+        val ordered = (ids.distinct().mapNotNull(byId::get) + entries.filter { it.get("id").asString !in ids })
+        values.putString(PROFILES_KEY, gson.toJson(JsonArray().apply { ordered.forEach(::add) }))
+    }
+
+    private fun updateEntry(id: String, update: JsonObject.() -> Unit) {
+        val updated = JsonArray()
+        readEntries().forEach { entry ->
+            if (entry.get("id").asString == id) {
+                updated.add(entry.deepCopy().apply(update))
+            } else {
+                updated.add(entry)
+            }
+        }
+        values.putString(PROFILES_KEY, gson.toJson(updated))
     }
 
     private fun readEntries(): List<JsonObject> {
@@ -129,6 +174,7 @@ class ConnectionProfileStore(
     private companion object {
         const val PROFILES_KEY = "profiles"
         const val LAST_USED_KEY = "last_used"
+        const val LEGACY_OWNER_KEY = "legacy_cache_owner"
     }
 }
 

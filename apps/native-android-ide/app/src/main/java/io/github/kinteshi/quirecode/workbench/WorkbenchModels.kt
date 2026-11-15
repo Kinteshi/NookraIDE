@@ -10,6 +10,8 @@ import io.github.kinteshi.quirecode.notebook.KernelClient
 import io.github.kinteshi.quirecode.notebook.KernelSpec
 import io.github.kinteshi.quirecode.notebook.NotebookDocument
 import io.github.kinteshi.quirecode.document.DocumentSession
+import io.github.kinteshi.quirecode.document.isGuestPath
+import io.github.kinteshi.quirecode.document.isTreePath
 import org.connectbot.terminal.TerminalEmulator
 import java.util.UUID
 
@@ -138,6 +140,19 @@ sealed interface WorkbenchDialog {
     data object GuestResources : WorkbenchDialog
     /** Closing a tab with unsaved changes, as VS Code asks. */
     data class ConfirmClose(val path: String) : WorkbenchDialog
+    /** Switching connections while edits or guest work are still active. */
+    data class ConfirmConnectionSwitch(
+        val profileId: String,
+        val recent: RecentWorkspace? = null,
+        val hasUnsaved: Boolean,
+        val hasRunning: Boolean,
+    ) : WorkbenchDialog
+    /** Opening a deleted connection's kept folder while another guest is currently connected. */
+    data class ConfirmOfflineWorkspace(
+        val recent: RecentWorkspace,
+        val hasUnsaved: Boolean,
+        val hasRunning: Boolean,
+    ) : WorkbenchDialog
     /** Python environments found in the guest; [then] runs after one is chosen (e.g. start debugging). */
     data class InterpreterPicker(
         val options: List<Pair<String, String>>,
@@ -350,7 +365,17 @@ data class WorkspaceSession(
     val preview: String? = null,
 )
 
-internal fun workspaceSessionKey(workspace: String) = "session:$workspace"
+/** A recent workspace is identified by its path and, for guest paths, the connection that served it. */
+data class RecentWorkspace(
+    val path: String,
+    val connectionId: String? = null,
+) {
+    val isDeviceFolder: Boolean get() = isTreePath(path)
+    val isGuestFolder: Boolean get() = isGuestPath(path)
+}
+
+internal fun workspaceSessionKey(workspace: String, connectionId: String? = null): String =
+    if (isGuestPath(workspace) && connectionId != null) "session:$connectionId:$workspace" else "session:$workspace"
 
 /** The editor's hover card: problems at [position] (worst first) and the language server's hover Markdown. */
 data class HoverCard(

@@ -149,6 +149,7 @@ import io.github.kinteshi.quirecode.notebook.generatedKernelName
 import io.github.kinteshi.quirecode.notebook.NotebookCell
 import io.github.kinteshi.quirecode.notebook.NotebookDocument
 import io.github.kinteshi.quirecode.transport.ConnectionProfileStore
+import io.github.kinteshi.quirecode.transport.ConnectionProfile
 import io.github.kinteshi.quirecode.transport.FileEntry
 import io.github.kinteshi.quirecode.transport.GuestPort
 import io.github.kinteshi.quirecode.transport.GuestVfsClient
@@ -327,7 +328,13 @@ class WorkbenchController(private val context: Context) {
         DeviceTreeFs(context.contentResolver, Executors.newFixedThreadPool(2)),
         OfflineIndex(java.io.File(context.filesDir, "offline-folders")),
     )
-    val repository = DocumentRepository(files, cache, ContentResolverFileStore(context))
+    val repository = DocumentRepository(
+        files,
+        cache,
+        ContentResolverFileStore(context),
+        ::cacheScopeForPath,
+        { profileStore.legacyCacheOwnerId(profileId) },
+    )
     val editorHost = EditorSurfaceHost()
     private val io = Executors.newSingleThreadExecutor()
     private val timer = Executors.newSingleThreadScheduledExecutor()
@@ -431,6 +438,7 @@ class WorkbenchController(private val context: Context) {
 
     // Connection --------------------------------------------------------------------------------
     private var connectedState by mutableStateOf(false)
+    @Volatile private var connectedProfileId: String? = null
     var connected: Boolean
         get() = connectedState
         private set(value) {
@@ -444,6 +452,8 @@ class WorkbenchController(private val context: Context) {
     var token by mutableStateOf("")
     var profiles by mutableStateOf(profileStore.profiles())
         private set
+    private val profileAutoConnect: Boolean
+        get() = profiles.firstOrNull { it.id == profileId }?.autoConnect ?: true
     var profileId by mutableStateOf<String?>(null)
     var profileName by mutableStateOf("")
     /** The selected profile's pinned certificate (remote hosts paired with a connection string). */
@@ -458,6 +468,7 @@ class WorkbenchController(private val context: Context) {
     var pairingError by mutableStateOf<String?>(null)
         private set
     private var autoConnecting = false
+    private var autoConnectFallbacks = emptyList<ConnectionProfile>()
     private var sessionRestored = false
     /** Set by the UI: asks Android for notification permission, then calls [connectGuest]. */
     var requestNotificationPermission: (() -> Unit)? = null
@@ -476,12 +487,17 @@ class WorkbenchController(private val context: Context) {
     val folderChildren = mutableStateMapOf<String, List<FileEntry>>()
     val documents = mutableStateListOf<DocumentSession>()
     /** Folders opened before, newest first (VS Code's Open Recent). */
-    var recentWorkspaces by mutableStateOf(emptyList<String>())
+    var recentWorkspaces by mutableStateOf(emptyList<RecentWorkspace>())
         private set
     /** The workspace whose tabs [persistSession] records; set as soon as one is chosen. */
     private var sessionWorkspace: String? = null
+    /** The guest that owns [sessionWorkspace]; device folders have no connection scope. */
+    private var sessionConnectionId: String? = null
+    /** A kept guest folder was opened locally by choice, rather than left open by a lost connection. */
+    private var offlineWorkspaceByChoice = false
     /** Set while switching: closing the old tabs must not overwrite their saved session. */
     private var switchingWorkspace = false
+    private var pendingRecentWorkspace: RecentWorkspace? = null
 
     private val closedDocuments = mutableListOf<DocumentSession>()
     private var activePathState by mutableStateOf<String?>(null)
@@ -698,6 +714,7 @@ class WorkbenchController(private val context: Context) {
         // folders and files.
         // Installed grammar packs: which files have colours, before any editor opens.
         AssetPackGrammarLoader.loadInstalledOnce(context)
+        profileStore.legacyCacheOwnerId(profiles.firstOrNull { it.autoConnect }?.id ?: profiles.firstOrNull()?.id)
         recentWorkspaces = loadRecentWorkspaces()
         refreshLauncherShortcuts()
         restoreUntitledFiles()
@@ -705,8 +722,12 @@ class WorkbenchController(private val context: Context) {
             chatAgent = AcpClient(vfs, settings.chatAgent.tool)
             chatAgentKind = settings.chatAgent
         }
-        // The last one used, else the first saved one (the last one used may have been deleted).
-        (profiles.firstOrNull { it.id == profileStore.lastUsedId() } ?: profiles.firstOrNull())?.let(::selectProfile)
+        // Auto-connect follows the explicit order; when all profiles are opted out, keep the last-used one selected.
+        val initialProfile = profiles.firstOrNull { it.autoConnect }
+            ?: profiles.firstOrNull { it.id == profileStore.lastUsedId() }
+            ?: profiles.firstOrNull()
+        initialProfile?.let(::selectProfile)
+        files.offline?.migrateLegacyScope(profileStore.legacyCacheOwnerId(initialProfile?.id))
         preferences.getString("grammar-load-errors", null)
             ?.takeIf(String::isNotBlank)?.let { status = "Asset-pack grammar load failed: $it" }
         bindListeners()
@@ -714,10 +735,12 @@ class WorkbenchController(private val context: Context) {
         // which is still null here. Starting offline, with no connection to retry, crashed the app on launch.
         mainHandler.post {
             // A device folder that was open last (G29) opens at once, guest or not.
-            recentWorkspaces.firstOrNull()?.takeIf { isTreePath(it) && files.device.hasAccess(it) }?.let(::openWorkspace)
+            recentWorkspaces.firstOrNull { it.isDeviceFolder }?.path
+                ?.takeIf(files.device::hasAccess)?.let(::openWorkspace)
             // Pick up where the last session left off: reconnect, then reopen its tabs (onWorkspaceConnected).
-            if (settings.autoConnect && endpoint.isNotBlank() && token.isNotBlank()) {
+            if (settings.autoConnect && profileAutoConnect && endpoint.isNotBlank() && token.isNotBlank()) {
                 autoConnecting = true
+                autoConnectFallbacks = profiles.filter { it.autoConnect && it.id != profileId }
                 connectGuest()
             } else if (settings.offlineWorkspace && workspaceRoot == null) {
                 openOfflineWorkspace()
@@ -734,6 +757,7 @@ class WorkbenchController(private val context: Context) {
         vfs.connectionStateListener = { isConnected, failure ->
             post {
                 connected = isConnected
+                if (!isConnected) connectedProfileId = null
                 // The daemon lists its open ports again after each handshake.
                 guestPorts.clear()
                 portsConnectedAt = android.os.SystemClock.uptimeMillis()
@@ -1103,6 +1127,11 @@ class WorkbenchController(private val context: Context) {
         endpoint = profile.endpoint
         token = profileStore.token(profile.id).orEmpty()
         profileFingerprint = profile.fingerprint
+        files.offline?.activeConnectionId = if (workspaceRoot?.let(::isGuestPath) == true) {
+            sessionConnectionId ?: profile.id
+        } else {
+            profile.id
+        }
     }
 
     fun newProfile() {
@@ -1114,8 +1143,12 @@ class WorkbenchController(private val context: Context) {
     }
 
     fun deleteProfile(id: String) {
+        val keptEntries = recentWorkspaces.filter { it.connectionId == id && files.offline?.serves(it.path, id) == true }
         profileStore.delete(id)
         profiles = profileStore.profiles()
+        recentWorkspaces = recentWorkspaces.filterNot { it.connectionId == id && it !in keptEntries }
+        persistRecentWorkspaces()
+        refreshLauncherShortcuts()
         if (profileId != id) return
         connectionCheck = null
         // Its problems go with it; the next saved connection is the one to connect to.
@@ -1167,6 +1200,7 @@ class WorkbenchController(private val context: Context) {
                     return@post
                 }
                 connected = true
+                connectedProfileId = profileId
                 roots = guestRoots
                 // Only what this machine serves: a folder from another one (a connection switched) is dropped.
                 val served = { path: String -> isTreePath(path) || guestRoots.any { isPathWithinRoot(path, it) } }
@@ -1176,10 +1210,13 @@ class WorkbenchController(private val context: Context) {
                 if (dialog == WorkbenchDialog.Connect) dialog = null
                 io.execute {
                     val saved = profileStore.save(profileId, profileName, endpoint, token, pin, clearFingerprint = pin == null)
+                    profileStore.markUsed(saved.id)
                     post {
                         profileId = saved.id
+                        connectedProfileId = saved.id
                         profileName = saved.name
                         profiles = profileStore.profiles()
+                        files.offline?.activeConnectionId = saved.id
                     }
                 }
                 startKeepAlive("Connected")
@@ -1194,6 +1231,7 @@ class WorkbenchController(private val context: Context) {
                 reconnectAttempt = 0
                 scheduledReconnect?.cancel(false)
                 scheduledReconnect = null
+                autoConnectFallbacks = emptyList()
                 status = when {
                     keepAliveError != null -> "Connected; background keepalive unavailable: $keepAliveError"
                     guestRoots.isEmpty() -> "Connected; guest has no workspace roots"
@@ -1205,13 +1243,21 @@ class WorkbenchController(private val context: Context) {
                 // A device folder still opening (its settings load before workspaceRoot is set) counts as open: at
                 // startup the connection could land first and replace it with the guest's last folder.
                 val deviceOpening = workspaceRoot == null && sessionWorkspace?.let(::isTreePath) == true
+                val recentTarget = pendingRecentWorkspace?.takeIf { recent ->
+                    recent.connectionId == profileId && guestRoots.any { isPathWithinRoot(recent.path, it) }
+                }
                 when {
+                    recentTarget != null -> {
+                        pendingRecentWorkspace = null
+                        openWorkspace(recentTarget.path)
+                    }
                     deviceWorkspace || deviceOpening -> startCopilot()
                     workspaceRoot == null -> chooseWorkspace(guestRoots, ::onWorkspaceConnected)
+                    isGuestPath(workspaceRoot!!) && sessionConnectionId != profileId -> openWorkspace(workspaceRoot!!)
                     else -> onWorkspaceConnected(workspaceRoot!!)
                 }
                 reattachTerminals()
-                documents.filter { it.dirty && isGuestPath(it.path) }.forEach(::reconcileDocument)
+                documents.filter { it.dirty && isGuestPath(it.path) && it.cacheScope == profileId }.forEach(::reconcileDocument)
                 refreshCleanDocuments()
                 forgetMissingRecentFolders(guestRoots)
                 // Kept folders catch up with what changed in the guest meanwhile (after the queued saves above).
@@ -2858,6 +2904,7 @@ class WorkbenchController(private val context: Context) {
             pairingRejected = pairingRejected,
             failure = connectFailure,
             workingOffline = offline,
+            workingOnDevice = deviceWorkspace || offlineWorkspaceByChoice,
         )
     val connection: ConnectionSummary get() = connectionSummary(connectionFacts)
 
@@ -2942,8 +2989,40 @@ class WorkbenchController(private val context: Context) {
 
     /** Connects to [profile] instead of the current connection. */
     fun switchConnection(profile: io.github.kinteshi.quirecode.transport.ConnectionProfile) {
+        requestConnectionSwitch(profile, recent = null)
+    }
+
+    private fun requestConnectionSwitch(
+        profile: io.github.kinteshi.quirecode.transport.ConnectionProfile,
+        recent: RecentWorkspace?,
+    ) {
+        if (profile.id != profileId) {
+            val hasUnsaved = hasGuestUnsavedEdits()
+            val hasRunning = hasGuestWorkRunning()
+            if (hasUnsaved || hasRunning) {
+                dialog = WorkbenchDialog.ConfirmConnectionSwitch(profile.id, recent, hasUnsaved, hasRunning)
+                return
+            }
+        }
+        performConnectionSwitch(profile, recent)
+    }
+
+    private fun hasGuestUnsavedEdits(): Boolean =
+        documents.any { it.dirty && it.cacheScope == profileId && isGuestPath(it.path) } ||
+            notebooks.values.any { it.document.cacheScope == profileId && it.notebook.dirty }
+
+    private fun hasGuestWorkRunning(): Boolean =
+        terminals.any { !it.exited } || debugState != DebugState.Idle ||
+            chatAgentRunning || notebooks.values.any { it.executing.isNotEmpty() || it.kernelState == "Busy" }
+
+    private fun performConnectionSwitch(
+        profile: io.github.kinteshi.quirecode.transport.ConnectionProfile,
+        recent: RecentWorkspace?,
+    ) {
+        if (recent != null) pendingRecentWorkspace = recent
         replacingConnection = connected
         if (profile.endpoint != endpoint) forgetMachineExplorer()
+        autoConnectFallbacks = emptyList()
         selectProfile(profile)
         resetConnectionProblems()
         guestStoppedAt = null
@@ -3014,6 +3093,18 @@ class WorkbenchController(private val context: Context) {
 
     /** The token typed into the editor, for a connection being edited: the saved one stays unless replaced. */
     fun connectionHasToken(id: String?): Boolean = id != null && profiles.firstOrNull { it.id == id }?.hasToken == true
+
+    fun setConnectionAutoConnect(id: String, enabled: Boolean) {
+        profileStore.setAutoConnect(id, enabled)
+        profiles = profileStore.profiles()
+    }
+
+    fun moveConnection(id: String, delta: Int) {
+        val current = profiles.indexOfFirst { it.id == id }
+        val target = (current + delta).takeIf { current >= 0 && it in profiles.indices } ?: return
+        profileStore.reorder(profiles.map { it.id }.toMutableList().apply { add(target, removeAt(current)) })
+        profiles = profileStore.profiles()
+    }
 
     /** Pair again: the tablet's setup for its guest, the connection string for a computer. */
     fun pairAgain(profile: io.github.kinteshi.quirecode.transport.ConnectionProfile? = profiles.firstOrNull { it.id == profileId }) {
@@ -3119,7 +3210,7 @@ class WorkbenchController(private val context: Context) {
      * a guest that comes back is noticed within seconds.
      */
     private fun scheduleReconnect() {
-        if (!settings.autoConnect || endpoint.isBlank() || token.isBlank() || scheduledReconnect != null) return
+        if (!settings.autoConnect || !profileAutoConnect || endpoint.isBlank() || token.isBlank() || scheduledReconnect != null) return
         if (!appVisible && reconnectAttempt >= 10) return
         val backoff = listOf(2L, 5L, 10L, 20L, 30L, 60L)[reconnectAttempt.coerceAtMost(5)]
         val delay = if (appVisible) backoff.coerceAtMost(FOREGROUND_RECONNECT_CAP_S) else backoff
@@ -3130,6 +3221,7 @@ class WorkbenchController(private val context: Context) {
                 scheduledReconnect = null
                 if (!connected && !busy) {
                     autoConnecting = true
+                    autoConnectFallbacks = profiles.filter { it.autoConnect && it.id != profileId }
                     connectGuest()
                 }
             }
@@ -3137,7 +3229,16 @@ class WorkbenchController(private val context: Context) {
     }
 
     private fun onConnectFailed(error: Throwable) {
-        if (workspaceRoot == null && settings.offlineWorkspace) openOfflineWorkspace()
+        val pendingRecent = pendingRecentWorkspace?.takeIf { it.connectionId == profileId }
+        if (pendingRecent != null) {
+            pendingRecentWorkspace = null
+            files.offline?.activeConnectionId = pendingRecent.connectionId
+            if (files.offline?.serves(pendingRecent.path, pendingRecent.connectionId) == true) {
+                openOfflineWorkspace(pendingRecent.path, pendingRecent.connectionId)
+            }
+        } else if (workspaceRoot == null && settings.offlineWorkspace) {
+            openOfflineWorkspace()
+        }
         val causes = generateSequence(error) { it.cause }.toList()
         val rejected = causes.filterIsInstance<GuestRejectedException>().firstOrNull()
         val unreachable = causes.any {
@@ -3148,6 +3249,15 @@ class WorkbenchController(private val context: Context) {
         }
         val wasAutomatic = autoConnecting
         autoConnecting = false
+        val nextAutoProfile = autoConnectFallbacks.firstOrNull().takeIf { wasAutomatic && settings.autoConnect }
+        if (nextAutoProfile != null) {
+            autoConnectFallbacks = autoConnectFallbacks.drop(1)
+            selectProfile(nextAutoProfile)
+            resetConnectionProblems()
+            autoConnecting = true
+            connectGuest()
+            return
+        }
         when {
             rejected?.reason == "InvalidToken" -> {
                 // Said by the chip and the banner, with Pair again; no dialog opens by itself (G22).
@@ -3417,7 +3527,7 @@ class WorkbenchController(private val context: Context) {
             pinned = pinnedTabs.filter { isWorkspaceFile(it) && isPathWithinRoot(it, workspace) },
             preview = previewTab?.takeIf { isWorkspaceFile(it) && isPathWithinRoot(it, workspace) },
         )
-        preferences.edit().putString(workspaceSessionKey(workspace), gson.toJson(session)).apply()
+        preferences.edit().putString(workspaceSessionKey(workspace, sessionConnectionId), gson.toJson(session)).apply()
     }
 
     /** Tabs reopening in the background from the last session. */
@@ -3438,9 +3548,23 @@ class WorkbenchController(private val context: Context) {
         sessionRestored = true
         if (!settings.restoreSession) return
         val gson = com.google.gson.Gson()
-        val saved = preferences.getString(workspaceSessionKey(workspace), null)
-            ?.let { runCatching { gson.fromJson(it, WorkspaceSession::class.java) }.getOrNull() }
-            ?: legacySession(workspace)
+        val scopedKey = workspaceSessionKey(workspace, sessionConnectionId)
+        val legacyOwner = profileStore.legacyCacheOwnerId(profileId)
+        val migrateLegacy = isGuestPath(workspace) && sessionConnectionId != null && sessionConnectionId == legacyOwner
+        val scopedJson = preferences.getString(scopedKey, null)
+        val legacyJson = if (scopedJson == null && migrateLegacy) preferences.getString(workspaceSessionKey(workspace), null) else null
+        val saved = (scopedJson ?: legacyJson)?.let { runCatching { gson.fromJson(it, WorkspaceSession::class.java) }.getOrNull() }
+            ?: if (migrateLegacy) legacySession(workspace) else WorkspaceSession()
+        if (scopedJson == null && migrateLegacy) {
+            preferences.edit()
+                .putString(scopedKey, gson.toJson(saved))
+                .remove(workspaceSessionKey(workspace))
+                .remove("session-open")
+                .remove("session-active")
+                .remove("session-directory")
+                .remove("session-expanded")
+                .apply()
+        }
         val open = saved.open.orEmpty().filter { isPathWithinRoot(it, workspace) }
         pinnedTabs.addAll(saved.pinned.orEmpty().filter { it in open && it !in pinnedTabs })
         // Only the active tab is shown (and starts its language servers); the rest wait to be shown.
@@ -3519,10 +3643,21 @@ class WorkbenchController(private val context: Context) {
      * Without a guest, opens a recent folder ([path], else the last one) from this device's
      * copies: its tabs as they were, editable; saves wait for the guest (the offline queue).
      */
-    fun openOfflineWorkspace(path: String? = null) {
+    fun openOfflineWorkspace(path: String? = null, connectionId: String? = null) {
         if (connected) return
-        val target = path ?: recentWorkspaces.firstOrNull() ?: return
-        if (workspaceRoot == target) return
+        val recent = if (path != null) {
+            val owner = connectionId ?: profileId
+            recentWorkspaces.firstOrNull { it.path == path && it.connectionId == owner }
+                ?: if (connectionId == null && owner == null) recentWorkspaces.firstOrNull { it.path == path } else null
+        } else {
+            recentWorkspaces.firstOrNull {
+                it.isGuestFolder && it.connectionId == profileId && files.offline?.serves(it.path, it.connectionId) == true
+            } ?: recentWorkspaces.firstOrNull {
+                it.isGuestFolder && files.offline?.serves(it.path, it.connectionId) == true
+            }
+        } ?: return
+        val target = path ?: recent.path
+        if (workspaceRoot == target && (!isGuestPath(target) || sessionConnectionId == recent.connectionId)) return
         // Another folder's tabs close as on switching folders: unsaved edits stay as drafts.
         persistSession()
         documents.filter { isGuestPath(it.path) }.forEach { document ->
@@ -3531,6 +3666,10 @@ class WorkbenchController(private val context: Context) {
         }
         workspaceRoot = target
         sessionWorkspace = target
+        sessionConnectionId = recent.connectionId
+        offlineWorkspaceByChoice = true
+        files.offline?.activeConnectionId = sessionConnectionId
+        rememberWorkspace(target, sessionConnectionId)
         sessionRestored = false
         reloadWorkspaceSnippets(target)
         reloadLaunchConfigurations(target)
@@ -3545,13 +3684,28 @@ class WorkbenchController(private val context: Context) {
     }
 
     /** The guest files of [workspace] this device keeps a copy of, for Explorer offline: the ones opened since, and its tabs. */
-    fun offlineFiles(workspace: String? = workspaceRoot): List<String> {
+    fun offlineFiles(workspace: String? = workspaceRoot, connectionId: String? = sessionConnectionId): List<String> {
         if (workspace == null) return emptyList()
+        val scopedKey = offlineFilesKey(workspace, connectionId)
+        val legacyKey = OFFLINE_FILES_PREFIX + workspace
+        val legacyOwner = profileStore.legacyCacheOwnerId(profileId)
+        val stored = preferences.getString(scopedKey, null)
+            ?: preferences.getString(legacyKey, null)?.takeIf { connectionId != null && connectionId == legacyOwner }?.also {
+                if (scopedKey != legacyKey) {
+                    preferences.edit().putString(scopedKey, it).remove(legacyKey).apply()
+                }
+            }
+            ?: "[]"
         val remembered = runCatching {
-            com.google.gson.Gson().fromJson(preferences.getString(OFFLINE_FILES_PREFIX + workspace, "[]"), Array<String>::class.java).toList()
+            com.google.gson.Gson().fromJson(stored, Array<String>::class.java).toList()
         }.getOrDefault(emptyList())
         val tabs = runCatching {
-            com.google.gson.Gson().fromJson(preferences.getString(workspaceSessionKey(workspace), null), WorkspaceSession::class.java).open.orEmpty()
+            com.google.gson.Gson().fromJson(
+                preferences.getString(workspaceSessionKey(workspace, connectionId), null)
+                    ?: preferences.getString(workspaceSessionKey(workspace), null)
+                        .takeIf { connectionId != null && connectionId == legacyOwner },
+                WorkspaceSession::class.java,
+            ).open.orEmpty()
         }.getOrDefault(emptyList())
         return (remembered + tabs).distinct().filter { isPathWithinRoot(it, workspace) && repository.hasCopy(it) }
     }
@@ -3559,14 +3713,18 @@ class WorkbenchController(private val context: Context) {
     private fun rememberOfflineFile(path: String) {
         val workspace = workspaceRoot?.takeIf { isPathWithinRoot(path, it) } ?: return
         val files = (listOf(path) + offlineFiles(workspace).filterNot { it == path }).take(OFFLINE_FILES_LIMIT)
-        preferences.edit().putString(OFFLINE_FILES_PREFIX + workspace, com.google.gson.Gson().toJson(files)).apply()
+        preferences.edit().putString(offlineFilesKey(workspace), com.google.gson.Gson().toJson(files)).apply()
     }
 
     private fun forgetOfflineFile(path: String, workspace: String? = workspaceRoot) {
         if (workspace == null) return
         val files = offlineFiles(workspace)
-        if (path in files) preferences.edit().putString(OFFLINE_FILES_PREFIX + workspace, com.google.gson.Gson().toJson(files - path)).apply()
+        if (path in files) preferences.edit().putString(offlineFilesKey(workspace), com.google.gson.Gson().toJson(files - path)).apply()
     }
+
+    private fun offlineFilesKey(workspace: String, connectionId: String? = sessionConnectionId): String =
+        if (isGuestPath(workspace) && connectionId != null) "$OFFLINE_FILES_PREFIX$connectionId:$workspace"
+        else OFFLINE_FILES_PREFIX + workspace
 
     /**
      * After connecting: the offline list's files deleted in the guest meanwhile (in Linux Terminal, say) go from the list,
@@ -3595,14 +3753,24 @@ class WorkbenchController(private val context: Context) {
      * device kept for them (their offline list, their copies without unsaved edits, their last session's tabs).
      */
     private fun forgetMissingRecentFolders(guestRoots: List<String>) {
-        val kept = preferences.all.keys.filter { it.startsWith(OFFLINE_FILES_PREFIX) }.map { it.removePrefix(OFFLINE_FILES_PREFIX) }
-        (recentWorkspaces + kept).distinct().filter { folder -> guestRoots.any { isPathWithinRoot(folder, it) } }.forEach { folder ->
+        val connectionId = profileId ?: return
+        val kept = files.offline?.folders.orEmpty()
+        val recent = recentWorkspaces.filter { it.connectionId == connectionId }
+        (recent.map { it.path } + kept).distinct()
+            .filter { folder -> guestRoots.any { isPathWithinRoot(folder, it) } }
+            .forEach { folder ->
             files.stat(folder).whenComplete { entry, error ->
                 post {
                     if (!error.isNotFound() && (error != null || entry.isDirectory)) return@post
-                    if (folder in recentWorkspaces) forgetRecentWorkspace(folder)
-                    offlineFiles(folder).filterNot { path -> documents.any { it.path == path } }.forEach(repository::forgetCleanCopy)
-                    preferences.edit().remove(OFFLINE_FILES_PREFIX + folder).remove(workspaceSessionKey(folder)).apply()
+                    recent.filter { it.path == folder }
+                        .forEach(::forgetRecentWorkspace)
+                    offlineFiles(folder, connectionId).filterNot { path -> documents.any { it.path == path } }.forEach(repository::forgetCleanCopy)
+                    preferences.edit()
+                        .remove(offlineFilesKey(folder, connectionId))
+                        .remove(OFFLINE_FILES_PREFIX + folder)
+                        .remove(workspaceSessionKey(folder, connectionId))
+                        .remove(workspaceSessionKey(folder))
+                        .apply()
                 }
             }
         }
@@ -3633,8 +3801,11 @@ class WorkbenchController(private val context: Context) {
      * from an older copy, or edited elsewhere) are read again. Edited tabs go through
      * [reconcileDocument] and its conflict check instead.
      */
+    private fun documentScopeMatchesCurrentConnection(document: DocumentSession): Boolean =
+        document.cacheScope == profileId
+
     private fun refreshCleanDocuments() {
-        documents.filter { isGuestPath(it.path) && !it.dirty && it.path !in notebooks }.forEach { document ->
+        documents.filter { isGuestPath(it.path) && documentScopeMatchesCurrentConnection(it) && !it.dirty && it.path !in notebooks }.forEach { document ->
             files.stat(document.path).whenComplete { entry, error ->
                 if (error != null || entry.isDirectory || entry.modifiedTs == document.baseModifiedTs) return@whenComplete
                 repository.open(document.path).whenComplete { result, _ ->
@@ -3657,24 +3828,160 @@ class WorkbenchController(private val context: Context) {
 
     // Workspaces ------------------------------------------------------------------------------
 
-    private fun loadRecentWorkspaces(): List<String> = runCatching {
-        com.google.gson.Gson().fromJson(preferences.getString(RECENT_WORKSPACES_KEY, "[]"), Array<String>::class.java).toList()
+    private fun loadRecentWorkspaces(): List<RecentWorkspace> = runCatching {
+        val legacyOwner = profileStore.legacyCacheOwnerId(profileId)
+        var migrateLegacyEntries = false
+        val recent = JsonParser.parseString(preferences.getString(RECENT_WORKSPACES_KEY, "[]")).asJsonArray.mapNotNull { element ->
+            when {
+                element.isJsonPrimitive && element.asJsonPrimitive.isString -> {
+                    val path = element.asString
+                    if (isGuestPath(path)) migrateLegacyEntries = true
+                    RecentWorkspace(path, legacyOwner.takeIf { isGuestPath(path) })
+                }
+                element.isJsonObject -> {
+                    val item = element.asJsonObject
+                    val path = item.get("path")?.takeIf { it.isJsonPrimitive }?.asString ?: return@mapNotNull null
+                    val owner = item.get("connectionId")?.takeIf { it.isJsonPrimitive && !it.isJsonNull }?.asString
+                        ?: legacyOwner.takeIf { isGuestPath(path) }
+                    if (isGuestPath(path) && item.get("connectionId")?.isJsonPrimitive != true) migrateLegacyEntries = true
+                    RecentWorkspace(path, owner.takeIf { isGuestPath(path) })
+                }
+                else -> null
+            }
+        }.distinctBy { it.connectionId to it.path }.take(RECENT_WORKSPACES_LIMIT)
+        if (migrateLegacyEntries) {
+            preferences.edit().putString(RECENT_WORKSPACES_KEY, com.google.gson.Gson().toJson(recent)).apply()
+        }
+        recent
     }.getOrDefault(emptyList())
 
-    /** Recent folders this guest serves, the open one left out. */
-    val recentWorkspaceChoices: List<String>
-        get() = recentWorkspaces.filter { recent -> recent != workspaceRoot && roots.any { isPathWithinRoot(recent, it) } }
-
-    private fun rememberWorkspace(path: String) {
-        recentWorkspaces = (listOf(path) + recentWorkspaces.filterNot { it == path }).take(RECENT_WORKSPACES_LIMIT)
+    private fun persistRecentWorkspaces() {
         preferences.edit().putString(RECENT_WORKSPACES_KEY, com.google.gson.Gson().toJson(recentWorkspaces)).apply()
+    }
+
+    private fun cacheScopeForPath(path: String): String? {
+        if (!isGuestPath(path)) return null
+        if (connected) return connectedProfileId ?: profileId
+        sessionWorkspace?.takeIf { isGuestPath(it) && isPathWithinRoot(path, it) }?.let { return sessionConnectionId }
+        return recentWorkspaces.firstOrNull { it.isGuestFolder && it.connectionId != null && isPathWithinRoot(path, it.path) }?.connectionId
+            ?: profileId
+    }
+
+    fun recentWorkspaceOrigin(recent: RecentWorkspace): String {
+        if (recent.isDeviceFolder) return "this device"
+        val profile = profiles.firstOrNull { it.id == recent.connectionId }
+            ?: return "offline copy"
+        val kind = if (connectionKind(profile.endpoint) == ConnectionKind.TabletGuest) "Linux guest" else profile.name
+        val route = connectionRoute(profile.endpoint)
+        return if (route == ConnectionRoute.LinuxTerminal) kind else "$kind over ${route.label}"
+    }
+
+    fun openRecentWorkspace(recent: RecentWorkspace) {
+        if (recent.isDeviceFolder) {
+            openWorkspace(recent.path)
+            return
+        }
+        val targetProfile = profiles.firstOrNull { it.id == recent.connectionId }
+        if (targetProfile == null) {
+            if (files.offline?.serves(recent.path, recent.connectionId) != true) {
+                status = "This folder's connection was removed and it isn't available offline"
+                return
+            }
+            if (connected) {
+                dialog = WorkbenchDialog.ConfirmOfflineWorkspace(recent, hasGuestUnsavedEdits(), hasGuestWorkRunning())
+            } else {
+                openOfflineRecentWorkspace(recent)
+            }
+            return
+        }
+        openRecentWorkspaceNow(recent, targetProfile)
+    }
+
+    fun confirmOfflineWorkspace(recent: RecentWorkspace) {
+        dialog = null
+        if (files.offline?.serves(recent.path, recent.connectionId) != true) {
+            status = "This folder isn't available offline"
+            return
+        }
+        openOfflineRecentWorkspace(recent)
+    }
+
+    private fun openOfflineRecentWorkspace(recent: RecentWorkspace) {
+        files.offline?.activeConnectionId = recent.connectionId
+        if (!connected) {
+            openOfflineWorkspace(recent.path, recent.connectionId)
+            return
+        }
+        replacingConnection = true
+        vfs.disconnect()
+        post {
+            if (!vfs.isConnected()) {
+                connected = false
+                openOfflineWorkspace(recent.path, recent.connectionId)
+            } else {
+                replacingConnection = false
+                status = "Could not disconnect from the current guest"
+            }
+        }
+    }
+
+    fun confirmConnectionSwitch(profileId: String, recent: RecentWorkspace?) {
+        val targetProfile = profiles.firstOrNull { it.id == profileId }
+        dialog = null
+        if (targetProfile == null) {
+            recent?.let(::openRecentWorkspace)
+            return
+        }
+        performConnectionSwitch(targetProfile, recent)
+    }
+
+    private fun openRecentWorkspaceNow(recent: RecentWorkspace, targetProfile: ConnectionProfile) {
+        if (targetProfile.id == profileId && connected) {
+            openWorkspace(recent.path)
+            return
+        }
+        if (targetProfile.id != profileId) {
+            requestConnectionSwitch(targetProfile, recent)
+            return
+        }
+        if (!connected && recent.connectionId != null) {
+            files.offline?.activeConnectionId = recent.connectionId
+            if (files.offline?.serves(recent.path, recent.connectionId) == true) {
+                openOfflineWorkspace(recent.path, recent.connectionId)
+            }
+        }
+        if (!connected) {
+            pendingRecentWorkspace = recent
+            resetConnectionProblems()
+            requestGuestConnection()
+        }
+    }
+
+    /** Recent folders this guest serves, the open one left out. */
+    val recentWorkspaceChoices: List<RecentWorkspace>
+        get() = recentWorkspaces.filter { recent ->
+            recent.path != workspaceRoot &&
+                (recent.isDeviceFolder ||
+                    profiles.any { it.id == recent.connectionId } ||
+                    !connected && files.servesOffline(recent.path, recent.connectionId))
+        }
+
+    private fun rememberWorkspace(path: String, connectionId: String? = profileId.takeIf { isGuestPath(path) }) {
+        val recent = RecentWorkspace(path, connectionId.takeIf { isGuestPath(path) })
+        recentWorkspaces = (listOf(recent) + recentWorkspaces.filterNot { it.path == path && it.connectionId == recent.connectionId })
+            .take(RECENT_WORKSPACES_LIMIT)
+        persistRecentWorkspaces()
         refreshLauncherShortcuts()
     }
 
     fun forgetRecentWorkspace(path: String) {
+        recentWorkspaces.filter { it.path == path }.forEach(::forgetRecentWorkspace)
+    }
+
+    fun forgetRecentWorkspace(recent: RecentWorkspace) {
         // A device folder's access grant goes with it (Android keeps a limited number per app).
-        if (isTreePath(path) && path != workspaceRoot) {
-            treeUriOf(path)?.let { uri ->
+        if (recent.isDeviceFolder && recent.path != workspaceRoot) {
+            treeUriOf(recent.path)?.let { uri ->
                 runCatching {
                     context.contentResolver.releasePersistableUriPermission(
                         android.net.Uri.parse(uri),
@@ -3683,8 +3990,8 @@ class WorkbenchController(private val context: Context) {
                 }
             }
         }
-        recentWorkspaces = recentWorkspaces.filterNot { it == path }
-        preferences.edit().putString(RECENT_WORKSPACES_KEY, com.google.gson.Gson().toJson(recentWorkspaces)).apply()
+        recentWorkspaces = recentWorkspaces.filterNot { it == recent }
+        persistRecentWorkspaces()
         refreshLauncherShortcuts()
     }
 
@@ -3697,7 +4004,13 @@ class WorkbenchController(private val context: Context) {
     /** An intent from [IntentRouter]: "Open with" from another app, or a recent-folder shortcut. */
     fun handleIntent(intent: android.content.Intent) {
         when (intent.action) {
-            IntentRouter.ACTION_OPEN_FOLDER -> intent.getStringExtra(IntentRouter.EXTRA_FOLDER)?.let(::openFolderFromLauncher)
+            IntentRouter.ACTION_OPEN_FOLDER -> {
+                val path = intent.getStringExtra(IntentRouter.EXTRA_FOLDER) ?: return
+                val connectionId = intent.getStringExtra(IntentRouter.EXTRA_CONNECTION)
+                val recent = recentWorkspaces.firstOrNull { it.path == path && it.connectionId == connectionId }
+                    ?: RecentWorkspace(path, connectionId)
+                openRecentWorkspace(recent)
+            }
             android.content.Intent.ACTION_VIEW, android.content.Intent.ACTION_EDIT -> {
                 val uri = intent.data?.takeIf { it.scheme == "content" } ?: return
                 openDeviceFile(uri)
@@ -3847,25 +4160,17 @@ class WorkbenchController(private val context: Context) {
         }
     }
 
-    /** A launcher shortcut's folder: opened now, or first once the guest connects. */
-    private fun openFolderFromLauncher(path: String) {
-        if (connected) {
-            openWorkspace(path)
-        } else {
-            rememberWorkspace(path)
-            status = "Opening ${path.substringAfterLast('/')} when the guest connects"
-        }
-    }
-
     /** The folder to open on connecting: the last one, if this guest still has it, else its first root. */
     private fun chooseWorkspace(guestRoots: List<String>, then: (String) -> Unit) {
-        val last = recentWorkspaces.firstOrNull { recent -> guestRoots.any { isPathWithinRoot(recent, it) } }
+        val last = recentWorkspaces.firstOrNull { recent ->
+            recent.connectionId == profileId && guestRoots.any { isPathWithinRoot(recent.path, it) }
+        }
         if (last == null) {
             guestRoots.firstOrNull()?.let(then)
             return
         }
-        files.stat(last).whenComplete { entry, error ->
-            post { (if (error == null && entry?.isDirectory == true) last else guestRoots.firstOrNull())?.let(then) }
+        files.stat(last.path).whenComplete { entry, error ->
+            post { (if (error == null && entry?.isDirectory == true) last.path else guestRoots.firstOrNull())?.let(then) }
         }
     }
 
@@ -3953,7 +4258,7 @@ class WorkbenchController(private val context: Context) {
                 return
             }
         }
-        if (target == workspaceRoot) return
+        if (target == workspaceRoot && (!isGuestPath(target) || sessionConnectionId == profileId)) return
         persistSession()
         switchingWorkspace = true
         documents.map { it.path }.filter { isGuestPath(it) || isTreePath(it) }.forEach { open ->
@@ -4004,6 +4309,9 @@ class WorkbenchController(private val context: Context) {
     private fun onWorkspaceConnected(workspace: String) {
         autoConnecting = false
         sessionWorkspace = workspace
+        sessionConnectionId = profileId.takeIf { isGuestPath(workspace) }
+        offlineWorkspaceByChoice = false
+        files.offline?.activeConnectionId = sessionConnectionId
         rememberWorkspace(workspace)
         loadDirectory(workspace)
         restoreSession(workspace)
@@ -5066,11 +5374,13 @@ class WorkbenchController(private val context: Context) {
         if (!isGuestPath(path) || !vfs.isConnected()) return repository.readBytes(path, MAX_PREVIEW_IMAGE_BYTES).get(30, TimeUnit.SECONDS)
         // A copy as of the guest's modification time is shown as is: no download, and nothing stored again. Otherwise
         // the image is read and, when small, kept so it shows offline.
+        val cacheScope = connectedProfileId ?: profileId
         val entry = vfs.stat(path).get(30, TimeUnit.SECONDS)
+        if (cacheScopeForPath(path) != cacheScope) throw java.io.IOException("Connection changed while reading $path")
         repository.currentCopyBytes(path, entry.modifiedTs)?.let { return it }
         val bytes = repository.readBytes(path, MAX_PREVIEW_IMAGE_BYTES).get(30, TimeUnit.SECONDS)
-        if (bytes.size <= MAX_OFFLINE_FILE_BYTES) {
-            runCatching { repository.storeBytesCopy(path, bytes, entry.modifiedTs) }
+        if (bytes.size <= MAX_OFFLINE_FILE_BYTES && cacheScopeForPath(path) == cacheScope) {
+            runCatching { repository.storeBytesCopy(path, bytes, entry.modifiedTs, cacheScope) }
         }
         return bytes
     }

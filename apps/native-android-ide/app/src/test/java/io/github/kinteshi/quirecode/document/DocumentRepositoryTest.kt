@@ -80,6 +80,43 @@ class DocumentRepositoryTest {
     }
 
     @Test
+    fun sameGuestPathKeepsCopiesAndDraftsSeparateByConnection() {
+        val vfs = FakeGuestVfs("guest-a\n".toByteArray(), 50)
+        var connection = "guest-a"
+        val cache = MemoryDocumentCache()
+        val repository = DocumentRepository(vfs, cache, cacheScopeForPath = { connection })
+        val document = (repository.open("/workspace/main.py").join() as OpenDocument.Editable).document
+        document.updateText("guest-a edit\n")
+        vfs.connected = false
+        assertEquals(SaveResult.QueuedOffline, repository.save(document).join())
+
+        connection = "guest-b"
+        assertFalse(repository.hasCopy("/workspace/main.py"))
+        assertTrue(cache.load("connection:guest-a:/workspace/main.py")?.dirty == true)
+
+        connection = "guest-a"
+        assertTrue(repository.hasCopy("/workspace/main.py"))
+        assertEquals("guest-a edit\n", (repository.open("/workspace/main.py").join() as OpenDocument.Editable).document.text)
+    }
+
+    @Test
+    fun aDraftCannotBeWrittenToASecondGuestAtTheSamePath() {
+        val vfs = FakeGuestVfs("guest-b\n".toByteArray(), 50)
+        var connection = "guest-a"
+        val cache = MemoryDocumentCache()
+        val repository = DocumentRepository(vfs, cache, cacheScopeForPath = { connection })
+        val document = (repository.open("/workspace/main.py").join() as OpenDocument.Editable).document
+        document.updateText("guest-a edit\n")
+        connection = "guest-b"
+
+        val error = runCatching { repository.save(document).join() }.exceptionOrNull()
+
+        assertTrue(error != null)
+        assertEquals("guest-b\n", vfs.contents.toString(StandardCharsets.UTF_8))
+        assertTrue(cache.load("connection:guest-a:/workspace/main.py")?.dirty == true)
+    }
+
+    @Test
     fun reconnectSurfacesExternalChangesInsteadOfOverwritingThem() {
         val vfs = FakeGuestVfs("old\n".toByteArray(), 20)
         val repository = DocumentRepository(vfs, MemoryDocumentCache())

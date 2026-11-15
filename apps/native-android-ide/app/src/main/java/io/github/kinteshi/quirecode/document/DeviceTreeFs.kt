@@ -360,7 +360,8 @@ class RoutingVfs(
     override fun roots(): CompletableFuture<List<String>> = guest.roots()
 
     /** Whether [path] is listed from a kept folder's last sync now: the guest is away and the folder is kept. */
-    fun servesOffline(path: String): Boolean = !isTreePath(path) && !guest.isConnected() && offline?.serves(path) == true
+    fun servesOffline(path: String, connectionId: String? = offline?.activeConnectionId): Boolean =
+        !isTreePath(path) && !guest.isConnected() && offline?.serves(path, connectionId) == true
 
     override fun listDir(path: String) = when {
         isTreePath(path) -> device.listDir(path)

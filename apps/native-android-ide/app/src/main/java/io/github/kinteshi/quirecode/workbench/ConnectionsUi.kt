@@ -17,6 +17,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.ArrowDownward
+import androidx.compose.material.icons.outlined.ArrowUpward
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.CloudOff
@@ -48,6 +50,7 @@ import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -65,6 +68,7 @@ import io.github.kinteshi.quirecode.transport.ConnectionProfile
 
 /** The icon for a [ConnectionState], in the chip and the dialog's status card. */
 private fun ConnectionState.icon(): ImageVector = when (this) {
+    ConnectionState.OnDevice -> Icons.Outlined.TabletAndroid
     ConnectionState.Connected -> Icons.Outlined.Cloud
     ConnectionState.Connecting -> Icons.Outlined.CloudSync
     ConnectionState.NotSetUp -> Icons.Outlined.Add
@@ -90,7 +94,7 @@ internal fun ConnectionChip(controller: WorkbenchController) {
     val summary = controller.connection
     val chipColors = when (summary.state) {
         ConnectionState.Connected, ConnectionState.Connecting -> AssistChipDefaults.assistChipColors()
-        ConnectionState.NotSetUp, ConnectionState.Idle -> AssistChipDefaults.assistChipColors(
+        ConnectionState.OnDevice, ConnectionState.NotSetUp, ConnectionState.Idle -> AssistChipDefaults.assistChipColors(
             containerColor = colors.primaryContainer,
             labelColor = colors.onPrimaryContainer,
             leadingIconContentColor = colors.onPrimaryContainer,
@@ -164,9 +168,17 @@ internal fun ConnectionsDialog(controller: WorkbenchController) {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 if (summary.state != ConnectionState.NotSetUp) StatusCard(controller, summary)
                 if (controller.profiles.isNotEmpty()) {
-                    Text("Your connections", style = MaterialTheme.typography.titleSmall, color = colors.primary)
-                    Column {
-                        controller.profiles.forEach { profile -> ConnectionRow(controller, profile) }
+                    listOf(
+                        ConnectionKind.TabletGuest to "This tablet",
+                        ConnectionKind.Computer to "Computers",
+                    ).forEach { (kind, title) ->
+                        val profiles = controller.profiles.filter { connectionKind(it.endpoint) == kind }
+                        if (profiles.isNotEmpty()) {
+                            Text(title, style = MaterialTheme.typography.titleSmall, color = colors.primary)
+                            Column {
+                                profiles.forEach { profile -> ConnectionRow(controller, profile) }
+                            }
+                        }
                     }
                 } else {
                     Text(summary.detail.orEmpty(), style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
@@ -233,6 +245,7 @@ private fun StatusCard(controller: WorkbenchController, summary: ConnectionSumma
                     ConnectionState.Connected -> if (controller.daemonVersionNotice?.status == DaemonVersionStatus.Older) {
                         FilledTonalButton(onClick = controller::updateGuestDaemon) { Text("Update the daemon") }
                     }
+                    ConnectionState.OnDevice -> Unit
                     ConnectionState.Idle, ConnectionState.Failed -> FilledTonalButton(onClick = controller::requestGuestConnection, enabled = !controller.busy) { Text("Connect") }
                     ConnectionState.PairingRejected -> FilledTonalButton(onClick = { controller.pairAgain() }) { Text("Pair again") }
                     ConnectionState.ForwardingStuck -> {
@@ -259,15 +272,22 @@ private fun ConnectionRow(controller: WorkbenchController, profile: ConnectionPr
     val current = profile.id == controller.profileId
     val tablet = isTabletGuestEndpoint(profile.endpoint)
     var menu by remember { mutableStateOf(false) }
-    val where = if (tablet) "This tablet's Linux guest" else endpointHost(profile.endpoint) ?: profile.endpoint
+    val where = connectionRoute(profile.endpoint).label
+    val order = controller.profiles.indexOfFirst { it.id == profile.id } + 1
     val state = when {
-        current && controller.connected -> " · Connected"
-        current -> " · Current"
-        else -> ""
+        current && controller.connected -> "Connected"
+        current && controller.busy -> "Connecting"
+        current && controller.pairingRejected -> "Pair again"
+        current && controller.connection.state in setOf(ConnectionState.Unreachable, ConnectionState.Lost) -> "Offline"
+        current -> "Current"
+        else -> "Not connected"
     }
+    val lastUsed = profile.lastUsedAt?.let {
+        " · Last used ${java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT).format(java.util.Date(it))}"
+    }.orEmpty()
     ListItem(
         headlineContent = { Text(profile.name) },
-        supportingContent = { Text(where + state) },
+        supportingContent = { Text("$where · Auto-connect #$order · $state$lastUsed") },
         leadingContent = {
             Icon(
                 if (tablet) Icons.Outlined.TabletAndroid else Icons.Outlined.Computer,
@@ -276,24 +296,43 @@ private fun ConnectionRow(controller: WorkbenchController, profile: ConnectionPr
             )
         },
         trailingContent = {
-            Box {
-                Tooltip("More") { IconButton(onClick = { menu = true }) { Icon(Icons.Outlined.MoreVert, contentDescription = "More for ${profile.name}") } }
-                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                    DropdownMenuItem(
-                        text = { Text("Edit…") },
-                        leadingIcon = { Icon(Icons.Outlined.Edit, contentDescription = null) },
-                        onClick = { menu = false; controller.dialog = WorkbenchDialog.ConnectionEditor(profile.id) },
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Tooltip(if (profile.autoConnect) "Auto-connect enabled" else "Auto-connect disabled") {
+                    Switch(
+                        checked = profile.autoConnect,
+                        onCheckedChange = { controller.setConnectionAutoConnect(profile.id, it) },
+                        modifier = Modifier.padding(end = 4.dp),
                     )
-                    DropdownMenuItem(
-                        text = { Text("Pair again…") },
-                        leadingIcon = { Icon(Icons.Outlined.Link, contentDescription = null) },
-                        onClick = { menu = false; controller.pairAgain(profile) },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Delete") },
-                        leadingIcon = { Icon(Icons.Outlined.Delete, contentDescription = null) },
-                        onClick = { menu = false; controller.deleteProfile(profile.id) },
-                    )
+                }
+                Box {
+                    Tooltip("More") { IconButton(onClick = { menu = true }) { Icon(Icons.Outlined.MoreVert, contentDescription = "More for ${profile.name}") } }
+                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                        DropdownMenuItem(
+                            text = { Text("Move up in auto-connect order") },
+                            leadingIcon = { Icon(Icons.Outlined.ArrowUpward, contentDescription = null) },
+                            onClick = { menu = false; controller.moveConnection(profile.id, -1) },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Move down in auto-connect order") },
+                            leadingIcon = { Icon(Icons.Outlined.ArrowDownward, contentDescription = null) },
+                            onClick = { menu = false; controller.moveConnection(profile.id, 1) },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Edit…") },
+                            leadingIcon = { Icon(Icons.Outlined.Edit, contentDescription = null) },
+                            onClick = { menu = false; controller.dialog = WorkbenchDialog.ConnectionEditor(profile.id) },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Pair again…") },
+                            leadingIcon = { Icon(Icons.Outlined.Link, contentDescription = null) },
+                            onClick = { menu = false; controller.pairAgain(profile) },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Delete") },
+                            leadingIcon = { Icon(Icons.Outlined.Delete, contentDescription = null) },
+                            onClick = { menu = false; controller.deleteProfile(profile.id) },
+                        )
+                    }
                 }
             }
         },

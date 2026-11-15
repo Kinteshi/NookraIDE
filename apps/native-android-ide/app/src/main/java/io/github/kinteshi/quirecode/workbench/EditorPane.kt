@@ -530,41 +530,31 @@ private fun EmptyEditor(controller: WorkbenchController) = BoxWithConstraints(Mo
             }
         }
         // VS Code's Start page: the last folders, a tap away (without a guest, from this device's copies).
-        val offlineFolders = !controller.connected && controller.settings.offlineWorkspace
         // Device folders (G29) open with or without the guest.
-        val guestRecent = when {
-            controller.connected -> controller.recentWorkspaceChoices
-            offlineFolders -> controller.recentWorkspaces.filter { it != controller.workspaceRoot && isGuestPath(it) }
-            else -> emptyList()
-        }
-        val recent = controller.recentWorkspaces.filter { path ->
-            path != controller.workspaceRoot && (path in guestRecent || io.github.kinteshi.quirecode.document.isTreePath(path))
-        }.take(5)
+        val recent = controller.recentWorkspaceChoices.take(5)
         if (recent.isNotEmpty()) {
             Spacer(Modifier.height(20.dp))
             Column(Modifier.widthIn(max = 400.dp).fillMaxWidth()) {
                 Text(
-                    if (offlineFolders) "Recent folders · offline" else "Recent folders",
+                    if (!controller.connected) "Recent folders · offline" else "Recent folders",
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(horizontal = 10.dp),
                 )
-                recent.forEach { path ->
+                recent.forEach { item ->
                     Row(
                         Modifier.fillMaxWidth()
                             .clip(RoundedCornerShape(8.dp))
-                            .clickable {
-                                if (offlineFolders && isGuestPath(path)) controller.openOfflineWorkspace(path) else controller.openWorkspace(path)
-                            }
+                            .clickable { controller.openRecentWorkspace(item) }
                             .padding(horizontal = 10.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
-                        val onDevice = io.github.kinteshi.quirecode.document.isTreePath(path)
+                        val onDevice = item.isDeviceFolder
                         Icon(if (onDevice) Icons.Outlined.PhoneAndroid else Icons.Outlined.Folder, contentDescription = null, tint = colors.onSurfaceVariant, modifier = Modifier.size(18.dp))
-                        Text(controller.displayName(path), color = MaterialTheme.colorScheme.onSurface)
+                        Text(controller.displayName(item.path), color = MaterialTheme.colorScheme.onSurface)
                         Text(
-                            "  " + if (onDevice) "on this device" else path.substringBeforeLast('/'),
+                            "  " + controller.recentWorkspaceOrigin(item),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             style = MaterialTheme.typography.bodySmall,
                             maxLines = 1,

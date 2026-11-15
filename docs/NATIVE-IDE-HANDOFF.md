@@ -1,18 +1,20 @@
 # Native IDE (Track B) — handoff
 
-Last updated: 2026-11-09 (UTC−3). Read this first when resuming. The batch plan and its status are in [NATIVE-IDE-BATCHES.md](NATIVE-IDE-BATCHES.md). Scope decisions are in
+Last updated: 2026-11-15 (UTC). Read this first when resuming. The batch plan and its status are in [NATIVE-IDE-BATCHES.md](NATIVE-IDE-BATCHES.md). Scope decisions are in
 [NATIVE-ANDROID-IDE-SPEC.md](NATIVE-ANDROID-IDE-SPEC.md) under "Scope reset (2026-10-23)". How work is done here (Material You,
 the engine seam, batches, testing on the device) is in [CONTRIBUTING.md](../CONTRIBUTING.md). For agents: how to work with the maintainer, the device's hard rules and the lessons so far are in [AGENT-GUIDE.md](AGENT-GUIDE.md).
 
-## Current state (2026-11-09)
+## Current state (2026-11-15)
 
-* **Progress:** batches 1–69 are done (41 was exploration with no app change). Each is described in the batch plan.
-* **What's open:** [Open backlog](NATIVE-IDE-BATCHES.md#open-backlog-11-08), in two lists: general, and the Aardink switch's, which replaces this file's old "Remaining" list.
+* **Progress:** batches 1–69 are done (41 was exploration with no app change). Batch 70 implements G33 + G34; its tablet
+  verification is pending because wireless ADB did not connect. Each batch is described in the batch plan.
+* **What's open:** [Open backlog](NATIVE-IDE-BATCHES.md#open-backlog-11-08), in two lists: G33/G34's tablet check,
+  the remaining general backlog, and the Aardink switch's, which replaces this file's old "Remaining" list.
 * **Release 0.1.0 on hold:** all release backlog items (R1–R10: Apache-2.0, notices, signing, CI workflows, QuireCode renaming, diagnostics) and branch consolidation (R11) are finished. Tagging and release are paused awaiting user decision on repository visibility.
-* **Offline & remote features (batches 62–69, Group 10 complete):** file sharing/import/export (group 9, batch 62), Tailscale daemon hardening (batch 63), device folder workspaces without a guest (batch 64), paired device management UI (batch 65), guest folders kept offline with sync, offline Explorer, Quick Open, and offline search (batch 66), offline/device-only previews, images, hex view, snippets, and kernel-less notebook editing (batch 67, completing G29), and Troubleshoot port-vs-daemon probing + Tailscale split-tunneling guidance, auto-revoking earlier pairings on re-pair, Cloudflare Tunnel (`--tunnel`, public TLS), and router port forwarding (batch 68, completing G30 and G31); batch 69 fixed what a review of 66–68 found (tunnel traffic now counts as remote, re-pairing replaces only with the old token, deleting the connection in use closes it).
+* **Offline & remote features (batches 62–70):** file sharing/import/export (group 9, batch 62), Tailscale daemon hardening (batch 63), device folder workspaces without a guest (batch 64), paired device management UI (batch 65), guest folders kept offline with sync, offline Explorer, Quick Open, and offline search (batch 66), offline/device-only previews, images, hex view, snippets, and kernel-less notebook editing (batch 67, completing G29), and Troubleshoot port-vs-daemon probing + Tailscale split-tunneling guidance, Cloudflare Tunnel (`--tunnel`, public TLS), and router port forwarding (batch 68, completing G30 and G31); batch 69 fixed issues from review. Batch 70 implements G33/G34: connection kinds and ordering, Recent origins and connection-scoped workspace/cache state; tablet verification remains.
 * **The switch to Aardink:** [AARDINK-SWITCH-PLAN.md](AARDINK-SWITCH-PLAN.md). All phases are done (batches 42 to 57), on Aardink 0.9.0 (batch 45): **Aardink is the editor**; sora-editor was removed in batch 57, and tm4e is the app's own `tm4e` module. The workbench's own Material You cards are drawn over Aardink from its geometry (batch 54). Review each Aardink release against the plan (its "Release reviews"). Requests to Aardink are drafted or listed, not filed.
 * **Waiting on the user:** whether to continue the glibc test (backlog item 70 d). Claude Code's permission system blocked it, so it needs the user's approval.
-* **Tablet:** the latest dev build is installed (batch 69). The sections "Reference tablet" and "Done" below mostly date from 10-23, so some of what they describe may have moved on. The batch plan is the record since then.
+* **Tablet:** the latest installed dev build is from batch 69. Batch 70's debug APK builds but is not installed because ADB at the supplied port refused the connection. The sections "Reference tablet" and "Done" below mostly date from 10-23, so some of what they describe may have moved on. The batch plan is the record since then.
 
 ## Where things are
 
@@ -35,7 +37,7 @@ cargo test -p avf-daemon -p avf-protocol
 PATH=$HOME/.cargo/bin:$PATH cargo zigbuild --release -p avf-daemon --target aarch64-unknown-linux-gnu.2.28
 ```
 
-At last run (batch 69): 400 app unit tests (on Java 21, installed beside 17) and 146 daemon/protocol tests, all passing; CI runs both on every push.
+At last run (batch 70): 411 app unit tests (on Java 21, installed beside 17) and 146 daemon/protocol tests, all passing; debug assemble passes. Clippy passes with the same five pre-existing lints; CI runs app and Rust tests on every push.
 
 ## Reference tablet (Galaxy Tab S11 Ultra, SM-X930)
 

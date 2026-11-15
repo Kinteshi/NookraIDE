@@ -222,6 +222,50 @@ fun WorkbenchDialogHost(controller: WorkbenchController) {
                 }
             },
         )
+        is WorkbenchDialog.ConfirmConnectionSwitch -> AlertDialog(
+            onDismissRequest = { controller.dialog = null },
+            title = { Text("Switch connection?") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    val target = controller.profiles.firstOrNull { it.id == dialog.profileId }?.name ?: "that connection"
+                    if (dialog.recent != null) {
+                        Text("Open ${controller.displayName(dialog.recent.path)} from ${controller.recentWorkspaceOrigin(dialog.recent)}?")
+                    } else {
+                        Text("Switch to $target?")
+                    }
+                    if (dialog.hasUnsaved) {
+                        Text("Unsaved edits are kept as drafts for this folder.")
+                    }
+                    if (dialog.hasRunning) {
+                        Text("Running terminals, kernels or debugging may be interrupted.")
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { controller.confirmConnectionSwitch(dialog.profileId, dialog.recent) }) {
+                    Text(if (dialog.recent == null) "Switch" else "Switch and open")
+                }
+            },
+            dismissButton = { TextButton(onClick = { controller.dialog = null }) { Text("Cancel") } },
+        )
+        is WorkbenchDialog.ConfirmOfflineWorkspace -> AlertDialog(
+            onDismissRequest = { controller.dialog = null },
+            title = { Text("Open offline copy?") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "Open ${controller.displayName(dialog.recent.path)} from this device? QuireCode will disconnect " +
+                            "from ${controller.profileName.ifBlank { "the current guest" }}.",
+                    )
+                    if (dialog.hasUnsaved) Text("Unsaved edits are kept as drafts for this folder.")
+                    if (dialog.hasRunning) Text("Running terminals, kernels or debugging may be interrupted.")
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { controller.confirmOfflineWorkspace(dialog.recent) }) { Text("Disconnect and open") }
+            },
+            dismissButton = { TextButton(onClick = { controller.dialog = null }) { Text("Cancel") } },
+        )
         is WorkbenchDialog.GitConfirmDiscard -> AlertDialog(
             onDismissRequest = { controller.dialog = null },
             title = { Text(if (dialog.paths.size == 1) "Discard changes?" else "Discard ${dialog.paths.size} files' changes?") },

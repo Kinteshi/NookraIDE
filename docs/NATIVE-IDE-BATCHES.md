@@ -3112,6 +3112,34 @@ name, the untested Tailscale advice, the image and hex caching, and batch 66's t
   * The dev app is on "Linux guest" with only Projects in Recent.
 * **Tests:** 400 app unit tests and 146 daemon/protocol tests passing. Clippy reports only the five older lints.
 
+## 70. Connection kinds and connection-scoped Recent/workspaces (11-15; in progress, not checked on the tablet)
+User selected G33 + G34 from group 11.
+
+* **G33 — Connection kinds and auto-connect:**
+  * Classified saved endpoints as the tablet guest or a computer, and as Linux Terminal, local network, Tailscale,
+    Cloudflare Tunnel, local forward, or generic WebSocket routes. The Connections dialog groups profiles by kind and
+    displays route, current status, last-used time, auto-connect, and ordering.
+  * Added per-profile auto-connect and persisted ordering. The “On this device” chip state distinguishes device folders
+    and deliberately opened offline workspaces from a failed connection.
+* **G34 — Recent and workspace state belong to their connection:**
+  * Recent entries retain their connection ID; the Welcome/Open Folder UI shows each entry's origin. Switching profiles
+    from Recent asks before interrupting unsaved edits or active guest work. A kept-offline copy can be opened while
+    another guest is connected, after confirming the disconnect.
+  * Scoped guest document copies, offline indexes, kept-offline lists, and workspace sessions by connection ID plus
+    path. Legacy unscoped entries are assigned once to a stable last-used connection. Device-folder sessions remain
+    device-scoped.
+  * Prevented stale document and image reads from saving data into another connection's cache; saving a guest draft
+    through a different connection now fails explicitly instead of risking a write to the wrong machine.
+* **Found and fixed during review:** malformed dotted hostnames could be mistaken for IPv4 addresses and crash route
+  classification. IPv4 parsing now rejects non-numeric octets, covered by a route test.
+* **Not checked on the tablet:** no ADB devices were listed, and connecting to the supplied wireless ADB port was
+  refused. Pairing was not attempted because this session has no safe way to enter the pairing code without exposing it
+  in a command or log. The built dev APK was therefore not installed.
+* **Left:** verify the Connections grouping, auto-connect order, Recent origin/switch confirmation, and same-path
+  isolation on the tablet. G33 and G34 remain open until that check.
+* **Tests:** 411 app unit tests and 146 daemon/protocol tests pass; debug assemble passes. Clippy passes with the same
+  five pre-existing lints.
+
 ## Backlog
 ### Open backlog (11-08)
 The current lists of what's open, in two: the general backlog, and the Aardink switch's until it's complete. The older
@@ -3148,8 +3176,8 @@ Grouped (11-08) so that what's cheaper done together is done together; the numbe
 | **10. Beyond the tablet's guest** (user, 11-09) | G29 | – | Done: (a) 64, (b) 66, (c) 67 | **Fully usable offline, without a guest** (user: "where possible"). Done: (a) **a device folder as the workspace** (Android's folder picker: Documents, a synced folder), with Explorer, tabs, editing, Quick Open, find and replace in files done in the app and saves straight to the device (batch 64); (b) **"Keep available offline"** for a guest folder: all of it copied to the device and synced back with conflict checks, beyond today's copies of opened files (batch 66); (c) what already needs no guest, made whole: colours, snippets, previews (Markdown, SVG, images, hex), notebooks edited with their saved outputs and no kernel (batch 67). What can't be without some machine: language servers, debuggers, kernels, terminals, Copilot and the agents (they run in the guest). Later, research: a Python kernel in the browser engine (Pyodide in a WebView) for notebooks (L+). Overlaps G18 |
 | | G30 | – | Done: (1, 4) 63, devices 65, (2, 3, re-pair) 68, fixes 69 | **The daemon reachable over the internet.** Done: Tailscale (`--tailscale`), device tokens, revoking, attempt limits, and the connection log (batch 63); paired devices listed and revoked from the app (batch 65); Cloudflare Tunnel with public TLS (`quirecode-daemon pair --tunnel`, `fp=public`), router port forwarding guide, and replacing a device's earlier pairing when it pairs again (batch 68; by its old token since batch 69, not by name) |
 | | G31 | – | Done in batch 68 | **Linux Terminal stopped forwarding the guest's port when the tablet's Tailscale VPN came on** (batch 63's live test): Troubleshoot now probes `GET /health` over the open socket (`probeDaemonPort`) to tell `"Port 127.0.0.1:19870 is open, but nothing answers through it"` apart from a refused port, and both the app and `docs/HOSTING-THE-DAEMON.md` explain force-stopping Linux Terminal and excluding it in Tailscale's App Split Tunneling |
-| **11. Connections, guided** (user, 11-10) | G33 | – | M | **Every connection's kind, clearly.** Three places to work: this tablet's guest, a computer (on the same network, over Tailscale, through a tunnel), and this device alone (device folders and kept-offline folders, no connection at all). The Connections dialog groups them by kind. Each row shows its route (Wi-Fi, Tailscale, tunnel, adb or SSH), its state and when it was last used. Working on this device by choice is a state of its own (the chip says "On this device"), not an error. Each connection gets its own auto-connect, and the order to try them in (the guest first, then a computer). Settings: that order, and auto-connect per connection |
-| | G34 | – | M | **Recent folders remember their connection.** Each entry keeps the connection it was opened through and its kind. Welcome and Open Folder show it ("Projects · Linux guest", "api · work-pc over Tailscale", "Notes · this device"). Opening an entry from another connection switches to it, asking first when something is unsaved or running. A deleted connection's entries go. Kept-offline entries still open without one. Per-folder state is keyed by connection and path: the tabs of the last session, the kept-offline list and the copies. Today two machines that both have `/home/droid/Projects` share them. Older entries are mapped to the connection they were last seen on. Overlaps G33 (one model) |
+| **11. Connections, guided** (user, 11-10) | G33 | – | M (tablet check pending; implemented in 70) | **Every connection's kind, clearly.** Three places to work: this tablet's guest, a computer (on the same network, over Tailscale, through a tunnel), and this device alone (device folders and kept-offline folders, no connection at all). The Connections dialog groups them by kind. Each row shows its route (Wi-Fi, Tailscale, tunnel, adb or SSH), its state and when it was last used. Working on this device by choice is a state of its own (the chip says "On this device"), not an error. Each connection gets its own auto-connect, and the order to try them in (the guest first, then a computer). Settings: that order, and auto-connect per connection |
+| | G34 | – | M (tablet check pending; implemented in 70) | **Recent folders remember their connection.** Each entry keeps the connection it was opened through and its kind. Welcome and Open Folder show it ("Projects · Linux guest", "api · work-pc over Tailscale", "Notes · this device"). Opening an entry from another connection switches to it, asking first when something is unsaved or running. A deleted connection's entries go. Kept-offline entries still open without one. Per-folder state is keyed by connection and path: the tabs of the last session, the kept-offline list and the copies. Today two machines that both have `/home/droid/Projects` share them. Older entries are mapped to the connection they were last seen on. Overlaps G33 (one model) |
 | | G35 | – | M–L | **A guided "Add a connection": the best setup for what the user wants.** It asks where the code should run (this tablet's guest, or a computer) and where it will be used from (at home on the same Wi-Fi, or anywhere). It recommends a setup, each with a line on why: (1) the guest: install in Linux Terminal (today's flow); (2) a computer on the same network: `--remote`; (3) from anywhere: **Tailscale, recommended** (end-to-end encrypted, no open ports, free for personal use); the app checks whether the Tailscale app is installed and its VPN is on, and links to it if not; (4) no VPN possible on the tablet: Cloudflare Tunnel, with its trade-offs (Cloudflare decrypts the traffic); (5) router port forwarding last, with its warning. Commands for Linux and Windows (WSL), with copy and share buttons so they reach the computer. Then the connection string is pasted or scanned (G36). Builds on batch 61's dialog |
 | | G36 | – | S–M | **No typing the connection string**: `quirecode-daemon pair` also prints it as a QR code in the terminal, and the app scans it with the camera (ZXing, Apache-2.0; camera permission asked only then). A connection string on the clipboard is offered when the dialog opens |
 | | G37 | – | M | **One computer, several routes**: a computer's connection keeps more than one address under the same certificate and token (its home network, its Tailscale address, a tunnel). The app tries them in order: the network address at home, Tailscale away. The chip says which one it's on. `pair` prints every address the daemon is reachable at (network and Tailscale), so one pairing covers them. Settings: the preferred route per connection |
@@ -3177,7 +3205,7 @@ Why these groups:
     work of group 8 (the chip, the dialog) is where both show.
 11. One model of where work happens (a connection's kind, its routes, the folders opened through it) underlies the dialog,
     Recent and the setup guide. Designing them together keeps one vocabulary and one place for every connection question.
-    Suggested order: G33 with G34 (the model), then G35, G36 and G38 (the guide), then G37 and G32.
+    Suggested order: finish the G33/G34 tablet check, then G35, G36 and G38 (the guide), then G37 and G32.
 
 #### Aardink switch backlog
 

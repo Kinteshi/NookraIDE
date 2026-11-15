@@ -64,4 +64,41 @@ class OfflineIndexTest {
         reloaded.remove("/home/u/Projects/app")
         assertTrue(OfflineIndex(directory).folders.isEmpty())
     }
+
+    @Test
+    fun sameGuestPathHasSeparateOfflineTreesPerConnection() {
+        val directory = temp.newFolder("scoped-index")
+        val index = OfflineIndex(directory)
+        index.activeConnectionId = "guest-a"
+        index.save(project)
+
+        index.activeConnectionId = "guest-b"
+        assertTrue(index.folders.isEmpty())
+        assertFalse(index.serves(project.folder))
+        assertTrue(index.serves(project.folder, "guest-a"))
+        index.save(project.copy(entries = listOf(entry("${project.folder}/work-b.py"))))
+
+        index.activeConnectionId = "guest-a"
+        assertEquals(listOf("README.md", "node_modules", "src"), index.listDir(project.folder)!!.map { it.name }.sorted())
+        index.activeConnectionId = "guest-b"
+        assertEquals(listOf("work-b.py"), index.listDir(project.folder)!!.map { it.name })
+
+        val reloaded = OfflineIndex(directory)
+        reloaded.activeConnectionId = "guest-a"
+        assertEquals(listOf("README.md", "node_modules", "src"), reloaded.listDir(project.folder)!!.map { it.name }.sorted())
+        reloaded.activeConnectionId = "guest-b"
+        assertEquals(listOf("work-b.py"), reloaded.listDir(project.folder)!!.map { it.name })
+    }
+
+    @Test
+    fun legacyIndexCanBeAssignedToTheLastUsedConnection() {
+        val directory = temp.newFolder("legacy-index")
+        OfflineIndex(directory).save(project)
+        val migrated = OfflineIndex(directory)
+        migrated.migrateLegacyScope("guest-a")
+        migrated.activeConnectionId = "guest-a"
+
+        assertTrue(migrated.serves(project.folder))
+        assertEquals("guest-a", migrated.tree(project.folder)?.connectionId)
+    }
 }
