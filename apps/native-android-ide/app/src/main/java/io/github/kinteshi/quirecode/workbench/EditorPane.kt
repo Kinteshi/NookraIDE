@@ -160,7 +160,7 @@ fun EditorArea(controller: WorkbenchController, modifier: Modifier = Modifier) {
                 activeDocument != null && preview == MarkdownPreviewMode.Side -> key(activeDocument.path) {
                     Row(Modifier.fillMaxSize()) {
                         Box(Modifier.weight(1f).fillMaxHeight()) {
-                            key(controller.grammarRevision) { AardinkEditorView(controller, activeDocument) }
+                            key(activeDocument.path, controller.grammarRevision) { AardinkEditorView(controller, activeDocument) }
                             EditorOverlays(controller)
                         }
                         androidx.compose.material3.VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant)

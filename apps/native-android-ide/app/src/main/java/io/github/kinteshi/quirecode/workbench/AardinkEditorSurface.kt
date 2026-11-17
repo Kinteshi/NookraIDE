@@ -453,12 +453,15 @@ internal class AardinkEditorSurface(val state: CodeEditorState) : EditorSurface 
 
     override fun setDecorations(decorations: List<EditorDecoration>) {
         val grammar = tokenizer ?: return
-        grammar.semantic = decorations.mapNotNull { decoration ->
+        val nextSemantic = decorations.mapNotNull { decoration ->
             val (start, end) = decoration.range
             if (start.line != end.line || end.character <= start.character) return@mapNotNull null
             SemanticSpan(start.line, start.character, end.character, AardinkSyntax.semanticType(decoration.kind))
         }.groupBy { it.line }.mapValues { (_, spans) -> spans.sortedBy { it.start } }
-        state.scheduleTokenization()
+        if (grammar.semantic != nextSemantic) {
+            grammar.semantic = nextSemantic
+            state.scheduleTokenization()
+        }
     }
 
     override fun applyConfig(config: EditorConfig) {

@@ -140,4 +140,25 @@ class TextMateTokenizerTest {
         val incremental = tokenizer.tokenizeLines(edited, 1..1, overlaid)
         assertTrue(incremental.any { it.type == semantic && it.start == edited.indexOf("println") })
     }
+
+    @Test
+    fun declarativeBuiltInTokenizerKeepsIncrementalCacheWithSemanticOverlay() {
+        val tokenizer = BuiltInSemanticTokenizer(BuiltInLanguages.Yaml.tokenizer)
+        assertEquals("#", tokenizer.commentSyntax?.line)
+        val initial = "name: quire\njobs:\n  build: true\n"
+        val first = tokenizer.tokenizeFull(initial)
+        tokenizer.semantic = mapOf(2 to listOf(SemanticSpan(2, 2, 7, semantic)))
+        val fullWithSemantic = tokenizer.tokenizeFull(initial)
+        assertTrue(fullWithSemantic.any { it.type == semantic && it.start == initial.indexOf("build") })
+
+        val edited = "name: quire\njobs:\n  build: false\n"
+        val partial = tokenizer.tokenizeLines(edited, 2..2, fullWithSemantic)
+        assertTrue(partial.any { it.type == semantic && it.start == edited.indexOf("build") })
+
+        tokenizer.semantic = emptyMap()
+        val editedAgain = "name: quire\njobs:\n  test: false\n"
+        val recovered = tokenizer.tokenizeLines(editedAgain, 2..2, partial)
+        assertTrue(recovered.none { it.type == semantic })
+        assertTrue(recovered.isNotEmpty())
+    }
 }

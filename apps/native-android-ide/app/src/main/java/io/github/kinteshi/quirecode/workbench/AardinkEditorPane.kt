@@ -55,7 +55,6 @@ internal fun AardinkEditorView(controller: WorkbenchController, document: Docume
     val syntax = remember(colors, dark, syntaxColors, controller.editorThemeRevision) { syntaxTheme(context, colors, dark, syntaxColors) }
     val registry = remember(syntax.key) { AardinkSyntax.registry(context, syntax) }
     val rules = remember(document.path, controller.grammarRevision) { AardinkSyntax.rulesFor(context, document) }
-    val builtIn = remember(document.path, document.languageId) { AardinkSyntax.builtInLanguageFor(document.path, document.languageId) }
     val grammar = remember(registry, document.path, document.languageId, controller.grammarRevision, rules) { AardinkSyntax.tokenizerFor(registry, document, rules) }
     // Made once per file: a new theme or grammar changes its tokenizer, and keeps its text and undo.
     val state = remember { CodeEditorState(document.text, grammar ?: PlainTextTokenizer) }
@@ -64,11 +63,11 @@ internal fun AardinkEditorView(controller: WorkbenchController, document: Docume
     val overtype = surface.overtype
     // Refresh hints and lenses natively when language servers restart, emit */refresh, or toggles change.
     val settings = controller.settings
-    val service = remember(document.path, rules, builtIn) {
+    val service = remember(document.path, rules) {
         AardinkLanguageService(controller, document, rules, tokenKindAt = { offset ->
             val line = state.document.offsetToLineCol(offset.coerceIn(0, state.document.length)).first
             tokenKindName(state.tokensForLine(line).firstOrNull { it.start <= offset && offset < it.end }?.type)
-        }, builtInService = builtIn?.languageService, overtype = overtype, ownCards = { surface.geometry != null })
+        }, overtype = overtype, ownCards = { surface.geometry != null })
     }
     LaunchedEffect(
         state,

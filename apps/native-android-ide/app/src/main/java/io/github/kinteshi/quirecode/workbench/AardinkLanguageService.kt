@@ -45,8 +45,6 @@ internal class AardinkLanguageService(
     private val rules: LanguageRules?,
     /** What kind of token is at an offset (`string.…`, `comment.…`), for a pair's `notIn`. */
     val tokenKindAt: (Int) -> String?,
-    /** Optional built-in Aardink language service used as fallback when no TextMate configuration is loaded. */
-    private val builtInService: LanguageService? = null,
     /** Told of each closer this inserts, so typing it again steps over it. */
     private val overtype: ClosingOvertype? = null,
     /** Whether the workbench's own cards are in charge (Aardink's geometry is reachable): its hover and signature help then. */
@@ -186,18 +184,13 @@ internal class AardinkLanguageService(
         val before = document.lineText((lineIndex - 1).coerceAtLeast(0))
         val after = if (lineIndex < document.lineCount) document.lineText(lineIndex) else ""
         val unit = if (options.insertSpaces) " ".repeat(options.tabSize) else "\t"
-        return rules?.enterIndentation(before, after, unit)
-            ?: builtInService?.smartIndent(document, lineIndex, options)
-            ?: before.takeWhile { it == ' ' || it == '\t' }
+        return rules?.enterIndentation(before, after, unit) ?: before.takeWhile { it == ' ' || it == '\t' }
     }
 
     override fun autoClose(document: CodeDocument, offset: Int, charTyped: Char): String? =
-        (rules?.autoClose(document, offset, charTyped, tokenKindAt)
-            ?: builtInService?.autoClose(document, offset, charTyped))
-            ?.also { overtype?.expect(offset + 1, it, closerAt = offset + 1, closer = it) }
+        rules?.autoClose(document, offset, charTyped, tokenKindAt)?.also { overtype?.expect(offset + 1, it, closerAt = offset + 1, closer = it) }
 
-    override fun surroundingClose(typed: Char): String? =
-        rules?.surroundingPairs?.get(typed) ?: builtInService?.surroundingClose(typed)
+    override fun surroundingClose(typed: Char): String? = rules?.surroundingPairs?.get(typed)
 
     private fun snippetItems(priority: Int): List<CompletionItem> = provider.snippets().flatMap { snippet ->
         snippet.prefixes.map { prefix ->

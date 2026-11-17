@@ -37,22 +37,35 @@ class BuiltInSemanticTokenizer(
     @Volatile
     override var semantic: Map<Int, List<SemanticSpan>> = emptyMap()
 
+    @Volatile
+    private var lastRawResult: List<Token>? = null
+
     override val commentSyntax: CommentSyntax?
         get() = delegate.commentSyntax
 
     override fun canSpanLines(lineIndex: Int, tokens: List<Token>): Boolean =
         delegate.canSpanLines(lineIndex, tokens)
 
-    override fun tokenizeFull(text: String): List<Token> = applySemantic(text, delegate.tokenizeFull(text))
+    override fun tokenizeFull(text: String): List<Token> {
+        val raw = delegate.tokenizeFull(text)
+        lastRawResult = raw
+        return applySemantic(text, raw)
+    }
 
-    override suspend fun tokenizeFullCooperative(text: String): List<Token> =
-        applySemantic(text, delegate.tokenizeFullCooperative(text))
+    override suspend fun tokenizeFullCooperative(text: String): List<Token> {
+        val raw = delegate.tokenizeFullCooperative(text)
+        lastRawResult = raw
+        return applySemantic(text, raw)
+    }
 
     override fun tokenizeLines(text: String, dirtyRange: IntRange, previousTokens: List<Token>): List<Token> {
-        val spans = semantic
-        if (spans.isEmpty()) return delegate.tokenizeLines(text, dirtyRange, previousTokens)
-        if (previousTokens.isEmpty()) return applySemantic(text, delegate.tokenizeLines(text, dirtyRange, previousTokens))
-        return applySemantic(text, delegate.tokenizeFull(text))
+        if (previousTokens.isEmpty()) {
+            val raw = delegate.tokenizeLines(text, dirtyRange, emptyList())
+            return applySemantic(text, raw)
+        }
+        val raw = delegate.tokenizeLines(text, dirtyRange, lastRawResult ?: previousTokens)
+        lastRawResult = raw
+        return applySemantic(text, raw)
     }
 
     private fun applySemantic(text: String, raw: List<Token>): List<Token> {
