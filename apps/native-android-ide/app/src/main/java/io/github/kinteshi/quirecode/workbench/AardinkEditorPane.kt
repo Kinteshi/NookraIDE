@@ -27,9 +27,13 @@ import com.aardarch.aardink.core.InlineCompletionProvider
 import com.aardarch.aardink.core.PlainTextTokenizer
 import com.aardarch.aardink.core.NamedTokenType
 import com.aardarch.aardink.ui.CodeEditorLayout
+import com.aardarch.aardink.ui.CursorBlinking
+import com.aardarch.aardink.ui.CursorStyle
 import com.aardarch.aardink.ui.EditorMenuItem
 import com.aardarch.aardink.ui.EditorOptions
+import com.aardarch.aardink.ui.LineNumberStyle
 import com.aardarch.aardink.ui.LocalEditorTheme
+import com.aardarch.aardink.ui.WrappingIndent
 import io.github.kinteshi.quirecode.document.DocumentSession
 import io.github.kinteshi.quirecode.document.isGuestPath
 import io.github.kinteshi.quirecode.editor.selectionStart
@@ -56,13 +60,23 @@ internal fun AardinkEditorView(controller: WorkbenchController, document: Docume
     val surface = remember(state) { AardinkEditorSurface(state) }
     // What the language servers know, with the file's closing pairs and Enter rules.
     val overtype = surface.overtype
-    // Made again when hints or lenses should be asked for although the text is the same (a server started, a setting).
+    // Refresh hints and lenses natively when language servers restart, emit */refresh, or toggles change.
     val settings = controller.settings
-    val service = remember(document.path, rules, controller.languageFeaturesRevision, settings.codeLens, settings.interactiveCodeLens) {
+    val service = remember(document.path, rules) {
         AardinkLanguageService(controller, document, rules, tokenKindAt = { offset ->
             val line = state.document.offsetToLineCol(offset.coerceIn(0, state.document.length)).first
             (state.tokensForLine(line).firstOrNull { it.start <= offset && offset < it.end }?.type as? NamedTokenType)?.name
         }, overtype = overtype, ownCards = { surface.geometry != null })
+    }
+    LaunchedEffect(
+        state,
+        controller.languageFeaturesRevision,
+        settings.codeLens,
+        settings.interactiveCodeLens,
+        settings.inlayHints,
+        settings.formatOnType,
+    ) {
+        state.refreshLanguageFeatures()
     }
     // With a hardware keyboard, our list in place of Aardink's touch strip, which the keys can't choose from (request 8).
     val configuration = androidx.compose.ui.platform.LocalConfiguration.current
@@ -168,10 +182,29 @@ internal fun AardinkEditorView(controller: WorkbenchController, document: Docume
                 codeLens = true,
                 // Problems, find matches, a symbol's uses and breakpoints beside the scrollbar; a tap goes there.
                 overviewRuler = true,
+                formatOnType = settings.formatOnType,
+                lineNumbers = editorLineNumbers(settings.lineNumbersStyle),
+                cursorStyle = editorCursorStyle(settings.cursorStyle),
+                cursorBlinking = editorCursorBlinking(settings.cursorBlinking),
+                indentGuides = settings.indentGuides,
+                bracketPairGuides = settings.bracketPairGuides,
+                scrollBeyondLastLine = settings.scrollBeyondLastLine,
+                smoothScrolling = settings.smoothScrolling && settings.animations,
+                wrappingIndent = editorWrappingIndent(settings.wrappingIndent),
             ),
             inlineCompletionProvider = copilot,
             contextMenuItems = breakpointItems,
             touchMenuItems = breakpointItems,
+            onSearchWorkspace = { query, options ->
+                controller.searchCaseSensitive = options.caseSensitive
+                controller.searchWholeWord = options.wholeWord
+                controller.searchRegex = options.useRegex
+                if (query.isNotEmpty()) {
+                    controller.searchText = query
+                    controller.scheduleSearch(0)
+                }
+                controller.showSearch()
+            },
             onFontSizeChange = if (config.pinchToZoom) {
                 { size -> surface.emit(EditorEvent.Zoomed("", size.value)) }
             } else {
@@ -307,7 +340,7 @@ private suspend fun copilotCompletions(
     return suggestions.map { suggestion ->
         val start = offsetIn(snapshot, suggestion.range.start)
         val end = offsetIn(snapshot, suggestion.range.end).coerceAtLeast(start)
-        InlineCompletion(suggestion.insertText, start until end)
+        InlineCompletion(suggestion.insertText, start until end, isSnippet = suggestion.isSnippet)
     }
 }
 
@@ -413,4 +446,32 @@ internal val MONOSPACE_ROW_RATIO: Float by lazy {
         textSize = 100f
     }.fontMetrics
     ((metrics.descent - metrics.ascent) / 100f).takeIf { it in 1f..2f } ?: 1.2f
+}
+
+internal fun editorCursorStyle(key: String): CursorStyle = when (key) {
+    "block" -> CursorStyle.Block
+    "underline" -> CursorStyle.Underline
+    "line-thin" -> CursorStyle.LineThin
+    "block-outline" -> CursorStyle.BlockOutline
+    "underline-thin" -> CursorStyle.UnderlineThin
+    else -> CursorStyle.Line
+}
+
+internal fun editorCursorBlinking(key: String): CursorBlinking = when (key) {
+    "blink" -> CursorBlinking.Blink
+    "solid" -> CursorBlinking.Solid
+    else -> CursorBlinking.Smooth
+}
+
+private fun editorLineNumbers(style: String): LineNumberStyle = when (style) {
+    "relative" -> LineNumberStyle.Relative
+    "interval" -> LineNumberStyle.Interval
+    else -> LineNumberStyle.Absolute
+}
+
+private fun editorWrappingIndent(key: String): WrappingIndent = when (key) {
+    "none" -> WrappingIndent.None
+    "indent" -> WrappingIndent.Indent
+    "deepIndent" -> WrappingIndent.DeepIndent
+    else -> WrappingIndent.Same
 }

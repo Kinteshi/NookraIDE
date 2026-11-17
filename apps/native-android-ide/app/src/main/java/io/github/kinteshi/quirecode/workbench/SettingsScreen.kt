@@ -272,6 +272,7 @@ private fun LazyListScope.appearance(controller: WorkbenchController, settings: 
         ) { set(WorkbenchSettings.DYNAMIC_COLOR, it) }
     }
     item { SwitchRow(Icons.Outlined.Contrast, "Pure black", "True black surfaces in dark mode, for OLED screens", settings.pureBlack) { set(WorkbenchSettings.PURE_BLACK, it) } }
+    item { SwitchRow(Icons.Outlined.Speed, "Smooth transitions", "Subtle transitions when panes, banners and cards open or close", settings.animations) { set(WorkbenchSettings.ANIMATIONS, it) } }
     item { Section("Code colours") }
     item {
         ChoiceRow(
@@ -324,7 +325,37 @@ private fun LazyListScope.editor(settings: WorkbenchSettings, set: SetSetting) {
     item { SwitchRow(Icons.Outlined.ZoomIn, "Pinch to zoom", "Two fingers on the screen or the touchpad change the font size of the editor and notebooks, kept as the font size above", settings.pinchToZoom) { set(WorkbenchSettings.PINCH_TO_ZOOM, it) } }
     item { SwitchRow(Icons.Outlined.Mouse, "Ctrl + wheel zooms", "Ctrl and the mouse wheel change the font size (editor.mouseWheelZoom)", settings.mouseWheelZoom) { set(WorkbenchSettings.MOUSE_WHEEL_ZOOM, it) } }
     item { SwitchRow(Icons.AutoMirrored.Outlined.WrapText, "Word wrap", "Wrap long lines at the edge of the editor (folding needs it off)", settings.wordWrap) { set(WorkbenchSettings.WORD_WRAP, if (it) "on" else "off") } }
-    item { SwitchRow(Icons.Outlined.FormatListNumbered, "Line numbers", null, settings.lineNumbers) { set(WorkbenchSettings.LINE_NUMBERS, if (it) "on" else "off") } }
+    item {
+        ChoiceRow(
+            Icons.Outlined.FormatListNumbered,
+            "Line numbers",
+            "Absolute, relative to the cursor's line, every tenth line, or off",
+            listOf("on" to "On", "relative" to "Relative", "interval" to "Interval", "off" to "Off"),
+            settings.lineNumbersStyle,
+        ) { set(WorkbenchSettings.LINE_NUMBERS, it) }
+    }
+    item {
+        ChoiceRow(
+            Icons.Outlined.Edit,
+            "Cursor style",
+            "Shape of the text cursor",
+            listOf("line" to "Line", "block" to "Block", "underline" to "Underline"),
+            settings.cursorStyle,
+        ) { set(WorkbenchSettings.CURSOR_STYLE, it) }
+    }
+    item {
+        ChoiceRow(
+            Icons.Outlined.Schedule,
+            "Cursor blinking",
+            "How the cursor blinks while the editor has focus",
+            listOf("smooth" to "Smooth", "blink" to "Blink", "solid" to "Solid"),
+            settings.cursorBlinking,
+        ) { set(WorkbenchSettings.CURSOR_BLINKING, it) }
+    }
+    item { SwitchRow(Icons.Outlined.Speed, "Smooth scrolling", "Animate scrolling to a line, find match or page", settings.smoothScrolling) { set(WorkbenchSettings.SMOOTH_SCROLLING, it) } }
+    item { SwitchRow(Icons.Outlined.UnfoldLess, "Scroll beyond last line", "Allow scrolling until the last line is at the top of the view", settings.scrollBeyondLastLine) { set(WorkbenchSettings.SCROLL_BEYOND_LAST_LINE, it) } }
+    item { SwitchRow(Icons.Outlined.FormatIndentIncrease, "Indentation guides", "Vertical lines at each indentation level; the active block's guide is stronger", settings.indentGuides) { set(WorkbenchSettings.INDENT_GUIDES, it) } }
+    item { SwitchRow(Icons.Outlined.Code, "Bracket pair guides", "Vertical lines connecting matching brackets across lines", settings.bracketPairGuides) { set(WorkbenchSettings.BRACKET_PAIR_GUIDES, it) } }
     item { SwitchRow(Icons.Outlined.UnfoldLess, "Folding", "Arrows beside the line numbers fold functions, classes and blocks; Ctrl+Shift+[ and ] at the cursor", settings.folding) { set(WorkbenchSettings.FOLDING, it) } }
     item { SwitchRow(Icons.Outlined.ColorLens, "Semantic highlighting", "Colours from the language server, on top of the grammar", settings.semanticHighlighting) { set(WorkbenchSettings.SEMANTIC_HIGHLIGHTING, it) } }
     item { Section("Indentation") }
@@ -411,6 +442,7 @@ private fun LazyListScope.saving(settings: WorkbenchSettings, set: SetSetting) {
     item { Section("Formatting") }
     item { SwitchRow(Icons.Outlined.AutoFixHigh, "Format on save", "Ruff for Python, the language server otherwise", settings.formatOnSave) { set(WorkbenchSettings.FORMAT_ON_SAVE, it) } }
     item { SwitchRow(Icons.Outlined.ContentPaste, "Format on paste", "Formats what you paste, where the formatter can format a range (Ruff, TypeScript)", settings.formatOnPaste) { set(WorkbenchSettings.FORMAT_ON_PASTE, it) } }
+    item { SwitchRow(Icons.Outlined.Keyboard, "Format on type", "Tidies the line after typing ;, } or Enter when the language server supports it", settings.formatOnType) { set(WorkbenchSettings.FORMAT_ON_TYPE, it) } }
     item { Section("Clean-ups on save") }
     item { SwitchRow(Icons.Outlined.CleaningServices, "Trim trailing whitespace", "Not on the cursor's line when saving automatically; Markdown files are left alone", settings.trimTrailingWhitespace) { set(WorkbenchSettings.TRIM_TRAILING_WHITESPACE, it) } }
     item { SwitchRow(Icons.Outlined.KeyboardReturn, "Insert final newline", "Ends the file with a line break", settings.insertFinalNewline) { set(WorkbenchSettings.INSERT_FINAL_NEWLINE, it) } }

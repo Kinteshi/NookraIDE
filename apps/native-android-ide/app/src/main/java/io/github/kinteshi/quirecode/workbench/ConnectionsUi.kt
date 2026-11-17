@@ -1,5 +1,8 @@
 package io.github.kinteshi.quirecode.workbench
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -27,8 +30,6 @@ import androidx.compose.material.icons.outlined.Computer
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.ErrorOutline
-import androidx.compose.material.icons.outlined.ExpandLess
-import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.LinkOff
 import androidx.compose.material.icons.outlined.MoreVert
@@ -60,6 +61,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -92,19 +94,33 @@ private val ConnectionState.away: Boolean
 internal fun ConnectionChip(controller: WorkbenchController) {
     val colors = MaterialTheme.colorScheme
     val summary = controller.connection
-    val chipColors = when (summary.state) {
-        ConnectionState.Connected, ConnectionState.Connecting -> AssistChipDefaults.assistChipColors()
-        ConnectionState.OnDevice, ConnectionState.NotSetUp, ConnectionState.Idle -> AssistChipDefaults.assistChipColors(
-            containerColor = colors.primaryContainer,
-            labelColor = colors.onPrimaryContainer,
-            leadingIconContentColor = colors.onPrimaryContainer,
+    val animate = controller.settings.animations
+    val colorMs = if (animate) 160 else 0
+    val (targetContainer, targetLabel, targetIcon) = when (summary.state) {
+        ConnectionState.Connected, ConnectionState.Connecting -> Triple(
+            Color.Transparent,
+            colors.onSurface,
+            colors.primary,
         )
-        else -> AssistChipDefaults.assistChipColors(
-            containerColor = colors.secondaryContainer,
-            labelColor = colors.onSecondaryContainer,
-            leadingIconContentColor = colors.onSecondaryContainer,
+        ConnectionState.OnDevice, ConnectionState.NotSetUp, ConnectionState.Idle -> Triple(
+            colors.primaryContainer,
+            colors.onPrimaryContainer,
+            colors.onPrimaryContainer,
+        )
+        else -> Triple(
+            colors.secondaryContainer,
+            colors.onSecondaryContainer,
+            colors.onSecondaryContainer,
         )
     }
+    val containerColor by animateColorAsState(targetContainer, tween(colorMs), label = "chipContainer")
+    val labelColor by animateColorAsState(targetLabel, tween(colorMs), label = "chipLabel")
+    val iconColor by animateColorAsState(targetIcon, tween(colorMs), label = "chipIcon")
+    val chipColors = AssistChipDefaults.assistChipColors(
+        containerColor = containerColor,
+        labelColor = labelColor,
+        leadingIconContentColor = iconColor,
+    )
     Tooltip(summary.title) {
         AssistChip(
             onClick = controller::openConnect,
@@ -117,7 +133,7 @@ internal fun ConnectionChip(controller: WorkbenchController) {
                 }
             },
             colors = chipColors,
-            modifier = Modifier.widthIn(max = 220.dp),
+            modifier = Modifier.widthIn(max = 220.dp).animateContentSize(tween(if (animate) 150 else 0)),
         )
     }
 }
@@ -201,6 +217,7 @@ internal fun ConnectionsDialog(controller: WorkbenchController) {
                     }
                 }
                 if (controller.profiles.isNotEmpty()) {
+                    val animate = controller.settings.animations
                     HorizontalDivider()
                     Row(
                         Modifier.fillMaxWidth().clickable {
@@ -210,9 +227,9 @@ internal fun ConnectionsDialog(controller: WorkbenchController) {
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text("Troubleshoot", style = MaterialTheme.typography.titleSmall, color = colors.primary, modifier = Modifier.weight(1f))
-                        Icon(if (troubleshoot) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore, contentDescription = null)
+                        ExpandChevron(troubleshoot, animate)
                     }
-                    if (troubleshoot) Troubleshooting(controller)
+                    VerticalReveal(troubleshoot, animate) { Troubleshooting(controller) }
                 }
             }
         },
@@ -604,14 +621,15 @@ private fun PairedDevicesSection(controller: WorkbenchController, summary: Conne
         }
     }
     if (info != null && info.recent.isNotEmpty()) {
+        val animate = controller.settings.animations
         Row(
             Modifier.fillMaxWidth().clickable { showLog = !showLog }.padding(vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text("Recent connections", style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
-            Icon(if (showLog) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore, contentDescription = null)
+            ExpandChevron(showLog, animate)
         }
-        if (showLog) {
+        VerticalReveal(showLog, animate) {
             Surface(color = colors.surfaceContainerLow, shape = MaterialTheme.shapes.small, modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(10.dp)) {
                     info.recent.asReversed().take(15).forEach { line ->

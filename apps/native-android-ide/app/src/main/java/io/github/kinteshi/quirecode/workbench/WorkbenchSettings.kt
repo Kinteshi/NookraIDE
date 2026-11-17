@@ -28,7 +28,16 @@ data class WorkbenchSettings(
     val detectIndentation: Boolean = true,
     val wordWrap: Boolean = false,
     val lineNumbers: Boolean = true,
+    val lineNumbersStyle: String = "on",
+    val cursorStyle: String = "line",
+    val cursorBlinking: String = "smooth",
+    val smoothScrolling: Boolean = true,
+    val indentGuides: Boolean = true,
+    val bracketPairGuides: Boolean = true,
+    val wrappingIndent: String = "same",
+    val scrollBeyondLastLine: Boolean = false,
     val formatOnSave: Boolean = false,
+    val formatOnType: Boolean = false,
     /** Ruff/TypeScript format what is pasted (range formatting), like `editor.formatOnPaste`. */
     val formatOnPaste: Boolean = false,
     /** Save-time clean-ups (`files.trimTrailingWhitespace`, `files.insertFinalNewline`, `files.trimFinalNewlines`). */
@@ -210,6 +219,8 @@ data class WorkbenchSettings(
     val folding: Boolean = true,
     /** A short buzz for a breakpoint, a latched modifier, a long-press drag (`avf.haptics`). */
     val haptics: Boolean = true,
+    /** Subtle Material 3 transitions on panes, banners, expandable sections and cards (`avf.workbench.animations`). */
+    val animations: Boolean = true,
 ) {
     companion object {
         const val THEME_MODE = "avf.theme.mode"
@@ -328,6 +339,15 @@ data class WorkbenchSettings(
         const val HAPTICS = "avf.haptics"
         const val FOLDING = "editor.folding"
         const val ICON_THEME = "workbench.iconTheme"
+        const val SMOOTH_SCROLLING = "editor.smoothScrolling"
+        const val CURSOR_BLINKING = "editor.cursorBlinking"
+        const val CURSOR_STYLE = "editor.cursorStyle"
+        const val INDENT_GUIDES = "editor.guides.indentation"
+        const val BRACKET_PAIR_GUIDES = "editor.guides.bracketPairs"
+        const val WRAPPING_INDENT = "editor.wrappingIndent"
+        const val SCROLL_BEYOND_LAST_LINE = "editor.scrollBeyondLastLine"
+        const val FORMAT_ON_TYPE = "editor.formatOnType"
+        const val ANIMATIONS = "avf.workbench.animations"
         /** VS Code's defaults for `files.exclude`. */
         val DEFAULT_FILES_EXCLUDE = listOf("**/.git", "**/.svn", "**/.hg", "**/CVS", "**/.DS_Store", "**/Thumbs.db")
 
@@ -339,6 +359,7 @@ data class WorkbenchSettings(
                     ?: fallback
             fun number(key: String) =
                 settings.getPath(key)?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isNumber }?.asNumber
+            val lineNumRaw = string(LINE_NUMBERS)?.takeIf { it in setOf("on", "off", "relative", "interval") }
             return WorkbenchSettings(
                 themeMode = ThemeMode.entries.firstOrNull { it.key == string(THEME_MODE) } ?: defaults.themeMode,
                 dynamicColor = bool(DYNAMIC_COLOR, defaults.dynamicColor),
@@ -348,8 +369,20 @@ data class WorkbenchSettings(
                 tabSize = number(TAB_SIZE)?.toInt()?.coerceIn(1, 8) ?: defaults.tabSize,
                 insertSpaces = bool(INSERT_SPACES, defaults.insertSpaces),
                 wordWrap = string(WORD_WRAP)?.let { it == "on" } ?: defaults.wordWrap,
-                lineNumbers = string(LINE_NUMBERS)?.let { it != "off" } ?: defaults.lineNumbers,
+                lineNumbers = lineNumRaw?.let { it != "off" } ?: string(LINE_NUMBERS)?.let { it != "off" } ?: defaults.lineNumbers,
+                lineNumbersStyle = lineNumRaw ?: if (string(LINE_NUMBERS) == "off") "off" else defaults.lineNumbersStyle,
+                cursorStyle = string(CURSOR_STYLE)?.takeIf { it in setOf("line", "block", "underline", "line-thin", "block-outline", "underline-thin") }
+                    ?: defaults.cursorStyle,
+                cursorBlinking = string(CURSOR_BLINKING)?.takeIf { it in setOf("blink", "smooth", "solid") }
+                    ?: defaults.cursorBlinking,
+                smoothScrolling = bool(SMOOTH_SCROLLING, defaults.smoothScrolling),
+                indentGuides = bool(INDENT_GUIDES, defaults.indentGuides),
+                bracketPairGuides = bool(BRACKET_PAIR_GUIDES, defaults.bracketPairGuides),
+                wrappingIndent = string(WRAPPING_INDENT)?.takeIf { it in setOf("none", "same", "indent", "deepIndent") }
+                    ?: defaults.wrappingIndent,
+                scrollBeyondLastLine = bool(SCROLL_BEYOND_LAST_LINE, defaults.scrollBeyondLastLine),
                 formatOnSave = bool(FORMAT_ON_SAVE, defaults.formatOnSave),
+                formatOnType = bool(FORMAT_ON_TYPE, defaults.formatOnType),
                 formatOnPaste = bool(FORMAT_ON_PASTE, defaults.formatOnPaste),
                 trimTrailingWhitespace = bool(TRIM_TRAILING_WHITESPACE, defaults.trimTrailingWhitespace),
                 insertFinalNewline = bool(INSERT_FINAL_NEWLINE, defaults.insertFinalNewline),
@@ -455,6 +488,7 @@ data class WorkbenchSettings(
                     ?.filter { (_, value) -> value.isJsonPrimitive && runCatching { value.asBoolean }.getOrDefault(false) }
                     ?.map { it.key } ?: defaults.filesExclude,
                 haptics = bool(HAPTICS, defaults.haptics),
+                animations = bool(ANIMATIONS, defaults.animations),
                 folding = bool(FOLDING, defaults.folding),
                 // VS Code writes null for no file icons.
                 iconTheme = settings.getPath(ICON_THEME)?.let { if (it.isJsonNull) "none" else it.takeIf { v -> v.isJsonPrimitive }?.asString }

@@ -163,6 +163,22 @@ internal class AardinkLanguageService(
 
     override suspend fun format(document: CodeDocument, options: FormattingOptions): String = document.text
 
+    override val formatOnTypeCharacters: Set<Char>
+        get() = if (!controller.settings.formatOnType) emptySet() else controller.languageClientFor(this.document.path)?.takeIf { it.isReady }?.onTypeTriggerCharacters.orEmpty()
+
+    override suspend fun formatOnType(
+        document: CodeDocument,
+        offset: Int,
+        typed: Char,
+        options: FormattingOptions,
+    ): List<TextEdit> {
+        if (!controller.settings.formatOnType) return emptyList()
+        val client = controller.languageClientFor(this.document.path)?.takeIf { it.isReady && typed in it.onTypeTriggerCharacters } ?: return emptyList()
+        val (line, column) = document.offsetToLineCol(offset.coerceIn(0, document.length))
+        val edits = client.onTypeFormatting(this.document.path, LspPosition(line, column), typed.toString(), options.tabSize, options.insertSpaces).awaitOrNull().orEmpty()
+        return edits.map { textEdit(it, document.text) }
+    }
+
     /** The previous line's indentation, more or less as the file's language configuration says after `:` and the like. */
     override fun smartIndent(document: CodeDocument, lineIndex: Int, options: FormattingOptions): String {
         val before = document.lineText((lineIndex - 1).coerceAtLeast(0))
@@ -198,7 +214,7 @@ internal class AardinkLanguageService(
 
 /** LSP hints as Aardink shows them, at their offsets in [document]. */
 internal fun aardinkInlayHints(hints: List<io.github.kinteshi.quirecode.language.InlayHint>, document: CodeDocument): List<InlayHint> =
-    hints.map { InlayHint(offsetIn(document, it.position), it.label) }
+    hints.map { InlayHint(offsetIn(document, it.position), it.label, it.tooltip) }
 
 /** [position] in [document], clamped to its lines and their lengths. */
 internal fun offsetIn(document: CodeDocument, position: LspPosition): Int {

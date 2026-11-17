@@ -4,6 +4,16 @@ import android.Manifest
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -190,8 +200,15 @@ fun NativeWorkbench() {
                     .windowInsetsPadding(WindowInsets.safeDrawing)
                     .imePadding(),
             ) {
+                val anim = controller.settings.animations
                 Box(Modifier.weight(1f)) {
-                    if (controller.settingsVisible) SettingsScreen(controller) else WorkbenchLayout(controller)
+                    Crossfade(
+                        targetState = controller.settingsVisible,
+                        animationSpec = tween(if (anim) 150 else 0),
+                        label = "settings",
+                    ) { showSettings ->
+                        if (showSettings) SettingsScreen(controller) else WorkbenchLayout(controller)
+                    }
                     controller.explorerUndo?.let { undo ->
                         Snackbar(
                             action = {
@@ -217,6 +234,9 @@ fun NativeWorkbench() {
 
 @Composable
 private fun WorkbenchLayout(controller: WorkbenchController) {
+    val anim = controller.settings.animations
+    val lastSidebar = remember { mutableStateOf(SidebarView.Explorer) }
+    controller.sidebar?.let { lastSidebar.value = it }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val expanded = maxWidth >= 600.dp
         val roomy = maxWidth >= 1200.dp
@@ -224,10 +244,12 @@ private fun WorkbenchLayout(controller: WorkbenchController) {
         val windowHeight = maxHeight.value
         Column(Modifier.fillMaxSize()) {
             TopBar(controller, expanded)
-            ConnectionBanner(controller)
-            TransferBanner(controller)
-            DaemonVersionBanner(controller)
-            GuestDiskBanner(controller)
+            Column(Modifier.fillMaxWidth().animateContentSize(tween(if (anim) 150 else 0))) {
+                ConnectionBanner(controller)
+                TransferBanner(controller)
+                DaemonVersionBanner(controller)
+                GuestDiskBanner(controller)
+            }
             if (expanded) {
                 Row(Modifier.weight(1f).fillMaxWidth()) {
                     WorkbenchRail(controller)
@@ -238,31 +260,57 @@ private fun WorkbenchLayout(controller: WorkbenchController) {
                     val chatWidth = (controller.chatWidth ?: if (roomy) 420f else 340f).coerceIn(MIN_SIDE_PANE_WIDTH, limit)
                     val sidebarWidth = (controller.sidebarWidth ?: if (roomy) 300f else 260f)
                         .coerceIn(MIN_SIDE_PANE_WIDTH, (limit - if (chatOpen) chatWidth else 0f).coerceAtLeast(MIN_SIDE_PANE_WIDTH))
-                    controller.sidebar?.let { view ->
-                        SidebarContent(controller, view, Modifier.width(sidebarWidth.dp).paneShape())
-                        PaneGutter(
-                            onDrag = { delta -> controller.sidebarWidth = (sidebarWidth + delta).coerceIn(MIN_SIDE_PANE_WIDTH, limit - if (chatOpen) chatWidth else 0f) },
-                            onStopped = controller::savePaneSizes,
-                        )
+                    AnimatedVisibility(
+                        visible = sidebarOpen,
+                        enter = fadeIn(tween(if (anim) 140 else 0)) + expandHorizontally(tween(if (anim) 160 else 0)),
+                        exit = fadeOut(tween(if (anim) 120 else 0)) + shrinkHorizontally(tween(if (anim) 150 else 0)),
+                    ) {
+                        Row(Modifier.fillMaxHeight()) {
+                            Box(Modifier.width(sidebarWidth.dp).fillMaxHeight().paneShape()) {
+                                Crossfade(
+                                    targetState = lastSidebar.value,
+                                    animationSpec = tween(if (anim) 120 else 0),
+                                    label = "sidebar",
+                                ) { view ->
+                                    SidebarContent(controller, view, Modifier.fillMaxSize())
+                                }
+                            }
+                            PaneGutter(
+                                onDrag = { delta -> controller.sidebarWidth = (sidebarWidth + delta).coerceIn(MIN_SIDE_PANE_WIDTH, limit - if (chatOpen) chatWidth else 0f) },
+                                onStopped = controller::savePaneSizes,
+                            )
+                        }
                     }
                     Column(Modifier.weight(1f).fillMaxHeight()) {
                         Box(Modifier.weight(1f).fillMaxWidth().paneShape()) { EditorArea(controller) }
                         // The panel leaves the editor its tabs and a few lines.
-                        if (controller.panelShown) PanelArea(controller, Modifier.paneShape(), maxHeight = windowHeight - MIN_EDITOR_HEIGHT)
+                        VerticalReveal(
+                            visible = controller.panelShown,
+                            animate = anim,
+                            expandFrom = Alignment.Bottom,
+                        ) {
+                            PanelArea(controller, Modifier.paneShape(), maxHeight = windowHeight - MIN_EDITOR_HEIGHT)
+                        }
                     }
-                    if (chatOpen) {
-                        PaneGutter(
-                            onDrag = { delta -> controller.chatWidth = (chatWidth - delta).coerceIn(MIN_SIDE_PANE_WIDTH, limit - if (sidebarOpen) sidebarWidth else 0f) },
-                            onStopped = controller::savePaneSizes,
-                        )
-                        CopilotChatPane(
-                            controller,
-                            Modifier.width(chatWidth.dp).padding(end = 8.dp).paneShape(),
-                            onClose = { controller.chatVisible = false },
-                        )
-                    } else {
-                        Spacer(Modifier.width(8.dp))
+                    AnimatedVisibility(
+                        visible = chatOpen,
+                        enter = fadeIn(tween(if (anim) 140 else 0)) + expandHorizontally(tween(if (anim) 160 else 0), expandFrom = Alignment.End),
+                        exit = fadeOut(tween(if (anim) 120 else 0)) + shrinkHorizontally(tween(if (anim) 150 else 0), shrinkTowards = Alignment.End),
+                    ) {
+                        Row(Modifier.fillMaxHeight()) {
+                            PaneGutter(
+                                onDrag = { delta -> controller.chatWidth = (chatWidth - delta).coerceIn(MIN_SIDE_PANE_WIDTH, limit - if (sidebarOpen) sidebarWidth else 0f) },
+                                onStopped = controller::savePaneSizes,
+                            )
+                            CopilotChatPane(
+                                controller,
+                                Modifier.width(chatWidth.dp).padding(end = 8.dp).paneShape(),
+                                onClose = { controller.chatVisible = false },
+                            )
+                        }
                     }
+                    val endGap by animateDpAsState(if (chatOpen) 0.dp else 8.dp, tween(if (anim) 160 else 0), label = "endGap")
+                    if (endGap > 0.dp) Spacer(Modifier.width(endGap))
                 }
             } else {
                 Box(Modifier.weight(1f).fillMaxWidth()) { CompactContent(controller) }
@@ -415,47 +463,53 @@ private fun RailItem(icon: ImageVector, label: String, command: String?, selecte
 
 @Composable
 private fun CompactContent(controller: WorkbenchController) {
-    when (controller.compactDestination) {
-        CompactDestination.Files -> SidebarContent(controller, SidebarView.Explorer)
-        CompactDestination.Editor -> EditorArea(controller)
-        // The bottom panel's tabs (Problems lives under More) and "+", which the wide layout has in its panel.
-        CompactDestination.Terminal -> Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceContainerLow)) {
-            Row(
-                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                (listOf(PanelTab.Terminal, PanelTab.Debug, PanelTab.Output, PanelTab.Ports, PanelTab.Variables, PanelTab.Interactive) +
-                    listOfNotNull(PanelTab.Docs.takeIf { controller.expandedDocs != null })).forEach { tab ->
-                    PanelTabChip(controller, tab)
-                }
-            }
-            Box(Modifier.weight(1f).fillMaxWidth()) {
-                when (controller.panelTab) {
-                    PanelTab.Debug -> DebugPanel(controller)
-                    PanelTab.Output -> OutputLog(controller)
-                    PanelTab.Ports -> PortsView(controller)
-                    PanelTab.Variables -> VariablesView(controller)
-                    PanelTab.Interactive -> InteractiveView(controller)
-                    PanelTab.Docs -> DocsView(controller)
-                    else -> TerminalView(controller)
-                }
-            }
-        }
-        CompactDestination.Chat -> CopilotChatPane(controller)
-        CompactDestination.More -> {
-            var view by remember { mutableStateOf(SidebarView.Problems) }
-            Column(Modifier.fillMaxSize()) {
+    Crossfade(
+        targetState = controller.compactDestination,
+        animationSpec = tween(if (controller.settings.animations) 140 else 0),
+        label = "compact",
+    ) { destination ->
+        when (destination) {
+            CompactDestination.Files -> SidebarContent(controller, SidebarView.Explorer)
+            CompactDestination.Editor -> EditorArea(controller)
+            // The bottom panel's tabs (Problems lives under More) and "+", which the wide layout has in its panel.
+            CompactDestination.Terminal -> Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceContainerLow)) {
                 Row(
-                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    listOf(SidebarView.Search, SidebarView.SourceControl, SidebarView.Problems, SidebarView.Outline, SidebarView.References, SidebarView.CallHierarchy).forEach {
-                        FilterChip(selected = view == it, onClick = { view = it }, label = { Text(it.title) })
+                    (listOf(PanelTab.Terminal, PanelTab.Debug, PanelTab.Output, PanelTab.Ports, PanelTab.Variables, PanelTab.Interactive) +
+                        listOfNotNull(PanelTab.Docs.takeIf { controller.expandedDocs != null })).forEach { tab ->
+                        PanelTabChip(controller, tab)
                     }
-                    FilterChip(selected = false, onClick = { controller.settingsVisible = true }, label = { Text("Settings") })
                 }
-                SidebarContent(controller, view, Modifier.weight(1f))
+                Box(Modifier.weight(1f).fillMaxWidth()) {
+                    when (controller.panelTab) {
+                        PanelTab.Debug -> DebugPanel(controller)
+                        PanelTab.Output -> OutputLog(controller)
+                        PanelTab.Ports -> PortsView(controller)
+                        PanelTab.Variables -> VariablesView(controller)
+                        PanelTab.Interactive -> InteractiveView(controller)
+                        PanelTab.Docs -> DocsView(controller)
+                        else -> TerminalView(controller)
+                    }
+                }
+            }
+            CompactDestination.Chat -> CopilotChatPane(controller)
+            CompactDestination.More -> {
+                var view by remember { mutableStateOf(SidebarView.Problems) }
+                Column(Modifier.fillMaxSize()) {
+                    Row(
+                        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        listOf(SidebarView.Search, SidebarView.SourceControl, SidebarView.Problems, SidebarView.Outline, SidebarView.References, SidebarView.CallHierarchy).forEach {
+                            FilterChip(selected = view == it, onClick = { view = it }, label = { Text(it.title) })
+                        }
+                        FilterChip(selected = false, onClick = { controller.settingsVisible = true }, label = { Text("Settings") })
+                    }
+                    SidebarContent(controller, view, Modifier.weight(1f))
+                }
             }
         }
     }
@@ -500,11 +554,13 @@ private fun StatusBar(controller: WorkbenchController, expanded: Boolean) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {
+        val dotColor by animateColorAsState(
+            if (controller.connected) colors.primary else colors.outline,
+            tween(if (controller.settings.animations) 180 else 0),
+            label = "statusDot",
+        )
         Box(
-            Modifier.size(8.dp).background(
-                if (controller.connected) colors.primary else colors.outline,
-                CircleShape,
-            ),
+            Modifier.size(8.dp).background(dotColor, CircleShape),
         )
         // VS Code's left end: the branch and the problem counts, each a tap from its view.
         if (expanded) {

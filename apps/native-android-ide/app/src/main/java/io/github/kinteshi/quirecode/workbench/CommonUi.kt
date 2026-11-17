@@ -1,5 +1,12 @@
 package io.github.kinteshi.quirecode.workbench
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.Orientation
@@ -17,14 +24,18 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -113,4 +124,30 @@ internal fun PaneGutter(onDrag: (Float) -> Unit, onStopped: () -> Unit, modifier
     ) {
         Box(Modifier.size(width = 3.dp, height = 32.dp).background(MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(2.dp)))
     }
+}
+
+/** Smoothly reveals or collapses vertical content (G40), snapping immediately when [animate] is false. */
+@Composable
+internal fun VerticalReveal(
+    visible: Boolean,
+    animate: Boolean,
+    modifier: Modifier = Modifier,
+    expandFrom: Alignment.Vertical = Alignment.Top,
+    content: @Composable () -> Unit,
+) {
+    val enterMs = if (animate) 150 else 0
+    val exitMs = if (animate) 120 else 0
+    AnimatedVisibility(
+        visible = visible,
+        modifier = modifier,
+        enter = fadeIn(tween(enterMs)) + expandVertically(tween(enterMs), expandFrom = expandFrom),
+        exit = fadeOut(tween(exitMs)) + shrinkVertically(tween(exitMs), shrinkTowards = expandFrom),
+    ) { content() }
+}
+
+/** An expand chevron that smoothly rotates 180 degrees when [expanded]. */
+@Composable
+internal fun ExpandChevron(expanded: Boolean, animate: Boolean, modifier: Modifier = Modifier) {
+    val rotation by animateFloatAsState(if (expanded) 180f else 0f, tween(if (animate) 150 else 0), label = "chevron")
+    Icon(Icons.Outlined.ExpandMore, contentDescription = null, modifier = modifier.graphicsLayer { rotationZ = rotation })
 }

@@ -21,6 +21,7 @@ data class CopilotSuggestion(
     val range: LspRange,
     val command: JsonObject?,
     val item: JsonObject,
+    val isSnippet: Boolean = false,
 )
 
 /** A next edit suggestion: [text] replaces [range] of the document at [version], anywhere in the file. */
@@ -192,6 +193,7 @@ internal fun parseSuggestions(result: JsonElement): List<CopilotSuggestion> {
             ),
             command = item.get("command")?.takeIf { it.isJsonObject }?.asJsonObject,
             item = item,
+            isSnippet = item.get("insertTextFormat")?.takeIf { it.isJsonPrimitive }?.asInt == 2,
         )
     }
 }

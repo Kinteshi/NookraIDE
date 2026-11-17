@@ -100,13 +100,14 @@ class AardinkLanguageServiceTest {
         val document = com.aardarch.aardink.core.CodeDocument("total = f(2)\nx\n")
         val hints = aardinkInlayHints(
             listOf(
-                io.github.kinteshi.quirecode.language.InlayHint(LspPosition(0, 5), ": int", 1),
-                io.github.kinteshi.quirecode.language.InlayHint(LspPosition(0, 10), "factor=", 2),
+                io.github.kinteshi.quirecode.language.InlayHint(LspPosition(0, 5), ": int", 1, "Return type"),
+                io.github.kinteshi.quirecode.language.InlayHint(LspPosition(0, 10), "factor=", 2, "Multiplier"),
                 io.github.kinteshi.quirecode.language.InlayHint(LspPosition(1, 40), ": str", 1),
             ),
             document,
         )
         assertEquals(listOf(5, 10, 14), hints.map { it.offset })
         assertEquals(listOf(": int", "factor=", ": str"), hints.map { it.label })
+        assertEquals(listOf("Return type", "Multiplier", null), hints.map { it.tooltip })
     }
 }

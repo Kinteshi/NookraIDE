@@ -170,7 +170,7 @@ private fun ExplorerTree(controller: WorkbenchController, directory: String) {
         // above the rows it keeps in view).
         if (settings.openEditors && controller.documents.isNotEmpty()) {
             OpenEditorsHeader(controller)
-            if (controller.openEditorsExpanded) {
+            VerticalReveal(controller.openEditorsExpanded, settings.animations) {
                 // Six rows, and half of a seventh when there are more to scroll to.
                 Column(Modifier.heightIn(max = 246.dp).verticalScroll(rememberScrollState())) {
                     controller.documents.toList().forEach { document -> key(document.path) { OpenEditorRow(controller, document) } }
@@ -296,7 +296,11 @@ private fun ExplorerTree(controller: WorkbenchController, directory: String) {
             }
         }
         // Below the files while something is selected (G24): what applies to all of it.
-        if (selecting) SelectionBar(controller, selection.toList())
+        val shownSelection = remember { mutableStateOf(selection.toList()) }
+        if (selecting) shownSelection.value = selection.toList()
+        VerticalReveal(selecting, settings.animations, expandFrom = Alignment.Bottom) {
+            SelectionBar(controller, shownSelection.value)
+        }
     }
 }
 

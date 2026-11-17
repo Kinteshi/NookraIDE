@@ -20,12 +20,20 @@ internal fun saveImportedTheme(context: Context, theme: ImportedTheme) {
         .apply()
 }
 
-internal fun loadSavedSemanticColors(context: Context): Map<String, String> {
+internal fun loadSavedSemanticColors(context: Context): Map<String, String> =
+    loadSavedColorMap(context, "semantic-colors")
+
+internal fun loadSavedWorkbenchColors(context: Context): Map<String, String> =
+    loadSavedColorMap(context, "workbench-colors")
+
+private fun loadSavedColorMap(context: Context, key: String): Map<String, String> {
     val json = context.getSharedPreferences("native-ide-assets", Context.MODE_PRIVATE)
-        .getString("semantic-colors", "{}") ?: "{}"
-    return JsonParser.parseString(json).asJsonObject.entrySet().mapNotNull { (name, value) ->
-        if (value.isJsonPrimitive && value.asJsonPrimitive.isString) name to value.asString else null
-    }.toMap()
+        .getString(key, "{}") ?: "{}"
+    return runCatching {
+        JsonParser.parseString(json).asJsonObject.entrySet().mapNotNull { (name, value) ->
+            if (value.isJsonPrimitive && value.asJsonPrimitive.isString) name to value.asString else null
+        }.toMap()
+    }.getOrDefault(emptyMap())
 }
 
 internal fun parseThemeColor(value: String): Color {

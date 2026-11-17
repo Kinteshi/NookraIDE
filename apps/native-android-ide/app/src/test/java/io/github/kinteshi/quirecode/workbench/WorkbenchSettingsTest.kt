@@ -126,4 +126,68 @@ class WorkbenchSettingsTest {
         val unknown = JsonParser.parseString("""{"avf.notebook.cellEditor":"monaco"}""").asJsonObject
         assertEquals("aardink", WorkbenchSettings.from(unknown).cellEditor)
     }
+
+    @Test
+    fun aardinkEditorOptionsAndAnimationsParseAndValidate() {
+        val defaults = WorkbenchSettings()
+        assertEquals("on", defaults.lineNumbersStyle)
+        assertTrue(defaults.lineNumbers)
+        assertEquals("line", defaults.cursorStyle)
+        assertEquals("smooth", defaults.cursorBlinking)
+        assertTrue(defaults.smoothScrolling)
+        assertTrue(defaults.indentGuides)
+        assertTrue(defaults.bracketPairGuides)
+        assertEquals("same", defaults.wrappingIndent)
+        assertFalse(defaults.scrollBeyondLastLine)
+        assertFalse(defaults.formatOnType)
+        assertTrue(defaults.animations)
+
+        val configured = WorkbenchSettings.from(
+            JsonParser.parseString(
+                """{
+                  "editor.lineNumbers":"relative",
+                  "editor.cursorStyle":"block-outline",
+                  "editor.cursorBlinking":"solid",
+                  "editor.smoothScrolling":false,
+                  "editor.guides.indentation":false,
+                  "editor.guides.bracketPairs":false,
+                  "editor.wrappingIndent":"deepIndent",
+                  "editor.scrollBeyondLastLine":true,
+                  "editor.formatOnType":true,
+                  "avf.workbench.animations":false,
+                  "avf.theme.syntaxColors":"highContrast"
+                }""",
+            ).asJsonObject,
+        )
+        assertEquals("relative", configured.lineNumbersStyle)
+        assertTrue(configured.lineNumbers)
+        assertEquals("block-outline", configured.cursorStyle)
+        assertEquals("solid", configured.cursorBlinking)
+        assertFalse(configured.smoothScrolling)
+        assertFalse(configured.indentGuides)
+        assertFalse(configured.bracketPairGuides)
+        assertEquals("deepIndent", configured.wrappingIndent)
+        assertTrue(configured.scrollBeyondLastLine)
+        assertTrue(configured.formatOnType)
+        assertFalse(configured.animations)
+        assertEquals(SyntaxColors.HighContrast, configured.syntaxColors)
+
+        val interval = WorkbenchSettings.from(JsonParser.parseString("""{"editor.lineNumbers":"interval"}""").asJsonObject)
+        assertEquals("interval", interval.lineNumbersStyle)
+        assertTrue(interval.lineNumbers)
+
+        val off = WorkbenchSettings.from(JsonParser.parseString("""{"editor.lineNumbers":"off"}""").asJsonObject)
+        assertEquals("off", off.lineNumbersStyle)
+        assertFalse(off.lineNumbers)
+
+        val invalid = WorkbenchSettings.from(
+            JsonParser.parseString(
+                """{"editor.lineNumbers":"bogus","editor.cursorStyle":"beam","editor.cursorBlinking":"pulse","editor.wrappingIndent":"hanging"}""",
+            ).asJsonObject,
+        )
+        assertEquals("on", invalid.lineNumbersStyle)
+        assertEquals("line", invalid.cursorStyle)
+        assertEquals("smooth", invalid.cursorBlinking)
+        assertEquals("same", invalid.wrappingIndent)
+    }
 }

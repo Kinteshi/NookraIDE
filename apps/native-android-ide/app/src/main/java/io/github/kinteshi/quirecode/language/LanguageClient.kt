@@ -119,6 +119,8 @@ class LanguageClient(
     /** `textDocument/foldingRange`; without it, folding follows indentation. */
     @Volatile var supportsFoldingRange = false
         private set
+    @Volatile var onTypeTriggerCharacters: Set<Char> = emptySet()
+        private set
     /** `textDocument/linkedEditingRange` (JSX/HTML tag pairs). */
     @Volatile var supportsLinkedEditing = false
         private set
@@ -192,6 +194,11 @@ class LanguageClient(
                 supportsCallHierarchy = capabilities?.provides("callHierarchyProvider") == true
                 supportsLinkedEditing = capabilities?.provides("linkedEditingRangeProvider") == true
                 supportsFoldingRange = capabilities?.provides("foldingRangeProvider") == true
+                val onTypeProvider = capabilities?.get("documentOnTypeFormattingProvider")?.takeIf { it.isJsonObject }?.asJsonObject
+                onTypeTriggerCharacters = buildSet {
+                    onTypeProvider?.get("firstTriggerCharacter")?.takeIf { it.isJsonPrimitive }?.asString?.singleOrNull()?.let(::add)
+                    onTypeProvider?.getAsJsonArray("moreTriggerCharacter")?.mapNotNull { it.takeIf { c -> c.isJsonPrimitive }?.asString?.singleOrNull() }?.forEach(::add)
+                }
                 notify("initialized", JsonObject())
                 notify("workspace/didChangeConfiguration", JsonObject().apply {
                     add("settings", gson.toJsonTree(configuredSettings))
@@ -286,6 +293,16 @@ class LanguageClient(
         request("textDocument/rangeFormatting", JsonObject().apply {
             add("textDocument", JsonObject().apply { addProperty("uri", fileUri(path)) })
             add("range", gson.toJsonTree(range))
+            add("options", JsonObject().apply {
+                addProperty("tabSize", tabSize)
+                addProperty("insertSpaces", insertSpaces)
+            })
+        }).thenApply(::textEdits)
+
+    /** Tidies code around [position] after typing trigger character [ch] (`textDocument/onTypeFormatting`). */
+    fun onTypeFormatting(path: String, position: LspPosition, ch: String, tabSize: Int, insertSpaces: Boolean): CompletableFuture<List<LspTextEdit>> =
+        request("textDocument/onTypeFormatting", positionParams(path, position).apply {
+            addProperty("ch", ch)
             add("options", JsonObject().apply {
                 addProperty("tabSize", tabSize)
                 addProperty("insertSpaces", insertSpaces)
@@ -452,7 +469,7 @@ class LanguageClient(
                 val shown = uri != null && showDocumentHandler?.invoke(uri) == true
                 CompletableFuture.completedFuture(JsonObject().apply { addProperty("success", shown) })
             }
-            "workspace/inlayHint/refresh" -> {
+            "workspace/inlayHint/refresh", "workspace/codeLens/refresh", "workspace/semanticTokens/refresh" -> {
                 inlayHintRefreshListener?.invoke()
                 CompletableFuture.completedFuture(JsonNull.INSTANCE)
             }
@@ -520,6 +537,8 @@ class LanguageClient(
                 addProperty("workspaceFolders", true)
                 add("workspaceEdit", JsonObject().apply { addProperty("documentChanges", true) })
                 add("inlayHint", JsonObject().apply { addProperty("refreshSupport", true) })
+                add("codeLens", JsonObject().apply { addProperty("refreshSupport", true) })
+                add("semanticTokens", JsonObject().apply { addProperty("refreshSupport", true) })
                 add("symbol", JsonObject().apply { addProperty("dynamicRegistration", false) })
             })
             add("textDocument", JsonObject().apply {
@@ -586,6 +605,7 @@ class LanguageClient(
                 add("references", JsonObject().apply { addProperty("dynamicRegistration", false) })
                 add("rename", JsonObject().apply { addProperty("dynamicRegistration", false) })
                 add("formatting", JsonObject().apply { addProperty("dynamicRegistration", false) })
+                add("onTypeFormatting", JsonObject().apply { addProperty("dynamicRegistration", false) })
                 add("codeAction", JsonObject().apply {
                     addProperty("dynamicRegistration", false)
                     add("codeActionLiteralSupport", JsonObject().apply {

@@ -3,10 +3,12 @@ package io.github.kinteshi.quirecode.workbench
 import android.content.Context
 import androidx.compose.material3.ColorScheme
 import androidx.compose.ui.graphics.Color
+import com.aardarch.aardink.core.ChromeColors
 import com.aardarch.aardink.core.CommentSyntax
 import com.aardarch.aardink.core.EditorTheme
 import com.aardarch.aardink.core.NamedTokenType
 import com.aardarch.aardink.core.TokenType
+import com.aardarch.aardink.ui.EditorThemes
 import com.aardarch.aardink.ui.fromColorScheme
 import io.github.kinteshi.quirecode.DARK_SYNTAX_THEME
 import io.github.kinteshi.quirecode.LIGHT_SYNTAX_THEME
@@ -25,7 +27,7 @@ import org.eclipse.tm4e.core.registry.IRegistryOptions
 import org.eclipse.tm4e.core.registry.IThemeSource
 import org.eclipse.tm4e.core.registry.Registry
 
-/** The syntax colours in effect: an imported VS Code theme, else the Material You palette, else the built-in light or dark one. */
+/** The syntax colours in effect: an imported VS Code theme, Material You, High contrast, or the built-in Classic light/dark theme. */
 internal class SyntaxTheme(
     /** A file name: tm4e tells the theme's format by its extension. */
     val name: String,
@@ -33,20 +35,32 @@ internal class SyntaxTheme(
     val semanticColors: Map<String, String>,
     val light: Boolean,
     val imported: Boolean,
+    val workbenchColors: Map<String, String> = emptyMap(),
+    val highContrast: Boolean = false,
 ) {
-    val key: String = "$name/${json.hashCode()}/${semanticColors.hashCode()}/$light"
+    val key: String = "$name/${json.hashCode()}/${semanticColors.hashCode()}/$light/${workbenchColors.hashCode()}/$highContrast"
 }
 
 internal fun syntaxTheme(context: Context, colors: ColorScheme, dark: Boolean, syntax: SyntaxColors): SyntaxTheme {
-    val importedJson = context.getSharedPreferences("native-ide-assets", Context.MODE_PRIVATE).getString("theme-json", null)
-    if (importedJson != null) return SyntaxTheme(IMPORTED_THEME_FILE, importedJson, loadSavedSemanticColors(context), light = false, imported = true)
+    val prefs = context.getSharedPreferences("native-ide-assets", Context.MODE_PRIVATE)
+    val importedJson = prefs.getString("theme-json", null)
+    if (importedJson != null) {
+        return SyntaxTheme(
+            IMPORTED_THEME_FILE,
+            importedJson,
+            loadSavedSemanticColors(context),
+            light = false,
+            imported = true,
+            workbenchColors = loadSavedWorkbenchColors(context),
+        )
+    }
     if (syntax == SyntaxColors.MaterialYou) {
         val palette = SyntaxPalette.materialYou(colors, dark)
         return SyntaxTheme("material-you.tmTheme.json", palette.textMateTheme("Material You", colors.surface), palette.semanticColors(), !dark, imported = false)
     }
     val file = if (dark) DARK_SYNTAX_THEME else LIGHT_SYNTAX_THEME
     val json = context.assets.open("textmate/$file").use { it.reader().readText() }
-    return SyntaxTheme(file, json, loadSavedSemanticColors(context), !dark, imported = false)
+    return SyntaxTheme(file, json, loadSavedSemanticColors(context), !dark, imported = false, highContrast = syntax == SyntaxColors.HighContrast)
 }
 
 /** Grammars and colours for the editor, through a tm4e registry. */
@@ -130,13 +144,37 @@ internal object AardinkSyntax {
         val semantic = semanticColorsByKind(theme.light, theme.semanticColors)
             .map { (kind, color) -> semanticType(kind) to Color(color) }
             .toMap()
+        if (theme.highContrast) {
+            val hc = if (dark) EditorThemes.HighContrastDark else EditorThemes.HighContrastLight
+            return hc.copy(
+                tokenColors = hc.tokenColors + tokenColors + semantic,
+                tokenFontStyles = tokenStyles,
+            )
+        }
         val base = EditorTheme.fromColorScheme(colors, dark)
+        fun chromeColor(vararg keys: String): Color? =
+            keys.firstNotNullOfOrNull { key -> theme.workbenchColors[key]?.let { runCatching { parseThemeColor(it) }.getOrNull() } }
         return base.copy(
             // An imported theme brings its own background.
             background = if (theme.imported) themeBackground(theme.json) ?: base.background else base.background,
             tokenColors = tokenColors + semantic,
             tokenFontStyles = tokenStyles,
             bracketPairColors = (if (theme.light) LIGHT_BRACKET_COLORS else BRACKET_COLORS).map(::Color),
+            chromeColors = ChromeColors(
+                indentGuide = chromeColor("editorIndentGuide.background1", "editorIndentGuide.background")
+                    ?: colors.outlineVariant.copy(alpha = 0.35f),
+                activeIndentGuide = chromeColor("editorIndentGuide.activeBackground1", "editorIndentGuide.activeBackground")
+                    ?: colors.primary.copy(alpha = 0.65f),
+                bracketPairGuide = chromeColor("editorBracketPairGuide.background1") ?: Color.Unspecified,
+                ruler = chromeColor("editorRuler.foreground") ?: colors.outlineVariant.copy(alpha = 0.4f),
+                widgetBackground = chromeColor("editorWidget.background") ?: colors.surfaceContainerHigh,
+                widgetForeground = chromeColor("editorWidget.foreground") ?: colors.onSurface,
+                widgetBorder = chromeColor("editorWidget.border") ?: colors.outlineVariant,
+                inlayHint = chromeColor("editorInlayHint.foreground") ?: colors.onSurfaceVariant,
+                inlayHintBackground = chromeColor("editorInlayHint.background") ?: colors.surfaceContainerHighest.copy(alpha = 0.6f),
+                codeLens = chromeColor("editorCodeLens.foreground") ?: colors.onSurfaceVariant,
+                ghostText = chromeColor("editorGhostText.foreground") ?: colors.onSurfaceVariant.copy(alpha = 0.55f),
+            ),
         )
     }
 

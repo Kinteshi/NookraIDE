@@ -16,6 +16,8 @@ enum class SyntaxColors(val key: String, val label: String) {
     Classic("classic", "Classic"),
     /** Generated from the app's Material You palette. */
     MaterialYou("materialYou", "Material You"),
+    /** Aardink's WCAG-7:1 high-contrast palette. */
+    HighContrast("highContrast", "High contrast"),
 }
 
 /** The colour of each kind of token, shared by the code editor and notebook cells. */

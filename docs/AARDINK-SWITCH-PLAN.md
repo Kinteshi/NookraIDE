@@ -1,7 +1,7 @@
 # Plan: switching from sora-editor to Aardink
 
-Status: **done** (2026-11-08, batch 57; updated to Aardink 0.10.0 in batch 72): **Aardink is the editor**; sora-editor and its setting were removed
-in phase 7. tm4e, which colours code, is carried in the app's `tm4e` module. Left: the user's own try on the Book Cover (A7),
+Status: **done** (2026-11-08, batch 57; updated to Aardink 0.10.0 in batch 72 and adopted native 0.10.0 features in batch 73): **Aardink is the editor**; sora-editor and its setting were removed
+in phase 7. tm4e, which colours code, is carried in the app's `tm4e` module. A7 (Book Cover / on-screen keyboard trial) was concluded on 11-17; left:
 the asks to Aardink, and a review of each release.
 
 **Decided by the user:** the switch will happen, for the licence (Apache-2.0 instead of sora's LGPL-2.1).
@@ -61,7 +61,7 @@ If 1 or 2 are declined, a fork is allowed by the licence but is a real maintenan
   a keyboard selection the input method turns round is turned back: Samsung's keyboard and Aardink 0.8.0 lost the cursor
   and the selection's direction otherwise (backlog 73).
 * Tests touching Aardink run on Java 21 (installed beside 17).
-* **Still for the user:** the Book Cover itself, and the on-screen keyboard (hidden while the Book Cover is attached).
+* **Concluded by the user (11-17, A7):** daily use on the Book Cover itself and on-screen keyboard.
 
 ### Phase 2: colours (done 11-08, batch 44)
 * `editor/TextMateTokenizer.kt` with semantic colours over the grammar's; `AardinkSyntax` with its own tm4e registry from the
@@ -156,7 +156,7 @@ the user the full backlog and what changed in coverage.
 
 | Release | Reviewed | What changed for us |
 | --- | --- | --- |
-| 0.10.0 | 11-17, batch 72 | Recompiled cleanly (`EditorCommand.SearchWorkspace` and defaulted parameters on `EditorOptions`, `EditorTheme`, `InlayHint`, `InlineCompletion`, `CodeEditorLayout`). `AardinkGeometry` reflection (`A19`) still works (tested in `AardinkEditorSurfaceTest` and on the tablet). Partial highlighting no longer rescans the whole document for line starts and tolerates two slow passes; new native hooks ready to adopt: `CodeEditorState.refreshLanguageFeatures()`, `InlayHint.tooltip`, `InlineCompletion.isSnippet`, `LanguageService.formatOnType`, `EditorTheme.chromeColors`/`tokenBackgrounds`/`HighContrast*`, `CodeEditorLayout(onSearchWorkspace)`, and `EditorOptions` view switches (`smoothScrolling`, `indentGuides`, `bracketPairGuides`, `lineNumbers` styles, `cursorStyle`, `cursorBlinking`, `rulers`, `scrollBeyondLastLine`, `cursorSurroundingLines`, `wrappingIndent`, `wordWrapColumn`, `dragAndDrop`). Requests 1, 2, 7, 8, 9 (`LanguageConfiguration` regex still unescaped on Android) and 10 are unchanged. |
+| 0.10.0 | 11-17, batch 72–73 | Batch 72 recompiled cleanly (`EditorCommand.SearchWorkspace` and defaulted parameters on `EditorOptions`, `EditorTheme`, `InlayHint`, `InlineCompletion`, `CodeEditorLayout`), with `AardinkGeometry` reflection (`A19`) verified. Batch 73 adopted `CodeEditorState.refreshLanguageFeatures()`, `LanguageService.formatOnType` / `formatOnTypeCharacters` (`editor.formatOnType`), `workspace/codeLens/refresh` and `workspace/semanticTokens/refresh` client triggers, `InlayHint.tooltip`, `InlineCompletion.isSnippet`, `CodeEditorLayout(onSearchWorkspace)`, `HighContrastDark` / `HighContrastLight` + `ChromeColors` (`SyntaxColors.HighContrast` and imported VS Code workbench colors), and `EditorOptions` (`lineNumbers` styles, `cursorStyle`, `cursorBlinking`, `smoothScrolling`, `indentGuides`, `bracketPairGuides`, `wrappingIndent`, `scrollBeyondLastLine`). Requests 1, 2, 7, 8, 9 (`LanguageConfiguration` regex still unescaped on Android) and 10 are unchanged. |
 | 0.8.0 | 11-04 | Decorations, change events, commands, keybindings, Material 3 themes (batch 41 revisit). |
 | 0.9.0 (phase 3 on it) | 11-08, batch 46 | Found requests 8 to 10 (completion list with a hardware keyboard, `LanguageConfiguration` on Android, type-over). |
 | 0.9.0 | 11-08, batch 45 | Requests 3 and 4 delivered; phase 3 smaller, phase 5 unblocked but for two overlays; request 1 narrowed. Our tokenizer broke the new rule for an empty `previousTokens` (fixed). No source change needed. Samsung keyboard issue and gesture hitch unchanged. |

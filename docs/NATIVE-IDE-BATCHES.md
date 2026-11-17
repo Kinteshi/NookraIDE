@@ -3191,6 +3191,20 @@ User's request: run an `A12` release review for the new Aardink release (`v0.10.
   * Installed the updated `QuireCode Dev` (`Aardink 0.10.0`) APK over the previous build, launched it, opened **New untitled file** (`Untitled-1`), and typed `x=1`; confirmed clean rendering and input (`Ln 1, Col 4`) and verified in `adb logcat` that `AardinkGeometry` and `AardinkSyntax` logged no reflection or fallback warnings. Reset dev app data (`pm clear`) and restored `POST_NOTIFICATIONS`.
 * **Tests:** 415 app unit tests (414 passed, 1 opt-in live-host test `RemoteHostIntegrationTest.pairsPinsAndConnectsToATlsHost` skipped) and 146 daemon/protocol tests pass; debug assemble, `clippy` (5 pre-existing warnings), and `third-party-notices.py` pass.
 
+## 73. Subtle UI animations (G40) and native Aardink 0.10.0 adoption (11-17; done, checked on the tablet)
+* **`G40` — Subtle, purposeful UI animations (~120–180 ms):**
+  * Added `avf.workbench.animations` (`WorkbenchSettings.animations`, default `true`) and Appearance → Theme **Smooth transitions** toggle (`SettingsScreen.kt`).
+  * Added shared `VerticalReveal` and `ExpandChevron` helpers in `CommonUi.kt` and wired short Material 3 transitions (snapping to `0 ms` when **Smooth transitions** is off) across `NativeWorkbench.kt` (`Crossfade` on Settings and `CompactContent`, `animateContentSize` banner stack, `AnimatedVisibility` + `Crossfade` sidebar, `VerticalReveal` bottom panel, `AnimatedVisibility` + `animateDpAsState` Chat pane, `animateColorAsState` `StatusBar` dot), `ConnectionsUi.kt` (`ConnectionChip` container/content colors and width, `VerticalReveal` + `ExpandChevron` for Troubleshooting and recent connections log), `ExplorerPane.kt` (`VerticalReveal` on `OPEN EDITORS` list and `SelectionBar`), and `EditorPane.kt` (`EditorTab` active color animation, `FindWidget` `AnimatedVisibility`).
+* **Native Aardink `0.10.0` feature adoption:**
+  * Settings (`WorkbenchSettings.kt`, `SettingsScreen.kt`): added **Line numbers** `ChoiceRow` (`On` / `Relative` / `Interval` / `Off`), **Cursor style** (`Line` / `Block` / `Underline`), **Cursor blinking** (`Smooth` / `Blink` / `Solid`), **Smooth scrolling**, **Scroll beyond last line**, **Indentation guides**, **Bracket pair guides**, `editor.wrappingIndent`, and **Saving -> Format on type** (`editor.formatOnType`), plus **High contrast** in **Syntax colours** (`SyntaxColors.HighContrast`).
+  * Editor & notebook integration (`AardinkEditorPane.kt`, `NotebookCellAardink.kt`): wired Aardink `0.10.0` `EditorOptions`, shared `editorCursorStyle`/`editorCursorBlinking` helpers, `CodeEditorLayout(onSearchWorkspace = ...)`, `state.refreshLanguageFeatures()`, and `isSnippet = it.source.isSnippet`.
+  * Themes & chrome (`SyntaxPalette.kt`, `ImportedThemes.kt`, `AardinkSyntax.kt`): added `SyntaxColors.HighContrast` mapping to `HighContrastDark`/`HighContrastLight`, loaded VS Code workbench colors via `loadSavedWorkbenchColors` (`loadSavedColorMap`), and mapped `ChromeColors` (with Material 3 fallbacks).
+  * Language features (`InlayHints.kt`, `CopilotClient.kt`, `LanguageClient.kt`, `AardinkLanguageService.kt`): parsed string/`MarkupContent` tooltips in `parseInlayHints` and passed `it.tooltip` in `aardinkInlayHints`; parsed `CopilotSuggestion.isSnippet`; added LSP `onTypeFormatting` (`documentOnTypeFormattingProvider`), `formatOnTypeCharacters`/`formatOnType`, and handled `workspace/codeLens/refresh` + `workspace/semanticTokens/refresh`.
+* **Checked on the tablet (`SM-X930`, `192.0.2.66:39495`):**
+  * Installed the Batch 73 `QuireCode Dev` debug APK, opened `Untitled-1.py` with nested Python and verified indentation guides, bracket pair guides, and syntax highlighting; toggled **High contrast** syntax colors, **Relative** line numbers, and **Block** cursor in Settings and confirmed all three live in the editor alongside **Smooth transitions**, **Cursor blinking**, **Smooth scrolling**, **Scroll beyond last line**, and **Format on type**.
+  * Toggled Search, Terminal, Chat, and Problems panes with zero logcat exceptions; cleaned up temporary screenshots and reset dev app state (`pm clear`) with `POST_NOTIFICATIONS` restored.
+* **Tests:** 416 app unit tests (415 passed, 1 opt-in live-host test `RemoteHostIntegrationTest.pairsPinsAndConnectsToATlsHost` skipped — adding tests in `InlayHintsTest.kt`, `AardinkLanguageServiceTest.kt`, and `WorkbenchSettingsTest.kt`) and 146 daemon/protocol tests pass; debug assemble, `clippy` (5 pre-existing warnings), and `third-party-notices.py` pass.
+
 ## Backlog
 ### Open backlog (11-08)
 The current lists of what's open, in two: the general backlog, and the Aardink switch's until it's complete. The older
@@ -3214,7 +3228,7 @@ Grouped (11-08) so that what's cheaper done together is done together; the numbe
 | **5. Notebook outputs** | G8 | 56 | M–L | Widgets not drawn yet. (G3, the data viewer's filter with the on-screen keyboard, done in batch 59) |
 | **6. Large workspaces** | G4 | 61 | S–M | Files beyond Quick Open's 20,000 |
 | | G7 | 55 | S | Deep Rust projects on the tablet (about 1 GB of Rust) |
-| **7. Window and layout** | G40 | – | S–M | **Subtle, purposeful animations on small UI transitions** (user, 11-17: "not a festival, but some smoothness is expected on the small things"). Short Material 3 transitions (~120–180 ms, respecting system animator scale / reduced motion) where elements currently pop in and out abruptly: opening and closing the sidebar, bottom panel and Chat pane; connection and notification banners appearing and hiding; Explorer folders and Troubleshoot / Settings sections expanding and collapsing; editor hover, completion and peek cards fading in/out; active tab/rail indicator and status chip state changes; and Aardink 0.10's `smoothScrolling` / `CursorBlinking.Smooth`. Done earlier in group 7: G23 in batch 61 (the panel makes room for the on-screen keyboard), G6 (57), the terminal toolbar at phone width (58) |
+| **7. Window and layout** | G40 | – | Done in 73 | **Subtle, purposeful animations on small UI transitions** (user, 11-17). Done in batch 73: `avf.workbench.animations` (**Smooth transitions**), shared `VerticalReveal` / `ExpandChevron`, restrained transitions across `NativeWorkbench`, `ConnectionsUi`, `ExplorerPane`, and `EditorPane`, plus Aardink `smoothScrolling` / `CursorBlinking.Smooth`. Done earlier in group 7: G23 in batch 61, G6 (57), terminal toolbar at phone width (58) |
 | **On its own** | G12 | 64 | S–M or L | Replace Gemini CLI with Antigravity CLI |
 | | G19 | – | S–M | Debugger: values in the hover while paused, and Copilot's partial accept (word by word): in neither engine (batch 55) |
 | | G11 | – | ? | Copilot exits after a daemon restart (watching) |
@@ -3262,12 +3276,12 @@ Why these groups:
 #### Aardink switch backlog
 
 Until Aardink replaces sora: the remaining phases of the [plan](AARDINK-SWITCH-PLAN.md), which has the details, and
-what the switch is waiting on. Phases 0–7 are done (batches 42–57: sora was removed in 57), on Aardink 0.10.0 (batch 72; switched on 0.9.0 in batches 45–57); A1 was phase 3, and
+what the switch is waiting on. Phases 0–7 are done (batches 42–57: sora was removed in 57), on Aardink 0.10.0 (pin bumped in 72, native `0.10.0` features adopted in 73; switched on 0.9.0 in batches 45–57); A1 was phase 3, A7 concluded 11-17, and
 A2, A3, A4, A8, A16, A17 and A19 were done in batches 47–54, and A5's checks in 55.
 
 | Group | # | Item | Size | Description |
 |---|---|------|------|-------------|
-| **A. The flip, then sora out** | A7 | 43 | S, the user's | Try the Aardink engine on the Book Cover itself, and the on-screen keyboard (under way: the user has it on). A5 and A6 are done (batch 57) |
+| **A. The flip, then sora out** | A7 | 43 | Done (user, 11-17) | Try the Aardink engine on the Book Cover itself, and the on-screen keyboard (concluded 11-17). A5 and A6 are done (batch 57) |
 | **B. Popups at their line** | – | – | – | Done in batch 54 (A19): the workbench's cards at their text from Aardink's geometry; A9 would replace the reflection |
 | **C. Asks to Aardink, filed together** | A9 | 71 | S to ask | Public text positions: Next Edit's card, the peek and our suggestion list at their line. Drafted |
 | | A13 | 77 | S to ask | The completion list at the caret on Android with a hardware keyboard; our list stands in (batch 51). Drafted |
@@ -3298,8 +3312,7 @@ Loose ends: placed in the groups above (11-08).
 ruleset for `main` only on a public repository (or with Pro), and a private release can't be downloaded by others. The
 user holds the release and keeps developing; `v0.1.0` is tagged when they decide on the repository's visibility.
 
-Decisions and options are in [RELEASE-PLAN.md](RELEASE-PLAN.md). **The batch before it is done (57)**, but A7 (the user's) and
-G17's check; **next: 0.1.0**, R2 to R11. Registered 11-08, from the user: "let us think about releasing… items in the backlog I don't want to sweep under the rug…
+Decisions and options are in [RELEASE-PLAN.md](RELEASE-PLAN.md). **The batch before it is done (57)**, but G17's check (A7 concluded 11-17); **next: 0.1.0**, R2 to R11. Registered 11-08, from the user: "let us think about releasing… items in the backlog I don't want to sweep under the rug…
 we have to polish the app for an initial release cycle". Nothing here is started. R1 decides which G and A items the first
 release waits for; the rest stay in their lists for later releases.
 

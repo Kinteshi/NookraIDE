@@ -36,6 +36,13 @@ import androidx.compose.ui.layout.layout
 import android.content.Context
 import android.graphics.Typeface
 import android.view.KeyEvent as AndroidKeyEvent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import io.github.kinteshi.quirecode.editor.LspPosition
@@ -222,8 +229,18 @@ private fun EditorOverlays(controller: WorkbenchController) {
     AardinkParameterHints(controller)
     AardinkHoverCard(controller)
     PeekOverlay(controller)
-    if (controller.findVisible) {
-        Box(Modifier.fillMaxSize()) { FindWidget(controller, Modifier.align(Alignment.TopEnd)) }
+    Box(Modifier.fillMaxSize()) {
+        val animate = controller.settings.animations
+        val enterMs = if (animate) 150 else 0
+        val exitMs = if (animate) 120 else 0
+        AnimatedVisibility(
+            visible = controller.findVisible,
+            modifier = Modifier.align(Alignment.TopEnd),
+            enter = fadeIn(tween(enterMs)) + slideInVertically(tween(enterMs)) { -it / 4 },
+            exit = fadeOut(tween(exitMs)) + slideOutVertically(tween(exitMs)) { -it / 4 },
+        ) {
+            FindWidget(controller)
+        }
     }
 }
 
@@ -291,9 +308,12 @@ private fun EditorTab(controller: WorkbenchController, document: DocumentSession
     val preview = controller.previewTab == path
     val pinned = path in controller.pinnedTabs
     var menu by remember { mutableStateOf(false) }
+    val colorMs = if (controller.settings.animations) 120 else 0
+    val tabColor by animateColorAsState(if (selected) colors.surface else colors.surfaceContainer, tween(colorMs), label = "tabColor")
+    val tabContentColor by animateColorAsState(if (selected) colors.onSurface else colors.onSurfaceVariant, tween(colorMs), label = "tabContentColor")
     Surface(
-        color = if (selected) colors.surface else colors.surfaceContainer,
-        contentColor = if (selected) colors.onSurface else colors.onSurfaceVariant,
+        color = tabColor,
+        contentColor = tabContentColor,
         shape = RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp),
         modifier = modifier.height(34.dp),
     ) {

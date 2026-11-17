@@ -232,7 +232,7 @@ internal fun AardinkCellEditor(controller: WorkbenchController, session: Noteboo
                 if (state.text != snapshot.text || cell.source != snapshot.text) null else controller.cellInlineCompletions(session, cell, offset)
             } ?: return@InlineCompletionProvider emptyList()
             runCatching { withTimeoutOrNull(CELL_COPILOT_TIMEOUT_MS) { request.await() } }.getOrNull().orEmpty()
-                .map { InlineCompletion(it.text, it.start until it.end.coerceAtLeast(it.start)) }
+                .map { InlineCompletion(it.text, it.start until it.end.coerceAtLeast(it.start), isSnippet = it.source.isSnippet) }
         }
     }
 
@@ -361,6 +361,10 @@ internal fun AardinkCellEditor(controller: WorkbenchController, session: Noteboo
                     overviewRuler = false,
                     quickSuggestions = false,
                     codeLens = false,
+                    cursorStyle = editorCursorStyle(settings.cursorStyle),
+                    cursorBlinking = editorCursorBlinking(settings.cursorBlinking),
+                    indentGuides = settings.indentGuides,
+                    bracketPairGuides = settings.bracketPairGuides,
                     tabSize = settings.tabSize,
                     insertSpaces = settings.insertSpaces,
                     fontSize = fontSize.sp,
