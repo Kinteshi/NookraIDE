@@ -48,6 +48,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -70,6 +71,8 @@ internal fun ConnectionWizardDialog(controller: WorkbenchController) {
     var selectedOption by remember { mutableStateOf(RemoteSetupOption.Tailscale) }
     var os by remember { mutableStateOf(ComputerOs.Linux) }
     var connectionString by remember { mutableStateOf("") }
+    var accessClientId by remember { mutableStateOf("") }
+    var accessClientSecret by remember { mutableStateOf("") }
     var scannerOpen by remember { mutableStateOf(false) }
     var tailscaleState by remember { mutableStateOf(readTailscaleGuideState(context, controller)) }
     var clipboardOffer by remember { mutableStateOf(readClipboardConnectionString(context)) }
@@ -221,6 +224,10 @@ internal fun ConnectionWizardDialog(controller: WorkbenchController) {
                         clipboardOffer = clipboardOffer,
                         onDismissClipboardOffer = { clipboardOffer = null },
                         onOpenScanner = { scannerOpen = true },
+                        accessClientId = accessClientId,
+                        onAccessClientIdChange = { accessClientId = it },
+                        accessClientSecret = accessClientSecret,
+                        onAccessClientSecretChange = { accessClientSecret = it },
                     )
                 }
             }
@@ -230,7 +237,7 @@ internal fun ConnectionWizardDialog(controller: WorkbenchController) {
                 FilledTonalButton(onClick = controller::beginGuestSetup) { Text("Set up Linux guest") }
             } else {
                 TextButton(
-                    onClick = { controller.pairWithConnectionString(connectionString) },
+                    onClick = { controller.pairWithConnectionString(connectionString, accessClientId, accessClientSecret) },
                     enabled = !controller.busy && extractConnectionStringFromText(connectionString) != null,
                 ) { Text(if (controller.busy) "Pairing…" else "Pair and connect") }
             }
@@ -245,7 +252,7 @@ internal fun ConnectionWizardDialog(controller: WorkbenchController) {
             onScanned = { scanned ->
                 scannerOpen = false
                 connectionString = scanned
-                controller.pairWithConnectionString(scanned)
+                controller.pairWithConnectionString(scanned, accessClientId, accessClientSecret)
             },
             onDismiss = { scannerOpen = false },
         )
@@ -326,9 +333,14 @@ internal fun PairingInputSection(
     clipboardOffer: String?,
     onDismissClipboardOffer: () -> Unit,
     onOpenScanner: () -> Unit,
+    accessClientId: String = "",
+    onAccessClientIdChange: (String) -> Unit = {},
+    accessClientSecret: String = "",
+    onAccessClientSecretChange: (String) -> Unit = {},
 ) {
     val colors = MaterialTheme.colorScheme
     val context = LocalContext.current
+    var showAccess by remember { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         clipboardOffer?.let { offer ->
             val parsed = parseConnectionString(offer)
@@ -336,7 +348,10 @@ internal fun PairingInputSection(
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("Connection string found on clipboard", style = MaterialTheme.typography.labelLarge, color = colors.onSecondaryContainer)
                     Text(
-                        parsed?.let { "${it.host}:${it.port} (code ${it.code})" } ?: offer,
+                        parsed?.let {
+                            val extra = if (it.alternateRoutes.isNotEmpty()) " + ${it.alternateRoutes.size} route(s)" else ""
+                            "${it.host}:${it.port}$extra (code ${it.code})"
+                        } ?: offer,
                         style = MaterialTheme.typography.bodySmall,
                         color = colors.onSecondaryContainer,
                     )
@@ -344,7 +359,7 @@ internal fun PairingInputSection(
                         FilledTonalButton(onClick = {
                             onConnectionStringChange(offer)
                             onDismissClipboardOffer()
-                            controller.pairWithConnectionString(offer)
+                            controller.pairWithConnectionString(offer, accessClientId, accessClientSecret)
                         }, enabled = !controller.busy) {
                             Text("Pair from clipboard")
                         }
@@ -383,8 +398,41 @@ internal fun PairingInputSection(
             isError = controller.pairingError != null,
             supportingText = controller.pairingError?.let { error -> { Text(error) } },
             keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, imeAction = ImeAction.Go),
-            keyboardActions = KeyboardActions(onGo = { controller.pairWithConnectionString(connectionString) }),
+            keyboardActions = KeyboardActions(onGo = { controller.pairWithConnectionString(connectionString, accessClientId, accessClientSecret) }),
             modifier = Modifier.fillMaxWidth(),
         )
+        Row(
+            Modifier.fillMaxWidth().clickable { showAccess = !showAccess }.padding(vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Cloudflare Access service token (optional)", style = MaterialTheme.typography.labelLarge, color = colors.primary, modifier = Modifier.weight(1f))
+            ExpandChevron(showAccess, controller.settings.animations)
+        }
+        VerticalReveal(showAccess, controller.settings.animations) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "Needed only when pairing a tunnel protected by Cloudflare Access (`CF-Access-Client-Id` & `Secret`, stored encrypted).",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = accessClientId,
+                    onValueChange = { onAccessClientIdChange(it.trim()) },
+                    label = { Text("CF-Access-Client-Id") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = accessClientSecret,
+                    onValueChange = { onAccessClientSecretChange(it.trim()) },
+                    label = { Text("CF-Access-Client-Secret") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
     }
 }

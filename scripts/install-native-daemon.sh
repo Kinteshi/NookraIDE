@@ -237,9 +237,16 @@ elif $remote; then
     address=${address:-$(hostname -I 2>/dev/null | awk '{print $1}')}
   fi
   echo "The daemon listens on port $port over TLS. Allow it through the firewall if one is active"
-  echo "(for example: sudo ufw allow $port/tcp). Run 'quirecode-daemon pair --remote $address:$port'"
+  echo "(for example: sudo ufw allow $port/tcp). Run 'quirecode-daemon pair --all --port $port'"
   echo "again whenever you need a new code."
-  quirecode-daemon pair --remote "${address:?could not detect the address of this machine, pass --address}:$port"
+  pair_args=(--remote "${address:?could not detect the address of this machine, pass --address}:$port")
+  if command -v tailscale >/dev/null; then
+    ts_ip=$(tailscale ip -4 2>/dev/null | head -1)
+    if [[ -n "$ts_ip" && "$ts_ip" != "$address" ]]; then
+      pair_args+=(--remote "$ts_ip:$port")
+    fi
+  fi
+  quirecode-daemon pair "${pair_args[@]}"
 else
   echo "If Android asks to open port 19870, accept it."
   quirecode-daemon pair

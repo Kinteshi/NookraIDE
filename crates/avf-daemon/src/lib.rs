@@ -107,61 +107,122 @@ pub fn run_devices_cli(command: &str, args: &[String]) -> Result<(), String> {
 }
 
 pub fn print_pairing_code(args: &[String]) -> Result<(), String> {
-    const USAGE: &str = "usage: avf-daemon pair [--minutes N] [--remote HOST[:PORT] | --tunnel HOST[:PORT]]";
+    const USAGE: &str = "usage: avf-daemon pair [--minutes N] [--remote HOST[:PORT]]... [--tunnel HOST[:PORT]] [--all [--port PORT]]";
     let mut minutes = pairing::PAIRING_TTL.as_secs() / 60;
-    let mut remote: Option<String> = None;
-    let mut tunnel: Option<String> = None;
+    let mut remotes: Vec<(String, u16)> = Vec::new();
+    let mut tunnel: Option<(String, u16)> = None;
+    let mut auto_all = false;
+    let mut auto_port = 19870u16;
     let mut rest = args.iter();
     while let Some(flag) = rest.next() {
-        let value = rest.next().ok_or(USAGE)?;
         match flag.as_str() {
+            "--all" => auto_all = true,
             "--minutes" => {
+                let value = rest.next().ok_or(USAGE)?;
                 minutes = value
                     .parse::<u64>()
                     .ok()
                     .filter(|minutes| (1..=60).contains(minutes))
                     .ok_or("--minutes must be between 1 and 60")?
             }
-            "--remote" => remote = Some(value.clone()),
-            "--tunnel" => tunnel = Some(value.clone()),
+            "--port" => {
+                let value = rest.next().ok_or(USAGE)?;
+                auto_port = value.parse::<u16>().map_err(|_| "invalid port in --port".to_owned())?;
+            }
+            "--remote" => {
+                let value = rest.next().ok_or(USAGE)?;
+                remotes.push(parse_host_port(value, 19870, "invalid port in --remote")?);
+            }
+            "--tunnel" => {
+                let value = rest.next().ok_or(USAGE)?;
+                let stripped = value
+                    .trim()
+                    .trim_start_matches("https://")
+                    .trim_start_matches("wss://")
+                    .trim_end_matches("/ws")
+                    .trim_end_matches('/');
+                tunnel = Some(parse_host_port(stripped, 443, "invalid port in --tunnel")?);
+            }
             _ => return Err(USAGE.to_owned()),
         }
     }
-    if remote.is_some() && tunnel.is_some() {
-        return Err(USAGE.to_owned());
+    if auto_all {
+        for host in detect_reachable_hosts() {
+            let entry = (host, auto_port);
+            if !remotes.contains(&entry) {
+                remotes.push(entry);
+            }
+        }
+        if remotes.is_empty() && tunnel.is_none() {
+            return Err("could not detect a LAN or Tailscale address; pass --remote HOST[:PORT]".to_owned());
+        }
     }
     let path = pairing::pairing_path()?;
     let code = pairing::create(&path, Duration::from_secs(minutes * 60))?;
     println!();
-    match (remote, tunnel) {
-        (None, None) => {
-            println!("    Pairing code:  {code}");
-            println!();
-            println!("In QuireCode, tap the connection chip, then Add a connection > This tablet's Linux guest,");
-            println!("and enter it. The code works once,");
+    if remotes.is_empty() && tunnel.is_none() {
+        println!("    Pairing code:  {code}");
+        println!();
+        println!("In QuireCode, tap the connection chip, then Add a connection > This tablet's Linux guest,");
+        println!("and enter it. The code works once,");
+    } else if remotes.is_empty() {
+        let (host, port) = tunnel.as_ref().unwrap();
+        print_remote_pairing(
+            &tls::public_connection_string(host, *port, &code),
+            &[tls::format_host_port(host, *port)],
+        );
+    } else {
+        let material = tls::load_or_create(&pairing::config_dir()?)?;
+        let tunnel_ref = tunnel.as_ref().map(|(h, p)| (h.as_str(), *p));
+        let connection = tls::multi_connection_string(&remotes, Some(&material.fingerprint), tunnel_ref, &code);
+        let mut labels: Vec<String> = remotes.iter().map(|(h, p)| tls::format_host_port(h, *p)).collect();
+        if let Some((h, p)) = &tunnel {
+            labels.push(tls::format_host_port(h, *p));
         }
-        (Some(host), None) => {
-            let (host, port) = parse_host_port(&host, 19870, "invalid port in --remote")?;
-            let material = tls::load_or_create(&pairing::config_dir()?)?;
-            print_remote_pairing(&tls::connection_string(&host, port, &material.fingerprint, &code));
-        }
-        (None, Some(host)) => {
-            let stripped = host
-                .trim()
-                .trim_start_matches("https://")
-                .trim_start_matches("wss://")
-                .trim_end_matches("/ws")
-                .trim_end_matches('/');
-            let (host, port) = parse_host_port(stripped, 443, "invalid port in --tunnel")?;
-            print_remote_pairing(&tls::public_connection_string(&host, port, &code));
-        }
-        (Some(_), Some(_)) => unreachable!(),
+        print_remote_pairing(&connection, &labels);
     }
     println!("for {minutes} minutes, and allows {} wrong attempts.", pairing::MAX_ATTEMPTS);
     Ok(())
 }
 
-fn print_remote_pairing(connection: &str) {
+fn detect_reachable_hosts() -> Vec<String> {
+    let mut hosts = Vec::new();
+    // Primary outbound interface IPv4 (no packets leave the machine).
+    if let Ok(socket) = std::net::UdpSocket::bind("0.0.0.0:0") {
+        if socket.connect("1.1.1.1:80").is_ok() {
+            if let Ok(local) = socket.local_addr() {
+                let ip = local.ip();
+                if let std::net::IpAddr::V4(v4) = ip {
+                    if !v4.is_loopback() && !is_tailscale_ipv4(v4) {
+                        hosts.push(v4.to_string());
+                    }
+                }
+            }
+        }
+    }
+    // Tailscale IPv4 when signed in.
+    if let Ok(output) = std::process::Command::new("tailscale").args(["ip", "-4"]).output() {
+        if output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for line in stdout.lines().map(str::trim).filter(|l| !l.is_empty()) {
+                if line.parse::<std::net::Ipv4Addr>().is_ok() && !hosts.iter().any(|h| h == line) {
+                    hosts.push(line.to_owned());
+                }
+            }
+        }
+    }
+    hosts
+}
+
+fn is_tailscale_ipv4(ip: std::net::Ipv4Addr) -> bool {
+    let octets = ip.octets();
+    octets[0] == 100 && (64..=127).contains(&octets[1])
+}
+
+fn print_remote_pairing(connection: &str, routes: &[String]) {
+    if routes.len() > 1 {
+        println!("    Routes: {}", routes.join(", "));
+    }
     println!("    {connection}");
     if let Ok(qr) = render_qr_terminal(connection) {
         println!();

@@ -235,4 +235,70 @@ class ConnectionsTest {
         assertTrue(connectionUrlProblem("http://127.0.0.1:19870/ws")!!.contains("ws://"))
         assertTrue(connectionUrlProblem("not a url")!!.contains("valid"))
     }
+
+    @Test
+    fun orderProfileRoutesFollowsHomeWifiAwayTailscaleAndExplicitPreference() {
+        val wifi = io.github.kinteshi.quirecode.transport.ProfileRoute("wss://192.168.1.10:19870/ws", "a".repeat(64))
+        val tailscale = io.github.kinteshi.quirecode.transport.ProfileRoute("wss://100.64.0.1:19870/ws", "a".repeat(64))
+        val tunnel = io.github.kinteshi.quirecode.transport.ProfileRoute("wss://quirecode.example.com:443/ws", null)
+        val routes = listOf(tunnel, tailscale, wifi)
+
+        assertEquals(
+            listOf(wifi, tailscale, tunnel),
+            orderProfileRoutes(routes, io.github.kinteshi.quirecode.transport.RoutePreference.Auto, onLocalNetwork = true, vpnActive = true),
+        )
+        assertEquals(
+            listOf(tailscale, tunnel, wifi),
+            orderProfileRoutes(routes, io.github.kinteshi.quirecode.transport.RoutePreference.Auto, onLocalNetwork = false, vpnActive = true),
+        )
+        assertEquals(
+            listOf(tunnel, tailscale, wifi),
+            orderProfileRoutes(routes, io.github.kinteshi.quirecode.transport.RoutePreference.Auto, onLocalNetwork = false, vpnActive = false),
+        )
+        assertEquals(
+            listOf(tailscale, wifi, tunnel),
+            orderProfileRoutes(routes, io.github.kinteshi.quirecode.transport.RoutePreference.Tailscale, onLocalNetwork = true, vpnActive = true),
+        )
+    }
+
+    @Test
+    fun connectedChipShowsActiveRouteWhenProfileHasMultipleRoutes() {
+        val single = guest.copy(name = "Work PC", tabletGuest = false, connected = true, activeRoute = ConnectionRoute.Wifi, routeCount = 1)
+        assertEquals("Work PC", connectionSummary(single).chip)
+
+        val multi = single.copy(activeRoute = ConnectionRoute.Tailscale, routeCount = 2)
+        assertEquals("Work PC · Tailscale", connectionSummary(multi).chip)
+    }
+
+    @Test
+    fun probeDaemonPortIncludesExtraAccessHeaders() {
+        val receivedHeaders = StringBuilder()
+        java.net.ServerSocket(0).use { server ->
+            val thread = Thread {
+                runCatching {
+                    server.accept().use { client ->
+                        val reader = java.io.BufferedReader(java.io.InputStreamReader(client.getInputStream(), Charsets.US_ASCII))
+                        var line = reader.readLine()
+                        while (!line.isNullOrEmpty()) {
+                            receivedHeaders.append(line).append('\n')
+                            line = reader.readLine()
+                        }
+                        client.getOutputStream().apply {
+                            write("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok".toByteArray(Charsets.US_ASCII))
+                            flush()
+                        }
+                    }
+                }
+            }.apply { isDaemon = true; start() }
+            val result = probeDaemonPort(
+                "ws://127.0.0.1:${server.localPort}/ws",
+                timeoutMs = 500,
+                extraHeaders = mapOf("CF-Access-Client-Id" to "id-abc", "CF-Access-Client-Secret" to "sec-xyz"),
+            )
+            thread.join(1_000)
+            assertEquals(true to true, result)
+            assertTrue(receivedHeaders.toString().contains("CF-Access-Client-Id: id-abc"))
+            assertTrue(receivedHeaders.toString().contains("CF-Access-Client-Secret: sec-xyz"))
+        }
+    }
 }

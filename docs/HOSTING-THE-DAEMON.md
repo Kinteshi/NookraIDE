@@ -63,8 +63,10 @@ Requirements: x86_64 or arm64 Linux with systemd, `curl`, `tar`, and Git for Sou
 Need a new code later (another tablet, or a reinstall of the app)?
 
 ```sh
-quirecode-daemon pair --remote 192.168.1.10:19870
+quirecode-daemon pair --all --port 19870
 ```
+
+`--all` detects both the computer's LAN IP and Tailscale IP (if signed in) and prints one multi-route link and QR code (`--remote HOST:PORT` can also be repeated, and `--tunnel HOST` added alongside). One pairing then covers both routes: QuireCode tries the local network at home, Tailscale away, and lets you set a preferred route per connection in **Settings → Guest**.
 
 ## Away from home: Tailscale
 
@@ -139,9 +141,15 @@ so its clients look like the machine itself; use those only between machines you
 The tunnel's hostname is public: anyone can reach the daemon, and only the pairing code and device
 tokens keep them out. That is the same protection as a forwarded router port, with TLS from Cloudflare
 instead of a pinned certificate. Cloudflare decrypts the traffic on its way through (tokens and
-files included), so this means trusting Cloudflare; Tailscale's connections are end-to-end encrypted. A [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/policies/access/)
-policy in front would add a second lock, but the app can't sign in to Access or send a service token
-yet, so such a policy blocks it too. If you want that, Tailscale is the better fit today.
+files included), so this means trusting Cloudflare; Tailscale's connections are end-to-end encrypted.
+
+### Second lock: Cloudflare Access service token
+
+You can place the tunnel behind a [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/policies/access/) policy using a **Service Token** (`CF-Access-Client-Id` and `CF-Access-Client-Secret`):
+
+1. In Cloudflare Zero Trust → **Access → Service Auth → Service Tokens**, create a token and copy its **Client ID** and **Client Secret**.
+2. Create an Access Application for your tunnel hostname with a **Service Auth** policy allowing that Service Token.
+3. In QuireCode, enter that **Client ID** and **Client Secret** under **Cloudflare Access (optional)** when pairing or editing the connection (stored encrypted with Android's Keystore alongside your device token). QuireCode sends them on both WebSocket handshakes and Troubleshoot health checks.
 
 ## Router port forwarding
 

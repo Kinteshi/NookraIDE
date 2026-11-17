@@ -196,6 +196,26 @@ class GuestVfsClientTest {
             runCatching { server.shutdown() }
         }
     }
+
+    @Test
+    fun sendsCloudflareAccessHeadersOnWebSocketConnectWhenConfigured() {
+        val server = okhttp3.mockwebserver.MockWebServer()
+        val listener = ProtocolEchoListener()
+        server.enqueue(okhttp3.mockwebserver.MockResponse().withWebSocketUpgrade(listener))
+        server.start()
+        val client = GuestVfsClient()
+        try {
+            val url = server.url("/ws").toString().replaceFirst("http", "ws")
+            val headers = accessHeaders(AccessCredentials("id-123", "secret-456"))
+            client.connect(url, "session-token", null, headers).get(5, TimeUnit.SECONDS)
+            val recorded = server.takeRequest(5, TimeUnit.SECONDS)!!
+            assertEquals("id-123", recorded.getHeader("CF-Access-Client-Id"))
+            assertEquals("secret-456", recorded.getHeader("CF-Access-Client-Secret"))
+        } finally {
+            client.close()
+            runCatching { server.shutdown() }
+        }
+    }
 }
 
 private class ProtocolEchoListener : WebSocketListener() {

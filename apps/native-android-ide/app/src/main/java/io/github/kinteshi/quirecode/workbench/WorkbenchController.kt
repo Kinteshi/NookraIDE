@@ -150,6 +150,7 @@ import io.github.kinteshi.quirecode.notebook.KernelClient
 import io.github.kinteshi.quirecode.notebook.generatedKernelName
 import io.github.kinteshi.quirecode.notebook.NotebookCell
 import io.github.kinteshi.quirecode.notebook.NotebookDocument
+import io.github.kinteshi.quirecode.transport.AccessCredentials
 import io.github.kinteshi.quirecode.transport.ConnectionProfileStore
 import io.github.kinteshi.quirecode.transport.ConnectionProfile
 import io.github.kinteshi.quirecode.transport.FileEntry
@@ -158,6 +159,9 @@ import io.github.kinteshi.quirecode.transport.GuestVfsClient
 import io.github.kinteshi.quirecode.transport.GuestVfsException
 import io.github.kinteshi.quirecode.transport.GuestRejectedException
 import io.github.kinteshi.quirecode.transport.KeystoreSecretCipher
+import io.github.kinteshi.quirecode.transport.ProfileRoute
+import io.github.kinteshi.quirecode.transport.RoutePreference
+import io.github.kinteshi.quirecode.transport.accessHeaders
 import io.github.kinteshi.quirecode.transport.GitEvent
 import io.github.kinteshi.quirecode.transport.GitFileStatus
 import io.github.kinteshi.quirecode.transport.GitOperation
@@ -463,6 +467,11 @@ class WorkbenchController(private val context: Context) {
     var profileName by mutableStateOf("")
     /** The selected profile's pinned certificate (remote hosts paired with a connection string). */
     private var profileFingerprint: String? = null
+    /** Remaining routes for the current profile to try if the active route fails (G37). */
+    private var pendingRouteAttempts: List<ProfileRoute> = emptyList()
+    /** Route currently connected or being tried (G37). */
+    var activeRouteEndpoint by mutableStateOf("")
+        private set
     /** Shown above the editor when the last connection attempt failed; null when connected. */
     var guestProblem by mutableStateOf<String?>(null)
         private set
@@ -1162,8 +1171,10 @@ class WorkbenchController(private val context: Context) {
         profileId = profile.id
         profileName = profile.name
         endpoint = profile.endpoint
+        activeRouteEndpoint = profile.endpoint
         token = profileStore.token(profile.id).orEmpty()
         profileFingerprint = profile.fingerprint
+        pendingRouteAttempts = emptyList()
         files.offline?.activeConnectionId = if (workspaceRoot?.let(::isGuestPath) == true) {
             sessionConnectionId ?: profile.id
         } else {
@@ -1175,8 +1186,10 @@ class WorkbenchController(private val context: Context) {
         profileId = null
         profileName = ""
         endpoint = ""
+        activeRouteEndpoint = ""
         token = ""
         profileFingerprint = null
+        pendingRouteAttempts = emptyList()
     }
 
     fun deleteProfile(id: String) {
@@ -1216,8 +1229,25 @@ class WorkbenchController(private val context: Context) {
         if (needsPermission && ask != null) ask() else connectGuest()
     }
 
-    fun connectGuest() {
+    fun connectGuest() = connectGuestWithRoutes(resetRoutes = true)
+
+    private fun connectGuestWithRoutes(resetRoutes: Boolean) {
         updateOfflineByChoice(false)
+        val currentProfile = profileId?.let { id -> profiles.firstOrNull { it.id == id } }
+        if (resetRoutes) {
+            if (currentProfile != null && currentProfile.allRoutes().size > 1) {
+                val (hasVpn, hasLocal, _) = probeNetworkFacts()
+                val ordered = orderProfileRoutes(currentProfile.allRoutes(), currentProfile.preferredRoute, hasLocal, hasVpn)
+                ordered.firstOrNull()?.let { first ->
+                    endpoint = first.endpoint
+                    profileFingerprint = first.fingerprint
+                    pendingRouteAttempts = ordered.drop(1)
+                }
+            } else {
+                pendingRouteAttempts = emptyList()
+            }
+        }
+        activeRouteEndpoint = endpoint.trim()
         busy = true
         guestProblem = null
         status = "Connecting to guest"
@@ -1229,7 +1259,8 @@ class WorkbenchController(private val context: Context) {
         startKeepAlive("Connecting")
         // A paired remote host's pin only applies to the endpoint it was paired with.
         val pin = profileFingerprint?.takeIf { endpoint.trim().startsWith("wss://") }
-        runCatching { vfs.connect(endpoint.trim(), token, pin) }
+        val headers = accessHeaders(profileId?.let(profileStore::accessCredentials))
+        runCatching { vfs.connect(endpoint.trim(), token, pin, headers) }
             .getOrElse { CompletableFuture.failedFuture(it) }
             .thenCompose { vfs.roots() }
             .whenComplete { guestRoots, error ->
@@ -1243,6 +1274,7 @@ class WorkbenchController(private val context: Context) {
                 }
                 connected = true
                 connectedProfileId = profileId
+                pendingRouteAttempts = emptyList()
                 roots = guestRoots
                 // Only what this machine serves: a folder from another one (a connection switched) is dropped.
                 val served = { path: String -> isTreePath(path) || guestRoots.any { isPathWithinRoot(path, it) } }
@@ -1251,7 +1283,17 @@ class WorkbenchController(private val context: Context) {
                 folderChildren.keys.filterNot(served).forEach(folderChildren::remove)
                 if (dialog == WorkbenchDialog.Connect) dialog = null
                 io.execute {
-                    val saved = profileStore.save(profileId, profileName, endpoint, token, pin, clearFingerprint = pin == null)
+                    val savedProfile = profileId?.let { id -> profiles.firstOrNull { it.id == id } }
+                    val persistedEndpoint = savedProfile?.endpoint ?: endpoint
+                    val persistedPin = if (savedProfile != null) savedProfile.fingerprint else pin
+                    val saved = profileStore.save(
+                        profileId,
+                        profileName,
+                        persistedEndpoint,
+                        token,
+                        persistedPin,
+                        clearFingerprint = persistedPin == null,
+                    )
                     profileStore.markUsed(saved.id)
                     post {
                         profileId = saved.id
@@ -2933,21 +2975,27 @@ class WorkbenchController(private val context: Context) {
 
     /** Where the app stands with its connection, for the chip, the banner and the Connections dialog (G22). */
     val connectionFacts: ConnectionFacts
-        get() = ConnectionFacts(
-            hasConnections = profiles.isNotEmpty(),
-            connected = connected,
-            // busy is any operation; without a connection, one with somewhere to connect to is the connecting.
-            connecting = busy && !connected && endpoint.isNotBlank(),
-            name = profileName.ifBlank { if (isTabletGuestEndpoint(endpoint)) "Linux guest" else endpointHost(endpoint) ?: "the computer" },
-            tabletGuest = isTabletGuestEndpoint(endpoint),
-            stoppedAt = guestStoppedAt?.let { java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(it)) },
-            unreachable = guestUnreachable,
-            forwardingStuck = guestForwardingSuspected,
-            pairingRejected = pairingRejected,
-            failure = connectFailure,
-            workingOffline = offline,
-            workingOnDevice = deviceWorkspace || offlineWorkspaceByChoice,
-        )
+        get() {
+            val activeProfile = profileId?.let { id -> profiles.firstOrNull { it.id == id } }
+            val currentEndpoint = activeRouteEndpoint.ifBlank { endpoint }
+            return ConnectionFacts(
+                hasConnections = profiles.isNotEmpty(),
+                connected = connected,
+                // busy is any operation; without a connection, one with somewhere to connect to is the connecting.
+                connecting = busy && !connected && endpoint.isNotBlank(),
+                name = profileName.ifBlank { if (isTabletGuestEndpoint(endpoint)) "Linux guest" else endpointHost(endpoint) ?: "the computer" },
+                tabletGuest = isTabletGuestEndpoint(currentEndpoint),
+                stoppedAt = guestStoppedAt?.let { java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(it)) },
+                unreachable = guestUnreachable,
+                forwardingStuck = guestForwardingSuspected,
+                pairingRejected = pairingRejected,
+                failure = connectFailure,
+                workingOffline = offline,
+                workingOnDevice = deviceWorkspace || offlineWorkspaceByChoice,
+                activeRoute = currentEndpoint.takeIf { it.isNotBlank() }?.let(::connectionRoute),
+                routeCount = activeProfile?.allRoutes()?.size ?: 1,
+            )
+        }
     val connection: ConnectionSummary get() = connectionSummary(connectionFacts)
 
     /** The Connections dialog's check of the current connection (G22); null until asked. */
@@ -2962,6 +3010,7 @@ class WorkbenchController(private val context: Context) {
         val pin = profileFingerprint
         val route = connectionRoute(targetEndpoint)
         val hasTailscaleApp = tailscaleAvailable()
+        val headers = accessHeaders(profileId?.let(profileStore::accessCredentials))
         connectionCheck = ConnectionCheck(
             terminalAvailable = if (tablet) linuxTerminalAvailable() else null,
             daemonAnswers = null,
@@ -2974,7 +3023,7 @@ class WorkbenchController(private val context: Context) {
         io.execute {
             val (vpnActive, onLocalNetwork, onCellularOnly) = probeNetworkFacts()
             val (portOpen, answers) = if (target != null) {
-                probeDaemonPort(targetEndpoint, pin)
+                probeDaemonPort(targetEndpoint, pin, extraHeaders = headers)
             } else {
                 false to false
             }
@@ -3175,8 +3224,20 @@ class WorkbenchController(private val context: Context) {
         guestForwardingSuspected = false
     }
 
-    /** Saves a connection's name, URL and token (blank keeps the saved one); connects if [connect]. */
-    fun saveConnection(id: String?, name: String, url: String, newToken: String, connect: Boolean, clearFingerprint: Boolean = false) {
+    /** Saves a connection's name, URL, routes, token and optional Cloudflare Access token (G22, G32, G37). */
+    fun saveConnection(
+        id: String?,
+        name: String,
+        url: String,
+        newToken: String,
+        connect: Boolean,
+        clearFingerprint: Boolean = false,
+        extraRoutes: List<ProfileRoute>? = null,
+        preferredRoute: RoutePreference? = null,
+        accessClientId: String? = null,
+        accessClientSecret: String? = null,
+        clearAccessToken: Boolean = false,
+    ) {
         val keptToken = newToken.ifBlank { id?.let(profileStore::token).orEmpty() }
         val fingerprint = if (clearFingerprint) {
             null
@@ -3191,6 +3252,11 @@ class WorkbenchController(private val context: Context) {
                 keptToken,
                 fingerprint,
                 clearFingerprint = clearFingerprint || !url.trim().startsWith("wss://"),
+                extraRoutes = extraRoutes,
+                preferredRoute = preferredRoute,
+                accessClientId = accessClientId,
+                accessClientSecret = accessClientSecret,
+                clearAccessToken = clearAccessToken,
             )
             post {
                 profiles = profileStore.profiles()
@@ -3207,6 +3273,11 @@ class WorkbenchController(private val context: Context) {
                 }
             }
         }
+    }
+
+    fun setPreferredRoute(id: String, route: RoutePreference) {
+        profileStore.setPreferredRoute(id, route)
+        profiles = profileStore.profiles()
     }
 
     /** The token typed into the editor, for a connection being edited: the saved one stays unless replaced. */
@@ -3382,6 +3453,16 @@ class WorkbenchController(private val context: Context) {
         }
         val wasAutomatic = autoConnecting
         autoConnecting = false
+        // Try remaining routes on the same computer profile before failing over to another profile (G37).
+        if (rejected?.reason != "InvalidToken" && pendingRouteAttempts.isNotEmpty()) {
+            val nextRoute = pendingRouteAttempts.first()
+            pendingRouteAttempts = pendingRouteAttempts.drop(1)
+            endpoint = nextRoute.endpoint
+            profileFingerprint = nextRoute.fingerprint
+            autoConnecting = wasAutomatic
+            connectGuestWithRoutes(resetRoutes = false)
+            return
+        }
         val nextAutoProfile = autoConnectFallbacks.firstOrNull().takeIf {
             wasAutomatic && settings.autoConnect && workspaceRoot == null && sessionWorkspace == null
         }
@@ -3619,52 +3700,90 @@ class WorkbenchController(private val context: Context) {
     }
 
     /**
-     * Pairs with a Linux or WSL host from the string `avf-daemon pair --remote` printed: pins the
-     * host's certificate, trades the code for the token, saves a profile and connects.
+     * Pairs with a Linux or WSL host from the string `avf-daemon pair --remote`/`--tunnel`/`--all` printed:
+     * tries configured routes in network-appropriate order, saves all routes and optional Access headers (G32, G37).
      */
-    fun pairWithConnectionString(text: String) {
+    fun pairWithConnectionString(text: String, accessClientId: String = "", accessClientSecret: String = "") {
         val parsed = parseConnectionString(text) ?: run {
             pairingError = "That isn't a connection string; it starts with avf:// and has fp= and code="
             return
         }
+        val allRoutes = parsed.allRoutes().map { ProfileRoute(it.endpoint, it.fingerprint) }
+        val allEndpoints = allRoutes.mapTo(mutableSetOf()) { it.endpoint }
+        val existing = profiles.firstOrNull { profile -> profile.allRoutes().any { it.endpoint in allEndpoints } }
+        val previousToken = existing?.let { profileStore.token(it.id) }
+        val accessCreds = AccessCredentials(accessClientId.trim(), accessClientSecret.trim())
+            .takeIf { it.clientId.isNotEmpty() && it.clientSecret.isNotEmpty() }
+            ?: existing?.let { profileStore.accessCredentials(it.id) }
+        val headers = accessHeaders(accessCreds)
+        val (hasVpn, hasLocal, _) = probeNetworkFacts()
+        val orderedRoutes = orderProfileRoutes(allRoutes, existing?.preferredRoute ?: RoutePreference.Auto, hasLocal, hasVpn)
+
         busy = true
         pairingError = null
         status = "Pairing with ${parsed.host}"
-        val previousToken = profiles.firstOrNull { it.endpoint == parsed.endpoint }?.let { profileStore.token(it.id) }
-        vfs.pair(parsed.endpoint, parsed.code, parsed.fingerprint, pairingDeviceName(), previousToken).whenComplete { newToken, error ->
-            post {
-                busy = false
-                if (error != null) {
-                    val causes = generateSequence(error) { it.cause }.toList()
-                    pairingError = when {
-                        causes.any { it is java.security.cert.CertificateException || it is javax.net.ssl.SSLHandshakeException || it is javax.net.ssl.SSLPeerUnverifiedException } ->
-                            if (parsed.fingerprint != null) {
-                                "The host's certificate doesn't match the connection string; run the pair command again"
-                            } else {
-                                "Android didn't trust ${parsed.host}'s TLS certificate; use --remote for a self-signed certificate"
-                            }
-                        causes.any { it is java.net.ConnectException || it is java.net.SocketTimeoutException } ->
-                            "Can't reach ${parsed.host}:${parsed.port}. Same network? Firewall open for that port?"
-                        else -> (causes.firstOrNull { it is GuestRejectedException } ?: causes.last()).message ?: "Pairing failed"
+
+        fun attemptPair(remaining: List<ProfileRoute>) {
+            val route = remaining.first()
+            vfs.pair(route.endpoint, parsed.code, route.fingerprint, pairingDeviceName(), previousToken, headers).whenComplete { newToken, error ->
+                post {
+                    if (error != null) {
+                        val causes = generateSequence(error) { it.cause }.toList()
+                        val rejected = causes.firstOrNull { it is GuestRejectedException } as? GuestRejectedException
+                        if (rejected == null && remaining.size > 1) {
+                            attemptPair(remaining.drop(1))
+                            return@post
+                        }
+                        busy = false
+                        pairingError = when {
+                            rejected != null -> rejected.message ?: "Pairing failed"
+                            causes.any { it is java.security.cert.CertificateException || it is javax.net.ssl.SSLHandshakeException || it is javax.net.ssl.SSLPeerUnverifiedException } ->
+                                if (route.fingerprint != null) {
+                                    "The host's certificate doesn't match the connection string; run the pair command again"
+                                } else {
+                                    "Android didn't trust ${parsed.host}'s TLS certificate; use --remote for a self-signed certificate"
+                                }
+                            causes.any { it is java.net.ConnectException || it is java.net.SocketTimeoutException } ->
+                                "Can't reach ${parsed.host}:${parsed.port}. Same network? Firewall open for that port?"
+                            else -> causes.last().message ?: "Pairing failed"
+                        }
+                        status = pairingError!!
+                        return@post
                     }
-                    status = pairingError!!
-                    return@post
+                    busy = false
+                    if (route.endpoint != endpoint) {
+                        replacingConnection = connected
+                        forgetMachineExplorer()
+                    }
+                    val mergedExtras = (parsed.alternateRoutes.map { ProfileRoute(it.endpoint, it.fingerprint) } +
+                        existing?.extraRoutes.orEmpty().filter { it.endpoint != parsed.endpoint })
+                        .distinctBy { it.endpoint }
+                    io.execute {
+                        val saved = profileStore.save(
+                            existing?.id,
+                            existing?.name ?: parsed.host,
+                            parsed.endpoint,
+                            newToken,
+                            parsed.fingerprint,
+                            clearFingerprint = parsed.fingerprint == null,
+                            extraRoutes = mergedExtras,
+                            accessClientId = accessCreds?.clientId,
+                            accessClientSecret = accessCreds?.clientSecret,
+                        )
+                        post {
+                            profiles = profileStore.profiles()
+                            selectProfile(saved)
+                            endpoint = route.endpoint
+                            profileFingerprint = route.fingerprint
+                            resetConnectionProblems()
+                            dialog = null
+                            requestGuestConnection()
+                        }
+                    }
                 }
-                val existing = profiles.firstOrNull { it.endpoint == parsed.endpoint }
-                if (parsed.endpoint != endpoint) {
-                    replacingConnection = connected
-                    forgetMachineExplorer()
-                }
-                profileId = existing?.id
-                profileName = existing?.name ?: parsed.host
-                endpoint = parsed.endpoint
-                token = newToken
-                profileFingerprint = parsed.fingerprint
-                resetConnectionProblems()
-                dialog = null
-                requestGuestConnection()
             }
         }
+        attemptPair(orderedRoutes)
     }
 
     // Session restore ------------------------------------------------------------------------

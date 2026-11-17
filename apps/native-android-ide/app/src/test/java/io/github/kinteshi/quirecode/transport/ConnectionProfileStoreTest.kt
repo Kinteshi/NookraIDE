@@ -133,4 +133,44 @@ class ConnectionProfileStoreTest {
         val values = MemoryValues().apply { map["profiles"] = "{not json" }
         assertTrue(ConnectionProfileStore(values, ReversingCipher).profiles().isEmpty())
     }
+
+    @Test
+    fun storesExtraRoutesPreferredRouteAndEncryptedAccessCredentials() {
+        val values = MemoryValues()
+        val store = ConnectionProfileStore(values, ReversingCipher)
+        val extra = listOf(
+            ProfileRoute("wss://100.64.0.1:19870/ws", "b".repeat(64)),
+            ProfileRoute("wss://quirecode.example.com:443/ws", null),
+        )
+        val saved = store.save(
+            id = null,
+            name = "Work PC",
+            endpoint = "wss://192.168.1.10:19870/ws",
+            token = "device-tok",
+            fingerprint = "b".repeat(64),
+            extraRoutes = extra,
+            preferredRoute = RoutePreference.Tailscale,
+            accessClientId = "cf-client-id-secret",
+            accessClientSecret = "cf-client-secret-value",
+        )
+
+        assertTrue(saved.hasAccessToken)
+        assertEquals(RoutePreference.Tailscale, saved.preferredRoute)
+        assertEquals(3, saved.allRoutes().size)
+        assertEquals(AccessCredentials("cf-client-id-secret", "cf-client-secret-value"), store.accessCredentials(saved.id))
+        assertFalse(values.map.values.any { it.contains("cf-client-id-secret") || it.contains("cf-client-secret-value") })
+
+        // Saving the primary route without passing extraRoutes or access creds keeps them intact.
+        val updated = store.save(saved.id, "Work PC", "wss://192.168.1.10:19870/ws", "")
+        assertEquals(3, updated.allRoutes().size)
+        assertTrue(updated.hasAccessToken)
+        assertEquals(RoutePreference.Tailscale, updated.preferredRoute)
+
+        store.setPreferredRoute(saved.id, RoutePreference.Auto)
+        assertEquals(RoutePreference.Auto, store.profiles().single().preferredRoute)
+
+        val cleared = store.save(saved.id, "Work PC", "wss://192.168.1.10:19870/ws", "", clearAccessToken = true)
+        assertFalse(cleared.hasAccessToken)
+        assertNull(store.accessCredentials(saved.id))
+    }
 }

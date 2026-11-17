@@ -751,6 +751,22 @@ private fun LazyListScope.ai(controller: WorkbenchController, settings: Workbenc
 private fun LazyListScope.guest(controller: WorkbenchController, settings: WorkbenchSettings, set: SetSetting) {
     item { Section("Connection") }
     item { ActionRow(Icons.Outlined.Cable, "Connections", "Manage routes, auto-connect and order") { controller.openConnect() } }
+    controller.profiles.filter { it.allRoutes().size > 1 }.forEach { profile ->
+        val options = availableRoutePreferences(profile).map { it.key to it.label }
+        item(key = "route:${profile.id}") {
+            ChoiceRow(
+                Icons.Outlined.Cable,
+                "Preferred route (${profile.name})",
+                "Order tried when connecting to ${profile.name}",
+                options,
+                profile.preferredRoute.key,
+            ) { key ->
+                io.github.kinteshi.quirecode.transport.RoutePreference.entries
+                    .firstOrNull { it.key == key }
+                    ?.let { controller.setPreferredRoute(profile.id, it) }
+            }
+        }
+    }
     item {
         SwitchRow(
             Icons.Outlined.CloudOff,

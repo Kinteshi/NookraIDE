@@ -32,4 +32,20 @@ class PinnedTlsTest {
         assertNull(parseConnectionString("wss://h:1/ws"))
         assertNull(parseConnectionString("avf://h:1?fp=$fp"))
     }
+
+    @Test
+    fun parsesMultiRouteConnectionStringsWithAlternatesAndTunnel() {
+        val parsed = parseConnectionString(
+            "avf://192.168.1.10:19870?fp=$fp&code=K7QM-2XPA&alt=100.64.0.1:19870&alt=[fd7a::1]:19870&tunnel=quirecode.example.com:443",
+        )!!
+        assertEquals(
+            listOf(
+                ConnectionRouteSpec("wss://192.168.1.10:19870/ws", fp),
+                ConnectionRouteSpec("wss://100.64.0.1:19870/ws", fp),
+                ConnectionRouteSpec("wss://[fd7a::1]:19870/ws", fp),
+                ConnectionRouteSpec("wss://quirecode.example.com:443/ws", null),
+            ),
+            parsed.allRoutes(),
+        )
+    }
 }

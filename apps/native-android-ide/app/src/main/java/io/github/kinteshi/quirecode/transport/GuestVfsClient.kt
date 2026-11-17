@@ -50,6 +50,17 @@ const val PROBE_COMMANDS_FEATURE = "probe_commands"
 /** Welcome feature of daemons that list and revoke paired devices (G30). */
 const val DEVICES_FEATURE = "devices"
 
+/** HTTP headers for Cloudflare Access service-token authentication (G32). */
+fun accessHeaders(credentials: AccessCredentials?): Map<String, String> =
+    if (credentials == null || credentials.clientId.isBlank() || credentials.clientSecret.isBlank()) {
+        emptyMap()
+    } else {
+        mapOf(
+            "CF-Access-Client-Id" to credentials.clientId.trim(),
+            "CF-Access-Client-Secret" to credentials.clientSecret.trim(),
+        )
+    }
+
 class GuestVfsClient(
     private val http: OkHttpClient = OkHttpClient.Builder()
         .readTimeout(0, TimeUnit.MILLISECONDS)
@@ -103,10 +114,13 @@ class GuestVfsClient(
         fingerprint: String? = null,
         deviceName: String = "avf-native-android-ide",
         previousToken: String? = null,
+        extraHeaders: Map<String, String> = emptyMap(),
     ): CompletableFuture<String> {
         validateUrl(url, fingerprint)
         val result = CompletableFuture<String>()
-        val request = Request.Builder().url(url).header("Origin", NATIVE_APP_ORIGIN).build()
+        val request = Request.Builder().url(url).header("Origin", NATIVE_APP_ORIGIN).apply {
+            extraHeaders.forEach { (name, value) -> header(name, value) }
+        }.build()
         clientFor(fingerprint).newWebSocket(
             request,
             object : WebSocketListener() {
@@ -156,7 +170,12 @@ class GuestVfsClient(
     override fun connect(url: String, token: String): CompletableFuture<Unit> = connect(url, token, null)
 
     /** Connects; with [fingerprint] the host's self-signed certificate must match it exactly. */
-    fun connect(url: String, token: String, fingerprint: String?): CompletableFuture<Unit> {
+    fun connect(
+        url: String,
+        token: String,
+        fingerprint: String?,
+        extraHeaders: Map<String, String> = emptyMap(),
+    ): CompletableFuture<Unit> {
         validateUrl(url, fingerprint)
         require(token.isNotBlank()) { "Guest session token is required" }
         socket?.close(1000, "reconnecting")
@@ -166,6 +185,7 @@ class GuestVfsClient(
         val request = Request.Builder()
             .url(url)
             .header("Origin", NATIVE_APP_ORIGIN)
+            .apply { extraHeaders.forEach { (name, value) -> header(name, value) } }
             .build()
         socket = clientFor(fingerprint).newWebSocket(
             request,

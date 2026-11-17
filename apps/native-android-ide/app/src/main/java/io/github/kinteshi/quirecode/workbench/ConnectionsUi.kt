@@ -44,6 +44,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -68,6 +69,8 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import io.github.kinteshi.quirecode.transport.ConnectionProfile
+import io.github.kinteshi.quirecode.transport.ProfileRoute
+import io.github.kinteshi.quirecode.transport.RoutePreference
 
 /** The icon for a [ConnectionState], in the chip and the dialog's status card. */
 private fun ConnectionState.icon(): ImageVector = when (this) {
@@ -302,22 +305,33 @@ private fun ConnectionRow(controller: WorkbenchController, profile: ConnectionPr
     val current = profile.id == controller.profileId
     val tablet = isTabletGuestEndpoint(profile.endpoint)
     var menu by remember { mutableStateOf(false) }
-    val where = connectionRoute(profile.endpoint).label
+    val routes = profile.allRoutes()
+    val where = if (routes.size > 1) {
+        routes.joinToString(", ") { connectionRoute(it.endpoint).shortLabel() }
+    } else {
+        connectionRoute(profile.endpoint).label
+    }
     val order = controller.profiles.indexOfFirst { it.id == profile.id } + 1
+    val activeRoute = controller.activeRouteEndpoint.takeIf { it.isNotBlank() }?.let(::connectionRoute)
     val state = when {
-        current && controller.connected -> "Connected"
+        current && controller.connected -> if (routes.size > 1 && activeRoute != null) {
+            "Connected (${activeRoute.shortLabel()})"
+        } else {
+            "Connected"
+        }
         current && controller.busy -> "Connecting"
         current && controller.pairingRejected -> "Pair again"
         current && controller.connection.state in setOf(ConnectionState.Unreachable, ConnectionState.Lost) -> "Offline"
         current -> "Current"
         else -> "Not connected"
     }
+    val accessTag = if (profile.hasAccessToken) " · Access token" else ""
     val lastUsed = profile.lastUsedAt?.let {
         " · Last used ${java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT).format(java.util.Date(it))}"
     }.orEmpty()
     ListItem(
         headlineContent = { Text(profile.name) },
-        supportingContent = { Text("$where · Auto-connect #$order · $state$lastUsed") },
+        supportingContent = { Text("$where · Auto-connect #$order · $state$accessTag$lastUsed") },
         leadingContent = {
             Icon(
                 if (tablet) Icons.Outlined.TabletAndroid else Icons.Outlined.Computer,
@@ -448,25 +462,62 @@ private fun CheckRow(ok: Boolean?, text: String, action: (@Composable () -> Unit
     }
 }
 
-/** A connection's name, WebSocket URL and token, by hand (G22: what the Connect dialog was). */
+/** A connection's name, WebSocket URL(s), token and optional Cloudflare Access token (G22, G32, G37). */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun ConnectionEditorDialog(controller: WorkbenchController, editor: WorkbenchDialog.ConnectionEditor) {
     val profile = controller.profiles.firstOrNull { it.id == editor.profileId }
     var name by remember(editor) { mutableStateOf(profile?.name.orEmpty()) }
     var url by remember(editor) { mutableStateOf(profile?.endpoint ?: GUEST_DAEMON_ENDPOINT) }
+    var extraUrlsText by remember(editor) { mutableStateOf(profile?.extraRoutes?.joinToString("\n") { it.endpoint }.orEmpty()) }
+    var preferredRoute by remember(editor) { mutableStateOf(profile?.preferredRoute ?: RoutePreference.Auto) }
     var token by remember(editor) { mutableStateOf("") }
     var clearPin by remember(editor) { mutableStateOf(false) }
+    var accessClientId by remember(editor) { mutableStateOf("") }
+    var accessClientSecret by remember(editor) { mutableStateOf("") }
+    var clearAccess by remember(editor) { mutableStateOf(false) }
+
     val pinnedFingerprint = profile?.fingerprint?.takeIf { !clearPin && url.trim() == profile.endpoint }
     val hasToken = controller.connectionHasToken(editor.profileId)
     val urlProblem = connectionUrlProblem(url)
-    val valid = urlProblem == null && (hasToken || token.isNotBlank())
+    val extraUrlLines = extraUrlsText.lines().map(String::trim).filter(String::isNotEmpty)
+    val extraProblem = extraUrlLines.firstNotNullOfOrNull(::connectionUrlProblem)
+    val parsedExtraRoutes = extraUrlLines.map { ep ->
+        val existing = profile?.extraRoutes?.firstOrNull { it.endpoint == ep }
+        val fp = when {
+            existing != null && !clearPin -> existing.fingerprint
+            connectionRoute(ep) == ConnectionRoute.Tunnel -> null
+            ep.startsWith("wss://", ignoreCase = true) -> pinnedFingerprint
+            else -> null
+        }
+        ProfileRoute(ep, fp)
+    }
+    val valid = urlProblem == null && extraProblem == null && (hasToken || token.isNotBlank()) &&
+        ((accessClientId.isBlank() && accessClientSecret.isBlank()) || (accessClientId.isNotBlank() && accessClientSecret.isNotBlank()))
+
+    fun save(connect: Boolean) {
+        controller.saveConnection(
+            id = editor.profileId,
+            name = name,
+            url = url,
+            newToken = token,
+            connect = connect,
+            clearFingerprint = clearPin,
+            extraRoutes = parsedExtraRoutes,
+            preferredRoute = preferredRoute,
+            accessClientId = accessClientId.takeIf { it.isNotBlank() },
+            accessClientSecret = accessClientSecret.takeIf { it.isNotBlank() },
+            clearAccessToken = clearAccess,
+        )
+    }
+
     AlertDialog(
         onDismissRequest = { controller.dialog = WorkbenchDialog.Connect },
         title = { Text(if (profile == null) "New connection" else "Edit ${profile.name}") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
-                    "Saved on this device; the token is encrypted with Android's Keystore. Pairing (Add a connection) fills these in for you.",
+                    "Saved on this device; tokens are encrypted with Android's Keystore. Pairing (Add a connection) fills these in for you.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -501,24 +552,81 @@ internal fun ConnectionEditorDialog(controller: WorkbenchController, editor: Wor
                     }
                 }
                 OutlinedTextField(
+                    extraUrlsText, { extraUrlsText = it },
+                    label = { Text("Fallback routes (one URL per line, optional)") },
+                    placeholder = { Text("wss://100.x.y.z:19870/ws\nwss://tunnel.example.com/ws") },
+                    isError = extraProblem != null,
+                    supportingText = extraProblem?.let { problem -> { Text(problem) } },
+                    minLines = 1,
+                    maxLines = 4,
+                    keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (extraUrlLines.isNotEmpty() || (profile?.allRoutes()?.size ?: 1) > 1) {
+                    Text("Preferred route", style = MaterialTheme.typography.labelLarge)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        RoutePreference.entries.forEach { option ->
+                            val short = when (option) {
+                                RoutePreference.Auto -> "Auto"
+                                RoutePreference.Wifi -> "Wi-Fi"
+                                RoutePreference.Tailscale -> "Tailscale"
+                                RoutePreference.Tunnel -> "Tunnel"
+                            }
+                            FilterChip(
+                                selected = preferredRoute == option,
+                                onClick = { preferredRoute = option },
+                                label = { Text(short) },
+                            )
+                        }
+                    }
+                }
+                OutlinedTextField(
                     token, { token = it.trim() },
                     label = { Text(if (hasToken) "Token (blank keeps the saved one)" else "Token") },
                     visualTransformation = PasswordVisualTransformation(),
                     singleLine = true,
+                    keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, imeAction = ImeAction.Next),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                HorizontalDivider()
+                Text("Cloudflare Access service token (optional)", style = MaterialTheme.typography.labelLarge)
+                if (profile?.hasAccessToken == true && !clearAccess) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            "Access token saved (encrypted); leave blank to keep.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f),
+                        )
+                        TextButton(onClick = { clearAccess = true }) { Text("Clear") }
+                    }
+                }
+                OutlinedTextField(
+                    accessClientId, { accessClientId = it.trim(); if (it.isNotBlank()) clearAccess = false },
+                    label = { Text("CF-Access-Client-Id") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    accessClientSecret, { accessClientSecret = it.trim(); if (it.isNotBlank()) clearAccess = false },
+                    label = { Text("CF-Access-Client-Secret") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    singleLine = true,
                     keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(onDone = { if (valid) controller.saveConnection(editor.profileId, name, url, token, connect = true, clearFingerprint = clearPin) }),
+                    keyboardActions = KeyboardActions(onDone = { if (valid) save(connect = true) }),
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
         },
         confirmButton = {
-            TextButton(onClick = { controller.saveConnection(editor.profileId, name, url, token, connect = true, clearFingerprint = clearPin) }, enabled = valid && !controller.busy) {
+            TextButton(onClick = { save(connect = true) }, enabled = valid && !controller.busy) {
                 Text("Save and connect")
             }
         },
         dismissButton = {
             Row {
-                TextButton(onClick = { controller.saveConnection(editor.profileId, name, url, token, connect = false, clearFingerprint = clearPin) }, enabled = valid) { Text("Save") }
+                TextButton(onClick = { save(connect = false) }, enabled = valid) { Text("Save") }
                 TextButton(onClick = { controller.dialog = WorkbenchDialog.Connect }) { Text("Cancel") }
             }
         },
@@ -531,6 +639,8 @@ internal fun ComputerPairingDialog(controller: WorkbenchController) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     var connectionString by remember { mutableStateOf("") }
+    var accessClientId by remember { mutableStateOf("") }
+    var accessClientSecret by remember { mutableStateOf("") }
     var scannerOpen by remember { mutableStateOf(false) }
     var clipboardOffer by remember { mutableStateOf(readClipboardConnectionString(context)) }
     val colors = MaterialTheme.colorScheme
@@ -556,7 +666,7 @@ internal fun ComputerPairingDialog(controller: WorkbenchController) {
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 Text(
-                    "Run `quirecode-daemon pair --remote <address>:19870` (or `--tunnel <hostname>`) on the computer, then scan the QR code or paste the `avf://` string it prints.",
+                    "Run `quirecode-daemon pair --all` (or `--remote <address>:19870` / `--tunnel <hostname>`) on the computer, then scan the QR code or paste the `avf://` string it prints.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = colors.onSurfaceVariant,
                 )
@@ -567,12 +677,16 @@ internal fun ComputerPairingDialog(controller: WorkbenchController) {
                     clipboardOffer = clipboardOffer,
                     onDismissClipboardOffer = { clipboardOffer = null },
                     onOpenScanner = { scannerOpen = true },
+                    accessClientId = accessClientId,
+                    onAccessClientIdChange = { accessClientId = it },
+                    accessClientSecret = accessClientSecret,
+                    onAccessClientSecretChange = { accessClientSecret = it },
                 )
             }
         },
         confirmButton = {
             TextButton(
-                onClick = { controller.pairWithConnectionString(connectionString) },
+                onClick = { controller.pairWithConnectionString(connectionString, accessClientId, accessClientSecret) },
                 enabled = !controller.busy && extractConnectionStringFromText(connectionString) != null,
             ) { Text(if (controller.busy) "Pairing…" else "Pair and connect") }
         },
@@ -589,7 +703,7 @@ internal fun ComputerPairingDialog(controller: WorkbenchController) {
             onScanned = { scanned ->
                 scannerOpen = false
                 connectionString = scanned
-                controller.pairWithConnectionString(scanned)
+                controller.pairWithConnectionString(scanned, accessClientId, accessClientSecret)
             },
             onDismiss = { scannerOpen = false },
         )

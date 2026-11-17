@@ -56,6 +56,10 @@ data class ConnectionFacts(
     val workingOffline: Boolean = false,
     /** The open workspace is a device folder, not a disconnected guest workspace. */
     val workingOnDevice: Boolean = false,
+    /** Active connected route when the profile defines multiple routes (G37). */
+    val activeRoute: ConnectionRoute? = null,
+    /** Number of configured routes on the active profile (G37). */
+    val routeCount: Int = 1,
 )
 
 /** The [ConnectionState] for [facts], the most specific first. */
@@ -99,7 +103,11 @@ fun connectionSummary(facts: ConnectionFacts): ConnectionSummary {
         )
         ConnectionState.Idle -> ConnectionSummary(state, "Connect", "Not connected", "Connect to ${facts.name} to open its files.")
         ConnectionState.Connecting -> ConnectionSummary(state, "Connecting…", "Connecting to ${facts.name}", null)
-        ConnectionState.Connected -> ConnectionSummary(state, facts.name, "Connected to ${facts.name}", null)
+        ConnectionState.Connected -> {
+            val routeSuffix = facts.activeRoute?.takeIf { !facts.tabletGuest && facts.routeCount > 1 }
+                ?.let { " · ${it.shortLabel()}" }.orEmpty()
+            ConnectionSummary(state, facts.name + routeSuffix, "Connected to ${facts.name}", null)
+        }
         ConnectionState.Lost -> ConnectionSummary(
             state, "Offline", "${where.replaceFirstChar(Char::uppercase)} stopped at ${facts.stoppedAt}",
             (if (facts.tabletGuest) "Open Linux Terminal to start it again, then tap Reconnect. " else "When it's back, tap Reconnect. ") +
@@ -147,6 +155,84 @@ enum class ConnectionRoute(val label: String) {
     LocalForward("Local forward (ADB/SSH)"),
     SecureWebSocket("Secure WebSocket"),
     WebSocket("WebSocket"),
+}
+
+internal fun ConnectionRoute.shortLabel(): String = when (this) {
+    ConnectionRoute.LinuxTerminal -> "Guest"
+    ConnectionRoute.Wifi -> "Wi-Fi"
+    ConnectionRoute.Tailscale -> "Tailscale"
+    ConnectionRoute.Tunnel -> "Tunnel"
+    ConnectionRoute.LocalForward -> "Local"
+    ConnectionRoute.SecureWebSocket -> "TLS"
+    ConnectionRoute.WebSocket -> "WS"
+}
+
+/**
+ * Orders [routes] for [preferred] and the current network state (G37):
+ * if [preferred] is specific, matching routes go first; under Auto, local Wi-Fi/LAN goes first at home
+ * (`onLocalNetwork`), and Tailscale (or tunnel if no VPN) goes first away from home.
+ */
+internal fun orderProfileRoutes(
+    routes: List<io.github.kinteshi.quirecode.transport.ProfileRoute>,
+    preferred: io.github.kinteshi.quirecode.transport.RoutePreference,
+    onLocalNetwork: Boolean,
+    vpnActive: Boolean,
+): List<io.github.kinteshi.quirecode.transport.ProfileRoute> {
+    if (routes.size <= 1) return routes
+    fun matchesPreference(route: ConnectionRoute): Boolean = when (preferred) {
+        io.github.kinteshi.quirecode.transport.RoutePreference.Auto -> false
+        io.github.kinteshi.quirecode.transport.RoutePreference.Wifi -> route == ConnectionRoute.Wifi || route == ConnectionRoute.LocalForward
+        io.github.kinteshi.quirecode.transport.RoutePreference.Tailscale -> route == ConnectionRoute.Tailscale
+        io.github.kinteshi.quirecode.transport.RoutePreference.Tunnel -> route == ConnectionRoute.Tunnel || route == ConnectionRoute.SecureWebSocket
+    }
+    fun autoRank(route: ConnectionRoute): Int = when {
+        onLocalNetwork -> when (route) {
+            ConnectionRoute.Wifi, ConnectionRoute.LocalForward -> 0
+            ConnectionRoute.Tailscale -> 1
+            ConnectionRoute.Tunnel, ConnectionRoute.SecureWebSocket -> 2
+            else -> 3
+        }
+        vpnActive -> when (route) {
+            ConnectionRoute.Tailscale -> 0
+            ConnectionRoute.Tunnel, ConnectionRoute.SecureWebSocket -> 1
+            ConnectionRoute.Wifi, ConnectionRoute.LocalForward -> 3
+            else -> 2
+        }
+        else -> when (route) {
+            ConnectionRoute.Tunnel, ConnectionRoute.SecureWebSocket -> 0
+            ConnectionRoute.Tailscale -> 1
+            ConnectionRoute.Wifi, ConnectionRoute.LocalForward -> 2
+            else -> 3
+        }
+    }
+    return routes.withIndex()
+        .sortedWith(
+            compareBy<IndexedValue<io.github.kinteshi.quirecode.transport.ProfileRoute>>(
+                { if (matchesPreference(connectionRoute(it.value.endpoint))) 0 else 1 },
+                { autoRank(connectionRoute(it.value.endpoint)) },
+                { it.index },
+            ),
+        )
+        .map { it.value }
+}
+
+/** Route preference choices relevant to [profile]'s configured endpoints (G37). */
+internal fun availableRoutePreferences(
+    profile: io.github.kinteshi.quirecode.transport.ConnectionProfile,
+): List<io.github.kinteshi.quirecode.transport.RoutePreference> {
+    val routes = profile.allRoutes().map { connectionRoute(it.endpoint) }.toSet()
+    return buildList {
+        add(io.github.kinteshi.quirecode.transport.RoutePreference.Auto)
+        if (ConnectionRoute.Wifi in routes || ConnectionRoute.LocalForward in routes) {
+            add(io.github.kinteshi.quirecode.transport.RoutePreference.Wifi)
+        }
+        if (ConnectionRoute.Tailscale in routes) {
+            add(io.github.kinteshi.quirecode.transport.RoutePreference.Tailscale)
+        }
+        if (ConnectionRoute.Tunnel in routes || ConnectionRoute.SecureWebSocket in routes) {
+            add(io.github.kinteshi.quirecode.transport.RoutePreference.Tunnel)
+        }
+    }
 }
 
 fun connectionKind(endpoint: String): ConnectionKind =
@@ -352,7 +438,12 @@ fun planStartupConnection(
  *   but nothing answered `GET /health` through it.
  * - `(true, true)`: the daemon answered `GET /health` over the port.
  */
-fun probeDaemonPort(endpoint: String, fingerprint: String? = null, timeoutMs: Int = 2_000): Pair<Boolean, Boolean> {
+fun probeDaemonPort(
+    endpoint: String,
+    fingerprint: String? = null,
+    timeoutMs: Int = 2_000,
+    extraHeaders: Map<String, String> = emptyMap(),
+): Pair<Boolean, Boolean> {
     val (host, port) = endpointHostPort(endpoint) ?: return false to false
     val tls = endpoint.trim().startsWith("wss://", ignoreCase = true)
     return try {
@@ -375,7 +466,8 @@ fun probeDaemonPort(endpoint: String, fingerprint: String? = null, timeoutMs: In
                 } else {
                     tcp
                 }
-                val request = "GET /health HTTP/1.1\r\nHost: $host:$port\r\nConnection: close\r\n\r\n"
+                val extraLines = extraHeaders.entries.joinToString("") { (name, value) -> "$name: $value\r\n" }
+                val request = "GET /health HTTP/1.1\r\nHost: $host:$port\r\n${extraLines}Connection: close\r\n\r\n"
                 streamSocket.getOutputStream().apply {
                     write(request.toByteArray(Charsets.US_ASCII))
                     flush()

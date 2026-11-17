@@ -14,6 +14,26 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
+/** Route preference for a multi-route connection profile (G37). */
+enum class RoutePreference(val key: String, val label: String) {
+    Auto("auto", "Automatic (Wi-Fi at home, Tailscale away)"),
+    Wifi("wifi", "Wi-Fi / local network"),
+    Tailscale("tailscale", "Tailscale"),
+    Tunnel("tunnel", "Cloudflare Tunnel"),
+}
+
+/** One WebSocket address on a profile with its optional pinned SHA-256 certificate (G37). */
+data class ProfileRoute(
+    val endpoint: String,
+    val fingerprint: String? = null,
+)
+
+/** Cloudflare Access service-token headers (stored encrypted, G32). */
+data class AccessCredentials(
+    val clientId: String,
+    val clientSecret: String,
+)
+
 /** [fingerprint] pins a remote host's self-signed TLS certificate (SHA-256 of its DER, hex). */
 data class ConnectionProfile(
     val id: String,
@@ -23,7 +43,14 @@ data class ConnectionProfile(
     val fingerprint: String? = null,
     val autoConnect: Boolean = true,
     val lastUsedAt: Long? = null,
-)
+    val extraRoutes: List<ProfileRoute> = emptyList(),
+    val preferredRoute: RoutePreference = RoutePreference.Auto,
+    val hasAccessToken: Boolean = false,
+) {
+    /** All distinct routes for this connection (primary first, followed by saved alternates). */
+    fun allRoutes(): List<ProfileRoute> =
+        (listOf(ProfileRoute(endpoint, fingerprint)) + extraRoutes).distinctBy { it.endpoint }
+}
 
 interface SecretCipher {
     fun encrypt(plain: String): String
@@ -43,6 +70,16 @@ class ConnectionProfileStore(
     private val gson = Gson()
 
     fun profiles(): List<ConnectionProfile> = readEntries().map { entry ->
+        val extraRoutes = entry.get("extraRoutes")?.takeIf { it.isJsonArray }?.asJsonArray?.mapNotNull { item ->
+            val obj = item.takeIf { it.isJsonObject }?.asJsonObject ?: return@mapNotNull null
+            val ep = obj.get("endpoint")?.takeIf { it.isJsonPrimitive }?.asString?.trim()?.takeIf(String::isNotEmpty)
+                ?: return@mapNotNull null
+            val fp = obj.get("fingerprint")?.takeIf { it.isJsonPrimitive }?.asString?.takeIf(String::isNotEmpty)
+            ProfileRoute(ep, fp)
+        }.orEmpty()
+        val preferred = entry.get("preferredRoute")?.takeIf { it.isJsonPrimitive }?.asString
+            ?.let { key -> RoutePreference.entries.firstOrNull { it.key == key } }
+            ?: RoutePreference.Auto
         ConnectionProfile(
             entry.get("id").asString,
             entry.get("name").asString,
@@ -51,6 +88,9 @@ class ConnectionProfileStore(
             entry.get("fingerprint")?.takeIf { it.isJsonPrimitive }?.asString,
             entry.get("autoConnect")?.takeIf { it.isJsonPrimitive }?.asBoolean ?: true,
             entry.get("lastUsedAt")?.takeIf { it.isJsonPrimitive && !it.isJsonNull }?.asLong,
+            extraRoutes = extraRoutes,
+            preferredRoute = preferred,
+            hasAccessToken = entry.has("accessClientId") && entry.has("accessClientSecret"),
         )
     }
 
@@ -69,9 +109,21 @@ class ConnectionProfileStore(
         ?.get("token")?.asString
         ?.let(cipher::decrypt)
 
+    /** Returns decrypted Cloudflare Access service-token credentials for [id], or null if unset (G32). */
+    fun accessCredentials(id: String): AccessCredentials? {
+        val entry = readEntries().firstOrNull { it.get("id").asString == id } ?: return null
+        val clientId = entry.get("accessClientId")?.takeIf { it.isJsonPrimitive }?.asString?.let(cipher::decrypt)
+            ?.takeIf(String::isNotBlank) ?: return null
+        val clientSecret = entry.get("accessClientSecret")?.takeIf { it.isJsonPrimitive }?.asString?.let(cipher::decrypt)
+            ?.takeIf(String::isNotBlank) ?: return null
+        return AccessCredentials(clientId, clientSecret)
+    }
+
     /**
      * Creates or updates a profile; a blank token keeps the previously saved token. A null
      * [fingerprint] keeps the saved pin unless the endpoint changed or [clearFingerprint] is true.
+     * Blank/null [extraRoutes], [preferredRoute], or [accessClientId]/[accessClientSecret] preserve existing ones
+     * unless explicitly replaced or cleared via [clearAccessToken].
      */
     fun save(
         id: String?,
@@ -80,15 +132,21 @@ class ConnectionProfileStore(
         token: String,
         fingerprint: String? = null,
         clearFingerprint: Boolean = false,
+        extraRoutes: List<ProfileRoute>? = null,
+        preferredRoute: RoutePreference? = null,
+        accessClientId: String? = null,
+        accessClientSecret: String? = null,
+        clearAccessToken: Boolean = false,
     ): ConnectionProfile {
         val entries = readEntries()
         val profileId = id?.takeIf { existing -> entries.any { it.get("id").asString == existing } }
             ?: UUID.randomUUID().toString()
         val previous = entries.firstOrNull { it.get("id").asString == profileId }
+        val trimmedEndpoint = endpoint.trim()
         val entry = JsonObject().apply {
             addProperty("id", profileId)
-            addProperty("name", name.trim().ifEmpty { endpoint.trim() })
-            addProperty("endpoint", endpoint.trim())
+            addProperty("name", name.trim().ifEmpty { trimmedEndpoint })
+            addProperty("endpoint", trimmedEndpoint)
             when {
                 token.isNotEmpty() -> addProperty("token", cipher.encrypt(token))
                 previous?.has("token") == true -> add("token", previous.get("token"))
@@ -96,12 +154,51 @@ class ConnectionProfileStore(
             val pin = if (clearFingerprint) {
                 null
             } else {
-                fingerprint ?: previous?.takeIf { it.get("endpoint")?.asString == endpoint.trim() }?.get("fingerprint")?.asString
+                fingerprint ?: previous?.takeIf { it.get("endpoint")?.asString == trimmedEndpoint }?.get("fingerprint")?.asString
             }
             pin?.let { addProperty("fingerprint", it) }
             addProperty("autoConnect", previous?.get("autoConnect")?.asBoolean ?: true)
             previous?.get("lastUsedAt")?.takeIf { it.isJsonPrimitive && !it.isJsonNull }?.asLong
                 ?.let { addProperty("lastUsedAt", it) }
+            val resolvedExtra = extraRoutes?.filter { it.endpoint.isNotBlank() && it.endpoint != trimmedEndpoint }
+                ?.distinctBy { it.endpoint }
+            if (resolvedExtra != null) {
+                if (resolvedExtra.isNotEmpty()) {
+                    add(
+                        "extraRoutes",
+                        JsonArray().apply {
+                            resolvedExtra.forEach { route ->
+                                add(
+                                    JsonObject().apply {
+                                        addProperty("endpoint", route.endpoint.trim())
+                                        route.fingerprint?.let { addProperty("fingerprint", it) }
+                                    },
+                                )
+                            }
+                        },
+                    )
+                }
+            } else {
+                previous?.get("extraRoutes")?.let { add("extraRoutes", it) }
+            }
+            val resolvedPreferred = preferredRoute?.key
+                ?: previous?.get("preferredRoute")?.takeIf { it.isJsonPrimitive }?.asString
+            if (resolvedPreferred != null && resolvedPreferred != RoutePreference.Auto.key) {
+                addProperty("preferredRoute", resolvedPreferred)
+            }
+            val cleanAccessId = accessClientId?.trim().orEmpty()
+            val cleanAccessSecret = accessClientSecret?.trim().orEmpty()
+            when {
+                clearAccessToken -> Unit
+                cleanAccessId.isNotEmpty() && cleanAccessSecret.isNotEmpty() -> {
+                    addProperty("accessClientId", cipher.encrypt(cleanAccessId))
+                    addProperty("accessClientSecret", cipher.encrypt(cleanAccessSecret))
+                }
+                else -> {
+                    previous?.get("accessClientId")?.let { add("accessClientId", it) }
+                    previous?.get("accessClientSecret")?.let { add("accessClientSecret", it) }
+                }
+            }
         }
         val updated = JsonArray().apply {
             var replaced = false
@@ -127,6 +224,12 @@ class ConnectionProfileStore(
 
     fun setAutoConnect(id: String, enabled: Boolean) {
         updateEntry(id) { addProperty("autoConnect", enabled) }
+    }
+
+    fun setPreferredRoute(id: String, route: RoutePreference) {
+        updateEntry(id) {
+            if (route == RoutePreference.Auto) remove("preferredRoute") else addProperty("preferredRoute", route.key)
+        }
     }
 
     fun markUsed(id: String, atMillis: Long = System.currentTimeMillis()) {
