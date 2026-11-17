@@ -181,6 +181,8 @@ sealed interface WorkbenchDialog {
     data object ComputerPairing : WorkbenchDialog
     /** Guided "Add a connection" setup wizard (G35). */
     data object ConnectionWizard : WorkbenchDialog
+    /** 4-step welcome & orientation tour for new users. */
+    data object OnboardingTour : WorkbenchDialog
     /** A connection's name, URL and token by hand; [profileId] null for a new one (G22). */
     data class ConnectionEditor(val profileId: String?) : WorkbenchDialog
     /** Why a connected guest can stop (G17): opened from the banner that says it did. */

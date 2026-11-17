@@ -168,6 +168,61 @@ internal fun ConnectionRoute.shortLabel(): String = when (this) {
 }
 
 /**
+ * Two-line metadata summary for a saved [ConnectionProfile] row in the Connections dialog: route(s),
+ * auto-connect rank or manual mode, current state, non-Auto route preference, Access token flag,
+ * and optional formatted last-used timestamp.
+ */
+internal data class ConnectionRowCopy(val primary: String, val lastUsed: String? = null)
+
+internal fun connectionRowCopy(
+    profile: io.github.kinteshi.quirecode.transport.ConnectionProfile,
+    order: Int,
+    current: Boolean,
+    connected: Boolean,
+    busy: Boolean,
+    pairingRejected: Boolean,
+    connectionState: ConnectionState,
+    activeRouteEndpoint: String,
+    formattedLastUsed: String? = null,
+): ConnectionRowCopy {
+    val routes = profile.allRoutes()
+    val where = if (routes.size > 1) {
+        routes.joinToString(", ") { connectionRoute(it.endpoint).shortLabel() }
+    } else {
+        connectionRoute(profile.endpoint).label
+    }
+    val activeRoute = activeRouteEndpoint.takeIf { it.isNotBlank() }?.let(::connectionRoute)
+    val state = when {
+        current && connected -> if (routes.size > 1 && activeRoute != null) {
+            "Connected (${activeRoute.shortLabel()})"
+        } else {
+            "Connected"
+        }
+        current && busy -> "Connecting"
+        current && pairingRejected -> "Pair again"
+        current && connectionState in setOf(
+            ConnectionState.Unreachable,
+            ConnectionState.Lost,
+            ConnectionState.ForwardingStuck,
+        ) -> "Offline"
+        current -> "Current"
+        else -> "Not connected"
+    }
+    val autoLabel = if (profile.autoConnect) "Auto-connect #$order" else "Manual"
+    val preferLabel = if (routes.size > 1 && profile.preferredRoute != io.github.kinteshi.quirecode.transport.RoutePreference.Auto) {
+        "Prefer ${profile.preferredRoute.label}"
+    } else {
+        null
+    }
+    val accessTag = if (profile.hasAccessToken) "Access token" else null
+    val parts = listOfNotNull(where, autoLabel, state, preferLabel, accessTag)
+    return ConnectionRowCopy(
+        primary = parts.joinToString(" · "),
+        lastUsed = formattedLastUsed?.takeIf { it.isNotBlank() }?.let { "Last used $it" },
+    )
+}
+
+/**
  * Orders [routes] for [preferred] and the current network state (G37):
  * if [preferred] is specific, matching routes go first; under Auto, local Wi-Fi/LAN goes first at home
  * (`onLocalNetwork`), and Tailscale (or tunnel if no VPN) goes first away from home.

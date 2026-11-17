@@ -301,4 +301,46 @@ class ConnectionsTest {
             assertTrue(receivedHeaders.toString().contains("CF-Access-Client-Secret: sec-xyz"))
         }
     }
+
+    @Test
+    fun connectionRowCopyReflectsManualModePreferredRouteAndLastUsed() {
+        val multi = io.github.kinteshi.quirecode.transport.ConnectionProfile(
+            id = "p1",
+            name = "Work PC",
+            endpoint = "wss://192.168.1.10:19870/ws",
+            hasToken = true,
+            fingerprint = "a".repeat(64),
+            autoConnect = false,
+            extraRoutes = listOf(io.github.kinteshi.quirecode.transport.ProfileRoute("wss://100.64.0.1:19870/ws", "a".repeat(64))),
+            preferredRoute = io.github.kinteshi.quirecode.transport.RoutePreference.Tailscale,
+            hasAccessToken = true,
+        )
+        val offlineCopy = connectionRowCopy(
+            profile = multi,
+            order = 2,
+            current = true,
+            connected = false,
+            busy = false,
+            pairingRejected = false,
+            connectionState = ConnectionState.ForwardingStuck,
+            activeRouteEndpoint = "",
+            formattedLastUsed = "5:10 PM",
+        )
+        assertEquals("Wi-Fi, Tailscale · Manual · Offline · Prefer Tailscale · Access token", offlineCopy.primary)
+        assertEquals("Last used 5:10 PM", offlineCopy.lastUsed)
+
+        val autoConnected = multi.copy(autoConnect = true, hasAccessToken = false)
+        val connectedCopy = connectionRowCopy(
+            profile = autoConnected,
+            order = 1,
+            current = true,
+            connected = true,
+            busy = false,
+            pairingRejected = false,
+            connectionState = ConnectionState.Connected,
+            activeRouteEndpoint = "wss://100.64.0.1:19870/ws",
+        )
+        assertEquals("Wi-Fi, Tailscale · Auto-connect #1 · Connected (Tailscale) · Prefer Tailscale", connectedCopy.primary)
+        assertNull(connectedCopy.lastUsed)
+    }
 }

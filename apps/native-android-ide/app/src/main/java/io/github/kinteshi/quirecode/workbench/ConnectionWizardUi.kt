@@ -74,12 +74,14 @@ internal fun ConnectionWizardDialog(controller: WorkbenchController) {
     var accessClientId by remember { mutableStateOf("") }
     var accessClientSecret by remember { mutableStateOf("") }
     var scannerOpen by remember { mutableStateOf(false) }
+    var terminalReady by remember { mutableStateOf(controller.linuxTerminalAvailable()) }
     var tailscaleState by remember { mutableStateOf(readTailscaleGuideState(context, controller)) }
     var clipboardOffer by remember { mutableStateOf(readClipboardConnectionString(context)) }
 
     DisposableEffect(lifecycleOwner, context) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
+                terminalReady = controller.linuxTerminalAvailable()
                 tailscaleState = readTailscaleGuideState(context, controller)
                 if (connectionString.isBlank()) {
                     clipboardOffer = readClipboardConnectionString(context)
@@ -125,13 +127,30 @@ internal fun ConnectionWizardDialog(controller: WorkbenchController) {
 
                 if (workTarget == WorkTarget.TabletGuest) {
                     Surface(color = colors.surfaceContainerLow, shape = MaterialTheme.shapes.medium, modifier = Modifier.fillMaxWidth()) {
-                        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text("Recommended: Linux Terminal on this tablet", style = MaterialTheme.typography.titleSmall)
-                            Text(
-                                "Why: everything stays on the tablet with no Wi-Fi, Tailscale, or external computer needed.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = colors.onSurfaceVariant,
+                        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Icon(
+                                if (terminalReady) Icons.Outlined.CheckCircle else Icons.Outlined.WarningAmber,
+                                contentDescription = null,
+                                tint = if (terminalReady) colors.primary else colors.secondary,
                             )
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(
+                                    if (terminalReady) "Linux Terminal is ready on this tablet" else "Linux Terminal isn't enabled yet",
+                                    style = MaterialTheme.typography.titleSmall,
+                                )
+                                Text(
+                                    if (terminalReady) {
+                                        "Everything stays on the tablet with no Wi-Fi, Tailscale, or external computer needed."
+                                    } else {
+                                        "Turn on Linux development environment in Developer options, open Linux Terminal once to finish its Debian install, then come back."
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = colors.onSurfaceVariant,
+                                )
+                            }
+                            if (!terminalReady) {
+                                TextButton(onClick = controller::openDeveloperOptions) { Text("Developer options") }
+                            }
                         }
                     }
                 } else {

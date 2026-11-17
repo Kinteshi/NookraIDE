@@ -195,6 +195,7 @@ object EditorCommands {
         command("rust-analyzer.restartServer", "rust-analyzer: Restart server", ""),
         command("quirecode.restartLanguageServers", "Restart Language Servers of the Active File", ""),
         command("quirecode.resetPaneSizes", "View: Reset Pane Sizes", ""),
+        command("quirecode.welcomeTour", "Help: Welcome & Quick Tour", ""),
         command("quirecode.copyDiagnostics", "Help: Copy Diagnostics (for a bug report)", ""),
         command("quirecode.shareSelection", "Share Selection", ""),
         command("quirecode.shareActiveFile", "File: Share Active File", ""),

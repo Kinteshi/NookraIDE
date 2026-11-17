@@ -185,6 +185,7 @@ internal fun ConnectionsDialog(controller: WorkbenchController) {
     val colors = MaterialTheme.colorScheme
     val summary = controller.connection
     var troubleshoot by remember { mutableStateOf(summary.state.away) }
+    var confirmDelete by remember { mutableStateOf<ConnectionProfile?>(null) }
     AlertDialog(
         onDismissRequest = { controller.dialog = null },
         title = { Text("Connections") },
@@ -200,17 +201,34 @@ internal fun ConnectionsDialog(controller: WorkbenchController) {
                         if (profiles.isNotEmpty()) {
                             Text(title, style = MaterialTheme.typography.titleSmall, color = colors.primary)
                             Column {
-                                profiles.forEach { profile -> ConnectionRow(controller, profile) }
+                                profiles.forEach { profile ->
+                                    ConnectionRow(controller, profile, onRequestDelete = { confirmDelete = profile })
+                                }
                             }
                         }
                     }
                 } else {
-                    Text(summary.detail.orEmpty(), style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
+                    Text("Saved connections", style = MaterialTheme.typography.titleSmall, color = colors.primary)
+                    Surface(color = colors.surfaceContainerLow, shape = MaterialTheme.shapes.medium, modifier = Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("No saved connections yet", style = MaterialTheme.typography.titleSmall)
+                            Text(
+                                "Pair this tablet's Linux guest or a computer once. Saved routes, keys and preferences stay here and reconnect automatically.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = colors.onSurfaceVariant,
+                            )
+                        }
+                    }
                 }
                 if (controller.managesDevices) PairedDevicesSection(controller, summary)
                 Text("Add a connection", style = MaterialTheme.typography.titleSmall, color = colors.primary)
                 Column {
-                    AddRow(Icons.Outlined.Explore, "Guided setup", "Choose between the tablet guest, Wi-Fi, Tailscale or a tunnel") {
+                    AddRow(
+                        Icons.Outlined.Explore,
+                        "Guided setup (recommended)",
+                        "Compare tablet guest, Wi-Fi, Tailscale or a tunnel step-by-step",
+                        containerColor = colors.surfaceContainerHighest,
+                    ) {
                         controller.dialog = WorkbenchDialog.ConnectionWizard
                     }
                     AddRow(Icons.Outlined.TabletAndroid, "This tablet's Linux guest", "Install the daemon in Linux Terminal, or pair it again") {
@@ -242,6 +260,28 @@ internal fun ConnectionsDialog(controller: WorkbenchController) {
         },
         confirmButton = { TextButton(onClick = { controller.dialog = null }) { Text("Close") } },
     )
+
+    confirmDelete?.let { profile ->
+        AlertDialog(
+            onDismissRequest = { confirmDelete = null },
+            title = { Text("Remove ${profile.name}?") },
+            text = {
+                Text(
+                    "Removes this saved connection and its encrypted token from this device. " +
+                        "Files on ${profile.name} aren't touched, and any folders kept available offline stay readable.",
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmDelete = null
+                        controller.deleteProfile(profile.id)
+                    },
+                ) { Text("Remove") }
+            },
+            dismissButton = { TextButton(onClick = { confirmDelete = null }) { Text("Cancel") } },
+        )
+    }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -300,38 +340,36 @@ private fun StatusCard(controller: WorkbenchController, summary: ConnectionSumma
 }
 
 @Composable
-private fun ConnectionRow(controller: WorkbenchController, profile: ConnectionProfile) {
+private fun ConnectionRow(controller: WorkbenchController, profile: ConnectionProfile, onRequestDelete: () -> Unit) {
     val colors = MaterialTheme.colorScheme
     val current = profile.id == controller.profileId
     val tablet = isTabletGuestEndpoint(profile.endpoint)
     var menu by remember { mutableStateOf(false) }
-    val routes = profile.allRoutes()
-    val where = if (routes.size > 1) {
-        routes.joinToString(", ") { connectionRoute(it.endpoint).shortLabel() }
-    } else {
-        connectionRoute(profile.endpoint).label
-    }
     val order = controller.profiles.indexOfFirst { it.id == profile.id } + 1
-    val activeRoute = controller.activeRouteEndpoint.takeIf { it.isNotBlank() }?.let(::connectionRoute)
-    val state = when {
-        current && controller.connected -> if (routes.size > 1 && activeRoute != null) {
-            "Connected (${activeRoute.shortLabel()})"
-        } else {
-            "Connected"
-        }
-        current && controller.busy -> "Connecting"
-        current && controller.pairingRejected -> "Pair again"
-        current && controller.connection.state in setOf(ConnectionState.Unreachable, ConnectionState.Lost) -> "Offline"
-        current -> "Current"
-        else -> "Not connected"
+    val formattedLastUsed = profile.lastUsedAt?.let {
+        java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT).format(java.util.Date(it))
     }
-    val accessTag = if (profile.hasAccessToken) " · Access token" else ""
-    val lastUsed = profile.lastUsedAt?.let {
-        " · Last used ${java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT).format(java.util.Date(it))}"
-    }.orEmpty()
+    val rowCopy = connectionRowCopy(
+        profile = profile,
+        order = order,
+        current = current,
+        connected = controller.connected,
+        busy = controller.busy,
+        pairingRejected = controller.pairingRejected,
+        connectionState = controller.connection.state,
+        activeRouteEndpoint = controller.activeRouteEndpoint,
+        formattedLastUsed = formattedLastUsed,
+    )
     ListItem(
         headlineContent = { Text(profile.name) },
-        supportingContent = { Text("$where · Auto-connect #$order · $state$accessTag$lastUsed") },
+        supportingContent = {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(rowCopy.primary)
+                rowCopy.lastUsed?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
+                }
+            }
+        },
         leadingContent = {
             Icon(
                 if (tablet) Icons.Outlined.TabletAndroid else Icons.Outlined.Computer,
@@ -351,14 +389,30 @@ private fun ConnectionRow(controller: WorkbenchController, profile: ConnectionPr
                 Box {
                     Tooltip("More") { IconButton(onClick = { menu = true }) { Icon(Icons.Outlined.MoreVert, contentDescription = "More for ${profile.name}") } }
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                        if (current && controller.connected) {
+                            DropdownMenuItem(
+                                text = { Text("Work offline") },
+                                leadingIcon = { Icon(Icons.Outlined.CloudOff, contentDescription = null) },
+                                onClick = { menu = false; controller.requestWorkOffline() },
+                            )
+                        } else {
+                            DropdownMenuItem(
+                                text = { Text(if (current) "Reconnect" else "Switch to ${profile.name}") },
+                                leadingIcon = { Icon(Icons.Outlined.Cloud, contentDescription = null) },
+                                enabled = !controller.busy,
+                                onClick = { menu = false; controller.switchConnection(profile) },
+                            )
+                        }
                         DropdownMenuItem(
                             text = { Text("Move up in auto-connect order") },
                             leadingIcon = { Icon(Icons.Outlined.ArrowUpward, contentDescription = null) },
+                            enabled = order > 1,
                             onClick = { menu = false; controller.moveConnection(profile.id, -1) },
                         )
                         DropdownMenuItem(
                             text = { Text("Move down in auto-connect order") },
                             leadingIcon = { Icon(Icons.Outlined.ArrowDownward, contentDescription = null) },
+                            enabled = order in 1 until controller.profiles.size,
                             onClick = { menu = false; controller.moveConnection(profile.id, 1) },
                         )
                         DropdownMenuItem(
@@ -372,9 +426,9 @@ private fun ConnectionRow(controller: WorkbenchController, profile: ConnectionPr
                             onClick = { menu = false; controller.pairAgain(profile) },
                         )
                         DropdownMenuItem(
-                            text = { Text("Delete") },
+                            text = { Text("Delete…") },
                             leadingIcon = { Icon(Icons.Outlined.Delete, contentDescription = null) },
-                            onClick = { menu = false; controller.deleteProfile(profile.id) },
+                            onClick = { menu = false; onRequestDelete() },
                         )
                     }
                 }
@@ -387,12 +441,18 @@ private fun ConnectionRow(controller: WorkbenchController, profile: ConnectionPr
 }
 
 @Composable
-private fun AddRow(icon: ImageVector, title: String, summary: String, onClick: () -> Unit) {
+private fun AddRow(
+    icon: ImageVector,
+    title: String,
+    summary: String,
+    containerColor: Color = MaterialTheme.colorScheme.surfaceContainerHigh,
+    onClick: () -> Unit,
+) {
     ListItem(
         headlineContent = { Text(title) },
         supportingContent = { Text(summary) },
         leadingContent = { Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
-        colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+        colors = ListItemDefaults.colors(containerColor = containerColor),
         modifier = Modifier.clickable(onClick = onClick),
     )
 }

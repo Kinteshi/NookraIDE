@@ -2,6 +2,9 @@ package io.github.kinteshi.quirecode.workbench
 
 import io.github.kinteshi.quirecode.document.isGuestPath
 
+import androidx.compose.material.icons.outlined.Computer
+import androidx.compose.material.icons.outlined.Explore
+import androidx.compose.material.icons.outlined.TabletAndroid
 import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Palette
@@ -107,6 +110,9 @@ import kotlin.math.roundToInt
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.material.icons.outlined.Computer
+import androidx.compose.material.icons.outlined.Explore
+import androidx.compose.material.icons.outlined.TabletAndroid
 import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material.icons.outlined.Info
 
@@ -430,8 +436,9 @@ private fun Breadcrumbs(path: String, onNavigate: (String) -> Unit, actions: @Co
 }
 
 /**
- * The welcome page's first-run card: what the app needs (a Linux machine: Linux Terminal's guest, or a computer), and
- * the setup a tap away. Without Linux Terminal turned on it says where to turn it on.
+ * The welcome page's first-run card: shows the three ways QuireCode runs (on this device alone, in
+ * Linux Terminal's guest, or on a computer) alongside guided setup, the 30-second tour, and a
+ * sample playground buffer.
  */
 @Composable
 private fun GetStartedCard(controller: WorkbenchController) {
@@ -440,38 +447,70 @@ private fun GetStartedCard(controller: WorkbenchController) {
     androidx.compose.material3.Surface(
         color = colors.surfaceContainerHigh,
         shape = MaterialTheme.shapes.large,
-        modifier = Modifier.widthIn(max = 520.dp).fillMaxWidth(),
+        modifier = Modifier.widthIn(max = 560.dp).fillMaxWidth(),
     ) {
-        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("Get started", style = MaterialTheme.typography.titleMedium, color = colors.onSurface)
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("Welcome to QuireCode", style = MaterialTheme.typography.titleMedium, color = colors.onSurface)
             Text(
-                "QuireCode edits files on a Linux machine: the guest of Android's Linux Terminal on this tablet, or a " +
-                    "computer on your network. Set it up once; afterwards the app connects by itself.",
+                "Edit local folders right away, or connect to a Linux machine for terminals, language servers, notebooks, and AI.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = colors.onSurfaceVariant,
             )
-            if (!terminal) {
-                Text(
-                    "Linux Terminal isn't turned on here. Turn on Linux development environment in Developer options, " +
-                        "open Linux Terminal once to install its Debian guest, then come back.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = colors.onSurfaceVariant,
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                StartPathRow(
+                    Icons.Outlined.PhoneAndroid,
+                    "This tablet",
+                    "Open a device folder with zero setup — 20 languages highlight built in.",
+                )
+                StartPathRow(
+                    Icons.Outlined.TabletAndroid,
+                    if (terminal) "Tablet Linux guest (ready)" else "Tablet Linux guest (enable in Developer options)",
+                    "Debian VM in Android's Linux Terminal with full tools on this tablet.",
+                )
+                StartPathRow(
+                    Icons.Outlined.Computer,
+                    "A computer",
+                    "Connect over Wi-Fi, Tailscale, or a Cloudflare Tunnel; saved profiles keep all routes.",
                 )
             }
             androidx.compose.foundation.layout.FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                if (terminal) {
-                    androidx.compose.material3.Button(onClick = { controller.beginGuestSetup() }) { Text("Set up the guest") }
+                androidx.compose.material3.Button(onClick = { controller.dialog = WorkbenchDialog.ConnectionWizard }) {
+                    Icon(Icons.Outlined.Explore, contentDescription = null, modifier = Modifier.padding(end = 6.dp).size(18.dp))
+                    Text("Guided setup")
+                }
+                if (!controller.onboardingDone) {
+                    androidx.compose.material3.FilledTonalButton(onClick = { controller.dialog = WorkbenchDialog.OnboardingTour }) {
+                        Text("Take 30s tour")
+                    }
                 } else {
-                    androidx.compose.material3.Button(onClick = controller::openDeveloperOptions) { Text("Developer options") }
+                    androidx.compose.material3.TextButton(onClick = { controller.dialog = WorkbenchDialog.OnboardingTour }) {
+                        Text("Quick tour")
+                    }
                 }
-                androidx.compose.material3.OutlinedButton(onClick = { controller.dialog = WorkbenchDialog.ComputerPairing }) {
-                    Text(if (terminal) "Pair with a computer" else "Use a computer instead")
+                if (!terminal) {
+                    androidx.compose.material3.OutlinedButton(onClick = controller::openDeveloperOptions) { Text("Developer options") }
                 }
-                androidx.compose.material3.TextButton(onClick = { controller.dialog = WorkbenchDialog.ConnectionEditor(null) }) { Text("Connect by hand") }
+                androidx.compose.material3.TextButton(onClick = controller::openSamplePlayground) { Text("Try sample file") }
             }
+        }
+    }
+}
+
+@Composable
+private fun StartPathRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    summary: String,
+) {
+    val colors = MaterialTheme.colorScheme
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Icon(icon, contentDescription = null, tint = colors.primary, modifier = Modifier.size(18.dp))
+        Column {
+            Text(title, style = MaterialTheme.typography.labelLarge, color = colors.onSurface)
+            Text(summary, style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
         }
     }
 }

@@ -50,6 +50,7 @@ import androidx.compose.material.icons.outlined.Dns
 import androidx.compose.material.icons.outlined.DragIndicator
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.material.icons.outlined.Explore
 import androidx.compose.material.icons.outlined.Extension
 import androidx.compose.material.icons.outlined.FileOpen
 import androidx.compose.material.icons.outlined.FilterList
@@ -876,6 +877,12 @@ private fun LazyListScope.about(controller: WorkbenchController) {
         ) {}
     }
     item { SettingRow(Icons.Outlined.Gavel, "Licence", "Apache License 2.0") {} }
+    item {
+        ActionRow(Icons.Outlined.Explore, "Welcome & quick tour", "30-second orientation and setup choices") {
+            controller.settingsVisible = false
+            controller.dialog = WorkbenchDialog.OnboardingTour
+        }
+    }
     item { ActionRow(Icons.Outlined.Description, "Open-source licences", "The libraries, crates and files the app ships, and their licences") { controller.dialog = WorkbenchDialog.Licenses } }
     item { ActionRow(Icons.Outlined.BugReport, "Copy diagnostics", "Versions, device, guest state and recent messages, for a bug report. Nothing is sent") { controller.copyDiagnostics() } }
 }

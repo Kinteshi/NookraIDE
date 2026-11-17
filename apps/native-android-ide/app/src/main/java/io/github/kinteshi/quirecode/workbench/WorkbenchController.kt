@@ -216,6 +216,7 @@ private const val KERNEL_PYTHONS_KEY = "kernel-pythons"
 /** Built-in terminal profiles whose program is a Debian package of the same name. */
 private val INSTALLABLE_SHELLS = setOf("zsh", "fish", "tmux")
 private const val LANGUAGES_DECLINED_KEY = "languages-declined"
+private const val ONBOARDING_DONE_KEY = "onboarding-done"
 /** Built-in language packs are 10-60 KB; anything far bigger isn't one. */
 private const val MAX_LANGUAGE_PACK_BYTES = 4 * 1024 * 1024
 private val languagePackHttp by lazy { okhttp3.OkHttpClient() }
@@ -4430,6 +4431,7 @@ class WorkbenchController(private val context: Context) {
 
     /** File > Open Device Folder: a folder on this device (Documents, a USB drive, a synced folder) as the workspace. */
     fun beginOpenDeviceFolder() {
+        completeOnboarding()
         treePickedFor = TreePurpose.Workspace
         devicePickers?.openTree?.invoke() ?: run { status = "The folder picker isn't available" }
     }
@@ -5859,6 +5861,31 @@ class WorkbenchController(private val context: Context) {
         documents.add(document)
         selectDocument(document.path)
         status = "Created $name"
+    }
+
+    /** Onboarding launchpad: opens a syntax-highlighted Kotlin scratch buffer usable with zero setup. */
+    fun openSamplePlayground() {
+        completeOnboarding()
+        val path = "scratch:/Welcome.kt"
+        val existing = documents.firstOrNull { it.path == path }
+        if (existing != null) {
+            selectDocument(existing.path)
+            return
+        }
+        val sample = buildString {
+            appendLine("// Welcome to QuireCode — edit here, try Ctrl+P (Quick Open),")
+            appendLine("// or open Settings > Appearance to switch between Classic and Material You themes.")
+            appendLine()
+            appendLine("data class Mode(val name: String, val highlightedBuiltIn: Boolean)")
+            appendLine()
+            appendLine("fun main() {")
+            appendLine("    val mode = Mode(\"This device\", highlightedBuiltIn = true)")
+            appendLine("    println(\"Ready to code in \${mode.name}!\")")
+            appendLine("}")
+        }
+        documents.add(DocumentSession(path, sample, baseModifiedTs = null, dirty = false))
+        selectDocument(path)
+        status = "Opened Welcome.kt sample — works offline with built-in highlighting"
     }
 
     /**
@@ -11039,6 +11066,14 @@ class WorkbenchController(private val context: Context) {
     /** File types the user said "Not now" to in this session. */
     private val languagePacksPostponed = mutableStateListOf<String>()
     private var languagePacksDeclined by mutableStateOf(preferences.getStringSet(LANGUAGES_DECLINED_KEY, emptySet()).orEmpty())
+    var onboardingDone by mutableStateOf(preferences.getBoolean(ONBOARDING_DONE_KEY, false))
+        private set
+
+    fun completeOnboarding() {
+        if (onboardingDone) return
+        onboardingDone = true
+        preferences.edit().putBoolean(ONBOARDING_DONE_KEY, true).apply()
+    }
 
     private val packsDirectory: File get() = File(context.filesDir, "asset-packs")
 
@@ -11620,6 +11655,7 @@ class WorkbenchController(private val context: Context) {
             "rust-analyzer.restartServer" -> restartServerCommand(OtherLanguageServer.Rust.id)
             // The app's former name's ids, which keybindings.json files may still use, run the same commands.
             "quirecode.resetPaneSizes", "materialcode.resetPaneSizes" -> resetPaneSizes()
+            "quirecode.welcomeTour" -> dialog = WorkbenchDialog.OnboardingTour
             "quirecode.copyDiagnostics" -> copyDiagnostics()
             "quirecode.shareSelection" -> shareText(focusedSelection())
             "quirecode.shareActiveFile" -> shareActiveFile()
