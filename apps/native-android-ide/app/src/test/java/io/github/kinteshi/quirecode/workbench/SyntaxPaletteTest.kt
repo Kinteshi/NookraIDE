@@ -3,6 +3,8 @@ package io.github.kinteshi.quirecode.workbench
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.ui.graphics.Color
+import com.aardarch.aardink.core.NamedTokenType
+import com.aardarch.aardink.core.TokenType
 import com.google.gson.JsonParser
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -55,6 +57,27 @@ class SyntaxPaletteTest {
         val keyword = rules.first { it.get("scope")?.asString?.startsWith("keyword,") == true }
         assertEquals(palette.keyword.hex(), keyword.getAsJsonObject("settings").get("foreground").asString)
         assertEquals(palette.function.hex(), palette.semanticColors()["method"])
+    }
+
+    @Test
+    fun aardinkTokenColoursAndStylesMatchPalette() {
+        val palette = SyntaxPalette.materialYou(dark, dark = true)
+        val tokenColors = palette.aardinkTokenColors()
+        val tokenStyles = palette.aardinkTokenStyles()
+        assertEquals(palette.foreground, tokenColors[TokenType.Default])
+        assertEquals(palette.keyword, tokenColors[TokenType.Keyword])
+        assertEquals(palette.string, tokenColors[TokenType.StringLiteral])
+        assertEquals(palette.comment, tokenColors[TokenType.Comment])
+        assertEquals(palette.number, tokenColors[TokenType.Number])
+        assertEquals(palette.function, tokenColors[TokenType.FunctionCall])
+        assertEquals(palette.type, tokenColors[TokenType.TypeName])
+        assertEquals(palette.variable, tokenColors[TokenType.Identifier])
+        assertEquals(palette.operator, tokenColors[TokenType.Operator])
+        assertEquals(palette.operator, tokenColors[TokenType.Punctuation])
+        assertEquals(palette.type, tokenColors[TokenType.Annotation])
+        assertEquals(palette.invalid, tokenColors[TokenType.Invalid])
+        assertEquals(palette.constant, tokenColors[NamedTokenType("string.escape")])
+        assertEquals(true, tokenStyles[TokenType.Comment]?.italic)
     }
 
     private fun contrast(a: Color, b: Color): Double {

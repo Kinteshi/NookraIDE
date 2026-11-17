@@ -22,6 +22,117 @@ private const val STRIKETHROUGH = 8
 /** A language server's colour for part of one line, drawn over the grammar's. */
 class SemanticSpan(val line: Int, val start: Int, val end: Int, val type: TokenType)
 
+/** An [IncrementalTokenizer] that layers LSP semantic tokens over its base tokens. */
+interface SemanticTokenizer : IncrementalTokenizer {
+    var semantic: Map<Int, List<SemanticSpan>>
+}
+
+/**
+ * Wraps any [IncrementalTokenizer] (such as an Aardink built-in language tokenizer) so LSP semantic
+ * highlights overlay its base tokens without mutating its own incremental state.
+ */
+class BuiltInSemanticTokenizer(
+    private val delegate: IncrementalTokenizer,
+) : SemanticTokenizer {
+    @Volatile
+    override var semantic: Map<Int, List<SemanticSpan>> = emptyMap()
+
+    override val commentSyntax: CommentSyntax?
+        get() = delegate.commentSyntax
+
+    override fun canSpanLines(lineIndex: Int, tokens: List<Token>): Boolean =
+        delegate.canSpanLines(lineIndex, tokens)
+
+    override fun tokenizeFull(text: String): List<Token> = applySemantic(text, delegate.tokenizeFull(text))
+
+    override suspend fun tokenizeFullCooperative(text: String): List<Token> =
+        applySemantic(text, delegate.tokenizeFullCooperative(text))
+
+    override fun tokenizeLines(text: String, dirtyRange: IntRange, previousTokens: List<Token>): List<Token> {
+        val spans = semantic
+        if (spans.isEmpty()) return delegate.tokenizeLines(text, dirtyRange, previousTokens)
+        if (previousTokens.isEmpty()) return applySemantic(text, delegate.tokenizeLines(text, dirtyRange, previousTokens))
+        return applySemantic(text, delegate.tokenizeFull(text))
+    }
+
+    private fun applySemantic(text: String, raw: List<Token>): List<Token> {
+        val spans = semantic
+        if (spans.isEmpty() || raw.isEmpty()) return raw
+        val starts = textLineStarts(text)
+        val out = ArrayList<Token>(raw.size)
+        val lineBucket = ArrayList<Token>()
+        var line = 0
+
+        fun flushLine(lineIndex: Int) {
+            val lineSpans = spans[lineIndex]
+            if (lineSpans == null || lineBucket.isEmpty()) {
+                out.addAll(lineBucket)
+            } else {
+                out.addAll(overlayLineSemanticSpans(lineBucket, lineSpans, starts[lineIndex]))
+            }
+            lineBucket.clear()
+        }
+
+        for (token in raw) {
+            while (line + 1 < starts.size && token.start >= starts[line + 1]) {
+                flushLine(line)
+                line++
+            }
+            val lineEnd = if (line + 1 < starts.size) starts[line + 1] else text.length
+            if (token.end <= lineEnd) {
+                lineBucket += token
+            } else {
+                var cursor = token.start
+                while (cursor < token.end) {
+                    val currentLineEnd = if (line + 1 < starts.size) starts[line + 1] else text.length
+                    val pieceEnd = minOf(token.end, currentLineEnd)
+                    if (pieceEnd > cursor) lineBucket += Token(cursor, pieceEnd, token.type)
+                    cursor = pieceEnd
+                    if (cursor < token.end && line + 1 < starts.size) {
+                        flushLine(line)
+                        line++
+                    }
+                }
+            }
+        }
+        flushLine(line)
+        return out
+    }
+}
+
+private fun textLineStarts(text: String): IntArray {
+    var count = 1
+    for (ch in text) if (ch == '\n') count++
+    val starts = IntArray(count)
+    var line = 1
+    for (i in text.indices) {
+        if (text[i] == '\n') starts[line++] = i + 1
+    }
+    return starts
+}
+
+/** Overlays [spans] onto [tokens] on a single line whose text starts at [lineOffset]. */
+internal fun overlayLineSemanticSpans(tokens: List<Token>, spans: List<SemanticSpan>, lineOffset: Int): List<Token> {
+    val out = ArrayList<Token>(tokens.size + spans.size * 2)
+    for (token in tokens) {
+        if (token.isEmpty) {
+            out += token
+            continue
+        }
+        var at = token.start
+        for (span in spans) {
+            val from = maxOf(lineOffset + span.start, at)
+            val to = minOf(lineOffset + span.end, token.end)
+            if (from >= to) continue
+            if (from > at) out += Token(at, from, token.type)
+            out += Token(from, to, span.type)
+            at = to
+        }
+        if (at < token.end) out += Token(at, token.end, token.type)
+    }
+    return out
+}
+
 /**
  * A TextMate grammar behind Aardink's tokenizer: VS Code grammar packs and themes in the Aardink
  * editor. tm4e resolves the theme by scope stack as VS Code does, so a token's type here is what
@@ -32,7 +143,7 @@ class SemanticSpan(val line: Int, val start: Int, val end: Int, val type: TokenT
 class TextMateTokenizer(
     private val grammar: IGrammar,
     override val commentSyntax: CommentSyntax? = null,
-) : IncrementalTokenizer {
+) : SemanticTokenizer {
     private var text: String? = null
     private var lines: List<String> = emptyList()
     private var offsets = IntArray(0)
@@ -45,7 +156,7 @@ class TextMateTokenizer(
      * text isn't scanned again, only coloured.
      */
     @Volatile
-    var semantic: Map<Int, List<SemanticSpan>> = emptyMap()
+    override var semantic: Map<Int, List<SemanticSpan>> = emptyMap()
 
     @Synchronized
     override fun tokenizeFull(text: String): List<Token> {
@@ -153,28 +264,7 @@ class TextMateTokenizer(
         for (line in range) {
             val tokens = lineTokens[line]
             val lineSpans = spans[line]
-            if (lineSpans == null) out += tokens else out += overlay(tokens, lineSpans, offsets[line])
-        }
-        return out
-    }
-
-    private fun overlay(tokens: List<Token>, spans: List<SemanticSpan>, offset: Int): List<Token> {
-        val out = ArrayList<Token>(tokens.size + spans.size * 2)
-        for (token in tokens) {
-            if (token.isEmpty) {
-                out += token
-                continue
-            }
-            var at = token.start
-            for (span in spans) {
-                val from = maxOf(offset + span.start, at)
-                val to = minOf(offset + span.end, token.end)
-                if (from >= to) continue
-                if (from > at) out += Token(at, from, token.type)
-                out += Token(from, to, span.type)
-                at = to
-            }
-            if (at < token.end) out += Token(at, token.end, token.type)
+            if (lineSpans == null) out += tokens else out += overlayLineSemanticSpans(tokens, lineSpans, offsets[line])
         }
         return out
     }

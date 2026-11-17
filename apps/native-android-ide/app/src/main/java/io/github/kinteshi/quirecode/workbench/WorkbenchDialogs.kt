@@ -659,7 +659,11 @@ fun WorkbenchDialogHost(controller: WorkbenchController) {
                 },
             ) { pack ->
                 PaletteRow(
-                    pack.languageName + if (pack.id in installed) "  ✓" else "",
+                    pack.languageName + when {
+                        pack.id in installed -> "  ✓"
+                        AardinkSyntax.builtInCovers(pack) -> "  (built in)"
+                        else -> ""
+                    },
                     (pack.extensions.take(4).map { ".$it" } + pack.filenames.take(2)).joinToString(" "),
                 )
             }

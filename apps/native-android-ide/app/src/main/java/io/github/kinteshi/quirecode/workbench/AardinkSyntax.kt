@@ -6,17 +6,25 @@ import androidx.compose.ui.graphics.Color
 import com.aardarch.aardink.core.ChromeColors
 import com.aardarch.aardink.core.CommentSyntax
 import com.aardarch.aardink.core.EditorTheme
+import com.aardarch.aardink.core.IncrementalTokenizer
 import com.aardarch.aardink.core.NamedTokenType
 import com.aardarch.aardink.core.TokenType
+import com.aardarch.aardink.languages.BuiltInLanguages
+import com.aardarch.aardink.languages.LanguageDefinition
+import com.aardarch.aardink.languages.LanguageRegistry
+import com.aardarch.aardink.ui.EditorThemeParser
 import com.aardarch.aardink.ui.EditorThemes
 import com.aardarch.aardink.ui.fromColorScheme
 import io.github.kinteshi.quirecode.DARK_SYNTAX_THEME
 import io.github.kinteshi.quirecode.LIGHT_SYNTAX_THEME
 import io.github.kinteshi.quirecode.assets.AssetPackGrammarLoader
+import io.github.kinteshi.quirecode.assets.LanguagePack
 import io.github.kinteshi.quirecode.document.DocumentSession
 import io.github.kinteshi.quirecode.editor.BRACKET_COLORS
+import io.github.kinteshi.quirecode.editor.BuiltInSemanticTokenizer
 import io.github.kinteshi.quirecode.editor.LanguageRules
 import io.github.kinteshi.quirecode.editor.LIGHT_BRACKET_COLORS
+import io.github.kinteshi.quirecode.editor.SemanticTokenizer
 import io.github.kinteshi.quirecode.editor.TextMateTokenizer
 import io.github.kinteshi.quirecode.editor.semanticColorsByKind
 import io.github.kinteshi.quirecode.editor.textMateTokenColors
@@ -37,6 +45,7 @@ internal class SyntaxTheme(
     val imported: Boolean,
     val workbenchColors: Map<String, String> = emptyMap(),
     val highContrast: Boolean = false,
+    val palette: SyntaxPalette? = null,
 ) {
     val key: String = "$name/${json.hashCode()}/${semanticColors.hashCode()}/$light/${workbenchColors.hashCode()}/$highContrast"
 }
@@ -56,17 +65,67 @@ internal fun syntaxTheme(context: Context, colors: ColorScheme, dark: Boolean, s
     }
     if (syntax == SyntaxColors.MaterialYou) {
         val palette = SyntaxPalette.materialYou(colors, dark)
-        return SyntaxTheme("material-you.tmTheme.json", palette.textMateTheme("Material You", colors.surface), palette.semanticColors(), !dark, imported = false)
+        return SyntaxTheme(
+            "material-you.tmTheme.json",
+            palette.textMateTheme("Material You", colors.surface),
+            palette.semanticColors(),
+            !dark,
+            imported = false,
+            palette = palette,
+        )
     }
     val file = if (dark) DARK_SYNTAX_THEME else LIGHT_SYNTAX_THEME
     val json = context.assets.open("textmate/$file").use { it.reader().readText() }
-    return SyntaxTheme(file, json, loadSavedSemanticColors(context), !dark, imported = false, highContrast = syntax == SyntaxColors.HighContrast)
+    val highContrast = syntax == SyntaxColors.HighContrast
+    return SyntaxTheme(
+        file,
+        json,
+        loadSavedSemanticColors(context),
+        !dark,
+        imported = false,
+        highContrast = highContrast,
+        palette = if (highContrast) null else SyntaxPalette.classic(dark),
+    )
 }
 
-/** Grammars and colours for the editor, through a tm4e registry. */
+/** Grammars and colours for the editor: Aardink built-in languages first, falling back to a tm4e registry. */
 internal object AardinkSyntax {
     private const val PYTHON_SCOPE = "source.python"
     private var registry: Pair<String, Registry>? = null
+
+    /**
+     * All 20 built-in syntax languages from `aardink-languages`, excluding PlainText so `.txt` files
+     * continue to count as unhighlighted text rather than claiming an active grammar.
+     */
+    private val builtInRegistry: LanguageRegistry by lazy {
+        LanguageRegistry.withBuiltIns().apply {
+            unregister(BuiltInLanguages.PlainText.id)
+        }
+    }
+
+    /** Built-in Aardink language matching [path] or [languageId], or null to fall back to tm4e. */
+    fun builtInLanguageFor(path: String, languageId: String = ""): LanguageDefinition? {
+        val fileName = path.substringAfterLast('/')
+        if (fileName.isNotBlank()) builtInRegistry.byFileName(fileName)?.let { return it }
+        val normalized = languageId.trim().removePrefix(".").lowercase()
+        if (normalized.isEmpty()) return null
+        return builtInRegistry.byExtension(normalized) ?: builtInRegistry.byId(normalized)
+    }
+
+    /** Built-in Aardink language for a code-fence or cell language identifier (such as `"kt"` or `"typescript"`). */
+    fun builtInLanguageForId(language: String): LanguageDefinition? {
+        val normalized = language.trim().lowercase()
+        if (normalized.isEmpty() || normalized == BuiltInLanguages.PlainText.id) return null
+        return builtInRegistry.byId(normalized)
+            ?: builtInRegistry.byExtension(FENCE_EXTENSIONS[normalized] ?: normalized)
+    }
+
+    fun hasBuiltInLanguage(path: String): Boolean = builtInLanguageFor(path) != null
+
+    /** True when Aardink's built-in languages already cover core files of [pack]. */
+    fun builtInCovers(pack: LanguagePack): Boolean =
+        pack.extensions.any { builtInRegistry.byExtension(it) != null } ||
+            pack.filenames.any { builtInRegistry.byFileName(it) != null }
 
     /**
      * One registry for the theme in effect: tm4e colours a grammar's tokens with its registry's theme.
@@ -89,19 +148,22 @@ internal object AardinkSyntax {
         return made
     }
 
-    /** The document's grammar as a tokenizer; null when no grammar knows the file (it stays plain). */
-    fun tokenizerFor(registry: Registry, document: DocumentSession, rules: LanguageRules?): TextMateTokenizer? {
+    /** The document's tokenizer (Aardink built-in language first, else tm4e grammar); null stays plain. */
+    fun tokenizerFor(registry: Registry, document: DocumentSession, rules: LanguageRules?): SemanticTokenizer? {
+        builtInLanguageFor(document.path, document.languageId)?.let { def ->
+            return BuiltInSemanticTokenizer(def.tokenizer)
+        }
         val scope = scopeFor(document) ?: return null
         val grammar = runCatching { registry.loadGrammar(scope) }.getOrNull() ?: return null
         return TextMateTokenizer(grammar, rules?.lineComment?.let { CommentSyntax(line = it) })
     }
 
     /**
-     * The grammar for a code fence in hover, signature help or a suggestion's details, by the language it's tagged with
-     * (` ```python `, ` ```ts `); null for one no grammar knows, which Aardink shows plain. Without semantic colours: those
-     * are the document's, by its lines.
+     * The tokenizer for a code fence or notebook cell (` ```python `, ` ```ts `, ` ```kt `): Aardink
+     * built-in language first, else tm4e; null when unknown (shown plain).
      */
-    fun codeFenceTokenizer(registry: Registry, language: String): TextMateTokenizer? {
+    fun codeFenceTokenizer(registry: Registry, language: String): IncrementalTokenizer? {
+        builtInLanguageForId(language)?.let { return it.tokenizer }
         val id = language.trim().lowercase()
         val scope = when (id) {
             "python", "py", "python3", "pyi", "pycon" -> PYTHON_SCOPE
@@ -139,6 +201,23 @@ internal object AardinkSyntax {
     private fun scopeFor(document: DocumentSession): String? =
         if (document.languageId in setOf("py", "pyi")) PYTHON_SCOPE else AssetPackGrammarLoader.scopeNameFor(document.path.substringAfterLast('/'))
 
+    /**
+     * Resolves Aardink token colours, font styles, and optional imported background for [theme]
+     * so built-in languages use Classic, Material You, or imported VS Code JSON themes too.
+     */
+    internal fun resolveBuiltInTheme(theme: SyntaxTheme): Triple<Map<TokenType, Color>, Map<TokenType, com.aardarch.aardink.core.TokenFontStyle>, Color?> {
+        if (theme.imported) {
+            val parsed = EditorThemeParser.fromJson(theme.json)
+            return Triple(
+                parsed?.tokenColors.orEmpty(),
+                parsed?.tokenFontStyles.orEmpty(),
+                parsed?.background,
+            )
+        }
+        val palette = theme.palette ?: return Triple(emptyMap(), emptyMap(), null)
+        return Triple(palette.aardinkTokenColors(), palette.aardinkTokenStyles(), null)
+    }
+
     fun editorTheme(theme: SyntaxTheme, registry: Registry, colors: ColorScheme, dark: Boolean): EditorTheme {
         val (tokenColors, tokenStyles) = textMateTokenColors(registry.colorMap)
         val semantic = semanticColorsByKind(theme.light, theme.semanticColors)
@@ -148,17 +227,18 @@ internal object AardinkSyntax {
             val hc = if (dark) EditorThemes.HighContrastDark else EditorThemes.HighContrastLight
             return hc.copy(
                 tokenColors = hc.tokenColors + tokenColors + semantic,
-                tokenFontStyles = tokenStyles,
+                tokenFontStyles = hc.tokenFontStyles + tokenStyles,
             )
         }
         val base = EditorTheme.fromColorScheme(colors, dark)
+        val (builtInColors, builtInStyles, importedBg) = resolveBuiltInTheme(theme)
         fun chromeColor(vararg keys: String): Color? =
             keys.firstNotNullOfOrNull { key -> theme.workbenchColors[key]?.let { runCatching { parseThemeColor(it) }.getOrNull() } }
         return base.copy(
             // An imported theme brings its own background.
-            background = if (theme.imported) themeBackground(theme.json) ?: base.background else base.background,
-            tokenColors = tokenColors + semantic,
-            tokenFontStyles = tokenStyles,
+            background = if (theme.imported) importedBg ?: themeBackground(theme.json) ?: base.background else base.background,
+            tokenColors = base.tokenColors + builtInColors + tokenColors + semantic,
+            tokenFontStyles = base.tokenFontStyles + builtInStyles + tokenStyles,
             bracketPairColors = (if (theme.light) LIGHT_BRACKET_COLORS else BRACKET_COLORS).map(::Color),
             chromeColors = ChromeColors(
                 indentGuide = chromeColor("editorIndentGuide.background1", "editorIndentGuide.background")

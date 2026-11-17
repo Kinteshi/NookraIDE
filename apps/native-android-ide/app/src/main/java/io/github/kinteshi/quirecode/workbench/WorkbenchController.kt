@@ -11042,8 +11042,9 @@ class WorkbenchController(private val context: Context) {
 
     private val packsDirectory: File get() = File(context.filesDir, "asset-packs")
 
-    /** Whether some grammar colours [path] (Python's built in, or an installed pack's). */
+    /** Whether Aardink's built-in languages or some TextMate grammar (Python's bundled one, or an installed pack) colour [path]. */
     fun hasGrammar(path: String): Boolean {
+        if (AardinkSyntax.hasBuiltInLanguage(path)) return true
         val name = path.substringAfterLast('/')
         return name.substringAfterLast('.', "").lowercase() in setOf("py", "pyi") || AssetPackGrammarLoader.scopeNameFor(name) != null
     }

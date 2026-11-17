@@ -34,7 +34,7 @@ import io.github.kinteshi.quirecode.editor.LspRange
 import io.github.kinteshi.quirecode.editor.LspTextEdit
 import io.github.kinteshi.quirecode.editor.ParsedSnippet
 import io.github.kinteshi.quirecode.editor.SemanticSpan
-import io.github.kinteshi.quirecode.editor.TextMateTokenizer
+import io.github.kinteshi.quirecode.editor.SemanticTokenizer
 import io.github.kinteshi.quirecode.editor.VisibleLines
 import java.io.Closeable
 import kotlinx.coroutines.launch
@@ -448,8 +448,8 @@ internal class AardinkEditorSurface(val state: CodeEditorState) : EditorSurface 
         runCatching { focusRequester.requestFocus() }
     }
 
-    /** The file's grammar, when one knows it; semantic colours are drawn through it. */
-    var tokenizer: TextMateTokenizer? = null
+    /** The file's tokenizer, when one knows it; semantic colours are drawn through it. */
+    var tokenizer: SemanticTokenizer? = null
 
     override fun setDecorations(decorations: List<EditorDecoration>) {
         val grammar = tokenizer ?: return

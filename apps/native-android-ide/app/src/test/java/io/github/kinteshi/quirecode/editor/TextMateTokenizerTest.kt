@@ -2,6 +2,8 @@ package io.github.kinteshi.quirecode.editor
 
 import com.aardarch.aardink.core.NamedTokenType
 import com.aardarch.aardink.core.Token
+import com.aardarch.aardink.core.TokenType
+import com.aardarch.aardink.languages.BuiltInLanguages
 import java.io.File
 import kotlin.random.Random
 import org.eclipse.tm4e.core.registry.IGrammarSource
@@ -115,5 +117,27 @@ class TextMateTokenizerTest {
         val edited = "a = 1\nb = f(a) \nc = 3"
         val result = tokenizer.tokenizeLines(edited, 1..1, previous)
         assertTrue(result.any { it.type == semantic && it.start == edited.indexOf("f(") })
+    }
+
+    @Test
+    fun builtInSemanticTokenizerOverlaysBuiltInTokensAndPreservesCommentSyntax() {
+        val tokenizer = BuiltInSemanticTokenizer(BuiltInLanguages.Kotlin.tokenizer)
+        assertEquals("//", tokenizer.commentSyntax?.line)
+        val text = "fun greet(name: String) {\n    println(name)\n}\n"
+        val plain = tokenizer.tokenizeFull(text)
+        assertTrue(plain.any { it.type == TokenType.Keyword && text.substring(it.start, it.end) == "fun" })
+        assertTrue(plain.any { it.type == TokenType.TypeName && text.substring(it.start, it.end) == "String" })
+
+        val line1Start = text.indexOf("    println")
+        val printlnCol = text.indexOf("println") - line1Start
+        tokenizer.semantic = mapOf(1 to listOf(SemanticSpan(1, printlnCol, printlnCol + 7, semantic)))
+        val overlaid = tokenizer.tokenizeFull(text)
+        val fnTokens = overlaid.filter { it.type == semantic }
+        assertEquals(listOf(text.indexOf("println") until text.indexOf("println") + 7), fnTokens.map { it.start until it.end })
+        overlaid.zipWithNext { a, b -> assertTrue(a.end <= b.start) }
+
+        val edited = "fun greet(name: String) {\n    println(name) \n}\n"
+        val incremental = tokenizer.tokenizeLines(edited, 1..1, overlaid)
+        assertTrue(incremental.any { it.type == semantic && it.start == edited.indexOf("println") })
     }
 }

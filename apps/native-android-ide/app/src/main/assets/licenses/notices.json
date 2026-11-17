@@ -1164,6 +1164,24 @@
   {
    "group": "Android libraries",
    "license": "Apache-2.0",
+   "name": "com.aardarch:aardink-languages-android",
+   "text": "50e6751797c50ded",
+   "title": "Aardink Languages",
+   "url": "https://github.com/aardarch/aardink",
+   "version": "0.10.0"
+  },
+  {
+   "group": "Android libraries",
+   "license": "Apache-2.0",
+   "name": "com.aardarch:aardink-languages",
+   "text": "50e6751797c50ded",
+   "title": "Aardink Languages",
+   "url": "https://github.com/aardarch/aardink",
+   "version": "0.10.0"
+  },
+  {
+   "group": "Android libraries",
+   "license": "Apache-2.0",
    "name": "com.aardarch:aardink",
    "text": "50e6751797c50ded",
    "title": "Aardink",

@@ -522,13 +522,13 @@ private fun LazyListScope.languages(controller: WorkbenchController, settings: W
         ChoiceRow(
             Icons.Outlined.ColorLens,
             "Colours for other languages",
-            "Files Python's built-in grammar doesn't cover can get VS Code's own grammar from Open VSX (10–60 KB each)",
+            "Languages not already built into the editor can get VS Code's own grammar from Open VSX (10–60 KB each)",
             LanguageDownloads.entries.map { it.key to it.label },
             settings.languageDownloads.key,
         ) { set(WorkbenchSettings.LANGUAGE_DOWNLOADS, it) }
     }
     item {
-        ActionRow(Icons.Outlined.Extension, "Get colours for a language…", "SQL, Rust, Go, YAML, shell, C/C++ and 40 more") {
+        ActionRow(Icons.Outlined.Extension, "Get colours for a language…", "Rust, Go, C/C++, Dart, C#, Ruby and 25+ more") {
             controller.commandFilter = ""
             controller.dialog = WorkbenchDialog.LanguagePacks
         }

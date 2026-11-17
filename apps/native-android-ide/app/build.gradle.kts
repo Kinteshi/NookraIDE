@@ -117,6 +117,7 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended:1.7.8")
     implementation("org.connectbot:termlib:0.3.14")
     implementation("com.aardarch:aardink:$aardinkVersion")
+    implementation("com.aardarch:aardink-languages:$aardinkVersion")
     implementation(project(":tm4e"))
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.google.code.gson:gson:2.13.1")

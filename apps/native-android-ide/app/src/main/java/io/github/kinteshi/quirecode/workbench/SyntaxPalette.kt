@@ -4,6 +4,9 @@ import androidx.compose.material3.ColorScheme
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.toArgb
+import com.aardarch.aardink.core.NamedTokenType
+import com.aardarch.aardink.core.TokenFontStyle
+import com.aardarch.aardink.core.TokenType
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import kotlin.math.abs
@@ -148,3 +151,37 @@ internal fun SyntaxPalette.semanticColors(): Map<String, String> = mapOf(
     "keyword" to keyword, "modifier" to keyword,
     "string" to string, "number" to number, "comment" to comment, "operator" to operator,
 ).mapValues { it.value.hex() }
+
+/** Aardink token colours for built-in languages matching this palette. */
+internal fun SyntaxPalette.aardinkTokenColors(): Map<TokenType, Color> = mapOf(
+    TokenType.Default to foreground,
+    TokenType.Keyword to keyword,
+    TokenType.Operator to operator,
+    TokenType.Punctuation to operator,
+    TokenType.StringLiteral to string,
+    TokenType.Comment to comment,
+    TokenType.Number to number,
+    TokenType.FunctionCall to function,
+    TokenType.TypeName to type,
+    TokenType.Identifier to variable,
+    TokenType.Annotation to type,
+    TokenType.Invalid to invalid,
+    NamedTokenType("comment.doc") to comment,
+    NamedTokenType("string.escape") to constant,
+    NamedTokenType("regexp") to constant,
+    NamedTokenType("constant") to constant,
+    NamedTokenType("constant.language") to keyword,
+    NamedTokenType("keyword.flow") to keyword,
+    NamedTokenType("number.hex") to number,
+    NamedTokenType("number.float") to number,
+    NamedTokenType("tag") to keyword,
+    NamedTokenType("attribute.name") to type,
+    NamedTokenType("attribute.value") to string,
+)
+
+/** Aardink font styles matching [scopeRules] (italic comments and language constants). */
+internal fun SyntaxPalette.aardinkTokenStyles(): Map<TokenType, TokenFontStyle> = mapOf(
+    TokenType.Comment to TokenFontStyle(italic = true),
+    NamedTokenType("comment.doc") to TokenFontStyle(italic = true),
+    NamedTokenType("constant.language") to TokenFontStyle(italic = true),
+)

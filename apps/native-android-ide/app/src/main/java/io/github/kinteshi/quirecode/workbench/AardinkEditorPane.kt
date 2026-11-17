@@ -26,6 +26,7 @@ import com.aardarch.aardink.core.InlineCompletion
 import com.aardarch.aardink.core.InlineCompletionProvider
 import com.aardarch.aardink.core.PlainTextTokenizer
 import com.aardarch.aardink.core.NamedTokenType
+import com.aardarch.aardink.core.TokenType
 import com.aardarch.aardink.ui.CodeEditorLayout
 import com.aardarch.aardink.ui.CursorBlinking
 import com.aardarch.aardink.ui.CursorStyle
@@ -54,7 +55,8 @@ internal fun AardinkEditorView(controller: WorkbenchController, document: Docume
     val syntax = remember(colors, dark, syntaxColors, controller.editorThemeRevision) { syntaxTheme(context, colors, dark, syntaxColors) }
     val registry = remember(syntax.key) { AardinkSyntax.registry(context, syntax) }
     val rules = remember(document.path, controller.grammarRevision) { AardinkSyntax.rulesFor(context, document) }
-    val grammar = remember(registry, document.path, controller.grammarRevision, rules) { AardinkSyntax.tokenizerFor(registry, document, rules) }
+    val builtIn = remember(document.path, document.languageId) { AardinkSyntax.builtInLanguageFor(document.path, document.languageId) }
+    val grammar = remember(registry, document.path, document.languageId, controller.grammarRevision, rules) { AardinkSyntax.tokenizerFor(registry, document, rules) }
     // Made once per file: a new theme or grammar changes its tokenizer, and keeps its text and undo.
     val state = remember { CodeEditorState(document.text, grammar ?: PlainTextTokenizer) }
     val surface = remember(state) { AardinkEditorSurface(state) }
@@ -62,11 +64,11 @@ internal fun AardinkEditorView(controller: WorkbenchController, document: Docume
     val overtype = surface.overtype
     // Refresh hints and lenses natively when language servers restart, emit */refresh, or toggles change.
     val settings = controller.settings
-    val service = remember(document.path, rules) {
+    val service = remember(document.path, rules, builtIn) {
         AardinkLanguageService(controller, document, rules, tokenKindAt = { offset ->
             val line = state.document.offsetToLineCol(offset.coerceIn(0, state.document.length)).first
-            (state.tokensForLine(line).firstOrNull { it.start <= offset && offset < it.end }?.type as? NamedTokenType)?.name
-        }, overtype = overtype, ownCards = { surface.geometry != null })
+            tokenKindName(state.tokensForLine(line).firstOrNull { it.start <= offset && offset < it.end }?.type)
+        }, builtInService = builtIn?.languageService, overtype = overtype, ownCards = { surface.geometry != null })
     }
     LaunchedEffect(
         state,
@@ -262,6 +264,13 @@ internal fun AardinkEditorView(controller: WorkbenchController, document: Docume
     }
     SideEffect { controller.editorReady(surface) }
     LaunchedEffect(document.path) { controller.onActiveDocumentChanged() }
+}
+
+private fun tokenKindName(type: TokenType?): String? = when (type) {
+    TokenType.Comment -> "comment"
+    TokenType.StringLiteral -> "string"
+    is NamedTokenType -> type.name
+    else -> null
 }
 
 /**
