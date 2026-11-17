@@ -56,8 +56,7 @@ Requirements: x86_64 or arm64 Linux with systemd, `curl`, `tar`, and Git for Sou
 
 3. Open the port if a firewall is active, for example `sudo ufw allow 19870/tcp`.
 
-4. In QuireCode: the connection chip at the top right → **Add a connection → A computer on your
-   network** (or **Pair with a computer** on the welcome page), paste the connection string, and tap
+4. In QuireCode: the connection chip at the top right → **Add a connection → Guided setup** (or **A computer on your network** / **Pair with a computer** on the welcome page), scan the QR code or paste the connection string it prints, and tap
    **Pair and connect**. The app saves the connection and reconnects to it on launch; the chip's
    dialog switches between it and the tablet's guest.
 
@@ -127,8 +126,8 @@ validated by Android's trusted Root CAs (`fp=public`).
    quirecode-daemon pair --tunnel quirecode.example.com
    ```
 
-   It prints `avf://quirecode.example.com:443?fp=public&code=XXXX-XXXX`. Paste that into **Add a
-   connection → A computer on your network** in QuireCode.
+   It prints `avf://quirecode.example.com:443?fp=public&code=XXXX-XXXX` and a QR code. Scan the QR code or paste the string into **Add a
+   connection → Guided setup** (or **A computer on your network**) in QuireCode.
 
 How the daemon treats tunnel traffic: `cloudflared` connects to the daemon from 127.0.0.1, but adds
 `CF-Connecting-IP` with the real client's address. The daemon goes by that address, so through the

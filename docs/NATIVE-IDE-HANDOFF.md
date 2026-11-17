@@ -6,15 +6,15 @@ the engine seam, batches, testing on the device) is in [CONTRIBUTING.md](../CONT
 
 ## Current state (2026-11-17)
 
-* **Progress:** batches 1–73 are done (41 was exploration with no app change); **batch 72** (`A12` Aardink `0.10.0` release review & pin bump, adding `G40`) and **batch 73** (`G40` subtle Material 3 UI animations, adopting native Aardink `0.10.0` features, and marking `A7` concluded) are implemented, unit-tested, and checked on the tablet.
+* **Progress:** batches 1–74 are done (41 was exploration with no app change); **batch 73** (`G40` UI animations, native Aardink `0.10.0` features, `A7` concluded) and **batch 74** (`G35` guided connection setup wizard and `G36` terminal QR + CameraX/ZXing QR scanner + clipboard offer) are implemented, unit-tested, and checked on the tablet.
 * **What's open:** [Open backlog](NATIVE-IDE-BATCHES.md#open-backlog-11-08), in two lists: the remaining general
   backlog and the Aardink switch's, which replaces this file's old "Remaining" list.
-* **Next batch:** pick next (candidates: `G35` + `G36`, `G37` + `G32`, `G1` + `G2`, or `G9` + `G10`).
+* **Next batch:** pick next (candidates: `G37` + `G32`, `G1` + `G2`, `G9` + `G10`, or evaluating `aardink-languages` as a fallback).
 * **Release 0.1.0 on hold:** all release backlog items (R1–R10: Apache-2.0, notices, signing, CI workflows, QuireCode renaming, diagnostics) and branch consolidation (R11) are finished. Tagging and release are paused awaiting user decision on repository visibility.
-* **Offline & remote features (batches 62–71):** file sharing/import/export (group 9, batch 62), Tailscale daemon hardening (batch 63), device folder workspaces without a guest (batch 64), paired device management UI (batch 65), guest folders kept offline with sync, offline Explorer, Quick Open, and offline search (batch 66), offline/device-only previews, images, hex view, snippets, and kernel-less notebook editing (batch 67, completing G29), and Troubleshoot port-vs-daemon probing + Tailscale split-tunneling guidance, Cloudflare Tunnel (`--tunnel`, public TLS), and router port forwarding (batch 68, completing G30 and G31); batch 69 fixed issues from review. Batch 70 implements and verifies G33/G34 (connection kinds and ordering, Recent origins and connection-scoped workspace/cache state). Batch 71 implements and verifies G39/G38 (workspace-first launch/offline recovery, explicit Reconnect, Work offline, workspace-switch confirmation, route-aware Troubleshoot, and TCP-probe-backed forwarding checks).
+* **Offline & remote features (batches 62–74):** file sharing/import/export (group 9, batch 62), Tailscale daemon hardening (batch 63), device folder workspaces without a guest (batch 64), paired device management UI (batch 65), guest folders kept offline with sync, offline Explorer, Quick Open, and offline search (batch 66), offline/device-only previews, images, hex view, snippets, and kernel-less notebook editing (batch 67, completing G29), and Troubleshoot port-vs-daemon probing + Tailscale split-tunneling guidance, Cloudflare Tunnel (`--tunnel`, public TLS), and router port forwarding (batch 68, completing G30 and G31); batch 69 fixed issues from review. Batch 70 implements and verifies G33/G34 (connection kinds and ordering, Recent origins and connection-scoped workspace/cache state). Batch 71 implements and verifies G39/G38 (workspace-first launch/offline recovery, explicit Reconnect, Work offline, workspace-switch confirmation, route-aware Troubleshoot, and TCP-probe-backed forwarding checks). Batch 74 implements and verifies G35/G36 (guided Add a connection wizard, live Tailscale status, copy/share host commands, daemon QR output, CameraX+ZXing scanner, and clipboard offer).
 * **The switch to Aardink:** [AARDINK-SWITCH-PLAN.md](AARDINK-SWITCH-PLAN.md). All phases are done (batches 42 to 57), now pinned to Aardink 0.10.0 (batch 72) with native `0.10.0` features adopted (batch 73) and `A7` concluded (11-17): **Aardink is the editor**; sora-editor was removed in batch 57, and tm4e is the app's own `tm4e` module. The workbench's own Material You cards are drawn over Aardink from its geometry (batch 54). Review each Aardink release against the plan (its "Release reviews"). Requests to Aardink are drafted or listed, not filed.
 * **Waiting on the user:** whether to continue the glibc test (backlog item 70 d).
-* **Tablet:** wireless ADB is paired and connected on `192.0.2.66:39495`; `QuireCode Dev` was updated with the batch 73 (`Aardink 0.10.0`) build, checked on device, and reset to clean app state (`pm clear`).
+* **Tablet:** wireless ADB is paired and connected on `192.0.2.66:39495`; `QuireCode Dev` was updated with the batch 74 build, checked on device, and reset to clean app state (`pm clear`).
 
 ## Where things are
 
@@ -37,7 +37,7 @@ cargo test -p avf-daemon -p avf-protocol
 PATH=$HOME/.cargo/bin:$PATH cargo zigbuild --release -p avf-daemon --target aarch64-unknown-linux-gnu.2.28
 ```
 
-At last run (batch 73): 416 app unit tests (415 passed, 1 opt-in live-host test skipped; on Java 21, installed beside 17) and 146 daemon/protocol tests pass; debug assemble and notices check pass. Clippy passes with the same five pre-existing lints; batch 73 was also checked on the tablet. CI runs app and Rust tests on every push.
+At last run (batch 74): 420 app unit tests (419 passed, 1 opt-in live-host test skipped; on Java 21, installed beside 17) and 147 daemon/protocol tests pass; debug assemble, ARM64 `zigbuild`, and notices check pass. Clippy passes with the same five pre-existing lints; batch 74 was also checked on the tablet. CI runs app and Rust tests on every push.
 
 ## Reference tablet (Galaxy Tab S11 Ultra, SM-X930)
 

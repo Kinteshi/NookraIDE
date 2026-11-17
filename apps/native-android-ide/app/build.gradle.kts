@@ -129,6 +129,12 @@ dependencies {
     implementation("org.commonmark:commonmark-ext-autolink:0.30.1")
     // SVG files drawn in the image viewer (Apache-2.0; no scripts, nothing fetched).
     implementation("com.caverock:androidsvg-aar:1.4")
+    // QR pairing scanner (G36, Apache-2.0): CameraX preview/analysis + ZXing core.
+    val cameraxVersion = "1.5.3"
+    implementation("androidx.camera:camera-camera2:$cameraxVersion")
+    implementation("androidx.camera:camera-lifecycle:$cameraxVersion")
+    implementation("androidx.camera:camera-view:$cameraxVersion")
+    implementation("com.google.zxing:core:3.5.4")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     testImplementation("junit:junit:4.13.2")

@@ -179,6 +179,8 @@ sealed interface WorkbenchDialog {
     data class Import(val items: List<DeviceItem>, val folder: String) : WorkbenchDialog
     /** Pairing with a computer from the connection string its daemon printed (G22: apart from the tablet's setup). */
     data object ComputerPairing : WorkbenchDialog
+    /** Guided "Add a connection" setup wizard (G35). */
+    data object ConnectionWizard : WorkbenchDialog
     /** A connection's name, URL and token by hand; [profileId] null for a new one (G22). */
     data class ConnectionEditor(val profileId: String?) : WorkbenchDialog
     /** Why a connected guest can stop (G17): opened from the banner that says it did. */

@@ -138,6 +138,60 @@
   {
    "group": "Android libraries",
    "license": "Apache-2.0",
+   "name": "androidx.camera.featurecombinationquery:featurecombinationquery",
+   "text": "bb28c48e3e078166",
+   "title": "Camera Feature Combination Query",
+   "url": "https://developer.android.com/jetpack/androidx/releases/camera-featurecombinationquery#1.5.3",
+   "version": "1.5.3"
+  },
+  {
+   "group": "Android libraries",
+   "license": "Apache-2.0",
+   "name": "androidx.camera:camera-camera2",
+   "text": "bb28c48e3e078166",
+   "title": "Camera2",
+   "url": "https://developer.android.com/jetpack/androidx/releases/camera#1.5.3",
+   "version": "1.5.3"
+  },
+  {
+   "group": "Android libraries",
+   "license": "Apache-2.0 AND BSD-2-Clause",
+   "name": "androidx.camera:camera-core",
+   "text": "bb28c48e3e078166",
+   "title": "Camera Core",
+   "url": "https://developer.android.com/jetpack/androidx/releases/camera#1.5.3",
+   "version": "1.5.3"
+  },
+  {
+   "group": "Android libraries",
+   "license": "Apache-2.0",
+   "name": "androidx.camera:camera-lifecycle",
+   "text": "bb28c48e3e078166",
+   "title": "Camera Lifecycle",
+   "url": "https://developer.android.com/jetpack/androidx/releases/camera#1.5.3",
+   "version": "1.5.3"
+  },
+  {
+   "group": "Android libraries",
+   "license": "Apache-2.0",
+   "name": "androidx.camera:camera-video",
+   "text": "bb28c48e3e078166",
+   "title": "Camera Video",
+   "url": "https://developer.android.com/jetpack/androidx/releases/camera#1.5.3",
+   "version": "1.5.3"
+  },
+  {
+   "group": "Android libraries",
+   "license": "Apache-2.0",
+   "name": "androidx.camera:camera-view",
+   "text": "bb28c48e3e078166",
+   "title": "Camera View",
+   "url": "https://developer.android.com/jetpack/androidx/releases/camera#1.5.3",
+   "version": "1.5.3"
+  },
+  {
+   "group": "Android libraries",
+   "license": "Apache-2.0",
    "name": "androidx.cardview:cardview",
    "text": "50e6751797c50ded",
    "title": "Android Support CardView v7",
@@ -525,6 +579,15 @@
   {
    "group": "Android libraries",
    "license": "Apache-2.0",
+   "name": "androidx.concurrent:concurrent-futures-ktx",
+   "text": "50e6751797c50ded",
+   "title": "AndroidX Futures Kotlin Extensions",
+   "url": "https://developer.android.com/topic/libraries/architecture/index.html",
+   "version": "1.1.0"
+  },
+  {
+   "group": "Android libraries",
+   "license": "Apache-2.0",
    "name": "androidx.concurrent:concurrent-futures",
    "text": "50e6751797c50ded",
    "title": "AndroidX Futures",
@@ -647,6 +710,15 @@
    "title": "Emoji2",
    "url": "https://developer.android.com/jetpack/androidx/releases/emoji2#1.4.0",
    "version": "1.4.0"
+  },
+  {
+   "group": "Android libraries",
+   "license": "Apache-2.0",
+   "name": "androidx.exifinterface:exifinterface",
+   "text": "bb28c48e3e078166",
+   "title": "ExifInterface",
+   "url": "https://developer.android.com/jetpack/androidx/releases/exifinterface#1.4.2",
+   "version": "1.4.2"
   },
   {
    "group": "Android libraries",
@@ -984,6 +1056,15 @@
   {
    "group": "Android libraries",
    "license": "Apache-2.0",
+   "name": "androidx.tracing:tracing-ktx",
+   "text": "50e6751797c50ded",
+   "title": "Android Tracing Runtime Kotlin Extensions",
+   "url": "https://developer.android.com/jetpack/androidx/releases/tracing#1.2.0",
+   "version": "1.2.0"
+  },
+  {
+   "group": "Android libraries",
+   "license": "Apache-2.0",
    "name": "androidx.tracing:tracing",
    "text": "50e6751797c50ded",
    "title": "Android Tracing",
@@ -1110,6 +1191,15 @@
   {
    "group": "Android libraries",
    "license": "Apache-2.0",
+   "name": "com.google.auto.value:auto-value-annotations",
+   "text": "50e6751797c50ded",
+   "title": "AutoValue Annotations",
+   "url": "http://github.com/google/auto",
+   "version": "1.6.3"
+  },
+  {
+   "group": "Android libraries",
+   "license": "Apache-2.0",
    "name": "com.google.code.gson:gson",
    "text": "50e6751797c50ded",
    "title": "Gson",
@@ -1133,6 +1223,15 @@
    "title": "Guava ListenableFuture only",
    "url": "https://github.com/google/guava",
    "version": "1.0"
+  },
+  {
+   "group": "Android libraries",
+   "license": "Apache-2.0",
+   "name": "com.google.zxing:core",
+   "text": "50e6751797c50ded",
+   "title": "ZXing Core",
+   "url": "https://github.com/zxing/zxing",
+   "version": "3.5.4"
   },
   {
    "group": "Android libraries",
@@ -2586,6 +2685,15 @@
   {
    "group": "Guest daemon (Rust crates)",
    "license": "MIT",
+   "name": "qrcode",
+   "text": "3c33ed359e50c860",
+   "title": "qrcode",
+   "url": "https://github.com/kennytm/qrcode-rust",
+   "version": "0.14.1"
+  },
+  {
+   "group": "Guest daemon (Rust crates)",
+   "license": "MIT",
    "name": "quote",
    "text": "23f18e03dc49df91",
    "title": "quote",
@@ -3270,6 +3378,7 @@
   "2d01890414494742": "Copyright (c) 2014-2026 Sean McArthur\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in\nall copies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN\nTHE SOFTWARE.\n",
   "3521672491a34794": "Copyright (c) 2021 RustCrypto Developers\n\nPermission is hereby granted, free of charge, to any\nperson obtaining a copy of this software and associated\ndocumentation files (the \"Software\"), to deal in the\nSoftware without restriction, including without\nlimitation the rights to use, copy, modify, merge,\npublish, distribute, sublicense, and/or sell copies of\nthe Software, and to permit persons to whom the Software\nis furnished to do so, subject to the following\nconditions:\n\nThe above copyright notice and this permission notice\nshall be included in all copies or substantial portions\nof the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF\nANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED\nTO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A\nPARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT\nSHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY\nCLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION\nOF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR\nIN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER\nDEALINGS IN THE SOFTWARE.\n",
   "378f5840b258e277": "Copyright (c) 2014 Alex Crichton\n\nPermission is hereby granted, free of charge, to any\nperson obtaining a copy of this software and associated\ndocumentation files (the \"Software\"), to deal in the\nSoftware without restriction, including without\nlimitation the rights to use, copy, modify, merge,\npublish, distribute, sublicense, and/or sell copies of\nthe Software, and to permit persons to whom the Software\nis furnished to do so, subject to the following\nconditions:\n\nThe above copyright notice and this permission notice\nshall be included in all copies or substantial portions\nof the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF\nANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED\nTO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A\nPARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT\nSHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY\nCLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION\nOF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR\nIN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER\nDEALINGS IN THE SOFTWARE.\n",
+  "3c33ed359e50c860": "Copyright (c) 2016 kennytm\n\nPermission is hereby granted, free of charge, to any person obtaining a copy of\nthis software and associated documentation files (the \"Software\"), to deal in\nthe Software without restriction, including without limitation the rights to\nuse, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of\nthe Software, and to permit persons to whom the Software is furnished to do so,\nsubject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS\nFOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR\nCOPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER\nIN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN\nCONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.\n",
   "420966136f02a9f4": "MIT License\n\nCopyright (c) the authors of asn1-rs-impl (https://github.com/rusticata/asn1-rs.git)\n\nPermission is hereby granted, free of charge, to any person obtaining a copy of this software and\nassociated documentation files (the \"Software\"), to deal in the Software without restriction, including\nwithout limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the\nfollowing conditions:\n\nThe above copyright notice and this permission notice shall be included in all copies or substantial\nportions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT\nLIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO\nEVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER\nIN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE\nUSE OR OTHER DEALINGS IN THE SOFTWARE.\n",
   "4249c8e6c5ebb85f": "Copyright (c) 2019 Tower Contributors\n\nPermission is hereby granted, free of charge, to any\nperson obtaining a copy of this software and associated\ndocumentation files (the \"Software\"), to deal in the\nSoftware without restriction, including without\nlimitation the rights to use, copy, modify, merge,\npublish, distribute, sublicense, and/or sell copies of\nthe Software, and to permit persons to whom the Software\nis furnished to do so, subject to the following\nconditions:\n\nThe above copyright notice and this permission notice\nshall be included in all copies or substantial portions\nof the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF\nANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED\nTO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A\nPARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT\nSHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY\nCLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION\nOF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR\nIN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER\nDEALINGS IN THE SOFTWARE.\n",
   "42fa16951ce7f24b": "Copyright (c) 2018-2024 The rust-random Project Developers\nCopyright (c) 2014 The Rust Project Developers\n\nPermission is hereby granted, free of charge, to any\nperson obtaining a copy of this software and associated\ndocumentation files (the \"Software\"), to deal in the\nSoftware without restriction, including without\nlimitation the rights to use, copy, modify, merge,\npublish, distribute, sublicense, and/or sell copies of\nthe Software, and to permit persons to whom the Software\nis furnished to do so, subject to the following\nconditions:\n\nThe above copyright notice and this permission notice\nshall be included in all copies or substantial portions\nof the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF\nANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED\nTO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A\nPARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT\nSHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY\nCLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION\nOF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR\nIN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER\nDEALINGS IN THE SOFTWARE.\n",

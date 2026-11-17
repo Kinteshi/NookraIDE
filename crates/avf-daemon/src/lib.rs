@@ -143,10 +143,7 @@ pub fn print_pairing_code(args: &[String]) -> Result<(), String> {
         (Some(host), None) => {
             let (host, port) = parse_host_port(&host, 19870, "invalid port in --remote")?;
             let material = tls::load_or_create(&pairing::config_dir()?)?;
-            println!("    {}", tls::connection_string(&host, port, &material.fingerprint, &code));
-            println!();
-            println!("In QuireCode, tap the connection chip, then Add a connection > A computer on your network,");
-            println!("and paste this. The code in it works once,");
+            print_remote_pairing(&tls::connection_string(&host, port, &material.fingerprint, &code));
         }
         (None, Some(host)) => {
             let stripped = host
@@ -156,15 +153,35 @@ pub fn print_pairing_code(args: &[String]) -> Result<(), String> {
                 .trim_end_matches("/ws")
                 .trim_end_matches('/');
             let (host, port) = parse_host_port(stripped, 443, "invalid port in --tunnel")?;
-            println!("    {}", tls::public_connection_string(&host, port, &code));
-            println!();
-            println!("In QuireCode, tap the connection chip, then Add a connection > A computer on your network,");
-            println!("and paste this. The code in it works once,");
+            print_remote_pairing(&tls::public_connection_string(&host, port, &code));
         }
         (Some(_), Some(_)) => unreachable!(),
     }
     println!("for {minutes} minutes, and allows {} wrong attempts.", pairing::MAX_ATTEMPTS);
     Ok(())
+}
+
+fn print_remote_pairing(connection: &str) {
+    println!("    {connection}");
+    if let Ok(qr) = render_qr_terminal(connection) {
+        println!();
+        for line in qr.lines() {
+            println!("    {line}");
+        }
+    }
+    println!();
+    println!("In QuireCode, tap the connection chip, then Add a connection > A computer on your network,");
+    println!("and scan this QR code or paste the connection string. The code in it works once,");
+}
+
+fn render_qr_terminal(payload: &str) -> Result<String, String> {
+    let code = qrcode::QrCode::new(payload.as_bytes()).map_err(|error| error.to_string())?;
+    Ok(code
+        .render::<qrcode::render::unicode::Dense1x2>()
+        .quiet_zone(true)
+        .dark_color(qrcode::render::unicode::Dense1x2::Dark)
+        .light_color(qrcode::render::unicode::Dense1x2::Light)
+        .build())
 }
 
 fn parse_host_port(raw: &str, default_port: u16, port_error: &'static str) -> Result<(String, u16), String> {
@@ -4290,5 +4307,15 @@ mod tests {
         ));
         let _ = cancel_sender.send(());
         task.await.unwrap();
+    }
+
+    #[test]
+    fn render_qr_terminal_encodes_connection_string() {
+        let connection = "avf://192.168.1.10:19870?fp=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef&code=K7QM-2XPA";
+        let qr = render_qr_terminal(connection).expect("valid QR output");
+        let lines: Vec<&str> = qr.lines().collect();
+        assert!(lines.len() >= 15);
+        assert!(lines.iter().all(|line| !line.is_empty()));
+        assert!(qr.contains('\u{2588}') || qr.contains('\u{2580}') || qr.contains('\u{2584}'));
     }
 }

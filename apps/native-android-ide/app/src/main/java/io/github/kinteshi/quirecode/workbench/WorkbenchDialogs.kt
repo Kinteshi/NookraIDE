@@ -103,6 +103,7 @@ fun WorkbenchDialogHost(controller: WorkbenchController) {
     when (val dialog = controller.dialog) {
         null -> Unit
         WorkbenchDialog.Connect -> ConnectionsDialog(controller)
+        WorkbenchDialog.ConnectionWizard -> ConnectionWizardDialog(controller)
         WorkbenchDialog.ComputerPairing -> ComputerPairingDialog(controller)
         is WorkbenchDialog.SaveToDevice -> SaveToDeviceDialog(controller, dialog)
         is WorkbenchDialog.Import -> ImportDialog(controller, dialog)

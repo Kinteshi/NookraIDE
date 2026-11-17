@@ -30,6 +30,7 @@ import androidx.compose.material.icons.outlined.Computer
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.material.icons.outlined.Explore
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.LinkOff
 import androidx.compose.material.icons.outlined.MoreVert
@@ -206,10 +207,13 @@ internal fun ConnectionsDialog(controller: WorkbenchController) {
                 if (controller.managesDevices) PairedDevicesSection(controller, summary)
                 Text("Add a connection", style = MaterialTheme.typography.titleSmall, color = colors.primary)
                 Column {
+                    AddRow(Icons.Outlined.Explore, "Guided setup", "Choose between the tablet guest, Wi-Fi, Tailscale or a tunnel") {
+                        controller.dialog = WorkbenchDialog.ConnectionWizard
+                    }
                     AddRow(Icons.Outlined.TabletAndroid, "This tablet's Linux guest", "Install the daemon in Linux Terminal, or pair it again") {
                         controller.beginGuestSetup()
                     }
-                    AddRow(Icons.Outlined.Computer, "A computer on your network", "Linux, or Windows through WSL: paste the connection string it prints") {
+                    AddRow(Icons.Outlined.Computer, "A computer on your network", "Scan a QR code or paste the connection string it prints") {
                         controller.dialog = WorkbenchDialog.ComputerPairing
                     }
                     AddRow(Icons.Outlined.Tune, "By hand", "A WebSocket URL and a token") {
@@ -521,11 +525,26 @@ internal fun ConnectionEditorDialog(controller: WorkbenchController, editor: Wor
     )
 }
 
-/** Pairing with a computer from its connection string (G22: apart from the tablet's own setup). */
+/** Pairing with a computer from its connection string or QR code (G22, G36). */
 @Composable
 internal fun ComputerPairingDialog(controller: WorkbenchController) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     var connectionString by remember { mutableStateOf("") }
+    var scannerOpen by remember { mutableStateOf(false) }
+    var clipboardOffer by remember { mutableStateOf(readClipboardConnectionString(context)) }
     val colors = MaterialTheme.colorScheme
+
+    androidx.compose.runtime.DisposableEffect(lifecycleOwner, context) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME && connectionString.isBlank()) {
+                clipboardOffer = readClipboardConnectionString(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
     AlertDialog(
         onDismissRequest = { controller.dialog = null },
         title = { Text("Pair with a computer") },
@@ -537,35 +556,44 @@ internal fun ComputerPairingDialog(controller: WorkbenchController) {
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 Text(
-                    "1. On the computer, run the release's install-native-daemon.sh with --remote or --tailscale (on Windows, install-host-daemon-wsl.ps1; " +
-                        "see docs/HOSTING-THE-DAEMON.md on GitHub). It prints a connection string starting with avf://. To pair again " +
-                        "later, run `quirecode-daemon pair --remote <address>:19870` (or `--tunnel <hostname>` behind Cloudflare Tunnel).",
+                    "Run `quirecode-daemon pair --remote <address>:19870` (or `--tunnel <hostname>`) on the computer, then scan the QR code or paste the `avf://` string it prints.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = colors.onSurfaceVariant,
                 )
-                Text("2. Paste it here.", style = MaterialTheme.typography.bodyMedium)
-                OutlinedTextField(
-                    value = connectionString,
-                    onValueChange = { connectionString = it.trim() },
-                    label = { Text("Connection string") },
-                    placeholder = { Text("avf://192.168.1.10:19870?fp=…&code=…") },
-                    singleLine = true,
-                    isError = controller.pairingError != null,
-                    supportingText = controller.pairingError?.let { error -> { Text(error) } },
-                    keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, imeAction = ImeAction.Go),
-                    keyboardActions = KeyboardActions(onGo = { controller.pairWithConnectionString(connectionString) }),
-                    modifier = Modifier.fillMaxWidth(),
+                PairingInputSection(
+                    controller = controller,
+                    connectionString = connectionString,
+                    onConnectionStringChange = { connectionString = it },
+                    clipboardOffer = clipboardOffer,
+                    onDismissClipboardOffer = { clipboardOffer = null },
+                    onOpenScanner = { scannerOpen = true },
                 )
             }
         },
         confirmButton = {
             TextButton(
                 onClick = { controller.pairWithConnectionString(connectionString) },
-                enabled = !controller.busy && connectionString.startsWith("avf://"),
+                enabled = !controller.busy && extractConnectionStringFromText(connectionString) != null,
             ) { Text(if (controller.busy) "Pairing…" else "Pair and connect") }
         },
-        dismissButton = { TextButton(onClick = { controller.dialog = WorkbenchDialog.Connect }) { Text("Back") } },
+        dismissButton = {
+            Row {
+                TextButton(onClick = { controller.dialog = WorkbenchDialog.ConnectionWizard }) { Text("Guided setup") }
+                TextButton(onClick = { controller.dialog = WorkbenchDialog.Connect }) { Text("Back") }
+            }
+        },
     )
+
+    if (scannerOpen) {
+        QrScannerDialog(
+            onScanned = { scanned ->
+                scannerOpen = false
+                connectionString = scanned
+                controller.pairWithConnectionString(scanned)
+            },
+            onDismiss = { scannerOpen = false },
+        )
+    }
 }
 
 /**
