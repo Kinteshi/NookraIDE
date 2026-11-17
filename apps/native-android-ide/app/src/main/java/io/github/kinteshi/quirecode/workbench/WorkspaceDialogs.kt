@@ -142,7 +142,7 @@ internal fun OpenFolderDialog(controller: WorkbenchController, dialog: Workbench
             }
         },
         confirmButton = {
-            TextButton(onClick = { controller.openWorkspace(dialog.path) }, enabled = dialog.path != controller.workspaceRoot) {
+            TextButton(onClick = { controller.requestOpenWorkspace(dialog.path) }, enabled = dialog.path != controller.workspaceRoot) {
                 Text("Open ${dialog.path.substringAfterLast('/').ifEmpty { dialog.path }}", maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         },

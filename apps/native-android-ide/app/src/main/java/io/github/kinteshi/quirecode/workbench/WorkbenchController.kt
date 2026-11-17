@@ -8,6 +8,8 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
@@ -196,6 +198,8 @@ private const val NEXT_EDIT_DELAY_MS = 600L
 private const val DELETED_CELLS_KEPT = 20
 /** Recently opened workspace folders, newest first. */
 private const val RECENT_WORKSPACES_KEY = "recent-workspaces"
+private const val OFFLINE_BY_CHOICE_KEY = "offline-workspace-by-choice"
+private const val GUEST_STOPPED_AT_KEY = "guest-stopped-at"
 private const val RECENT_WORKSPACES_LIMIT = 10
 /** Untitled (scratch:) files open at the last stop; their text is in the document cache. */
 private const val SESSION_UNTITLED_KEY = "session-untitled"
@@ -285,6 +289,7 @@ private const val MAX_QUICK_OPEN_FILES = 20_000
 /** Chat options remembered across sessions; approvals ("permissions") never are. */
 private val rememberedChatCategories = setOf("model", "mode")
 private const val LINUX_TERMINAL_PACKAGE = "com.android.virtualization.terminal"
+private const val TAILSCALE_PACKAGE = "com.tailscale.ipn"
 private val skippedDirectories = setOf(
     ".git", "node_modules", "__pycache__", ".venv", "venv", ".mypy_cache", ".ruff_cache", ".pytest_cache",
     ".ipynb_checkpoints", "dist", "build", "target", ".gradle", ".idea", ".tox",
@@ -494,7 +499,9 @@ class WorkbenchController(private val context: Context) {
     /** The guest that owns [sessionWorkspace]; device folders have no connection scope. */
     private var sessionConnectionId: String? = null
     /** A kept guest folder was opened locally by choice, rather than left open by a lost connection. */
-    private var offlineWorkspaceByChoice = false
+    private var offlineWorkspaceByChoice by mutableStateOf(false)
+    /** Set when the user opened Linux Terminal from our offline UI, so returning checks once for the booted guest. */
+    private var waitingForLinuxTerminal = false
     /** Set while switching: closing the old tabs must not overwrite their saved session. */
     private var switchingWorkspace = false
     private var pendingRecentWorkspace: RecentWorkspace? = null
@@ -716,16 +723,23 @@ class WorkbenchController(private val context: Context) {
         AssetPackGrammarLoader.loadInstalledOnce(context)
         profileStore.legacyCacheOwnerId(profiles.firstOrNull { it.autoConnect }?.id ?: profiles.firstOrNull()?.id)
         recentWorkspaces = loadRecentWorkspaces()
+        offlineWorkspaceByChoice = preferences.getBoolean(OFFLINE_BY_CHOICE_KEY, false)
         refreshLauncherShortcuts()
         restoreUntitledFiles()
         if (settings.chatAgent != ChatAgentKind.Copilot) {
             chatAgent = AcpClient(vfs, settings.chatAgent.tool)
             chatAgentKind = settings.chatAgent
         }
-        // Auto-connect follows the explicit order; when all profiles are opted out, keep the last-used one selected.
-        val initialProfile = profiles.firstOrNull { it.autoConnect }
-            ?: profiles.firstOrNull { it.id == profileStore.lastUsedId() }
-            ?: profiles.firstOrNull()
+        // Keep the last workspace and its owning connection as primary (G39).
+        val plan = planStartupConnection(
+            profiles = profiles,
+            lastUsedProfileId = profileStore.lastUsedId(),
+            lastWorkspace = recentWorkspaces.firstOrNull(),
+            offlineByChoice = offlineWorkspaceByChoice,
+            autoConnectSetting = settings.autoConnect,
+            offlineWorkspaceSetting = settings.offlineWorkspace,
+        )
+        val initialProfile = profiles.firstOrNull { it.id == plan.selectedProfileId } ?: profiles.firstOrNull()
         initialProfile?.let(::selectProfile)
         files.offline?.migrateLegacyScope(profileStore.legacyCacheOwnerId(initialProfile?.id))
         preferences.getString("grammar-load-errors", null)
@@ -734,16 +748,16 @@ class WorkbenchController(private val context: Context) {
         // Once the controller is built: restoring a session touches state declared below this block (pinned tabs),
         // which is still null here. Starting offline, with no connection to retry, crashed the app on launch.
         mainHandler.post {
-            // A device folder that was open last (G29) opens at once, guest or not.
-            recentWorkspaces.firstOrNull { it.isDeviceFolder }?.path
-                ?.takeIf(files.device::hasAccess)?.let(::openWorkspace)
-            // Pick up where the last session left off: reconnect, then reopen its tabs (onWorkspaceConnected).
-            if (settings.autoConnect && profileAutoConnect && endpoint.isNotBlank() && token.isNotBlank()) {
+            plan.openDeviceWorkspace
+                ?.takeIf(files.device::hasAccess)
+                ?.let(::openWorkspace)
+                ?: plan.openOfflineGuestWorkspace?.let { recent ->
+                    openOfflineWorkspace(recent.path, recent.connectionId, byChoice = offlineWorkspaceByChoice)
+                }
+            if (plan.connectProfileId != null && endpoint.isNotBlank() && token.isNotBlank()) {
                 autoConnecting = true
-                autoConnectFallbacks = profiles.filter { it.autoConnect && it.id != profileId }
+                autoConnectFallbacks = plan.fallbackProfileIds.mapNotNull { id -> profiles.firstOrNull { it.id == id } }
                 connectGuest()
-            } else if (settings.offlineWorkspace && workspaceRoot == null) {
-                openOfflineWorkspace()
             }
         }
     }
@@ -767,22 +781,45 @@ class WorkbenchController(private val context: Context) {
                     notebookMirrors.clear()
                     cellMirrors.clear()
                     notebookServer.onDisconnected()
-                    notebooks.values.forEach { it.cellSuggestion = null }
+                    notebooks.values.forEach { session ->
+                        session.cellSuggestion = null
+                        session.kernel.onDisconnected()
+                        session.kernelState = "Disconnected"
+                        session.kernelName = null
+                        session.busy = false
+                        session.widgets.models.clear()
+                        val now = System.currentTimeMillis()
+                        session.notebook.cells.forEach { cell ->
+                            if (cell.running) cell.lastRun = CellRun(failed = true, millis = cell.runStartedAt?.let { now - it }, finishedAt = now)
+                            cell.running = false
+                            cell.queued = false
+                            cell.runStartedAt = null
+                        }
+                        session.executing.clear()
+                    }
                     chatAgent.onDisconnected()
-                    notebooks.values.forEach { it.kernel.onDisconnected(); it.kernelState = "Disconnected" }
                     chatBusy = false
                     copilotStatus = if (copilotEnabled) "Disconnected" else "Off"
+                    debugger.detach(IOException("Connection lost"))
+                    childDebugger?.detach(IOException("Connection lost"))
+                    if (debugState != DebugState.Idle) endDebugSession("Debug session ended: connection lost")
                 }
                 if (!isConnected && !busy) {
                     GuestConnectionService.stop(context)
                     if (!failure.isNullOrBlank()) status = "Guest disconnected: $failure"
-                    // The daemon restarts on updates and the VM may pause; come back by ourselves.
-                    if (wasConnected && !replacingConnection) scheduleReconnect()
                 }
-                // Connected, then gone: the guest stopped or its daemon did. Said when reconnecting fails. Not when
-                // the user switched connections: the old one closing is theirs.
+                // Connected, then gone: the guest stopped or its daemon did. Try one quick reconnect for brief hiccups,
+                // unless the user switched connections or chose to work offline (G39).
                 if (wasConnected && !isConnected) {
-                    if (replacingConnection) replacingConnection = false else guestStoppedAt = System.currentTimeMillis()
+                    if (replacingConnection || offlineWorkspaceByChoice) {
+                        replacingConnection = false
+                    } else {
+                        updateGuestStoppedAt(System.currentTimeMillis())
+                        if (!busy) {
+                            reconnectAttempt = 0
+                            scheduleReconnect()
+                        }
+                    }
                 }
                 wasConnected = isConnected
             }
@@ -1153,7 +1190,8 @@ class WorkbenchController(private val context: Context) {
         connectionCheck = null
         // Its problems go with it; the next saved connection is the one to connect to.
         resetConnectionProblems()
-        guestStoppedAt = null
+        updateGuestStoppedAt(null)
+        updateOfflineByChoice(false)
         val next = profiles.firstOrNull()
         when {
             // Connected through it: that connection closes with it (it went on, under the next connection's name, until
@@ -1179,6 +1217,7 @@ class WorkbenchController(private val context: Context) {
     }
 
     fun connectGuest() {
+        updateOfflineByChoice(false)
         busy = true
         guestProblem = null
         status = "Connecting to guest"
@@ -1190,7 +1229,10 @@ class WorkbenchController(private val context: Context) {
         startKeepAlive("Connecting")
         // A paired remote host's pin only applies to the endpoint it was paired with.
         val pin = profileFingerprint?.takeIf { endpoint.trim().startsWith("wss://") }
-        vfs.connect(endpoint.trim(), token, pin).thenCompose { vfs.roots() }.whenComplete { guestRoots, error ->
+        runCatching { vfs.connect(endpoint.trim(), token, pin) }
+            .getOrElse { CompletableFuture.failedFuture(it) }
+            .thenCompose { vfs.roots() }
+            .whenComplete { guestRoots, error ->
             post {
                 busy = false
                 if (error != null) {
@@ -1226,7 +1268,8 @@ class WorkbenchController(private val context: Context) {
                 connectionCheck = null
                 connectionBannerHiddenFor = null
                 replacingConnection = false
-                guestStoppedAt = null
+                updateGuestStoppedAt(null)
+                waitingForLinuxTerminal = false
                 checkDaemonVersion()
                 reconnectAttempt = 0
                 scheduledReconnect?.cancel(false)
@@ -1246,11 +1289,10 @@ class WorkbenchController(private val context: Context) {
                 val recentTarget = pendingRecentWorkspace?.takeIf { recent ->
                     recent.connectionId == profileId && guestRoots.any { isPathWithinRoot(recent.path, it) }
                 }
+                pendingRecentWorkspace = null
                 when {
-                    recentTarget != null -> {
-                        pendingRecentWorkspace = null
+                    recentTarget != null && (recentTarget.path != workspaceRoot || sessionConnectionId != profileId) ->
                         openWorkspace(recentTarget.path)
-                    }
                     deviceWorkspace || deviceOpening -> startCopilot()
                     workspaceRoot == null -> chooseWorkspace(guestRoots, ::onWorkspaceConnected)
                     isGuestPath(workspaceRoot!!) && sessionConnectionId != profileId -> openWorkspace(workspaceRoot!!)
@@ -1505,12 +1547,12 @@ class WorkbenchController(private val context: Context) {
         // Files may have changed from Linux Terminal or another app meanwhile.
         if (visible) refreshExplorer()
         if (!visible && settings.autoSave in setOf(AutoSaveMode.OnFocusChange, AutoSaveMode.OnWindowChange)) autoSaveAll()
-        // Coming back from Linux Terminal usually means the guest is up now.
-        // A retry scheduled in the background may be a minute away; try now instead.
-        if (visible && !connected && !busy && (guestUnreachable || scheduledReconnect != null)) {
+        // Coming back after opening Linux Terminal tries once for the booted guest (G39).
+        if (visible && !connected && !busy && waitingForLinuxTerminal) {
+            waitingForLinuxTerminal = false
             scheduledReconnect?.cancel(false)
             scheduledReconnect = null
-            autoConnecting = true
+            reconnectAttempt = 0
             connectGuest()
         }
     }
@@ -2912,20 +2954,25 @@ class WorkbenchController(private val context: Context) {
     var connectionCheck by mutableStateOf<ConnectionCheck?>(null)
         private set
 
-    /** Checks what can be checked from here: Linux Terminal turned on, the TCP port open, and the daemon answering `/health` (G31). */
+    /** Checks Linux Terminal, local network/Tailscale state, TCP port, and daemon `/health` (G31, G38). */
     fun checkConnection() {
         val targetEndpoint = endpoint.ifBlank { GUEST_DAEMON_ENDPOINT }
         val target = endpointHostPort(targetEndpoint)
         val tablet = isTabletGuestEndpoint(targetEndpoint)
         val pin = profileFingerprint
+        val route = connectionRoute(targetEndpoint)
+        val hasTailscaleApp = tailscaleAvailable()
         connectionCheck = ConnectionCheck(
             terminalAvailable = if (tablet) linuxTerminalAvailable() else null,
             daemonAnswers = null,
             target = target?.let { "${it.first}:${it.second}" },
             checking = true,
             portOpen = null,
+            route = route,
+            tailscaleInstalled = hasTailscaleApp,
         )
         io.execute {
+            val (vpnActive, onLocalNetwork, onCellularOnly) = probeNetworkFacts()
             val (portOpen, answers) = if (target != null) {
                 probeDaemonPort(targetEndpoint, pin)
             } else {
@@ -2936,9 +2983,40 @@ class WorkbenchController(private val context: Context) {
                     daemonAnswers = if (target != null) answers else null,
                     portOpen = if (target != null) portOpen else null,
                     checking = false,
+                    vpnActive = vpnActive,
+                    onLocalNetwork = onLocalNetwork,
+                    onCellularOnly = onCellularOnly,
                 )
+                if (tablet && !connected && endpoint.ifBlank { GUEST_DAEMON_ENDPOINT } == targetEndpoint) {
+                    guestForwardingSuspected = portOpen && !answers
+                }
             }
         }
+    }
+
+    private fun probeNetworkFacts(): Triple<Boolean, Boolean, Boolean> {
+        val manager = context.getSystemService(ConnectivityManager::class.java)
+        var hasVpn = false
+        var hasLocal = false
+        var hasCellular = false
+        val activeCaps = manager?.activeNetwork?.let(manager::getNetworkCapabilities)
+        if (activeCaps != null) {
+            if (activeCaps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) hasVpn = true
+            if (activeCaps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+                activeCaps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+            ) {
+                hasLocal = true
+            }
+            if (activeCaps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) hasCellular = true
+        }
+        val hasTailscaleAddress = runCatching {
+            java.net.NetworkInterface.getNetworkInterfaces()?.asSequence().orEmpty().any { iface ->
+                iface.isUp && iface.inetAddresses.asSequence().any { address ->
+                    address is java.net.Inet4Address && address.hostAddress?.ipv4InTailscaleRange() == true
+                }
+            }
+        }.getOrDefault(false)
+        return Triple(hasVpn || hasTailscaleAddress, hasLocal, hasCellular && !hasLocal)
     }
 
     // Paired devices, managed from the app (G30) -------------------------------------------------------
@@ -3007,13 +3085,51 @@ class WorkbenchController(private val context: Context) {
         performConnectionSwitch(profile, recent)
     }
 
-    private fun hasGuestUnsavedEdits(): Boolean =
-        documents.any { it.dirty && it.cacheScope == profileId && isGuestPath(it.path) } ||
-            notebooks.values.any { it.document.cacheScope == profileId && it.notebook.dirty }
+    private fun hasGuestUnsavedEdits(): Boolean {
+        val scope = sessionConnectionId ?: profileId
+        return documents.any { it.dirty && it.cacheScope == scope && isGuestPath(it.path) } ||
+            notebooks.values.any { it.document.cacheScope == scope && it.notebook.dirty }
+    }
 
     private fun hasGuestWorkRunning(): Boolean =
-        terminals.any { !it.exited } || debugState != DebugState.Idle ||
-            chatAgentRunning || notebooks.values.any { it.executing.isNotEmpty() || it.kernelState == "Busy" }
+        connected && (
+            terminals.any { !it.exited } || debugState != DebugState.Idle ||
+                chatAgentRunning || notebooks.values.any { it.executing.isNotEmpty() || it.kernelState == "Busy" || it.kernelName != null }
+            )
+
+    private fun hasWorkspaceWorkRunning(): Boolean =
+        connected && (
+            debugState != DebugState.Idle || chatAgentRunning ||
+                notebooks.values.any { it.executing.isNotEmpty() || it.kernelState == "Busy" || it.kernelName != null }
+            )
+
+    /** Disconnects intentionally so the current workspace stays usable on this device (G39). */
+    fun requestWorkOffline() {
+        if (!connected) {
+            updateOfflineByChoice(true)
+            scheduledReconnect?.cancel(false)
+            scheduledReconnect = null
+            dialog = null
+            return
+        }
+        if (hasGuestWorkRunning()) {
+            dialog = WorkbenchDialog.ConfirmWorkOffline(hasGuestUnsavedEdits(), hasRunning = true)
+            return
+        }
+        confirmWorkOffline()
+    }
+
+    fun confirmWorkOffline() {
+        dialog = null
+        replacingConnection = true
+        updateOfflineByChoice(true)
+        updateGuestStoppedAt(null)
+        scheduledReconnect?.cancel(false)
+        scheduledReconnect = null
+        waitingForLinuxTerminal = false
+        if (connected) vfs.disconnect()
+        status = "Working offline on this device"
+    }
 
     private fun performConnectionSwitch(
         profile: io.github.kinteshi.quirecode.transport.ConnectionProfile,
@@ -3025,7 +3141,8 @@ class WorkbenchController(private val context: Context) {
         autoConnectFallbacks = emptyList()
         selectProfile(profile)
         resetConnectionProblems()
-        guestStoppedAt = null
+        updateGuestStoppedAt(null)
+        updateOfflineByChoice(false)
         connectionCheck = null
         requestGuestConnection()
     }
@@ -3084,7 +3201,8 @@ class WorkbenchController(private val context: Context) {
                 if (connect) {
                     replacingConnection = connected
                     resetConnectionProblems()
-                    guestStoppedAt = null
+                    updateGuestStoppedAt(null)
+                    updateOfflineByChoice(false)
                     requestGuestConnection()
                 }
             }
@@ -3199,19 +3317,32 @@ class WorkbenchController(private val context: Context) {
     }
 
     /** When a connected guest went away (its VM or daemon stopped); null while connected or never connected. */
-    var guestStoppedAt by mutableStateOf<Long?>(null)
+    var guestStoppedAt by mutableStateOf(preferences.getLong(GUEST_STOPPED_AT_KEY, 0L).takeIf { it > 0L })
         private set
     private var reconnectAttempt = 0
     private var scheduledReconnect: ScheduledFuture<*>? = null
 
+    private fun updateGuestStoppedAt(at: Long?) {
+        guestStoppedAt = at
+        preferences.edit().apply {
+            if (at != null) putLong(GUEST_STOPPED_AT_KEY, at) else remove(GUEST_STOPPED_AT_KEY)
+        }.apply()
+    }
+
+    private fun updateOfflineByChoice(byChoice: Boolean) {
+        offlineWorkspaceByChoice = byChoice
+        preferences.edit().putBoolean(OFFLINE_BY_CHOICE_KEY, byChoice).apply()
+    }
+
     /**
-     * Retries a lost connection with backoff: 2 s … 60 s and ten attempts in the background, but
-     * at most [FOREGROUND_RECONNECT_CAP_S] apart and without a limit while the app is in front, so
-     * a guest that comes back is noticed within seconds.
+     * Retries once after a sudden drop (2 s) for brief hiccups, or up to six times while waiting for
+     * Linux Terminal to boot a started VM; otherwise stays in the recoverable offline workspace (G39).
      */
     private fun scheduleReconnect() {
-        if (!settings.autoConnect || !profileAutoConnect || endpoint.isBlank() || token.isBlank() || scheduledReconnect != null) return
-        if (!appVisible && reconnectAttempt >= 10) return
+        if (offlineWorkspaceByChoice || endpoint.isBlank() || token.isBlank() || scheduledReconnect != null) return
+        if (!waitingForLinuxTerminal && (!settings.autoConnect || !profileAutoConnect)) return
+        val maxAttempts = if (waitingForLinuxTerminal) 6 else 1
+        if (reconnectAttempt >= maxAttempts) return
         val backoff = listOf(2L, 5L, 10L, 20L, 30L, 60L)[reconnectAttempt.coerceAtMost(5)]
         val delay = if (appVisible) backoff.coerceAtMost(FOREGROUND_RECONNECT_CAP_S) else backoff
         reconnectAttempt++
@@ -3219,9 +3350,9 @@ class WorkbenchController(private val context: Context) {
         scheduledReconnect = timer.schedule({
             post {
                 scheduledReconnect = null
-                if (!connected && !busy) {
+                if (!connected && !busy && !offlineWorkspaceByChoice) {
                     autoConnecting = true
-                    autoConnectFallbacks = profiles.filter { it.autoConnect && it.id != profileId }
+                    autoConnectFallbacks = emptyList()
                     connectGuest()
                 }
             }
@@ -3234,22 +3365,26 @@ class WorkbenchController(private val context: Context) {
             pendingRecentWorkspace = null
             files.offline?.activeConnectionId = pendingRecent.connectionId
             if (files.offline?.serves(pendingRecent.path, pendingRecent.connectionId) == true) {
-                openOfflineWorkspace(pendingRecent.path, pendingRecent.connectionId)
+                openOfflineWorkspace(pendingRecent.path, pendingRecent.connectionId, byChoice = false)
             }
         } else if (workspaceRoot == null && settings.offlineWorkspace) {
-            openOfflineWorkspace()
+            openOfflineWorkspace(byChoice = false)
         }
         val causes = generateSequence(error) { it.cause }.toList()
         val rejected = causes.filterIsInstance<GuestRejectedException>().firstOrNull()
-        val unreachable = causes.any {
+        val tablet = isTabletGuestEndpoint(endpoint)
+        val forwardingDrop = tablet && causes.any {
+            it is java.io.EOFException || it.message == "Guest handshake timed out"
+        }
+        val unreachable = forwardingDrop || causes.any {
             it is java.net.ConnectException ||
-                it is java.net.SocketTimeoutException ||
-                // When Linux Terminal's forwarder accepts TCP on 127.0.0.1:19870 and drops or times out (G31).
-                (isTabletGuestEndpoint(endpoint) && (it is java.io.EOFException || it.message == "Guest handshake timed out"))
+                it is java.net.SocketTimeoutException
         }
         val wasAutomatic = autoConnecting
         autoConnecting = false
-        val nextAutoProfile = autoConnectFallbacks.firstOrNull().takeIf { wasAutomatic && settings.autoConnect }
+        val nextAutoProfile = autoConnectFallbacks.firstOrNull().takeIf {
+            wasAutomatic && settings.autoConnect && workspaceRoot == null && sessionWorkspace == null
+        }
         if (nextAutoProfile != null) {
             autoConnectFallbacks = autoConnectFallbacks.drop(1)
             selectProfile(nextAutoProfile)
@@ -3260,39 +3395,68 @@ class WorkbenchController(private val context: Context) {
         }
         when {
             rejected?.reason == "InvalidToken" -> {
+                waitingForLinuxTerminal = false
                 // Said by the chip and the banner, with Pair again; no dialog opens by itself (G22).
                 pairingRejected = true
-                guestProblem = (if (isTabletGuestEndpoint(endpoint)) "The guest" else connectionFacts.name) +
+                guestProblem = (if (tablet) "The guest" else connectionFacts.name) +
                     " no longer accepts this device's pairing. Pair again to reconnect."
                 status = guestProblem!!
             }
             unreachable -> {
                 guestUnreachable = true
                 unreachableFailures++
-                // Seen on the tablet: the guest and daemon run, but Terminal reports no forwarded
-                // port until it is force-stopped and opened again.
-                // Only the tablet's own guest is behind Linux Terminal's forwarding; a computer is just away.
-                guestForwardingSuspected = unreachableFailures >= 2 && isTabletGuestEndpoint(endpoint)
-                val stoppedAt = guestStoppedAt
-                guestProblem = if (guestForwardingSuspected) {
-                    "Still can't reach the guest daemon. If Linux Terminal is already open, it may have stopped " +
-                        "forwarding the connection: Force stop it in App info (this restarts the guest), then open it again."
-                } else if (stoppedAt != null) {
-                    val time = java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(stoppedAt))
-                    "The guest stopped at $time. Open Linux Terminal to start it again; edits are kept on this device meanwhile."
-                } else {
-                    "Can't reach the guest daemon. Open Linux Terminal so the guest starts; if it was reset, set it up again."
-                }
+                // Only flag Linux Terminal forwarding when TCP port 19870 is open without answering /health (G38).
+                guestForwardingSuspected = forwardingDrop
+                guestProblem = unreachableMessage(tablet, forwardingDrop)
                 status = guestProblem!!
-                // Always retry (with backoff): the first attempt after launch failing scheduled none before, so a
-                // computer that came back later (or a guest started from outside the app) was never noticed.
-                scheduleReconnect()
+                if (tablet && !forwardingDrop) {
+                    val failedEndpoint = endpoint
+                    val failedPin = profileFingerprint
+                    io.execute {
+                        val (portOpen, answers) = probeDaemonPort(failedEndpoint, failedPin, timeoutMs = 750)
+                        if (portOpen && !answers) {
+                            post {
+                                if (!connected && endpoint == failedEndpoint && guestUnreachable) {
+                                    guestForwardingSuspected = true
+                                    guestProblem = unreachableMessage(tablet = true, forwardingSuspected = true)
+                                    status = guestProblem!!
+                                }
+                            }
+                        }
+                    }
+                }
+                if (waitingForLinuxTerminal) {
+                    scheduleReconnect()
+                } else {
+                    scheduledReconnect?.cancel(false)
+                    scheduledReconnect = null
+                }
             }
             else -> {
+                waitingForLinuxTerminal = false
                 connectFailure = rejected?.message ?: error.cause?.message ?: error.message
                 guestProblem = "Connection failed: $connectFailure"
                 status = guestProblem!!
             }
+        }
+    }
+
+    private fun unreachableMessage(tablet: Boolean, forwardingSuspected: Boolean): String {
+        val stoppedAt = guestStoppedAt
+        return when {
+            forwardingSuspected ->
+                "Still can't reach the guest daemon. If Linux Terminal is already open, it may have stopped " +
+                    "forwarding the connection: Force stop it in App info (this restarts the guest), then open it again."
+            stoppedAt != null -> {
+                val time = java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(stoppedAt))
+                if (tablet) {
+                    "The guest stopped at $time. Open Linux Terminal to start it again, then tap Reconnect; edits are kept on this device meanwhile."
+                } else {
+                    "${connectionFacts.name} stopped at $time. When it's back, tap Reconnect; edits are kept on this device meanwhile."
+                }
+            }
+            tablet -> "Can't reach the guest daemon. Open Linux Terminal so the guest starts, then tap Reconnect; if it was reset, set it up again."
+            else -> "Can't reach ${connectionFacts.name}. Check that the computer is on and its daemon runs, then tap Reconnect."
         }
     }
 
@@ -3386,9 +3550,21 @@ class WorkbenchController(private val context: Context) {
         if (runCatching { context.startActivity(intent) }.isFailure) {
             status = "Linux Terminal isn't installed; enable it in Developer options"
         } else if (!connected) {
-            // The VM takes a few seconds to boot; keep trying while the user is in Terminal.
+            // The VM takes a few seconds to boot; retry briefly while the user is in Terminal.
+            waitingForLinuxTerminal = true
             reconnectAttempt = 0
             scheduleReconnect()
+        }
+    }
+
+    /** Tailscale app installed on this tablet (`com.tailscale.ipn`), for G38's Troubleshoot action. */
+    fun tailscaleAvailable(): Boolean = context.packageManager.getLaunchIntentForPackage(TAILSCALE_PACKAGE) != null
+
+    fun openTailscale() {
+        val intent = context.packageManager.getLaunchIntentForPackage(TAILSCALE_PACKAGE)
+            ?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (intent == null || runCatching { context.startActivity(intent) }.isFailure) {
+            status = "Tailscale isn't installed on this tablet"
         }
     }
 
@@ -3643,7 +3819,7 @@ class WorkbenchController(private val context: Context) {
      * Without a guest, opens a recent folder ([path], else the last one) from this device's
      * copies: its tabs as they were, editable; saves wait for the guest (the offline queue).
      */
-    fun openOfflineWorkspace(path: String? = null, connectionId: String? = null) {
+    fun openOfflineWorkspace(path: String? = null, connectionId: String? = null, byChoice: Boolean = true) {
         if (connected) return
         val recent = if (path != null) {
             val owner = connectionId ?: profileId
@@ -3667,7 +3843,7 @@ class WorkbenchController(private val context: Context) {
         workspaceRoot = target
         sessionWorkspace = target
         sessionConnectionId = recent.connectionId
-        offlineWorkspaceByChoice = true
+        updateOfflineByChoice(byChoice)
         files.offline?.activeConnectionId = sessionConnectionId
         rememberWorkspace(target, sessionConnectionId)
         sessionRestored = false
@@ -3878,7 +4054,7 @@ class WorkbenchController(private val context: Context) {
 
     fun openRecentWorkspace(recent: RecentWorkspace) {
         if (recent.isDeviceFolder) {
-            openWorkspace(recent.path)
+            requestOpenWorkspace(recent.path)
             return
         }
         val targetProfile = profiles.firstOrNull { it.id == recent.connectionId }
@@ -3937,7 +4113,7 @@ class WorkbenchController(private val context: Context) {
 
     private fun openRecentWorkspaceNow(recent: RecentWorkspace, targetProfile: ConnectionProfile) {
         if (targetProfile.id == profileId && connected) {
-            openWorkspace(recent.path)
+            requestOpenWorkspace(recent.path)
             return
         }
         if (targetProfile.id != profileId) {
@@ -3947,7 +4123,7 @@ class WorkbenchController(private val context: Context) {
         if (!connected && recent.connectionId != null) {
             files.offline?.activeConnectionId = recent.connectionId
             if (files.offline?.serves(recent.path, recent.connectionId) == true) {
-                openOfflineWorkspace(recent.path, recent.connectionId)
+                openOfflineWorkspace(recent.path, recent.connectionId, byChoice = false)
             }
         }
         if (!connected) {
@@ -4155,7 +4331,7 @@ class WorkbenchController(private val context: Context) {
                     treeNames[root] = it
                     preferences.edit().putString("tree-name:$root", it).apply()
                 }
-                openWorkspace(root)
+                requestOpenWorkspace(root)
             }
         }
     }
@@ -4222,6 +4398,25 @@ class WorkbenchController(private val context: Context) {
      * their drafts kept, so unsaved work comes back with its folder; language servers, Copilot and
      * the chat agent restart in the new folder. Terminals keep running where they are.
      */
+    /** Asks before switching workspaces on the same connection or to a device folder when guest work is running (G39). */
+    fun requestOpenWorkspace(path: String) {
+        val target = (if (isTreePath(path)) path.trimEnd('/') else normalizeGuestPath(path)) ?: return
+        if (workspaceRoot != null && target != workspaceRoot && (isTreePath(target) || (connected && sessionConnectionId == profileId))) {
+            val hasUnsaved = hasGuestUnsavedEdits()
+            val hasRunning = hasWorkspaceWorkRunning()
+            if (hasUnsaved || hasRunning) {
+                dialog = WorkbenchDialog.ConfirmWorkspaceSwitch(target, hasUnsaved, hasRunning)
+                return
+            }
+        }
+        openWorkspace(target)
+    }
+
+    fun confirmWorkspaceSwitch(path: String) {
+        dialog = null
+        openWorkspace(path)
+    }
+
     fun openWorkspace(path: String) = openWorkspace(path, checked = false)
 
     private fun openWorkspace(path: String, checked: Boolean) {
@@ -9688,7 +9883,11 @@ class WorkbenchController(private val context: Context) {
                         if (settings.recordTiming && started != null) recordTiming(cell.metadata, started, now)
                     }
                 }
-                session.kernelState = if (session.executing.isEmpty()) "Idle" else "Busy"
+                session.kernelState = when {
+                    !connected || !session.kernel.isStarted -> "Disconnected"
+                    session.executing.isEmpty() -> "Idle"
+                    else -> "Busy"
+                }
                 documentRevision++
                 if (session.executing.isEmpty()) refreshVariablesIfShown(session)
             }

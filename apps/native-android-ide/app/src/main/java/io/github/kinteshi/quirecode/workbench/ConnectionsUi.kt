@@ -134,16 +134,20 @@ internal fun ConnectionBanner(controller: WorkbenchController) {
     val hint = when (summary.state) {
         ConnectionState.PairingRejected -> "Pair again to reconnect."
         ConnectionState.ForwardingStuck -> "Linux Terminal may need a restart."
-        else -> if (facts.workingOffline) "You're working offline meanwhile; QuireCode reconnects by itself." else "QuireCode reconnects by itself."
+        else -> if (facts.workingOffline) "You're working offline meanwhile." else "Tap Reconnect when it's ready."
     }
     WorkbenchBanner(summary.state.icon(), "${summary.title}. $hint", quiet = true) {
         when (summary.state) {
             ConnectionState.PairingRejected -> FilledTonalButton(onClick = { controller.pairAgain() }) { Text("Pair again") }
-            ConnectionState.ForwardingStuck -> FilledTonalButton(onClick = controller::openLinuxTerminalAppInfo) { Text("App info") }
+            ConnectionState.ForwardingStuck -> {
+                FilledTonalButton(onClick = controller::openLinuxTerminalAppInfo) { Text("App info") }
+                TextButton(onClick = controller::connectGuest, enabled = !controller.busy) { Text("Reconnect") }
+            }
             else -> if (facts.tabletGuest) {
                 FilledTonalButton(onClick = controller::openLinuxTerminal) { Text("Open Linux Terminal") }
+                TextButton(onClick = controller::connectGuest, enabled = !controller.busy) { Text("Reconnect") }
             } else {
-                FilledTonalButton(onClick = controller::connectGuest, enabled = !controller.busy) { Text("Retry") }
+                FilledTonalButton(onClick = controller::connectGuest, enabled = !controller.busy) { Text("Reconnect") }
             }
         }
         TextButton(onClick = controller::openConnect) { Text("Details") }
@@ -242,19 +246,24 @@ private fun StatusCard(controller: WorkbenchController, summary: ConnectionSumma
             }
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 when (summary.state) {
-                    ConnectionState.Connected -> if (controller.daemonVersionNotice?.status == DaemonVersionStatus.Older) {
-                        FilledTonalButton(onClick = controller::updateGuestDaemon) { Text("Update the daemon") }
+                    ConnectionState.Connected -> {
+                        if (controller.daemonVersionNotice?.status == DaemonVersionStatus.Older) {
+                            FilledTonalButton(onClick = controller::updateGuestDaemon) { Text("Update the daemon") }
+                        }
+                        TextButton(onClick = controller::requestWorkOffline, enabled = !controller.busy) { Text("Work offline") }
                     }
-                    ConnectionState.OnDevice -> Unit
+                    ConnectionState.OnDevice -> if (facts.workingOffline && controller.profiles.any { it.id == controller.profileId }) {
+                        FilledTonalButton(onClick = controller::requestGuestConnection, enabled = !controller.busy) { Text("Reconnect") }
+                    }
                     ConnectionState.Idle, ConnectionState.Failed -> FilledTonalButton(onClick = controller::requestGuestConnection, enabled = !controller.busy) { Text("Connect") }
                     ConnectionState.PairingRejected -> FilledTonalButton(onClick = { controller.pairAgain() }) { Text("Pair again") }
                     ConnectionState.ForwardingStuck -> {
                         FilledTonalButton(onClick = controller::openLinuxTerminalAppInfo) { Text("App info") }
-                        TextButton(onClick = controller::connectGuest, enabled = !controller.busy) { Text("Retry") }
+                        TextButton(onClick = controller::connectGuest, enabled = !controller.busy) { Text("Reconnect") }
                     }
                     ConnectionState.Lost, ConnectionState.Unreachable -> {
                         if (facts.tabletGuest) FilledTonalButton(onClick = controller::openLinuxTerminal) { Text("Open Linux Terminal") }
-                        TextButton(onClick = controller::connectGuest, enabled = !controller.busy) { Text("Retry") }
+                        TextButton(onClick = controller::connectGuest, enabled = !controller.busy) { Text("Reconnect") }
                         if (facts.tabletGuest && summary.state == ConnectionState.Lost) {
                             TextButton(onClick = { controller.dialog = WorkbenchDialog.GuestStopped }) { Text("Why does it stop?") }
                         }
@@ -378,27 +387,14 @@ private fun Troubleshooting(controller: WorkbenchController) {
             controller.connected -> CheckRow(true, "The daemon answers, and accepts this device")
             check == null || check.checking -> CheckRow(null, "Checking $target…")
             check.daemonAnswers == true -> CheckRow(true, "The daemon answers at $target")
-            check.portOpen == true -> CheckRow(
-                false,
-                if (facts.tabletGuest) {
-                    "Port $target is open, but nothing answers through it: the daemon isn't running in the guest, or Linux " +
-                        "Terminal's port forwarding stopped (turning on a VPN such as Tailscale can do this). Open Linux Terminal; if " +
-                        "it's already open, force stop it in App info and open it again."
-                } else {
-                    "Port $target is open, but the daemon didn't answer through it: if this connects through a tunnel or reverse " +
-                        "proxy, check that quirecode-daemon is running on the computer behind it."
-                },
-            )
-            else -> CheckRow(
-                false,
-                if (facts.tabletGuest) {
-                    "Nothing answers at $target: the guest isn't running, or Linux Terminal isn't forwarding the port. Open Linux " +
-                        "Terminal; if it's open already, force stop it in App info and open it again. If Android asks to open port " +
-                        "19870, accept it."
-                } else {
-                    "Nothing answers at $target: is the computer on, on the same network (or both on Tailscale), with its daemon running and the port open in its firewall?"
-                },
-            )
+            else -> {
+                val openTailscale = check.route == ConnectionRoute.Tailscale && check.vpnActive == false && check.tailscaleInstalled
+                CheckRow(
+                    false,
+                    troubleshootDiagnosis(check, facts.tabletGuest),
+                    action = if (openTailscale) ({ TextButton(onClick = controller::openTailscale) { Text("Open Tailscale") } }) else null,
+                )
+            }
         }
         if (controller.pairingRejected) {
             CheckRow(false, "The daemon refuses this device's pairing.") { TextButton(onClick = { controller.pairAgain() }) { Text("Pair again") } }
@@ -441,7 +437,8 @@ internal fun ConnectionEditorDialog(controller: WorkbenchController, editor: Wor
     var clearPin by remember(editor) { mutableStateOf(false) }
     val pinnedFingerprint = profile?.fingerprint?.takeIf { !clearPin && url.trim() == profile.endpoint }
     val hasToken = controller.connectionHasToken(editor.profileId)
-    val valid = url.trim().let { it.startsWith("ws://") || it.startsWith("wss://") } && (hasToken || token.isNotBlank())
+    val urlProblem = connectionUrlProblem(url)
+    val valid = urlProblem == null && (hasToken || token.isNotBlank())
     AlertDialog(
         onDismissRequest = { controller.dialog = WorkbenchDialog.Connect },
         title = { Text(if (profile == null) "New connection" else "Edit ${profile.name}") },
@@ -457,6 +454,8 @@ internal fun ConnectionEditorDialog(controller: WorkbenchController, editor: Wor
                     url, { url = it.trim() },
                     label = { Text("WebSocket URL") },
                     placeholder = { Text(GUEST_DAEMON_ENDPOINT) },
+                    isError = url.isNotBlank() && urlProblem != null,
+                    supportingText = urlProblem?.takeIf { url.isNotBlank() }?.let { problem -> { Text(problem) } },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
                     modifier = Modifier.fillMaxWidth(),

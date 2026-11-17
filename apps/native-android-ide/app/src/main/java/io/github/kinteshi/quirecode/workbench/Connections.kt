@@ -13,7 +13,7 @@ enum class ConnectionState {
     Idle,
     Connecting,
     Connected,
-    /** It was connected, and went away; the app retries by itself. */
+    /** It was connected, and went away; the workspace stays usable offline with an explicit reconnect. */
     Lost,
     /** It couldn't connect: the daemon doesn't answer. */
     Unreachable,
@@ -102,13 +102,13 @@ fun connectionSummary(facts: ConnectionFacts): ConnectionSummary {
         ConnectionState.Connected -> ConnectionSummary(state, facts.name, "Connected to ${facts.name}", null)
         ConnectionState.Lost -> ConnectionSummary(
             state, "Offline", "${where.replaceFirstChar(Char::uppercase)} stopped at ${facts.stoppedAt}",
-            (if (facts.tabletGuest) "Open Linux Terminal to start it again; " else "When it's back, ") +
-                "QuireCode reconnects by itself. $meanwhile",
+            (if (facts.tabletGuest) "Open Linux Terminal to start it again, then tap Reconnect. " else "When it's back, tap Reconnect. ") +
+                meanwhile,
         )
         ConnectionState.Unreachable -> ConnectionSummary(
             state, "Offline", "Can't reach ${where}",
-            (if (facts.tabletGuest) "Open Linux Terminal so the guest starts; " else "Check that the computer is on and its daemon runs; ") +
-                "QuireCode reconnects by itself. $meanwhile",
+            (if (facts.tabletGuest) "Open Linux Terminal so the guest starts, then tap Reconnect. " else "Check that the computer is on and its daemon runs, then tap Reconnect. ") +
+                meanwhile,
         )
         ConnectionState.ForwardingStuck -> ConnectionSummary(
             state, "Offline", "The guest doesn't answer",
@@ -176,7 +176,7 @@ private fun String.ipv4Octets(): List<Int>? {
     return parts.map { part -> part.toIntOrNull()?.takeIf { it in 0..255 } ?: return null }
 }
 
-private fun String.ipv4InTailscaleRange(): Boolean =
+internal fun String.ipv4InTailscaleRange(): Boolean =
     ipv4Octets()?.let { (a, b) -> a == 100 && b in 64..127 } ?: false
 
 private fun String.ipv4IsPrivate(): Boolean =
@@ -207,7 +207,20 @@ fun endpointHostPort(endpoint: String): Pair<String, Int>? = runCatching {
     (uri.host ?: return null) to port
 }.getOrNull()
 
-/** The Connections dialog's checks (G22, G31): null where it doesn't apply or isn't known yet. */
+/** Returns why [url] cannot be used as a connection endpoint, or null when it is valid. */
+fun connectionUrlProblem(url: String): String? {
+    val trimmed = url.trim()
+    val uri = runCatching { java.net.URI(trimmed) }.getOrNull() ?: return "Enter a valid ws:// or wss:// WebSocket URL"
+    val scheme = uri.scheme?.lowercase()
+    if (scheme != "ws" && scheme != "wss") return "URL must start with ws:// or wss://"
+    val host = uri.host?.lowercase()?.takeIf { it.isNotBlank() } ?: return "Enter a valid host in the WebSocket URL"
+    if (scheme == "ws" && host !in setOf("localhost", "127.0.0.1", "::1", "[::1]")) {
+        return "Remote connections require wss:// (ws:// is only allowed on localhost)"
+    }
+    return null
+}
+
+/** The Connections dialog's checks (G22, G31, G38): null where it doesn't apply or isn't known yet. */
 data class ConnectionCheck(
     /** Linux Terminal can be opened (only asked for the tablet's guest). */
     val terminalAvailable: Boolean?,
@@ -222,7 +235,115 @@ data class ConnectionCheck(
      * on the host side, but nothing reached `quirecode-daemon` in the guest (e.g. after toggling a VPN).
      */
     val portOpen: Boolean? = null,
+    /** Route inferred for the endpoint being checked (G38). */
+    val route: ConnectionRoute = ConnectionRoute.LinuxTerminal,
+    /** Whether a VPN or Tailscale interface (`100.64.0.0/10`) is active on this tablet (G38). */
+    val vpnActive: Boolean? = null,
+    /** Whether the Tailscale app is installed on this tablet (G38). */
+    val tailscaleInstalled: Boolean = false,
+    /** Whether this tablet has an active Wi-Fi or Ethernet connection (G38). */
+    val onLocalNetwork: Boolean? = null,
+    /** Whether this tablet is on mobile data without Wi-Fi/Ethernet (G38). */
+    val onCellularOnly: Boolean? = null,
 )
+
+/** Route-aware Troubleshoot diagnosis for [check] when the daemon is not connected (G38). */
+fun troubleshootDiagnosis(check: ConnectionCheck, tabletGuest: Boolean): String {
+    val target = check.target ?: "the daemon's port"
+    if (check.checking) return "Checking $target…"
+    if (check.daemonAnswers == true) return "The daemon answers at $target"
+    return when {
+        tabletGuest || check.route == ConnectionRoute.LinuxTerminal -> if (check.portOpen == true) {
+            "Port $target is open, but nothing answers through it: the daemon isn't running in the guest, or Linux " +
+                "Terminal's port forwarding stopped (turning on a VPN such as Tailscale can do this). Open Linux Terminal; if " +
+                "it's already open, force stop it in App info and open it again."
+        } else {
+            "Nothing answers at $target: the guest isn't running, or Linux Terminal isn't forwarding the port. Open Linux " +
+                "Terminal; if Android asks to open port 19870, accept it."
+        }
+        check.route == ConnectionRoute.Tailscale -> when {
+            check.vpnActive == false -> "Tailscale isn't connected on this tablet: turn on Tailscale to reach $target."
+            check.portOpen == true -> "Port $target is open over Tailscale, but the daemon didn't answer: check that quirecode-daemon is running on the computer."
+            else -> "Nothing answers at $target over Tailscale: check that the computer is on, connected to Tailscale, and running quirecode-daemon."
+        }
+        check.route == ConnectionRoute.Wifi -> when {
+            check.onCellularOnly == true || check.onLocalNetwork == false ->
+                "You're away from your Wi-Fi network: connect to the same Wi-Fi as the computer, or use Tailscale."
+            check.portOpen == true -> "Port $target is open on the local network, but the daemon didn't answer: check that quirecode-daemon is running on the computer."
+            else -> "Nothing answers at $target on the local network: check that the computer is on the same Wi-Fi, quirecode-daemon is running, and the port is open in its firewall."
+        }
+        check.route == ConnectionRoute.Tunnel -> if (check.portOpen == true) {
+            "The tunnel reached $target, but the daemon didn't answer behind it: check that cloudflared and quirecode-daemon are running on the computer."
+        } else {
+            "Couldn't reach the tunnel at $target: check your internet connection and that cloudflared and quirecode-daemon are running on the computer."
+        }
+        check.route == ConnectionRoute.LocalForward -> if (check.portOpen == true) {
+            "Local port $target is open, but nothing answered through the forward: check that quirecode-daemon is running on the computer."
+        } else {
+            "Nothing listens on local port $target: check that your ADB reverse or SSH port forward is active."
+        }
+        else -> if (check.portOpen == true) {
+            "Port $target is open, but the daemon didn't answer through it: check that quirecode-daemon is running on the computer."
+        } else {
+            "Nothing answers at $target: check that the computer is reachable, quirecode-daemon is running, and its port is open."
+        }
+    }
+}
+
+/** Startup connection and workspace restore plan (G39). */
+data class StartupConnectionPlan(
+    val selectedProfileId: String?,
+    val connectProfileId: String?,
+    val fallbackProfileIds: List<String>,
+    val openDeviceWorkspace: String? = null,
+    val openOfflineGuestWorkspace: RecentWorkspace? = null,
+)
+
+/**
+ * Resolves which profile and workspace take priority on launch (G39):
+ * the last workspace and its owning connection stay primary and never silently switch to another daemon.
+ */
+fun planStartupConnection(
+    profiles: List<io.github.kinteshi.quirecode.transport.ConnectionProfile>,
+    lastUsedProfileId: String?,
+    lastWorkspace: RecentWorkspace?,
+    offlineByChoice: Boolean,
+    autoConnectSetting: Boolean,
+    offlineWorkspaceSetting: Boolean,
+): StartupConnectionPlan {
+    val defaultProfileId = profiles.firstOrNull { it.id == lastUsedProfileId }?.id
+        ?: profiles.firstOrNull { it.autoConnect }?.id
+        ?: profiles.firstOrNull()?.id
+    if (lastWorkspace != null && lastWorkspace.isDeviceFolder) {
+        return StartupConnectionPlan(
+            selectedProfileId = defaultProfileId,
+            connectProfileId = null,
+            fallbackProfileIds = emptyList(),
+            openDeviceWorkspace = lastWorkspace.path,
+        )
+    }
+    if (lastWorkspace != null && lastWorkspace.isGuestFolder) {
+        val owner = profiles.firstOrNull { it.id == lastWorkspace.connectionId }
+            ?: if (lastWorkspace.connectionId == null) profiles.firstOrNull { it.id == defaultProfileId } else null
+        val selectedId = owner?.id ?: defaultProfileId
+        val shouldConnect = owner != null && !offlineByChoice && autoConnectSetting && owner.autoConnect
+        val shouldOpenOffline = offlineByChoice || offlineWorkspaceSetting || owner == null
+        return StartupConnectionPlan(
+            selectedProfileId = selectedId,
+            connectProfileId = owner?.id?.takeIf { shouldConnect },
+            fallbackProfileIds = emptyList(),
+            openOfflineGuestWorkspace = lastWorkspace.copy(connectionId = owner?.id ?: lastWorkspace.connectionId)
+                .takeIf { shouldOpenOffline },
+        )
+    }
+    val autoProfiles = if (autoConnectSetting && !offlineByChoice) profiles.filter { it.autoConnect } else emptyList()
+    val selectedId = autoProfiles.firstOrNull()?.id ?: defaultProfileId
+    return StartupConnectionPlan(
+        selectedProfileId = selectedId,
+        connectProfileId = autoProfiles.firstOrNull()?.id,
+        fallbackProfileIds = autoProfiles.drop(1).map { it.id },
+    )
+}
 
 /**
  * Probes [endpoint]'s port (G31), returning `(portOpen, daemonAnswers)`:

@@ -266,6 +266,39 @@ fun WorkbenchDialogHost(controller: WorkbenchController) {
             },
             dismissButton = { TextButton(onClick = { controller.dialog = null }) { Text("Cancel") } },
         )
+        is WorkbenchDialog.ConfirmWorkspaceSwitch -> AlertDialog(
+            onDismissRequest = { controller.dialog = null },
+            title = { Text("Switch folder?") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Open ${controller.displayName(dialog.path)}?")
+                    if (dialog.hasUnsaved) Text("Unsaved edits are kept as drafts for this folder.")
+                    if (dialog.hasRunning) Text("Running kernels, debugging or chat turns will stop.")
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { controller.confirmWorkspaceSwitch(dialog.path) }) { Text("Switch folder") }
+            },
+            dismissButton = { TextButton(onClick = { controller.dialog = null }) { Text("Cancel") } },
+        )
+        is WorkbenchDialog.ConfirmWorkOffline -> AlertDialog(
+            onDismissRequest = { controller.dialog = null },
+            title = { Text("Work offline?") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "Disconnect from ${controller.profileName.ifBlank { "the current guest" }} and keep " +
+                            "${controller.workspaceRoot?.let(controller::displayName) ?: "this workspace"} open on this device?",
+                    )
+                    if (dialog.hasUnsaved) Text("Unsaved edits stay in your open tabs and sync when you reconnect.")
+                    if (dialog.hasRunning) Text("Running terminals, kernels or debugging will be disconnected.")
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = controller::confirmWorkOffline) { Text("Work offline") }
+            },
+            dismissButton = { TextButton(onClick = { controller.dialog = null }) { Text("Cancel") } },
+        )
         is WorkbenchDialog.GitConfirmDiscard -> AlertDialog(
             onDismissRequest = { controller.dialog = null },
             title = { Text(if (dialog.paths.size == 1) "Discard changes?" else "Discard ${dialog.paths.size} files' changes?") },

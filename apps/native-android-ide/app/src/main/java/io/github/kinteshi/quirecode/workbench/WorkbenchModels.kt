@@ -153,6 +153,17 @@ sealed interface WorkbenchDialog {
         val hasUnsaved: Boolean,
         val hasRunning: Boolean,
     ) : WorkbenchDialog
+    /** Switching workspaces on the same connection (or to a device folder) while guest work is running (G39). */
+    data class ConfirmWorkspaceSwitch(
+        val path: String,
+        val hasUnsaved: Boolean,
+        val hasRunning: Boolean,
+    ) : WorkbenchDialog
+    /** Disconnecting on purpose to work offline while guest work is running (G39). */
+    data class ConfirmWorkOffline(
+        val hasUnsaved: Boolean,
+        val hasRunning: Boolean,
+    ) : WorkbenchDialog
     /** Python environments found in the guest; [then] runs after one is chosen (e.g. start debugging). */
     data class InterpreterPicker(
         val options: List<Pair<String, String>>,
