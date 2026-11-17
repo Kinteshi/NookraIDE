@@ -7,7 +7,7 @@ plugins {
 }
 
 /** The editor engine; also in BuildConfig, for Copy Diagnostics. */
-val aardinkVersion = "0.9.0"
+val aardinkVersion = "0.10.0"
 
 android {
     namespace = "io.github.kinteshi.quirecode"

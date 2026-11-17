@@ -10,7 +10,7 @@ class DiagnosticsTest {
         appVersion = "0.1.0",
         versionCode = 100,
         debuggable = false,
-        editor = "Aardink 0.9.0",
+        editor = "Aardink 0.10.0",
         android = "16",
         sdk = 36,
         securityPatch = "2026-10-01",

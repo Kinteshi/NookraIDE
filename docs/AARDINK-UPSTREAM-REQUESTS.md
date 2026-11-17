@@ -3,7 +3,7 @@
 **Not filed.** Drafts for the user to review and post, or to ask to have posted, at
 <https://github.com/aardarch/aardink/issues>, in its "Feature request" template (the bug reports in its bug template).
 Everything below each rule is the issue's text. The first three were checked against Aardink 0.8.0's sources and roadmap
-on 2026-11-04; the last three (batch 61, 11-09) against 0.9.0, the pinned release.
+on 2026-11-04; the last three (batch 61, 11-09) against 0.9.0; and all six were rechecked on 2026-11-17 (batch 72) against 0.10.0, the pinned release (all six remain open in 0.10.0).
 
 | Draft | Backlog | Kind |
 |---|---|---|

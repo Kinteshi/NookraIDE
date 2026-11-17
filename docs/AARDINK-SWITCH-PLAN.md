@@ -1,6 +1,6 @@
 # Plan: switching from sora-editor to Aardink
 
-Status: **done** (2026-11-08, batch 57) on Aardink 0.9.0: **Aardink is the editor**; sora-editor and its setting were removed
+Status: **done** (2026-11-08, batch 57; updated to Aardink 0.10.0 in batch 72): **Aardink is the editor**; sora-editor and its setting were removed
 in phase 7. tm4e, which colours code, is carried in the app's `tm4e` module. Left: the user's own try on the Book Cover (A7),
 the asks to Aardink, and a review of each release.
 
@@ -26,21 +26,21 @@ Build Aardink beside sora and flip when it reaches parity, so the app stays usab
 
 ## Requests to Aardink
 
-Reviewed against each release (see [Release reviews](#release-reviews)); last against 0.9.0 on 11-08.
+Reviewed against each release (see [Release reviews](#release-reviews)); last against 0.10.0 on 11-17 (batch 72).
 Filing them is the user's decision.
 
-| # | Request | Where it stands (0.9.0) | Unblocks |
+| # | Request | Where it stands (0.10.0) | Unblocks |
 |---|---|---|---|
 | 1 | Public text positions: pixel rect for an offset or line | Not on the roadmap. **Needed far less since 0.9:** inline text, inlay hints, code lens, ghost text, Markdown hover and signature help are built in | Our reflection into Aardink's internals (batch 54, A19), which puts the workbench's cards at their text; with it, that goes |
 | 2 | Gutter icon in a decoration, and a host callback for gutter taps | Not on the roadmap | Breakpoint icons and taps in the gutter; bars by kind, F9 and the menu meanwhile (batch 47) |
-| 3 | Ghost text, inlay hints, code lens | **Delivered in 0.9** (`InlineCompletionProvider`, `inlayHints`, `codeLenses`). In use since batch 48; ghost text, hints and lenses checked on the tablet with Samsung's keyboard (batch 52) | Copilot's suggestions, inlay hints, lenses, Python cell and merge conflict actions |
-| 4 | Semantic token layer | **Delivered in 0.9** (`semanticTokens`, `semanticHighlighting`). Ours works already (batch 44); theirs can replace it once completion goes through `LanguageService` | Optional |
+| 3 | Ghost text, inlay hints, code lens | **Delivered in 0.9; widened in 0.10** (`InlineCompletion.isSnippet`, `InlayHint.tooltip`, `onOpenLink` on hover/signature popups, `CodeEditorState.refreshLanguageFeatures()`) | Copilot snippets as ghost text, inlay tooltips, interactive popup links, manual/server refresh |
+| 4 | Semantic token layer | **Delivered in 0.9; refined in 0.10** (`LspClient` single-pass parsing + `semanticTokens/full/delta`, 3-pass slow-highlight threshold). Ours works already (batch 44) | Replacing custom semantic spans if completion moves fully onto `LanguageService` |
 | 5 | Saved view state (scroll, folds) | 1.0 | Optional: we can keep it per tab |
-| 6 | The slow frames as a gesture starts | 0.10's performance work (Android gates, baseline profile). Unchanged in 0.9 (measured 11-08) | Better scrolling |
-| 8 | **Completion list at the caret on Android with a hardware keyboard** (backlog 77): `PlatformInfo.hasSoftKeyboard` is fixed at true, so suggestions are a touch strip only | Not on the roadmap | Choosing suggestions from the Book Cover. Drafted. Our own list stands in since batch 51 (backlog 78, a setting), so it no longer blocks phase 6; removed when it ships |
-| 9 | `LanguageConfiguration` loads on Android (backlog 75): a regex in its initializer is refused there | Bug in 0.9.0 | Dropping our own reader |
+| 6 | The slow frames as a gesture starts | 0.10 added JVM (`:editor:jvmPerfTest`), Android CI (`android-perf`) and `:sample` baseline-profile gates plus partial-highlighting fixes (partial highlight no longer re-scans whole document line starts); needs tablet gesture recheck | Better scrolling |
+| 8 | **Completion list at the caret on Android with a hardware keyboard** (backlog 77): `PlatformInfo.hasSoftKeyboard` is fixed at true in 0.10.0, so suggestions are a touch strip only | Not on the roadmap | Choosing suggestions from the Book Cover. Drafted. Our own list stands in since batch 51 (backlog 78, a setting), so it no longer blocks phase 6; removed when it ships |
+| 9 | `LanguageConfiguration` loads on Android (backlog 75): the unescaped brace regex (`\{\d+(,\d*)?}`) in `Quantifier` is still present in 0.10.0 | Bug in 0.9.0 and 0.10.0 | Dropping our own reader |
 | 10 | Type over auto-inserted closers (backlog 76) | Not on the roadmap | Dropping our key-level type-over, and the on-screen keyboard's doubled closers |
-| 7 | Samsung's keyboard: Enter and Shift+arrows (backlog 73) | Not mentioned; 1.0 plans device validation with Samsung's keyboard. **Still there in 0.9** (lab, 11-08) | Removing our workaround |
+| 7 | Samsung's keyboard: Enter and Shift+arrows (backlog 73) | 1.0 plans device validation with Samsung's keyboard. Unchanged in 0.10.0 release notes | Removing our workaround |
 
 If 1 or 2 are declined, a fork is allowed by the licence but is a real maintenance cost; ask the user before going there.
 
@@ -156,6 +156,7 @@ the user the full backlog and what changed in coverage.
 
 | Release | Reviewed | What changed for us |
 | --- | --- | --- |
+| 0.10.0 | 11-17, batch 72 | Recompiled cleanly (`EditorCommand.SearchWorkspace` and defaulted parameters on `EditorOptions`, `EditorTheme`, `InlayHint`, `InlineCompletion`, `CodeEditorLayout`). `AardinkGeometry` reflection (`A19`) still works (tested in `AardinkEditorSurfaceTest` and on the tablet). Partial highlighting no longer rescans the whole document for line starts and tolerates two slow passes; new native hooks ready to adopt: `CodeEditorState.refreshLanguageFeatures()`, `InlayHint.tooltip`, `InlineCompletion.isSnippet`, `LanguageService.formatOnType`, `EditorTheme.chromeColors`/`tokenBackgrounds`/`HighContrast*`, `CodeEditorLayout(onSearchWorkspace)`, and `EditorOptions` view switches (`smoothScrolling`, `indentGuides`, `bracketPairGuides`, `lineNumbers` styles, `cursorStyle`, `cursorBlinking`, `rulers`, `scrollBeyondLastLine`, `cursorSurroundingLines`, `wrappingIndent`, `wordWrapColumn`, `dragAndDrop`). Requests 1, 2, 7, 8, 9 (`LanguageConfiguration` regex still unescaped on Android) and 10 are unchanged. |
 | 0.8.0 | 11-04 | Decorations, change events, commands, keybindings, Material 3 themes (batch 41 revisit). |
 | 0.9.0 (phase 3 on it) | 11-08, batch 46 | Found requests 8 to 10 (completion list with a hardware keyboard, `LanguageConfiguration` on Android, type-over). |
 | 0.9.0 | 11-08, batch 45 | Requests 3 and 4 delivered; phase 3 smaller, phase 5 unblocked but for two overlays; request 1 narrowed. Our tokenizer broke the new rule for an empty `previousTokens` (fixed). No source change needed. Samsung keyboard issue and gesture hitch unchanged. |

@@ -3175,6 +3175,22 @@ User selected Candidate 1 (`G39` + `G38`) with Option A for all three `G39` deci
   * Cleaned up the temporary daemon, test workspace, port forwards, and tablet app state afterwards (`pm clear`).
 * **Tests:** 414 app unit tests (413 passed, 1 opt-in live-host test `RemoteHostIntegrationTest.pairsPinsAndConnectsToATlsHost` skipped) and 146 daemon/protocol tests pass; debug assemble and `third-party-notices.py` pass; clippy passes with the same five pre-existing lints.
 
+## 72. Aardink 0.10.0 release review and animations backlog (11-17; done, checked on the tablet)
+User's request: run an `A12` release review for the new Aardink release (`v0.10.0`), point out what can be updated to use native Aardink, and add a backlog entry for subtle, smooth animations on small UI transitions.
+
+* **`A12` — Aardink `0.10.0` release review and pin bump:**
+  * Updated `aardinkVersion` from `"0.9.0"` to `"0.10.0"` in `apps/native-android-ide/app/build.gradle.kts`, updated `DiagnosticsTest.kt`, regenerated `apps/native-android-ide/app/src/main/assets/licenses/notices.json` via `scripts/third-party-notices.py` (`com.aardarch:aardink` and `com.aardarch:aardink-android` now `0.10.0`), and updated `AARDINK-SWITCH-PLAN.md` and `AARDINK-UPSTREAM-REQUESTS.md`.
+  * Built cleanly with zero source breakages (`EditorCommand.SearchWorkspace` and defaulted parameters on `EditorOptions`, `EditorTheme`, `InlayHint`, `InlineCompletion`, `CodeEditorLayout` were all additive for our call sites).
+  * Added `aardinkGeometryReflectionTargetsRemainPresent` to `AardinkEditorSurfaceTest.kt` to guard `AardinkGeometry` (`A19`) reflection targets (`CodeEditorState.uiCommandHandler`, `EditorController.getView/getCoordinates/hoverAt$delegate`, `EditorView.caretRect/offsetAt`).
+  * Audited `v0.10.0` upstream sources (`MIGRATION_0.10.md`, `AARDINK_ROADMAP.md`, `EditorOptions.kt`, `LanguageService.kt`, `LanguageConfiguration.kt`, `PlatformInfo.android.kt`):
+    * **Newly adoptable native Aardink `0.10.0` APIs:** `CodeEditorState.refreshLanguageFeatures()` (can replace our manual language-feature revision triggers in `AardinkEditorPane.kt`), `EditorOptions` (`smoothScrolling`, `CursorBlinking.Smooth`, `indentGuides`, `bracketPairGuides`, `LineNumberStyle` `Absolute`/`Relative`/`Interval`, `CursorStyle`, `rulers`, `scrollBeyondLastLine`, `cursorSurroundingLines`, `wrappingIndent`, `wordWrapColumn`, `dragAndDrop`, plus `formatOnType`), `LanguageService.formatOnType` / `formatOnTypeCharacters`, `InlineCompletion.isSnippet` (ghost-text snippet tab stops in `copilotCompletions`), `InlayHint.tooltip` + `onOpenLink` on hover/signature popups, `EditorTheme.chromeColors` / `tokenBackgrounds` / `HighContrastDark` / `HighContrastLight`, and `CodeEditorLayout(onSearchWorkspace = ...)` for `Ctrl+Shift+F`. Also `BuiltInLanguages` added 12 languages (YAML, Properties, INI, Shell, Python, SQL, Java, Groovy, Dockerfile, Diff, SCSS, LESS) though keeping tm4e + Grammar Packs avoids regression with custom/imported TextMate themes and grammar rules (`A14`).
+    * **Unchanged upstream asks (still shimmed in QuireCode):** `A9` (public offset/line bounds for reflection-free overlay cards), `A10` (gutter breakpoint icons & taps), `A11` (Samsung keyboard Enter/selection/composing), `A13` (`PlatformInfo.hasSoftKeyboard = true` on Android so `KeyboardSuggestions` stays needed with hardware keyboards), `A14` (`LanguageConfiguration`'s `Quantifier` regex `"""\{\d+(,\d*)?}"""` still lacks an escaped closing brace for Android ICU, keeping `LanguageRules`), and `A15`/`A18` (type-over auto-inserted closers & `useTabStops`).
+* **Backlog — Added `G40` (Subtle, purposeful UI animations):**
+  * Added `G40` (`S–M`) under **Group 7 (Window and layout)** in the General backlog for short, restrained Material 3 transitions (~120–180 ms, respecting system animator scale) on sidebar/panel/Chat toggles, banners, Explorer/Troubleshoot/Settings expand/collapse, overlay cards, status chip/tab transitions, and Aardink `0.10`'s `smoothScrolling` / `CursorBlinking.Smooth`.
+* **Checked on the tablet (`SM-X930`, `192.0.2.66:39495`):**
+  * Installed the updated `QuireCode Dev` (`Aardink 0.10.0`) APK over the previous build, launched it, opened **New untitled file** (`Untitled-1`), and typed `x=1`; confirmed clean rendering and input (`Ln 1, Col 4`) and verified in `adb logcat` that `AardinkGeometry` and `AardinkSyntax` logged no reflection or fallback warnings. Reset dev app data (`pm clear`) and restored `POST_NOTIFICATIONS`.
+* **Tests:** 415 app unit tests (414 passed, 1 opt-in live-host test `RemoteHostIntegrationTest.pairsPinsAndConnectsToATlsHost` skipped) and 146 daemon/protocol tests pass; debug assemble, `clippy` (5 pre-existing warnings), and `third-party-notices.py` pass.
+
 ## Backlog
 ### Open backlog (11-08)
 The current lists of what's open, in two: the general backlog, and the Aardink switch's until it's complete. The older
@@ -3198,7 +3214,7 @@ Grouped (11-08) so that what's cheaper done together is done together; the numbe
 | **5. Notebook outputs** | G8 | 56 | M–L | Widgets not drawn yet. (G3, the data viewer's filter with the on-screen keyboard, done in batch 59) |
 | **6. Large workspaces** | G4 | 61 | S–M | Files beyond Quick Open's 20,000 |
 | | G7 | 55 | S | Deep Rust projects on the tablet (about 1 GB of Rust) |
-| **7. Window and layout** | – | – | – | Done: G23 in batch 61 (the panel makes room for the on-screen keyboard), G6 (57), the terminal toolbar at phone width (58) |
+| **7. Window and layout** | G40 | – | S–M | **Subtle, purposeful animations on small UI transitions** (user, 11-17: "not a festival, but some smoothness is expected on the small things"). Short Material 3 transitions (~120–180 ms, respecting system animator scale / reduced motion) where elements currently pop in and out abruptly: opening and closing the sidebar, bottom panel and Chat pane; connection and notification banners appearing and hiding; Explorer folders and Troubleshoot / Settings sections expanding and collapsing; editor hover, completion and peek cards fading in/out; active tab/rail indicator and status chip state changes; and Aardink 0.10's `smoothScrolling` / `CursorBlinking.Smooth`. Done earlier in group 7: G23 in batch 61 (the panel makes room for the on-screen keyboard), G6 (57), the terminal toolbar at phone width (58) |
 | **On its own** | G12 | 64 | S–M or L | Replace Gemini CLI with Antigravity CLI |
 | | G19 | – | S–M | Debugger: values in the hover while paused, and Copilot's partial accept (word by word): in neither engine (batch 55) |
 | | G11 | – | ? | Copilot exits after a daemon restart (watching) |
@@ -3246,7 +3262,7 @@ Why these groups:
 #### Aardink switch backlog
 
 Until Aardink replaces sora: the remaining phases of the [plan](AARDINK-SWITCH-PLAN.md), which has the details, and
-what the switch is waiting on. Phases 0–7 are done (batches 42–57: sora was removed in 57), on Aardink 0.9.0 (batch 45); A1 was phase 3, and
+what the switch is waiting on. Phases 0–7 are done (batches 42–57: sora was removed in 57), on Aardink 0.10.0 (batch 72; switched on 0.9.0 in batches 45–57); A1 was phase 3, and
 A2, A3, A4, A8, A16, A17 and A19 were done in batches 47–54, and A5's checks in 55.
 
 | Group | # | Item | Size | Description |
@@ -3271,7 +3287,7 @@ Why these groups:
   ("typing as VS Code does"), A9 and A13 cross-reference each other, and A11 now has the composing finding.
 * D: A19 adds a check to every release review.
 
-Watching, on Aardink's side: the hitch as a gesture starts (its 0.10 performance work), saved view state (1.0),
+Watching, on Aardink's side: the hitch as a gesture starts (0.10 added JVM/Android CI perf gates, a `:sample` baseline profile, and fixed partial highlighting re-scanning the whole document for line starts; needs tablet gesture recheck), saved view state (1.0),
 and Samsung's keyboard composing words even from a hardware keyboard (batch 52).
 
 Loose ends: placed in the groups above (11-08).

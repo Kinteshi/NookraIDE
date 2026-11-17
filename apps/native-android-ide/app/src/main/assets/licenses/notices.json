@@ -1078,7 +1078,7 @@
    "text": "50e6751797c50ded",
    "title": "Aardink",
    "url": "https://github.com/aardarch/aardink",
-   "version": "0.9.0"
+   "version": "0.10.0"
   },
   {
    "group": "Android libraries",
@@ -1087,7 +1087,7 @@
    "text": "50e6751797c50ded",
    "title": "Aardink",
    "url": "https://github.com/aardarch/aardink",
-   "version": "0.9.0"
+   "version": "0.10.0"
   },
   {
    "group": "Android libraries",
@@ -1627,7 +1627,7 @@
    "text": "50e6751797c50ded",
    "title": "kotlinx-serialization-bom",
    "url": "https://github.com/Kotlin/kotlinx.serialization",
-   "version": "1.12.0"
+   "version": "1.13.0"
   },
   {
    "group": "Android libraries",
@@ -1636,7 +1636,7 @@
    "text": "50e6751797c50ded",
    "title": "kotlinx-serialization-core",
    "url": "https://github.com/Kotlin/kotlinx.serialization",
-   "version": "1.12.0"
+   "version": "1.13.0"
   },
   {
    "group": "Android libraries",
@@ -1645,7 +1645,7 @@
    "text": "50e6751797c50ded",
    "title": "kotlinx-serialization-core",
    "url": "https://github.com/Kotlin/kotlinx.serialization",
-   "version": "1.12.0"
+   "version": "1.13.0"
   },
   {
    "group": "Android libraries",
@@ -1654,7 +1654,7 @@
    "text": "50e6751797c50ded",
    "title": "kotlinx-serialization-json",
    "url": "https://github.com/Kotlin/kotlinx.serialization",
-   "version": "1.12.0"
+   "version": "1.13.0"
   },
   {
    "group": "Android libraries",
@@ -1663,7 +1663,7 @@
    "text": "50e6751797c50ded",
    "title": "kotlinx-serialization-json",
    "url": "https://github.com/Kotlin/kotlinx.serialization",
-   "version": "1.12.0"
+   "version": "1.13.0"
   },
   {
    "group": "Android libraries",

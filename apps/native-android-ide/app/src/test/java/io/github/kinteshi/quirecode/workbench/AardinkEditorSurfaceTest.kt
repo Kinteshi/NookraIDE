@@ -256,4 +256,19 @@ class AardinkEditorSurfaceTest {
         surface.undo()
         assertEquals(before, surface.text)
     }
+
+    @Test
+    fun aardinkGeometryReflectionTargetsRemainPresent() {
+        CodeEditorState::class.java.getDeclaredField("uiCommandHandler")
+        val controller = Class.forName("com.aardarch.aardink.ui.view.EditorController")
+        controller.getMethod("getView")
+        controller.getMethod("getCoordinates")
+        controller.getDeclaredField("hoverAt\$delegate")
+        val view = Class.forName("com.aardarch.aardink.ui.view.EditorView")
+        view.getMethod("caretRect", Int::class.javaPrimitiveType)
+        val offsetAt = view.methods.first {
+            it.name.startsWith("offsetAt") && it.parameterTypes.contentEquals(arrayOf(Long::class.javaPrimitiveType))
+        }
+        offsetAt.returnType.getMethod("getOffset")
+    }
 }
