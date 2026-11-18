@@ -191,27 +191,54 @@ private fun ExplorerTree(controller: WorkbenchController, directory: String) {
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), modifier = Modifier.padding(top = 4.dp))
         }
+        if (atRoot) {
+            val colors = MaterialTheme.colorScheme
+            Row(
+                Modifier.fillMaxWidth().padding(start = 12.dp, end = 6.dp, top = 6.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Icon(Icons.Outlined.FolderOpen, contentDescription = null, modifier = Modifier.size(16.dp), tint = colors.primary)
+                Text(
+                    controller.displayName(directory).uppercase(),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = colors.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                if (tree && rows.any { it.expanded }) {
+                    Tooltip("Collapse folders") {
+                        IconButton(onClick = controller::collapseFolders, modifier = Modifier.size(24.dp)) {
+                            Icon(Icons.Outlined.UnfoldLess, contentDescription = "Collapse folders", modifier = Modifier.size(18.dp))
+                        }
+                    }
+                }
+            }
+        }
         Box(Modifier.weight(1f).onGloballyPositioned { listBounds = it.boundsInRoot() }) {
             LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
-                item(key = "up") {
-                    Box(Modifier.dropTarget(drag, "up", parent.takeIf { !atRoot && it.isNotEmpty() })) {
-                        PaneRow(
-                            // The arrow only where it goes somewhere.
-                            if (atRoot) Icons.Outlined.FolderOpen else Icons.AutoMirrored.Outlined.ArrowBack,
-                            if (atRoot) controller.displayName(directory) else "..",
-                            muted = !atRoot,
-                            selected = drag.target != null && drag.target == parent && !atRoot,
-                            trailing = if (tree && rows.any { it.expanded }) {
-                                {
-                                    Tooltip("Collapse folders") { IconButton(onClick = controller::collapseFolders, modifier = Modifier.size(24.dp)) {
-                                        Icon(Icons.Outlined.UnfoldLess, contentDescription = "Collapse folders", modifier = Modifier.size(18.dp))
-                                    } }
-                                }
-                            } else {
-                                null
-                            },
-                        ) {
-                            if (!atRoot && parent.isNotEmpty()) controller.loadDirectory(parent)
+                if (!atRoot) {
+                    item(key = "up") {
+                        Box(Modifier.dropTarget(drag, "up", parent.takeIf { it.isNotEmpty() })) {
+                            PaneRow(
+                                Icons.AutoMirrored.Outlined.ArrowBack,
+                                "..",
+                                muted = true,
+                                selected = drag.target != null && drag.target == parent,
+                                trailing = if (tree && rows.any { it.expanded }) {
+                                    {
+                                        Tooltip("Collapse folders") { IconButton(onClick = controller::collapseFolders, modifier = Modifier.size(24.dp)) {
+                                            Icon(Icons.Outlined.UnfoldLess, contentDescription = "Collapse folders", modifier = Modifier.size(18.dp))
+                                        } }
+                                    }
+                                } else {
+                                    null
+                                },
+                            ) {
+                                if (parent.isNotEmpty()) controller.loadDirectory(parent)
+                            }
                         }
                     }
                 }
@@ -222,7 +249,12 @@ private fun ExplorerTree(controller: WorkbenchController, directory: String) {
                     var menu by remember { mutableStateOf(false) }
                     val dropFolder = if (entry.isDirectory) entry.path else entry.path.substringBeforeLast('/')
                     val picked = entry.path in selection
-                    Box(Modifier.dropTarget(drag, entry.path, dropFolder)) {
+                    val theme = controller.fileIconTheme?.takeIf { !selecting && (!entry.isDirectory || it.hasFolderIcons) }
+                    Box(
+                        Modifier
+                            .then(if (settings.animations) Modifier.animateItem() else Modifier)
+                            .dropTarget(drag, entry.path, dropFolder),
+                    ) {
                         PaneRow(
                             when {
                                 selecting -> if (picked) Icons.Outlined.CheckBox else Icons.Outlined.CheckBoxOutlineBlank
@@ -235,25 +267,26 @@ private fun ExplorerTree(controller: WorkbenchController, directory: String) {
                                 else -> Icons.AutoMirrored.Outlined.InsertDriveFile
                             },
                             row.label,
-                            leading = controller.fileIconTheme?.takeIf { !selecting && (!entry.isDirectory || it.hasFolderIcons) }?.let { theme ->
-                                {
-                                    if (entry.isDirectory) {
-                                        // A theme with folder icons (Material Icon Theme): its folder, after the chevron unless it hides them.
-                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                                            if (tree && !theme.hidesExplorerArrows) {
-                                                Icon(
-                                                    if (row.expanded) Icons.Outlined.KeyboardArrowDown else Icons.AutoMirrored.Outlined.KeyboardArrowRight,
-                                                    contentDescription = null,
-                                                    modifier = Modifier.size(16.dp),
-                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                )
+                            leading = when {
+                                theme != null -> {
+                                    {
+                                        if (entry.isDirectory) {
+                                            // A theme with folder icons (Material Icon Theme): its folder, after the chevron unless it hides them.
+                                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                                                if (tree && !theme.hidesExplorerArrows) {
+                                                    TreeChevron(expanded = row.expanded, animate = settings.animations, modifier = Modifier.size(16.dp))
+                                                }
+                                                FileIconView(entry.name, theme, dark, Icons.Outlined.Folder, folder = true, expanded = row.expanded)
                                             }
-                                            FileIconView(entry.name, theme, dark, Icons.Outlined.Folder, folder = true, expanded = row.expanded)
+                                        } else {
+                                            FileIconView(entry.name, theme, dark, Icons.AutoMirrored.Outlined.InsertDriveFile)
                                         }
-                                    } else {
-                                        FileIconView(entry.name, theme, dark, Icons.AutoMirrored.Outlined.InsertDriveFile)
                                     }
                                 }
+                                tree && entry.isDirectory && !selecting -> {
+                                    { TreeChevron(expanded = row.expanded, animate = settings.animations, modifier = Modifier.size(18.dp)) }
+                                }
+                                else -> null
                             },
                             selected = picked || (entry.isDirectory && drag.target == entry.path) || (!selecting && entry.path == controller.activePath),
                             indent = row.depth,

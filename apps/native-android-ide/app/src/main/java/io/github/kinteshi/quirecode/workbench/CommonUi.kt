@@ -25,6 +25,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -35,6 +36,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -150,4 +152,21 @@ internal fun VerticalReveal(
 internal fun ExpandChevron(expanded: Boolean, animate: Boolean, modifier: Modifier = Modifier) {
     val rotation by animateFloatAsState(if (expanded) 180f else 0f, tween(if (animate) 150 else 0), label = "chevron")
     Icon(Icons.Outlined.ExpandMore, contentDescription = null, modifier = modifier.graphicsLayer { rotationZ = rotation })
+}
+
+/** A tree chevron that smoothly rotates 90 degrees when [expanded]. */
+@Composable
+internal fun TreeChevron(
+    expanded: Boolean,
+    animate: Boolean,
+    modifier: Modifier = Modifier,
+    tint: Color = MaterialTheme.colorScheme.onSurfaceVariant,
+) {
+    val rotation by animateFloatAsState(if (expanded) 90f else 0f, tween(if (animate) 140 else 0), label = "treeChevron")
+    Icon(
+        Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+        contentDescription = null,
+        tint = tint,
+        modifier = modifier.graphicsLayer { rotationZ = rotation },
+    )
 }

@@ -365,8 +365,9 @@ private fun TopBar(controller: WorkbenchController, expanded: Boolean) {
         Tooltip(controller.workspaceRoot?.let(controller::displayPath) ?: "Open workspace", "workbench.action.files.openFolder") {
             Surface(
                 onClick = { controller.showOpenFolder() },
-                color = if (workspaceName != null) colors.surfaceContainerHigh else colors.primaryContainer,
+                color = if (workspaceName != null) colors.surfaceContainerHighest else colors.primaryContainer,
                 contentColor = if (workspaceName != null) colors.onSurface else colors.onPrimaryContainer,
+                border = if (workspaceName != null) androidx.compose.foundation.BorderStroke(1.dp, colors.outlineVariant) else null,
                 shape = RoundedCornerShape(10.dp),
                 modifier = Modifier.height(36.dp).widthIn(max = 220.dp),
             ) {
@@ -507,14 +508,20 @@ private fun CompactContent(controller: WorkbenchController) {
                     }
                 }
                 Box(Modifier.weight(1f).fillMaxWidth()) {
-                    when (controller.panelTab) {
-                        PanelTab.Debug -> DebugPanel(controller)
-                        PanelTab.Output -> OutputLog(controller)
-                        PanelTab.Ports -> PortsView(controller)
-                        PanelTab.Variables -> VariablesView(controller)
-                        PanelTab.Interactive -> InteractiveView(controller)
-                        PanelTab.Docs -> DocsView(controller)
-                        else -> TerminalView(controller)
+                    Crossfade(
+                        targetState = controller.panelTab,
+                        animationSpec = tween(if (controller.settings.animations) 120 else 0),
+                        label = "compactPanelTab",
+                    ) { tab ->
+                        when (tab) {
+                            PanelTab.Debug -> DebugPanel(controller)
+                            PanelTab.Output -> OutputLog(controller)
+                            PanelTab.Ports -> PortsView(controller)
+                            PanelTab.Variables -> VariablesView(controller)
+                            PanelTab.Interactive -> InteractiveView(controller)
+                            PanelTab.Docs -> DocsView(controller)
+                            else -> TerminalView(controller)
+                        }
                     }
                 }
             }

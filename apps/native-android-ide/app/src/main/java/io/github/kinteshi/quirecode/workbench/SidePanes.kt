@@ -536,13 +536,11 @@ private fun SearchView(controller: WorkbenchController) {
     LaunchedEffect(controller.searchFocusRequest) { if (controller.searchFocusRequest > 0) runCatching { focus.requestFocus() } }
     Column(Modifier.fillMaxSize()) {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            val anim = controller.settings.animations
             Row(verticalAlignment = Alignment.CenterVertically) {
                 // VS Code's chevron: shows the replace field under the search box.
                 Tooltip("Toggle replace") { IconButton(onClick = { controller.searchReplaceVisible = !controller.searchReplaceVisible }, modifier = Modifier.size(32.dp)) {
-                    Icon(
-                        if (controller.searchReplaceVisible) Icons.Outlined.ExpandMore else Icons.AutoMirrored.Outlined.KeyboardArrowRight,
-                        contentDescription = "Toggle replace",
-                    )
+                    TreeChevron(expanded = controller.searchReplaceVisible, animate = anim)
                 } }
                 OutlinedTextField(
                     value = controller.searchText,
@@ -557,7 +555,7 @@ private fun SearchView(controller: WorkbenchController) {
                     modifier = Modifier.weight(1f).focusRequester(focus),
                 )
             }
-            if (controller.searchReplaceVisible) {
+            VerticalReveal(visible = controller.searchReplaceVisible, animate = anim) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Spacer(Modifier.width(32.dp))
                     OutlinedTextField(
@@ -594,23 +592,25 @@ private fun SearchView(controller: WorkbenchController) {
                     Icon(Icons.Outlined.FilterList, contentDescription = "Files to include or exclude")
                 } }
             }
-            if (showGlobs) {
-                OutlinedTextField(
-                    value = controller.searchInclude,
-                    onValueChange = { controller.searchInclude = it; controller.scheduleSearch() },
-                    label = { Text("Files to include") },
-                    placeholder = { Text("e.g. *.py, src/**") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                OutlinedTextField(
-                    value = controller.searchExclude,
-                    onValueChange = { controller.searchExclude = it; controller.scheduleSearch() },
-                    label = { Text("Files to exclude") },
-                    placeholder = { Text("e.g. *.min.js, build/**") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+            VerticalReveal(visible = showGlobs, animate = anim) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    OutlinedTextField(
+                        value = controller.searchInclude,
+                        onValueChange = { controller.searchInclude = it; controller.scheduleSearch() },
+                        label = { Text("Files to include") },
+                        placeholder = { Text("e.g. *.py, src/**") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = controller.searchExclude,
+                        onValueChange = { controller.searchExclude = it; controller.scheduleSearch() },
+                        label = { Text("Files to exclude") },
+                        placeholder = { Text("e.g. *.min.js, build/**") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
             }
             controller.searchSummary?.let {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {

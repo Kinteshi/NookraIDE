@@ -69,7 +69,6 @@ import androidx.compose.ui.unit.sp
  */
 @Composable
 fun FindWidget(controller: WorkbenchController, modifier: Modifier = Modifier) {
-    if (!controller.findVisible) return
     val colors = MaterialTheme.colorScheme
     val findFocus = remember { FocusRequester() }
     val replaceFocus = remember { FocusRequester() }
@@ -105,10 +104,22 @@ fun FindWidget(controller: WorkbenchController, modifier: Modifier = Modifier) {
         modifier = modifier.padding(end = 18.dp).widthIn(max = 520.dp),
     ) {
         Row(Modifier.padding(4.dp), verticalAlignment = Alignment.Top) {
-            WidgetButton(
-                if (controller.findReplaceVisible) Icons.Outlined.KeyboardArrowDown else Icons.AutoMirrored.Outlined.KeyboardArrowRight,
-                "Toggle Replace",
-            ) { controller.findReplaceVisible = !controller.findReplaceVisible }
+            Tooltip("Toggle Replace") {
+                Box(
+                    Modifier
+                        .size(34.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .noKeyFocus()
+                        .clickable(onClickLabel = "Toggle Replace") { controller.findReplaceVisible = !controller.findReplaceVisible },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    TreeChevron(
+                        expanded = controller.findReplaceVisible,
+                        animate = controller.settings.animations,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+            }
             Column(Modifier.weight(1f, fill = false), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     FindField(
@@ -138,7 +149,7 @@ fun FindWidget(controller: WorkbenchController, modifier: Modifier = Modifier) {
                     WidgetButton(Icons.Outlined.HighlightAlt, "Find in Selection (Alt+L)", on = controller.findScope != null) { controller.toggleFindInSelection() }
                     WidgetButton(Icons.Outlined.Close, "Close (Escape)") { controller.closeFind() }
                 }
-                if (controller.findReplaceVisible) {
+                VerticalReveal(visible = controller.findReplaceVisible, animate = controller.settings.animations) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         FindField(
                             value = controller.replaceQuery,

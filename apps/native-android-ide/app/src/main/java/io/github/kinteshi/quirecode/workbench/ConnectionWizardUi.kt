@@ -1,5 +1,10 @@
 package io.github.kinteshi.quirecode.workbench
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -125,129 +130,140 @@ internal fun ConnectionWizardDialog(controller: WorkbenchController) {
                     }
                 }
 
-                if (workTarget == WorkTarget.TabletGuest) {
-                    Surface(color = colors.surfaceContainerLow, shape = MaterialTheme.shapes.medium, modifier = Modifier.fillMaxWidth()) {
-                        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Icon(
-                                if (terminalReady) Icons.Outlined.CheckCircle else Icons.Outlined.WarningAmber,
-                                contentDescription = null,
-                                tint = if (terminalReady) colors.primary else colors.secondary,
-                            )
-                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Text(
-                                    if (terminalReady) "Linux Terminal is ready on this tablet" else "Linux Terminal isn't enabled yet",
-                                    style = MaterialTheme.typography.titleSmall,
+                AnimatedContent(
+                    targetState = workTarget,
+                    transitionSpec = {
+                        val ms = if (controller.settings.animations) 150 else 0
+                        fadeIn(tween(ms)) togetherWith fadeOut(tween(ms))
+                    },
+                    label = "wizardTarget",
+                ) { target ->
+                    if (target == WorkTarget.TabletGuest) {
+                        Surface(color = colors.surfaceContainerLow, shape = MaterialTheme.shapes.medium, modifier = Modifier.fillMaxWidth()) {
+                            Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Icon(
+                                    if (terminalReady) Icons.Outlined.CheckCircle else Icons.Outlined.WarningAmber,
+                                    contentDescription = null,
+                                    tint = if (terminalReady) colors.primary else colors.secondary,
                                 )
-                                Text(
-                                    if (terminalReady) {
-                                        "Everything stays on the tablet with no Wi-Fi, Tailscale, or external computer needed."
-                                    } else {
-                                        "Turn on Linux development environment in Developer options, open Linux Terminal once to finish its Debian install, then come back."
-                                    },
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = colors.onSurfaceVariant,
-                                )
-                            }
-                            if (!terminalReady) {
-                                TextButton(onClick = controller::openDeveloperOptions) { Text("Developer options") }
-                            }
-                        }
-                    }
-                } else {
-                    Text("2. Where will you connect from?", style = MaterialTheme.typography.titleSmall, color = colors.primary)
-                    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                        UsageScope.entries.forEachIndexed { index, item ->
-                            SegmentedButton(
-                                selected = scope == item,
-                                onClick = { scope = item },
-                                shape = SegmentedButtonDefaults.itemShape(index, UsageScope.entries.size),
-                                label = { Text(item.title, maxLines = 1) },
-                            )
-                        }
-                    }
-
-                    val options = guidedOptionsFor(scope)
-                    Text(
-                        if (options.size == 1) "Recommended setup" else "Choose how to reach your computer",
-                        style = MaterialTheme.typography.titleSmall,
-                        color = colors.primary,
-                    )
-                    options.forEach { option ->
-                        val chosen = selectedOption == option
-                        Surface(
-                            color = if (chosen) colors.surfaceContainerHighest else colors.surfaceContainerLow,
-                            shape = MaterialTheme.shapes.medium,
-                            modifier = Modifier.fillMaxWidth().clickable { selectedOption = option },
-                        ) {
-                            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Icon(
-                                        if (chosen) Icons.Outlined.RadioButtonChecked else Icons.Outlined.RadioButtonUnchecked,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(18.dp),
-                                        tint = if (chosen) colors.primary else colors.onSurfaceVariant,
+                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Text(
+                                        if (terminalReady) "Linux Terminal is ready on this tablet" else "Linux Terminal isn't enabled yet",
+                                        style = MaterialTheme.typography.titleSmall,
                                     )
-                                    Text(option.title, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                                    Text(
+                                        if (terminalReady) {
+                                            "Everything stays on the tablet with no Wi-Fi, Tailscale, or external computer needed."
+                                        } else {
+                                            "Turn on Linux development environment in Developer options, open Linux Terminal once to finish its Debian install, then come back."
+                                        },
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = colors.onSurfaceVariant,
+                                    )
                                 }
-                                Text(option.why, style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
-                                option.warning?.let { warn ->
-                                    Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        Icon(Icons.Outlined.WarningAmber, contentDescription = null, modifier = Modifier.size(16.dp), tint = colors.secondary)
-                                        Text(warn, style = MaterialTheme.typography.bodySmall, color = colors.secondary)
+                                if (!terminalReady) {
+                                    TextButton(onClick = controller::openDeveloperOptions) { Text("Developer options") }
+                                }
+                            }
+                        }
+                    } else {
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Text("2. Where will you connect from?", style = MaterialTheme.typography.titleSmall, color = colors.primary)
+                            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                                UsageScope.entries.forEachIndexed { index, item ->
+                                    SegmentedButton(
+                                        selected = scope == item,
+                                        onClick = { scope = item },
+                                        shape = SegmentedButtonDefaults.itemShape(index, UsageScope.entries.size),
+                                        label = { Text(item.title, maxLines = 1) },
+                                    )
+                                }
+                            }
+
+                            val options = guidedOptionsFor(scope)
+                            Text(
+                                if (options.size == 1) "Recommended setup" else "Choose how to reach your computer",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = colors.primary,
+                            )
+                            options.forEach { option ->
+                                val chosen = selectedOption == option
+                                Surface(
+                                    color = if (chosen) colors.surfaceContainerHighest else colors.surfaceContainerLow,
+                                    shape = MaterialTheme.shapes.medium,
+                                    modifier = Modifier.fillMaxWidth().clickable { selectedOption = option },
+                                ) {
+                                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            Icon(
+                                                if (chosen) Icons.Outlined.RadioButtonChecked else Icons.Outlined.RadioButtonUnchecked,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(18.dp),
+                                                tint = if (chosen) colors.primary else colors.onSurfaceVariant,
+                                            )
+                                            Text(option.title, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                                        }
+                                        Text(option.why, style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
+                                        option.warning?.let { warn ->
+                                            Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                Icon(Icons.Outlined.WarningAmber, contentDescription = null, modifier = Modifier.size(16.dp), tint = colors.secondary)
+                                                Text(warn, style = MaterialTheme.typography.bodySmall, color = colors.secondary)
+                                            }
+                                        }
                                     }
                                 }
                             }
-                        }
-                    }
 
-                    if (selectedOption == RemoteSetupOption.Tailscale) {
-                        TailscaleStatusCard(
-                            state = tailscaleState,
-                            onInstall = { openTailscaleInstall(context) },
-                            onOpen = controller::openTailscale,
-                        )
-                    }
+                            VerticalReveal(visible = selectedOption == RemoteSetupOption.Tailscale, animate = controller.settings.animations) {
+                                TailscaleStatusCard(
+                                    state = tailscaleState,
+                                    onInstall = { openTailscaleInstall(context) },
+                                    onOpen = controller::openTailscale,
+                                )
+                            }
 
-                    Text("3. Run on your computer", style = MaterialTheme.typography.titleSmall, color = colors.primary)
-                    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                        ComputerOs.entries.forEachIndexed { index, item ->
-                            SegmentedButton(
-                                selected = os == item,
-                                onClick = { os = item },
-                                shape = SegmentedButtonDefaults.itemShape(index, ComputerOs.entries.size),
-                                label = { Text(item.label) },
+                            Text("3. Run on your computer", style = MaterialTheme.typography.titleSmall, color = colors.primary)
+                            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                                ComputerOs.entries.forEachIndexed { index, item ->
+                                    SegmentedButton(
+                                        selected = os == item,
+                                        onClick = { os = item },
+                                        shape = SegmentedButtonDefaults.itemShape(index, ComputerOs.entries.size),
+                                        label = { Text(item.label) },
+                                    )
+                                }
+                            }
+                            val commands = guidedCommands(selectedOption, os)
+                            CommandCard(
+                                title = "First-time install",
+                                command = commands.setupStep,
+                                note = commands.note,
+                                onCopy = { copyGuideCommand(controller, context, "install command", commands.setupStep) },
+                                onShare = { shareGuideCommands(context, "QuireCode host install", commands.setupStep) },
+                            )
+                            CommandCard(
+                                title = "New pairing code / QR later",
+                                command = commands.pairCommand,
+                                note = null,
+                                onCopy = { copyGuideCommand(controller, context, "pair command", commands.pairCommand) },
+                                onShare = { shareGuideCommands(context, "QuireCode pair command", commands.pairCommand) },
+                            )
+
+                            Text("4. Pair with the printed QR code or link", style = MaterialTheme.typography.titleSmall, color = colors.primary)
+                            PairingInputSection(
+                                controller = controller,
+                                connectionString = connectionString,
+                                onConnectionStringChange = { connectionString = it },
+                                clipboardOffer = clipboardOffer,
+                                onDismissClipboardOffer = { clipboardOffer = null },
+                                onOpenScanner = { scannerOpen = true },
+                                accessClientId = accessClientId,
+                                onAccessClientIdChange = { accessClientId = it },
+                                accessClientSecret = accessClientSecret,
+                                onAccessClientSecretChange = { accessClientSecret = it },
                             )
                         }
                     }
-                    val commands = guidedCommands(selectedOption, os)
-                    CommandCard(
-                        title = "First-time install",
-                        command = commands.setupStep,
-                        note = commands.note,
-                        onCopy = { copyGuideCommand(controller, context, "install command", commands.setupStep) },
-                        onShare = { shareGuideCommands(context, "QuireCode host install", commands.setupStep) },
-                    )
-                    CommandCard(
-                        title = "New pairing code / QR later",
-                        command = commands.pairCommand,
-                        note = null,
-                        onCopy = { copyGuideCommand(controller, context, "pair command", commands.pairCommand) },
-                        onShare = { shareGuideCommands(context, "QuireCode pair command", commands.pairCommand) },
-                    )
-
-                    Text("4. Pair with the printed QR code or link", style = MaterialTheme.typography.titleSmall, color = colors.primary)
-                    PairingInputSection(
-                        controller = controller,
-                        connectionString = connectionString,
-                        onConnectionStringChange = { connectionString = it },
-                        clipboardOffer = clipboardOffer,
-                        onDismissClipboardOffer = { clipboardOffer = null },
-                        onOpenScanner = { scannerOpen = true },
-                        accessClientId = accessClientId,
-                        onAccessClientIdChange = { accessClientId = it },
-                        accessClientSecret = accessClientSecret,
-                        onAccessClientSecretChange = { accessClientSecret = it },
-                    )
                 }
             }
         },

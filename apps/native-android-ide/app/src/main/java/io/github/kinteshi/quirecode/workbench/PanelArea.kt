@@ -1,5 +1,7 @@
 package io.github.kinteshi.quirecode.workbench
 
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.PlayCircleOutline
@@ -161,15 +163,21 @@ fun PanelArea(controller: WorkbenchController, modifier: Modifier = Modifier, ma
             } }
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
-            when (controller.panelTab) {
-                PanelTab.Terminal -> TerminalView(controller)
-                PanelTab.Problems -> ProblemsList(controller)
-                PanelTab.Output -> OutputLog(controller)
-                PanelTab.Debug -> DebugPanel(controller)
-                PanelTab.Ports -> PortsView(controller)
-                PanelTab.Variables -> VariablesView(controller)
-                PanelTab.Interactive -> InteractiveView(controller)
-                PanelTab.Docs -> DocsView(controller)
+            Crossfade(
+                targetState = controller.panelTab,
+                animationSpec = tween(if (controller.settings.animations) 120 else 0),
+                label = "panelTab",
+            ) { tab ->
+                when (tab) {
+                    PanelTab.Terminal -> TerminalView(controller)
+                    PanelTab.Problems -> ProblemsList(controller)
+                    PanelTab.Output -> OutputLog(controller)
+                    PanelTab.Debug -> DebugPanel(controller)
+                    PanelTab.Ports -> PortsView(controller)
+                    PanelTab.Variables -> VariablesView(controller)
+                    PanelTab.Interactive -> InteractiveView(controller)
+                    PanelTab.Docs -> DocsView(controller)
+                }
             }
         }
     }

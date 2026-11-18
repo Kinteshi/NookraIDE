@@ -3301,6 +3301,25 @@ Completed on 2026-11-17 (requested UI/UX follow-up to Batch 78). Simplified the 
   * Verified logo + tonal workspace pill + bottom-left `+ Set up` pill and simplified Welcome CTAs, verified `Pick folder…` / `Pick file…` inside `This device`, paired a temporary TLS host (`/tmp/b79-host/Projects/proj-a/src/main.rs`) and confirmed single-root chip suppression + `Projects` path bar, confirmed `proj-a` in Explorer and `proj-a > src > main.rs` breadcrumbs, and verified tapping the bottom-left `127.0.0.1` badge opens `Connections` with zero crashes.
 * **Tests:** Added `relativeHostAndWorkspaceBreadcrumbPathsAnchorToRoots` in `ConnectionsTest.kt`; verified app unit tests (436 total: 435 passed, 1 skipped), Rust tests (147 passed), clippy, debug assemble, ARM64 `zigbuild`, notices check, and `git diff --check`.
 
+## 80. Workbench UI, UX, and micro-animation polish
+
+Completed on 2026-11-18 (requested UI/UX & animation pass). Refined Open Workspace layout stability and actions, workspace pill contrast, editor tab distinction, Explorer root headers, Welcome de-duplication, and animated transitions (`G40` patterns).
+
+* **Open Workspace stability & clarity (`WorkspaceDialogs.kt`):**
+  * Wrapped source tabs (`All recent`, `This device`, `<Host>`) in a fixed `340.dp` `AnimatedContent` crossfade (`140ms`) so dialog height never jumps when switching sources, and wrapped the inline `"New folder name"` row in `VerticalReveal`.
+  * Replaced multi-line vertical recents inside a connected host tab with compact horizontal `AssistChip`s (`Recent on <host>`), changed child-row open buttons to explicit `Open` `FilledTonalButton`s, and renamed the footer confirm button to `"Open current (<folder>)"`.
+* **Top Bar, Explorer, Editor Tabs & Welcome (`NativeWorkbench.kt`, `ExplorerPane.kt`, `EditorPane.kt`):**
+  * Added `surfaceContainerHighest` + `outlineVariant` border styling to the TopBar workspace switcher button when a workspace is active.
+  * Styled the Explorer `atRoot` workspace folder as a fixed uppercase section header (`PROJ-A`) matching `OPEN EDITORS`, keeping `..` only when zoomed into a subfolder, and added `Modifier.animateItem()` row animation.
+  * Added a `2.dp` animated primary accent strip at the top of active `EditorTab`s and subtle container separation on inactive tabs.
+  * Removed the duplicate `"Open Workspace"` shortcut row from `EmptyEditor` (keeping the tooltip/action on the primary `Open workspace…` button) and wrapped `GetStartedCard` in `VerticalReveal`.
+* **Consistent micro-animations (`CommonUi.kt`, `FindWidget.kt`, `SidePanes.kt`, `PanelArea.kt`, `NativeWorkbench.kt`, `ConnectionWizardUi.kt`):**
+  * Added `TreeChevron` (90° animated rotation, `140ms`) for Explorer tree folders, `FindWidget` Toggle Replace, and `SearchView` Toggle Replace.
+  * Enabled `FindWidget` enter/exit `AnimatedVisibility` by removing its early `return`, wrapped `FindWidget` Replace, `SearchView` Replace + Include/Exclude globs, and `ConnectionWizardDialog`'s `TailscaleStatusCard` in `VerticalReveal`, and wrapped `PanelArea` (wide + compact) tab switches and `ConnectionWizardDialog` target switching in `Crossfade` / `AnimatedContent`.
+* **Checked on the tablet (`SM-X930`, `192.0.2.66:40433`):**
+  * Verified zero height jump across `All recent` / `This device` / `127.0.0.1` tabs in **Open workspace**, compact `proj-b` horizontal chip in `Recent on 127.0.0.1`, explicit `Open` row pills + `Open current (Projects)`, bordered `[ proj-a ]` top-bar pill, fixed uppercase `PROJ-A` header + rotating `src` chevron, `2.dp` primary tab accent across `main.rs` / `Untitled-1`, animated `SearchView` Replace & `FindWidget`, and zero crashes in `logcat`.
+* **Tests:** Verified app unit tests (436 total: 435 passed, 1 skipped), Rust tests (147 passed), clippy, debug assemble, ARM64 `zigbuild`, notices check, and `git diff --check`.
+
 ## Backlog
 ### Open backlog (11-08)
 The current lists of what's open, in two: the general backlog, and the Aardink switch's until it's complete. The older

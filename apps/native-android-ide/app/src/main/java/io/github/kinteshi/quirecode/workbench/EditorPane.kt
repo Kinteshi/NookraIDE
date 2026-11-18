@@ -316,8 +316,9 @@ private fun EditorTab(controller: WorkbenchController, document: DocumentSession
     val pinned = path in controller.pinnedTabs
     var menu by remember { mutableStateOf(false) }
     val colorMs = if (controller.settings.animations) 120 else 0
-    val tabColor by animateColorAsState(if (selected) colors.surface else colors.surfaceContainer, tween(colorMs), label = "tabColor")
+    val tabColor by animateColorAsState(if (selected) colors.surface else colors.surfaceContainerHigh.copy(alpha = 0.65f), tween(colorMs), label = "tabColor")
     val tabContentColor by animateColorAsState(if (selected) colors.onSurface else colors.onSurfaceVariant, tween(colorMs), label = "tabContentColor")
+    val accentColor by animateColorAsState(if (selected) colors.primary else androidx.compose.ui.graphics.Color.Transparent, tween(colorMs), label = "tabAccent")
     Surface(
         color = tabColor,
         contentColor = tabContentColor,
@@ -325,22 +326,25 @@ private fun EditorTab(controller: WorkbenchController, document: DocumentSession
         modifier = modifier.height(34.dp),
     ) {
         Box {
-            Row(
-                Modifier
-                    .combinedClickable(
-                        onClick = { controller.selectDocument(path) },
-                        // Only the preview tab waits for a second tap, so other tabs switch at once.
-                        onDoubleClick = if (preview) {
-                            { controller.keepTab(path) }
-                        } else {
-                            null
-                        },
-                        onLongClick = { menu = true },
-                    )
-                    .padding(start = 12.dp, end = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
+            Column(Modifier.fillMaxHeight()) {
+                Box(Modifier.fillMaxWidth().height(2.dp).background(accentColor))
+                Row(
+                    Modifier
+                        .weight(1f)
+                        .combinedClickable(
+                            onClick = { controller.selectDocument(path) },
+                            // Only the preview tab waits for a second tap, so other tabs switch at once.
+                            onDoubleClick = if (preview) {
+                                { controller.keepTab(path) }
+                            } else {
+                                null
+                            },
+                            onLongClick = { menu = true },
+                        )
+                        .padding(start = 12.dp, end = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
                 val fallback = when {
                     path.endsWith(".ipynb") -> Icons.Outlined.Code
                     isImagePath(path) -> Icons.Outlined.Image
@@ -375,6 +379,7 @@ private fun EditorTab(controller: WorkbenchController, document: DocumentSession
                         else -> Icon(Icons.Outlined.Close, contentDescription = "Close", modifier = Modifier.size(15.dp))
                     }
                 }
+            }
             }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                 @Composable
@@ -537,13 +542,17 @@ private fun EmptyEditor(controller: WorkbenchController) = BoxWithConstraints(Mo
         }
         Spacer(Modifier.height(16.dp))
         // First run (R7): nothing paired yet, so the way in comes first.
-        if (!controller.connected && controller.profiles.isEmpty()) {
-            GetStartedCard(controller)
-            Spacer(Modifier.height(16.dp))
+        VerticalReveal(
+            visible = !controller.connected && controller.profiles.isEmpty(),
+            animate = controller.settings.animations,
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                GetStartedCard(controller)
+                Spacer(Modifier.height(16.dp))
+            }
         }
         // Each line does what it says; the keys are for next time.
         val actions: List<Triple<androidx.compose.ui.graphics.vector.ImageVector, String, Pair<String, () -> Unit>>> = listOf(
-            Triple(Icons.Outlined.FolderOpen, "Open Workspace", "Ctrl+K Ctrl+O" to { controller.showOpenFolder() }),
             Triple(Icons.Outlined.Search, "Quick Open", "Ctrl+P" to { controller.runCommand("workbench.action.quickOpen") }),
             Triple(Icons.Outlined.Widgets, "Command Palette", "Ctrl+Shift+P" to { controller.runCommand("workbench.action.showCommands") }),
             Triple(Icons.Outlined.Terminal, "Toggle Terminal", "Ctrl+`" to { controller.runCommand("workbench.action.terminal.toggleTerminal") }),
@@ -569,9 +578,11 @@ private fun EmptyEditor(controller: WorkbenchController) = BoxWithConstraints(Mo
             horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            androidx.compose.material3.Button(onClick = { controller.showOpenFolder() }) {
-                Icon(Icons.Outlined.FolderOpen, contentDescription = null, modifier = Modifier.padding(end = 8.dp).size(18.dp))
-                Text("Open workspace…")
+            Tooltip("Open workspace", "workbench.action.files.openFolder") {
+                androidx.compose.material3.Button(onClick = { controller.showOpenFolder() }) {
+                    Icon(Icons.Outlined.FolderOpen, contentDescription = null, modifier = Modifier.padding(end = 8.dp).size(18.dp))
+                    Text("Open workspace…")
+                }
             }
             androidx.compose.material3.OutlinedButton(onClick = { controller.newUntitledFile() }) {
                 Icon(Icons.AutoMirrored.Outlined.NoteAdd, contentDescription = null, modifier = Modifier.padding(end = 8.dp).size(18.dp))
