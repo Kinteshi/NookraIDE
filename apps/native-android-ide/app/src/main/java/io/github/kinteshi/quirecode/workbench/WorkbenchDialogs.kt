@@ -1689,7 +1689,10 @@ private fun QuickOpenDialog(controller: WorkbenchController) {
     LaunchedEffect(Unit) { controller.refreshQuickOpenIndex() }
     val query = controller.quickOpenFilter
     val mode = quickOpenMode(query)
-    LaunchedEffect(query) { if (mode == QuickOpenMode.WorkspaceSymbols) controller.searchWorkspaceSymbols(query.removePrefix(mode.prefix)) }
+    LaunchedEffect(query, controller.quickOpenTruncated) {
+        if (mode == QuickOpenMode.WorkspaceSymbols) controller.searchWorkspaceSymbols(query.removePrefix(mode.prefix))
+        controller.searchQuickOpenFiles(query)
+    }
     val root = controller.workspaceRoot.orEmpty().trimEnd('/')
     PaletteDialog(
         placeholder = when {
@@ -1701,6 +1704,7 @@ private fun QuickOpenDialog(controller: WorkbenchController) {
         onQuery = { controller.quickOpenFilter = it },
         items = controller.quickOpenItems(query),
         onDismiss = {
+            controller.cancelQuickOpenFileSearch()
             controller.dialog = null
             controller.quickOpenAttachesToChat = false
         },
@@ -1715,8 +1719,17 @@ private fun QuickOpenDialog(controller: WorkbenchController) {
                     modifier = Modifier.padding(start = 16.dp, top = 8.dp),
                 )
             } else if (controller.quickOpenTruncated) {
+                val hint = when {
+                    controller.quickOpenRemoteSearching -> "Searching all files with ripgrep…"
+                    controller.canSearchAllFilesRemotely && query.isBlank() ->
+                        "Large workspace (first ${"%,d".format(controller.quickOpenIndex.size)} listed); type to search all files"
+                    controller.canSearchAllFilesRemotely ->
+                        "Searching all files with ripgrep"
+                    else ->
+                        "This folder has many files: searching the first ${"%,d".format(controller.quickOpenIndex.size)}"
+                }
                 Text(
-                    "This folder has many files: searching the first ${"%,d".format(controller.quickOpenIndex.size)}",
+                    hint,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(start = 16.dp, top = 8.dp),

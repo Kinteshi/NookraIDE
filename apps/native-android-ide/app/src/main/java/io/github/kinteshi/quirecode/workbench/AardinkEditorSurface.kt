@@ -496,6 +496,96 @@ internal class AardinkEditorSurface(val state: CodeEditorState) : EditorSurface 
         val line = position.line.coerceIn(0, state.document.lineCount - 1)
         return state.document.lineColToOffset(line, position.character.coerceIn(0, lineText(line).length))
     }
+
+    /** Accepts the next word of the currently visible inline ghost text (`Ctrl+Right`); false when none is shown. */
+    fun acceptInlineCompletionWord(): Boolean = acceptAardinkInlineCompletionWord(state)
+}
+
+internal object AardinkGhostReflect {
+    private val trackerMethod = runCatching {
+        CodeEditorState::class.java.getMethod("getInlineCompletions\$com_aardarch_editor")
+    }.getOrNull()
+    private val trackerField = if (trackerMethod == null) {
+        runCatching {
+            CodeEditorState::class.java.getDeclaredField("inlineCompletions").apply { isAccessible = true }
+        }.getOrNull()
+    } else null
+
+    private val docVersionMethod = runCatching {
+        com.aardarch.aardink.core.CodeDocument::class.java.getMethod("getVersion\$com_aardarch_editor")
+    }.getOrNull()
+    private val docVersionField = if (docVersionMethod == null) {
+        runCatching {
+            com.aardarch.aardink.core.CodeDocument::class.java.getDeclaredField("version").apply { isAccessible = true }
+        }.getOrNull()
+    } else null
+
+    private val trackerClass = runCatching { Class.forName("com.aardarch.aardink.core.GhostTextTracker") }.getOrNull()
+    private val getSettled = trackerClass?.let { runCatching { it.getMethod("getSettled") }.getOrNull() }
+    private val clearMethod = trackerClass?.let { runCatching { it.getMethod("clear") }.getOrNull() }
+    private val askAgainMethod = trackerClass?.let {
+        runCatching { it.getMethod("askAgain", Boolean::class.javaPrimitiveType) }.getOrNull()
+    }
+    private val getAskMethod = trackerClass?.let { runCatching { it.getMethod("getAsk") }.getOrNull() }
+    private val answerMethod = trackerClass?.methods?.firstOrNull { it.name == "answer" && it.parameterCount == 3 }
+
+    fun tracker(state: CodeEditorState): Any? = runCatching {
+        trackerMethod?.invoke(state) ?: trackerField?.get(state)
+    }.getOrNull()
+
+    fun documentVersion(document: com.aardarch.aardink.core.CodeDocument): Long? = runCatching {
+        (docVersionMethod?.invoke(document) ?: docVersionField?.get(document)) as? Long
+    }.getOrNull()
+
+    fun settledPieces(tracker: Any): List<Pair<Int, String>> {
+        val settled = runCatching { getSettled?.invoke(tracker) }.getOrNull() ?: return emptyList()
+        val rawPieces = runCatching {
+            settled.javaClass.getMethod("getPieces").invoke(settled) as? List<*>
+        }.getOrNull() ?: return emptyList()
+        return rawPieces.mapNotNull { piece ->
+            if (piece == null) return@mapNotNull null
+            runCatching {
+                val offset = piece.javaClass.getMethod("getOffset").invoke(piece) as Int
+                val text = piece.javaClass.getMethod("getText").invoke(piece) as String
+                offset to text
+            }.getOrNull()
+        }
+    }
+
+    fun reseed(tracker: Any, version: Long, remaining: String, caret: Int) {
+        clearMethod?.invoke(tracker)
+        askAgainMethod?.invoke(tracker, true)
+        val ask = getAskMethod?.invoke(tracker) ?: return
+        answerMethod?.invoke(
+            tracker,
+            ask,
+            version,
+            listOf(com.aardarch.aardink.core.InlineCompletion(remaining, caret until caret, isSnippet = false)),
+        )
+    }
+}
+
+internal fun acceptAardinkInlineCompletionWord(state: CodeEditorState): Boolean {
+    val tracker = AardinkGhostReflect.tracker(state) ?: return false
+    val pieces = AardinkGhostReflect.settledPieces(tracker)
+    val piece = pieces.firstOrNull { it.second.isNotEmpty() } ?: return false
+    val (offset, fullText) = piece
+    val word = nextInlineCompletionWord(fullText)
+    if (word.isEmpty()) return false
+    if (pieces.size == 1 && word.length >= fullText.length) {
+        return state.execute(EditorCommand.AcceptInlineCompletion)
+    }
+    val insertAt = offset.coerceIn(0, state.text.length)
+    val newCaret = insertAt + word.length
+    if (!state.executeEdits(listOf(TextEdit(insertAt until insertAt, word)), listOf(TextRange(newCaret)))) {
+        return false
+    }
+    val remaining = fullText.substring(word.length)
+    if (remaining.isNotEmpty()) {
+        val version = AardinkGhostReflect.documentVersion(state.document) ?: return true
+        AardinkGhostReflect.reseed(tracker, version, remaining, newCaret)
+    }
+    return true
 }
 
 /** The word (letters, digits, `_`) at [offset] in [text], or null when there's none under it. */

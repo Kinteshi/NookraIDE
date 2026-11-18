@@ -44,4 +44,31 @@ class SearchCodecTest {
         assertEquals(listOf("*.py"), fields.getValue("include").asArrayValue().list().map { it.asStringValue().asString() })
         assertEquals(10, fields.size)
     }
+
+    @Test
+    fun encodesFindFilesAndDecodesFilesFound() {
+        val bytes = MessagePackVfsCodec.findFiles(11, "/w", "lib.rs", listOf("target"), maxResults = 200)
+        val variant = MessagePack.newDefaultUnpacker(bytes).unpackValue().asMapValue().map().values.first()
+            .asMapValue().map().entries.first()
+        assertEquals("FindFilesReq", variant.key.asStringValue().asString())
+        val fields = variant.value.asMapValue().map().entries
+            .associate { (key, value) -> key.asStringValue().asString() to value }
+        assertEquals("/w", fields.getValue("root").asStringValue().asString())
+        assertEquals("lib.rs", fields.getValue("query").asStringValue().asString())
+        assertEquals(listOf("target"), fields.getValue("exclude").asArrayValue().list().map { it.asStringValue().asString() })
+        assertEquals(200, fields.getValue("max_results").asIntegerValue().asInt())
+
+        val packer = MessagePack.newDefaultBufferPacker()
+        packer.packMapHeader(1)
+        packer.packString("Search")
+        packer.packMapHeader(1)
+        packer.packString("FilesFound")
+        packer.packMapHeader(4)
+        packer.packString("req_id"); packer.packLong(11)
+        packer.packString("paths"); packer.packArrayHeader(1); packer.packString("/w/src/lib.rs")
+        packer.packString("truncated"); packer.packBoolean(true)
+        packer.packString("elapsed_ms"); packer.packInt(14)
+        val event = (MessagePackVfsCodec.decode(packer.toByteArray()) as IncomingPacket.Search).event
+        assertEquals(SearchEvent.FilesFound(11, listOf("/w/src/lib.rs"), truncated = true, elapsedMs = 14), event)
+    }
 }

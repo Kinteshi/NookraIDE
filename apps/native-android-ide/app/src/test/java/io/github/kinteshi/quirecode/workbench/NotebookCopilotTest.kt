@@ -41,4 +41,14 @@ class NotebookCopilotTest {
         assertEquals(16, cellOffset(code.source, 1, 99))
         assertNull(cellOffset(code.source, 2, 0))
     }
+
+    @Test
+    fun nextInlineCompletionWordSplitsTokensCleanly() {
+        assertEquals("", nextInlineCompletionWord(""))
+        assertEquals("print", nextInlineCompletionWord("print('hi')"))
+        assertEquals("('", nextInlineCompletionWord("('hi')"))
+        assertEquals("  return", nextInlineCompletionWord("  return x + 1"))
+        assertEquals("\n    return", nextInlineCompletionWord("\n    return 42"))
+        assertEquals("\n", nextInlineCompletionWord("\n\nnext"))
+    }
 }

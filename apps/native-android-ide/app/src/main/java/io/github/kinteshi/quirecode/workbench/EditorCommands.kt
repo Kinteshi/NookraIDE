@@ -124,6 +124,7 @@ object EditorCommands {
 
     val copilot: List<EditorCommand> = listOf(
         command("editor.action.inlineSuggest.trigger", "Trigger Inline Suggestion", "Alt+\\"),
+        command("editor.action.inlineSuggest.acceptNextWord", "Inline Suggest: Accept Next Word", "Ctrl+Right"),
         command("editor.action.inlineSuggest.acceptNextEdit", "Copilot: Accept Next Edit Suggestion", ""),
         command("editor.action.inlineSuggest.triggerNextEdit", "Copilot: Suggest the Next Edit", ""),
         command("workbench.action.chat.open", "Open Copilot Chat", "Ctrl+Alt+I"),

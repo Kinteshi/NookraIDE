@@ -640,6 +640,12 @@ private fun CellSourceEditor(
                             controller.requestCellCompletion(session, cell, field)
                             return@onPreviewKeyEvent true
                         }
+                        if (event.key == Key.DirectionRight && event.isCtrlPressed && !event.isAltPressed && !event.isShiftPressed) {
+                            controller.acceptCellSuggestionWord(session, cell, field)?.let { accepted ->
+                                apply(accepted)
+                                return@onPreviewKeyEvent true
+                            }
+                        }
                     }
                     if (event.type != KeyEventType.KeyDown || event.isCtrlPressed || event.isAltPressed) {
                         return@onPreviewKeyEvent false

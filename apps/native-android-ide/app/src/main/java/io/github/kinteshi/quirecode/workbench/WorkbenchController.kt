@@ -412,8 +412,17 @@ class WorkbenchController(private val context: Context) {
     /** The editor's keys in a Python file with `# %%` cells: Ctrl+Enter and Shift+Enter run them. */
     private var cellEditorDispatcher = EditorKeybindingDispatcher(applyKeybindings(EditorCommands.interactive + EditorCommands.editor, keybindingRules))
     private var globalDispatcher = EditorKeybindingDispatcher(applyKeybindings(EditorCommands.global, keybindingRules))
-    private var notebookDispatcher =
-        EditorKeybindingDispatcher(applyKeybindings(EditorCommands.global + EditorCommands.notebook + EditorCommands.notebookFind, keybindingRules))
+    private fun notebookDispatcherFor(rules: List<KeybindingRule>) = EditorKeybindingDispatcher(
+        applyKeybindings(
+            EditorCommands.global +
+                EditorCommands.notebook +
+                EditorCommands.notebookFind +
+                EditorCommands.copilot.filter { it.id == "editor.action.inlineSuggest.acceptNextWord" },
+            rules,
+        ),
+    )
+
+    private var notebookDispatcher = notebookDispatcherFor(keybindingRules)
     private var terminalDispatcher =
         EditorKeybindingDispatcher(applyKeybindings(EditorCommands.terminal + EditorCommands.global, keybindingRules))
     private val consumedKeyDowns = mutableSetOf<Int>()
@@ -544,12 +553,31 @@ class WorkbenchController(private val context: Context) {
     var quickOpenIndexing by mutableStateOf(false)
     /** The folder has more files than the index holds. */
     var quickOpenTruncated by mutableStateOf(false)
+    var remoteQuickOpenFiles by mutableStateOf(emptyList<FileEntry>())
+        private set
+    var quickOpenRemoteSearching by mutableStateOf(false)
+        private set
+    var remoteQuickOpenQuery by mutableStateOf("")
+        private set
     private var quickOpenWalk: QuickOpenWalk? = null
     private var quickOpenWalkRoot: String? = null
     private var quickOpenIndexPartial = false
+    private var scheduledFindFiles: java.util.concurrent.ScheduledFuture<*>? = null
+    private var activeFindFiles: Long? = null
+    private var findFilesGeneration = 0
     /** The last query's files, whose matching a redraw shouldn't repeat over a large index. */
     private var quickOpenFilesCache: Triple<String, List<FileEntry>, List<QuickOpenItem>>? = null
         private set
+
+    val canSearchAllFilesRemotely: Boolean
+        get() {
+            val root = workspaceRoot ?: return false
+            return quickOpenTruncated &&
+                !isTreePath(root) &&
+                !files.servesOffline(root) &&
+                files.isConnected(root) &&
+                vfs.findsFilesRemotely
+        }
 
     // Language intelligence ---------------------------------------------------------------------
     val diagnostics = mutableStateListOf<LanguageDiagnostic>()
@@ -1057,20 +1085,54 @@ class WorkbenchController(private val context: Context) {
 
     /** The Cargo.toml of each open Rust file's crate, for rust-analyzer's `linkedProjects`. */
     private val rustManifests = mutableMapOf<String, String>()
+    private val resolvedRustCrates = mutableSetOf<String>()
+    private val rustCrateCallbacks = mutableMapOf<String, MutableList<() -> Unit>>()
+
+    private fun needsRustCrateResolution(path: String): Boolean {
+        val root = workspaceRoot?.trimEnd('/') ?: return false
+        return path.endsWith(".rs") &&
+            path.startsWith("$root/") &&
+            settings.otherLanguageServers &&
+            path !in resolvedRustCrates &&
+            languageClients[OtherLanguageServer.Rust.id]?.isStarted != true
+    }
 
     /** An open Rust file: its crate joins rust-analyzer's projects when discovery wouldn't find it. */
-    private fun trackRustCrate(path: String) {
-        val root = workspaceRoot?.trimEnd('/') ?: return
-        if (!path.endsWith(".rs") || !path.startsWith("$root/") || !settings.otherLanguageServers) return
+    private fun trackRustCrate(path: String, then: () -> Unit = {}) {
+        val root = workspaceRoot?.trimEnd('/') ?: return then()
+        if (!path.endsWith(".rs") || !path.startsWith("$root/") || !settings.otherLanguageServers) {
+            then()
+            return
+        }
+        if (path in resolvedRustCrates) {
+            then()
+            return
+        }
+        val callbacks = rustCrateCallbacks[path]
+        if (callbacks != null) {
+            callbacks.add(then)
+            return
+        }
+        rustCrateCallbacks[path] = mutableListOf(then)
         findCargoManifest(path.substringBeforeLast('/'), root) { manifest ->
-            if (manifest == null || rustManifests[path] == manifest || documents.none { it.path == path }) return@findCargoManifest
-            val before = rustLinkedProjects(root, rustManifests.values)
-            rustManifests[path] = manifest
-            if (rustLinkedProjects(root, rustManifests.values) != before) updateRustSettings()
+            resolvedRustCrates += path
+            if (manifest != null && rustManifests[path] != manifest && documents.any { it.path == path }) {
+                val before = rustLinkedProjects(root, rustManifests.values)
+                rustManifests[path] = manifest
+                if (languageClients[OtherLanguageServer.Rust.id]?.isStarted == true &&
+                    rustLinkedProjects(root, rustManifests.values) != before
+                ) {
+                    updateRustSettings()
+                }
+            }
+            val pendingCallbacks = rustCrateCallbacks.remove(path).orEmpty()
+            pendingCallbacks.forEach { it() }
         }
     }
 
     private fun untrackRustCrate(path: String) {
+        resolvedRustCrates.remove(path)
+        rustCrateCallbacks.remove(path)
         val root = workspaceRoot ?: return
         val before = rustLinkedProjects(root, rustManifests.values)
         if (rustManifests.remove(path) != null && rustLinkedProjects(root, rustManifests.values) != before) updateRustSettings()
@@ -1131,12 +1193,16 @@ class WorkbenchController(private val context: Context) {
         return merged
     }
 
-    /** Ruff takes its editor settings only at start (`initializationOptions.settings`). */
+    /** Ruff takes its editor settings at start; rust-analyzer takes `linkedProjects` at start for deep crates. */
     private fun initializationOptions(language: String, tool: String): JsonObject? =
-        if (tool == "ruff") {
-            JsonObject().apply { add("settings", serverSettings(language).getPath("ruff")?.deepCopy() ?: JsonObject()) }
-        } else {
-            null
+        when (tool) {
+            "ruff" -> JsonObject().apply { add("settings", serverSettings(language).getPath("ruff")?.deepCopy() ?: JsonObject()) }
+            "rust-analyzer" -> serverSettings(language).getPath("rust-analyzer")
+                ?.takeIf { it.isJsonObject }
+                ?.asJsonObject
+                ?.deepCopy()
+                ?.takeIf { it.size() > 0 }
+            else -> null
         }
 
     private fun loadWorkspaceSettings(root: String): CompletableFuture<JsonObject> {
@@ -1466,6 +1532,7 @@ class WorkbenchController(private val context: Context) {
                             event.message
                         }
                     }
+                    is SearchEvent.FilesFound -> Unit
                 }
             }
         }
@@ -4665,6 +4732,9 @@ class WorkbenchController(private val context: Context) {
         chatAgent.stop()
         if (debugState != DebugState.Idle) stopDebugging()
         diagnostics.clear()
+        rustManifests.clear()
+        resolvedRustCrates.clear()
+        rustCrateCallbacks.clear()
         languageServerIssues = emptyList()
         expandedFolders.clear()
         folderChildren.clear()
@@ -4672,6 +4742,7 @@ class WorkbenchController(private val context: Context) {
         currentDirectory = ""
         quickOpenWalk?.cancel()
         quickOpenWalk = null
+        cancelQuickOpenFileSearch()
         quickOpenIndexing = false
         quickOpenTruncated = false
         quickOpenIndexPartial = false
@@ -4982,8 +5053,11 @@ class WorkbenchController(private val context: Context) {
                 checkFileExists(session.path)
                 fetchLanguagePackIfWanted(session.path)
                 notifyDocumentOpened(session)
-                trackRustCrate(session.path)
-                if (!background) ensureLanguageServers(session.path)
+                trackRustCrate(session.path) {
+                    if (!background && (activePath == session.path || documents.any { it.path == session.path })) {
+                        ensureLanguageServers(session.path)
+                    }
+                }
                 if (lspLanguageId(session.path) != null) refreshOutline(session)
                 if (session.conflict != null) dialog = WorkbenchDialog.Conflict(session)
             }
@@ -6593,6 +6667,12 @@ class WorkbenchController(private val context: Context) {
     private fun ensureLanguageServers(path: String) {
         val workspace = guestWorkspace ?: return
         if (!vfs.isConnected() || path in notebooks) return
+        if (needsRustCrateResolution(path)) {
+            trackRustCrate(path) {
+                if (activePath == path || documents.any { it.path == path }) ensureLanguageServers(path)
+            }
+            return
+        }
         val starting = languageClients.filterValues { it in languageClientsFor(path) && !it.isStarted }
         if (starting.isEmpty()) return
         scheduledServerStop?.cancel(false)
@@ -6601,6 +6681,7 @@ class WorkbenchController(private val context: Context) {
             status = "Starting $tool"
             // ty finds the chosen interpreter's environment through CONDA_PREFIX / VIRTUAL_ENV.
             val env = if (language == "python" && tool == "ty") pythonEnvironmentVariables(settings.pythonInterpreter) else emptyList()
+            client.updateSettings(SettingsResolver.sections(serverSettings(language)))
             client.start(workspace, tool, env, initializationOptions(language, tool)).whenComplete { _, error ->
                 post {
                     reportLanguageServer(language, error)
@@ -7090,23 +7171,77 @@ class WorkbenchController(private val context: Context) {
         val uri = diagnosticUri(document.path)
         val problems = diagnostics.filter { it.uri == uri && it.covers(position) }.sortedBy { it.severity ?: 4 }
         val client = languageClientFor(document.path)?.takeIf { it.isReady }
-        if (client == null) {
+        val debugFuture = evaluateDebugHover(document.text, position)
+        if (client == null && debugFuture == null) {
             if (problems.isNotEmpty()) hoverCard = HoverCard(document.path, position, problems, null)
             else if (!fromPointer) status = "Language intelligence needs a running language server for this file"
             return
         }
-        client.hover(document.path, position).whenComplete { response, error ->
+        val lspFuture: CompletableFuture<com.google.gson.JsonElement?> =
+            client?.hover(document.path, position)?.thenApply { it }
+                ?: CompletableFuture.completedFuture(null)
+        val effectiveDebugFuture: CompletableFuture<String?> = debugFuture ?: CompletableFuture.completedFuture(null)
+        CompletableFuture.allOf(lspFuture, effectiveDebugFuture).whenComplete { _, _ ->
             post {
                 if (request != hoverRequest || activePath != document.path) return@post
-                if (error != null && !fromPointer) status = "Hover failed: ${error.cause?.message ?: error.message}"
-                val text = response?.takeIf { error == null && it.isJsonObject }?.asJsonObject?.get("contents")
+                val debugText = runCatching { effectiveDebugFuture.getNow(null) }.getOrNull()?.takeIf { it.isNotBlank() }
+                var lspError: Throwable? = null
+                val lspElement = try {
+                    lspFuture.getNow(null)
+                } catch (error: Throwable) {
+                    lspError = error
+                    null
+                }
+                if (lspError != null && !fromPointer && debugText == null) {
+                    status = "Hover failed: ${lspError.cause?.message ?: lspError.message}"
+                }
+                val lspText = lspElement?.takeIf { it.isJsonObject }?.asJsonObject?.get("contents")
                     ?.let(::hoverContents)?.takeIf { it.isNotBlank() }
-                if (text == null && problems.isEmpty()) {
+                val combined = listOfNotNull(debugText, lspText).joinToString("\n\n---\n\n").takeIf { it.isNotBlank() }
+                if (combined == null && problems.isEmpty()) {
                     hoverCard = null
-                    if (!fromPointer && error == null) status = "No hover information"
+                    if (!fromPointer && lspError == null) status = "No hover information"
                     return@post
                 }
-                hoverCard = HoverCard(document.path, position, problems, text)
+                hoverCard = HoverCard(document.path, position, problems, combined)
+            }
+        }
+    }
+
+    private fun findLoadedDebugVariable(variables: List<DebugVariable>, expression: String): DebugVariable? {
+        val parts = expression.split(".", "->", "::").filter { it.isNotEmpty() }
+        if (parts.isEmpty()) return null
+        var level = variables.flatMap { if (it.depth == 0) it.children else listOf(it) }
+        var current: DebugVariable? = null
+        for (part in parts) {
+            current = level.firstOrNull { it.name == part } ?: return null
+            level = current.children
+        }
+        return current
+    }
+
+    /** Evaluates the symbol under [position] via DAP (`context = "hover"`) while paused at a breakpoint (G19). */
+    internal fun evaluateDebugHover(text: String, position: LspPosition): CompletableFuture<String?>? {
+        if (debugState !is DebugState.Stopped) return null
+        val (expression, _) = debugHoverExpression(text, position.line, position.character) ?: return null
+        val cached = findLoadedDebugVariable(debugVariables, expression)
+        if (!session.isStarted) {
+            return cached?.let {
+                CompletableFuture.completedFuture(formatDebugHoverMarkdown(expression, it.value, it.type))
+            }
+        }
+        val args = JsonObject().apply {
+            addProperty("expression", expression)
+            selectedFrameId?.let { addProperty("frameId", it) }
+            addProperty("context", "hover")
+        }
+        return session.request("evaluate", args).handle { body, error ->
+            val result = body?.takeIf { error == null }?.get("result")?.takeIf { !it.isJsonNull }?.asString
+            val type = body?.takeIf { error == null }?.get("type")?.takeIf { !it.isJsonNull }?.asString
+            when {
+                !result.isNullOrBlank() -> formatDebugHoverMarkdown(expression, result, type)
+                cached != null -> formatDebugHoverMarkdown(expression, cached.value, cached.type)
+                else -> null
             }
         }
     }
@@ -11071,6 +11206,53 @@ class WorkbenchController(private val context: Context) {
         }
     }
 
+    /** Ctrl+Right with a suggestion showing in a notebook cell: accepts one word while leaving the suffix as ghost text. */
+    fun acceptCellSuggestionWord(session: NotebookSession, cell: NotebookCell, value: TextFieldValue? = null): TextFieldValue? {
+        val suggestion = session.cellSuggestion?.takeIf { it.cellId == cell.id } ?: return null
+        val currentText = value?.text ?: cell.source
+        val selection = value?.selection ?: androidx.compose.ui.text.TextRange(session.cellCaret.coerceIn(0, currentText.length))
+        if (!selection.collapsed) return null
+        val caret = selection.start.coerceIn(0, currentText.length)
+        val ghost = cellGhostText(currentText, caret, suggestion) ?: return null
+        val word = nextInlineCompletionWord(ghost)
+        if (word.isEmpty()) return null
+        if (word.length >= ghost.length) {
+            val accepted = acceptCellSuggestion(session, cell, TextFieldValue(currentText, selection)) ?: return null
+            if (value == null) {
+                cell.source = accepted.text
+                onCellEdited(session)
+                session.cellCaret = accepted.selection.start
+                session.cellCaretRequest = cell.id to accepted.selection.start
+            }
+            return accepted
+        }
+        val nextText = currentText.substring(0, caret) + word + currentText.substring(caret)
+        val nextCaret = caret + word.length
+        session.cellSuggestion = suggestion.copy(end = (suggestion.end + word.length).coerceAtLeast(nextCaret))
+        session.cellCaret = nextCaret
+        if (value == null) {
+            cell.source = nextText
+            onCellEdited(session)
+            session.cellCaretRequest = cell.id to nextCaret
+        }
+        return TextFieldValue(nextText, androidx.compose.ui.text.TextRange(nextCaret))
+    }
+
+    /** Accepts the next word of visible inline ghost text (`Ctrl+Right`); false when none is active. */
+    fun acceptInlineSuggestionWord(): Boolean {
+        if (focusArea == FocusArea.Notebook) {
+            val session = activeNotebook ?: return false
+            val cell = session.notebook.cells.firstOrNull { it.id == session.selectedCell && it.type == CellType.Code }
+                ?: return false
+            session.cellEditors[cell.id]?.takeIf { settings.cellEditor == "aardink" }?.let { state ->
+                return acceptAardinkInlineCompletionWord(state)
+            }
+            return acceptCellSuggestionWord(session, cell) != null
+        }
+        val surface = editorSurface as? AardinkEditorSurface ?: return false
+        return surface.acceptInlineCompletionWord()
+    }
+
     /** Tab with a suggestion showing: the cell text with it applied, caret after it. */
     fun acceptCellSuggestion(session: NotebookSession, cell: NotebookCell, value: TextFieldValue): TextFieldValue? {
         val suggestion = session.cellSuggestion?.takeIf { it.cellId == cell.id } ?: return null
@@ -11332,7 +11514,7 @@ class WorkbenchController(private val context: Context) {
         editorDispatcher = EditorKeybindingDispatcher(applyKeybindings(EditorCommands.editor, rules))
         cellEditorDispatcher = EditorKeybindingDispatcher(applyKeybindings(EditorCommands.interactive + EditorCommands.editor, rules))
         globalDispatcher = EditorKeybindingDispatcher(applyKeybindings(EditorCommands.global, rules))
-        notebookDispatcher = EditorKeybindingDispatcher(applyKeybindings(EditorCommands.global + EditorCommands.notebook + EditorCommands.notebookFind, rules))
+        notebookDispatcher = notebookDispatcherFor(rules)
         terminalDispatcher = EditorKeybindingDispatcher(applyKeybindings(EditorCommands.terminal + EditorCommands.global, rules))
         return true
     }
@@ -11429,7 +11611,84 @@ class WorkbenchController(private val context: Context) {
     fun openQuickOpen(prefix: String = "") {
         quickOpenFilter = prefix
         workspaceSymbols = emptyList()
+        cancelQuickOpenFileSearch()
         dialog = WorkbenchDialog.QuickOpen
+    }
+
+    private fun quickOpenExcludeGlobs(): List<String> =
+        (skippedDirectories.filter { !it.startsWith('.') } + settings.filesExclude)
+            .filter { it.isNotEmpty() && !it.startsWith('!') && '\u0000' !in it }
+            .distinct()
+
+    fun cancelQuickOpenFileSearch() {
+        scheduledFindFiles?.cancel(false)
+        scheduledFindFiles = null
+        activeFindFiles?.let(vfs::cancelSearch)
+        activeFindFiles = null
+        findFilesGeneration++
+        quickOpenRemoteSearching = false
+        remoteQuickOpenQuery = ""
+        remoteQuickOpenFiles = emptyList()
+        quickOpenFilesCache = null
+    }
+
+    fun searchQuickOpenFiles(rawQuery: String) {
+        val root = workspaceRoot
+        val mode = quickOpenMode(rawQuery)
+        val text = rawQuery.removePrefix(mode.prefix)
+        if (root == null || mode != QuickOpenMode.Files || !canSearchAllFilesRemotely || text.isBlank()) {
+            cancelQuickOpenFileSearch()
+            return
+        }
+        if (text == remoteQuickOpenQuery && (quickOpenRemoteSearching || remoteQuickOpenFiles.isNotEmpty())) {
+            return
+        }
+        scheduledFindFiles?.cancel(false)
+        activeFindFiles?.let(vfs::cancelSearch)
+        activeFindFiles = null
+        val generation = ++findFilesGeneration
+        remoteQuickOpenQuery = text
+        remoteQuickOpenFiles = emptyList()
+        quickOpenFilesCache = null
+        quickOpenRemoteSearching = true
+        scheduledFindFiles = timer.schedule(
+            {
+                post {
+                    if (generation != findFilesGeneration || !canSearchAllFilesRemotely) return@post
+                    val currentRoot = workspaceRoot ?: return@post
+                    val requestId = vfs.findFiles(currentRoot, text, quickOpenExcludeGlobs(), maxResults = 200) { event ->
+                        post {
+                            if (generation != findFilesGeneration) return@post
+                            when (event) {
+                                is SearchEvent.FilesFound -> {
+                                    activeFindFiles = null
+                                    quickOpenRemoteSearching = false
+                                    remoteQuickOpenFiles = event.paths.map { path ->
+                                        FileEntry(
+                                            name = path.substringAfterLast('/'),
+                                            path = path,
+                                            isDirectory = false,
+                                            size = 0L,
+                                            modifiedTs = 0L,
+                                        )
+                                    }
+                                    quickOpenFilesCache = null
+                                }
+                                is SearchEvent.Done, is SearchEvent.Error -> {
+                                    activeFindFiles = null
+                                    quickOpenRemoteSearching = false
+                                }
+                                is SearchEvent.Match -> Unit
+                            }
+                        }
+                    }
+                    activeFindFiles = requestId
+                    if (requestId == null) quickOpenRemoteSearching = false
+                }
+            },
+            120,
+            TimeUnit.MILLISECONDS,
+        )
     }
 
     /** `workspace/symbol` matches for Quick Open's `#`, from every running server that offers them. */
@@ -11481,13 +11740,25 @@ class WorkbenchController(private val context: Context) {
             QuickOpenMode.Files -> {
                 val root = workspaceRoot.orEmpty().trimEnd('/')
                 val index = quickOpenIndex
+                val remoteActive = canSearchAllFilesRemotely &&
+                    text.isNotBlank() &&
+                    remoteQuickOpenQuery == text &&
+                    remoteQuickOpenFiles.isNotEmpty()
                 quickOpenFilesCache?.takeIf { it.first == text && it.second === index }?.third
-                    ?: index
-                        .filter { fuzzyMatch(text, it.path.removePrefix(root)) }
-                        .sortedBy { matchRank(text, it.name) }
-                        .take(200)
-                        .map(QuickOpenItem::File)
-                        .also { quickOpenFilesCache = Triple(text, index, it) }
+                    ?: run {
+                        val matches = if (remoteActive) {
+                            val localMatches = index.filter { fuzzyMatch(text, it.path.removePrefix(root)) }
+                            (remoteQuickOpenFiles + localMatches)
+                                .filter { !isExcluded(it.path) }
+                                .distinctBy { it.path }
+                                .sortedWith(compareBy<FileEntry>({ matchRank(text, it.name) }, { it.path.removePrefix(root).length }, { it.path }))
+                        } else {
+                            index
+                                .filter { fuzzyMatch(text, it.path.removePrefix(root)) }
+                                .sortedBy { matchRank(text, it.name) }
+                        }
+                        matches.take(200).map(QuickOpenItem::File)
+                    }.also { quickOpenFilesCache = Triple(text, index, it) }
             }
             QuickOpenMode.Commands -> EditorCommands.all.distinctBy { it.id }
                 .filter { fuzzyMatch(text.trim(), it.title) || it.id.contains(text.trim(), true) }
@@ -11691,6 +11962,11 @@ class WorkbenchController(private val context: Context) {
         if (command == null) {
             if (dispatcher.isAwaitingChord) lastHandledKey = identity
             return dispatcher.isAwaitingChord
+        }
+        if (command == "editor.action.inlineSuggest.acceptNextWord") {
+            if (!acceptInlineSuggestionWord()) return false
+            lastHandledKey = identity
+            return true
         }
         lastHandledKey = identity
         runCommand(command)
@@ -11937,6 +12213,7 @@ class WorkbenchController(private val context: Context) {
                 else -> aardinkState()?.execute(AardinkCommand.CycleInlineCompletion(forward = true))
             }
             "editor.action.inlineSuggest.commit" -> if (aardinkState()?.execute(AardinkCommand.AcceptInlineCompletion) != true) jumpOrAcceptNextEdit()
+            "editor.action.inlineSuggest.acceptNextWord" -> acceptInlineSuggestionWord()
             "editor.action.inlineSuggest.hide" -> if (aardinkState()?.execute(AardinkCommand.DismissInlineCompletion) != true) clearNextEdit()
             "editor.action.inlineSuggest.acceptNextEdit" -> acceptNextEdit()
             "editor.action.inlineSuggest.triggerNextEdit" -> requestNextEdit(invoked = true)

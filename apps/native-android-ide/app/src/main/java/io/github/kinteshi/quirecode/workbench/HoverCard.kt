@@ -41,6 +41,60 @@ internal fun wordAt(line: String, column: Int): String? {
     return line.substring(start, end)
 }
 
+/**
+ * The variable or member chain (`foo`, `self.bar`, `ptr->field`, `ns::sym`) at 0-based [line] and [column],
+ * along with its offset range in [text]; null outside a safe identifier expression.
+ */
+internal fun debugHoverExpression(text: String, line: Int, column: Int): Pair<String, IntRange>? {
+    fun part(c: Char) = c.isLetterOrDigit() || c == '_' || c == '$'
+    if (line < 0 || text.isEmpty()) return null
+    var lineStart = 0
+    var currentLine = 0
+    while (currentLine < line) {
+        val nl = text.indexOf('\n', lineStart)
+        if (nl < 0) return null
+        lineStart = nl + 1
+        currentLine++
+    }
+    val rawEnd = text.indexOf('\n', lineStart).let { if (it < 0) text.length else it }
+    val lineEnd = if (rawEnd > lineStart && text[rawEnd - 1] == '\r') rawEnd - 1 else rawEnd
+    val lineLength = lineEnd - lineStart
+    var cursor = column.coerceIn(0, lineLength)
+    if ((cursor == lineLength || !part(text[lineStart + cursor])) && cursor > 0 && part(text[lineStart + cursor - 1])) {
+        cursor--
+    }
+    if (cursor >= lineLength || !part(text[lineStart + cursor])) return null
+    var start = cursor
+    var end = cursor + 1
+    while (start > 0 && part(text[lineStart + start - 1])) start--
+    while (end < lineLength && part(text[lineStart + end])) end++
+    if (text[lineStart + start].isDigit()) return null
+    while (start > 0) {
+        val sepStart = when {
+            start >= 2 && text[lineStart + start - 2] == '-' && text[lineStart + start - 1] == '>' -> start - 2
+            start >= 2 && text[lineStart + start - 2] == ':' && text[lineStart + start - 1] == ':' -> start - 2
+            text[lineStart + start - 1] == '.' -> start - 1
+            else -> break
+        }
+        if (sepStart == 0 || !part(text[lineStart + sepStart - 1])) break
+        var segStart = sepStart - 1
+        while (segStart > 0 && part(text[lineStart + segStart - 1])) segStart--
+        if (text[lineStart + segStart].isDigit()) break
+        start = segStart
+    }
+    return text.substring(lineStart + start, lineStart + end) to (lineStart + start until lineStart + end)
+}
+
+internal fun formatDebugHoverMarkdown(expression: String, value: String, type: String? = null): String {
+    val shown = value.ifEmpty { "\"\"" }
+    val fence = if ("```" in shown) "````" else "```"
+    return buildString {
+        append("**Debug** `").append(expression).append('`')
+        type?.takeIf { it.isNotBlank() }?.let { append(" `").append(it.trim()).append('`') }
+        append('\n').append(fence).append("text\n").append(shown).append('\n').append(fence)
+    }
+}
+
 /** A problem as the hover card lists it: VS Code's "message  source(code)". */
 data class HoverProblem(val severity: Int?, val message: String, val origin: String)
 

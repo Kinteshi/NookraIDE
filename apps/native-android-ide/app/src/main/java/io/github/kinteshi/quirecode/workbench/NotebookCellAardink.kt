@@ -310,6 +310,9 @@ internal fun AardinkCellEditor(controller: WorkbenchController, session: Noteboo
                             controller.requestCellCompletion(session, cell, value())
                             return@onPreviewKeyEvent true
                         }
+                        if (event.key == Key.DirectionRight && event.isCtrlPressed && !event.isAltPressed && !event.isShiftPressed) {
+                            if (acceptAardinkInlineCompletionWord(state)) return@onPreviewKeyEvent true
+                        }
                         if (event.isCtrlPressed || event.isAltPressed || event.isShiftPressed) return@onPreviewKeyEvent false
                         // Jupyter: Tab after a name or a dot completes (with a kernel running); elsewhere Aardink indents.
                         if (event.key == Key.Tab && cell.type == CellType.Code && settings.notebookTabCompletion &&

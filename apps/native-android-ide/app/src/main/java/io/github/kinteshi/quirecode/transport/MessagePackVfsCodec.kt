@@ -94,6 +94,22 @@ internal object MessagePackVfsCodec {
         stringField("req_id", requestId)
     }
 
+    fun findFiles(
+        requestId: Long,
+        root: String,
+        query: String,
+        exclude: List<String>,
+        maxResults: Int = 200,
+    ): ByteArray = packet("Search", "FindFilesReq") {
+        packMapHeader(5)
+        stringField("req_id", requestId)
+        stringField("root", root)
+        stringField("query", query)
+        packString("exclude")
+        packStrings(exclude)
+        stringField("max_results", maxResults)
+    }
+
     private fun org.msgpack.core.MessagePacker.packStrings(values: List<String>) {
         packArrayHeader(values.size)
         values.forEach(::packString)
@@ -263,6 +279,14 @@ internal object MessagePackVfsCodec {
                         ),
                     )
                 }
+                "FilesFound" -> IncomingPacket.Search(
+                    SearchEvent.FilesFound(
+                        requestId,
+                        fields.getValue("paths").asArrayValue().map { it.asString() },
+                        fields.getValue("truncated").asBoolean(),
+                        fields.getValue("elapsed_ms").asLong().toInt(),
+                    ),
+                )
                 "Done" -> IncomingPacket.Search(
                     SearchEvent.Done(
                         requestId,

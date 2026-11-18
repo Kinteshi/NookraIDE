@@ -1,7 +1,8 @@
 use crate::vfs::Vfs;
 use avf_protocol::SearchMessage;
 use std::{
-    collections::VecDeque,
+    cmp::Ordering,
+    collections::{BinaryHeap, VecDeque},
     io,
     path::{Path, PathBuf},
     process::Stdio,
@@ -34,10 +35,61 @@ pub(crate) fn start(
     request: SearchMessage,
     outbound: mpsc::Sender<SearchMessage>,
 ) -> Result<(u64, JoinHandle<()>), String> {
-    let config = SearchConfig::new(&vfs, request)?;
-    let req_id = config.req_id;
-    let task = tokio::spawn(run_search(config, outbound));
-    Ok((req_id, task))
+    match request {
+        start @ SearchMessage::StartReq { .. } => {
+            let config = SearchConfig::new(&vfs, start)?;
+            let req_id = config.req_id;
+            let task = tokio::spawn(run_search(config, outbound));
+            Ok((req_id, task))
+        }
+        find @ SearchMessage::FindFilesReq { .. } => {
+            let config = FindFilesConfig::new(&vfs, find)?;
+            let req_id = config.req_id;
+            let task = tokio::spawn(run_find_files(config, outbound));
+            Ok((req_id, task))
+        }
+        _ => Err("Search start requires a StartReq or FindFilesReq message.".to_owned()),
+    }
+}
+
+struct FindFilesConfig {
+    req_id: u64,
+    root: PathBuf,
+    query: String,
+    exclude: Vec<String>,
+    max_results: u32,
+}
+
+impl FindFilesConfig {
+    fn new(vfs: &Vfs, request: SearchMessage) -> Result<Self, String> {
+        let SearchMessage::FindFilesReq {
+            req_id,
+            root,
+            query,
+            exclude,
+            max_results,
+        } = request
+        else {
+            return Err("FindFilesConfig requires a FindFilesReq message.".to_owned());
+        };
+        if query.len() > MAX_QUERY_BYTES || query.contains('\0') {
+            return Err(format!(
+                "Search query must be at most {MAX_QUERY_BYTES} bytes and contain no NUL bytes."
+            ));
+        }
+        if max_results == 0 || max_results > MAX_RESULTS {
+            return Err(format!("max_results must be between 1 and {MAX_RESULTS}."));
+        }
+        validate_globs("exclude", &exclude)?;
+        let root = validate_dir_root(vfs, &root)?;
+        Ok(Self {
+            req_id,
+            root,
+            query,
+            exclude,
+            max_results,
+        })
+    }
 }
 
 struct SearchConfig {
@@ -92,37 +144,7 @@ impl SearchConfig {
 
         let mut validated_roots = Vec::with_capacity(roots.len());
         for requested in roots {
-            let resolved = vfs.resolve(&requested).map_err(|failure| {
-                format!("Invalid search root '{requested}': {}", failure.message)
-            })?;
-            let metadata = std::fs::metadata(&resolved.absolute).map_err(|error| {
-                format!(
-                    "Cannot access search root '{}': {error}",
-                    resolved.absolute.display()
-                )
-            })?;
-            if !metadata.is_dir() {
-                return Err(format!(
-                    "Search root is not a directory: {}",
-                    resolved.absolute.display()
-                ));
-            }
-
-            // Do not let a lexically in-root path that traverses a symlink turn
-            // into a ripgrep root outside the configured workspace.
-            let canonical = std::fs::canonicalize(&resolved.absolute).map_err(|error| {
-                format!(
-                    "Cannot canonicalize search root '{}': {error}",
-                    resolved.absolute.display()
-                )
-            })?;
-            if canonical != resolved.absolute {
-                return Err(format!(
-                    "Search roots may not contain symlinks: {}",
-                    resolved.absolute.display()
-                ));
-            }
-            validated_roots.push(canonical);
+            validated_roots.push(validate_dir_root(vfs, &requested)?);
         }
         validated_roots.sort();
         validated_roots.dedup();
@@ -140,6 +162,40 @@ impl SearchConfig {
             context_lines,
         })
     }
+}
+
+fn validate_dir_root(vfs: &Vfs, requested: &str) -> Result<PathBuf, String> {
+    let resolved = vfs
+        .resolve(requested)
+        .map_err(|failure| format!("Invalid search root '{requested}': {}", failure.message))?;
+    let metadata = std::fs::metadata(&resolved.absolute).map_err(|error| {
+        format!(
+            "Cannot access search root '{}': {error}",
+            resolved.absolute.display()
+        )
+    })?;
+    if !metadata.is_dir() {
+        return Err(format!(
+            "Search root is not a directory: {}",
+            resolved.absolute.display()
+        ));
+    }
+
+    // Do not let a lexically in-root path that traverses a symlink turn
+    // into a ripgrep root outside the configured workspace.
+    let canonical = std::fs::canonicalize(&resolved.absolute).map_err(|error| {
+        format!(
+            "Cannot canonicalize search root '{}': {error}",
+            resolved.absolute.display()
+        )
+    })?;
+    if canonical != resolved.absolute {
+        return Err(format!(
+            "Search roots may not contain symlinks: {}",
+            resolved.absolute.display()
+        ));
+    }
+    Ok(canonical)
 }
 
 fn validate_globs(kind: &str, globs: &[String]) -> Result<(), String> {
@@ -240,6 +296,205 @@ async fn run_search(config: SearchConfig, outbound: mpsc::Sender<SearchMessage>)
                 .await;
         }
     }
+}
+
+async fn run_find_files(config: FindFilesConfig, outbound: mpsc::Sender<SearchMessage>) {
+    let started = Instant::now();
+    let req_id = config.req_id;
+    match run_ripgrep_files(&config).await {
+        Ok((paths, truncated)) => {
+            let _ = outbound
+                .send(SearchMessage::FilesFound {
+                    req_id,
+                    paths,
+                    truncated,
+                    elapsed_ms: elapsed_ms(started),
+                })
+                .await;
+        }
+        Err(message) => {
+            let _ = outbound
+                .send(SearchMessage::Error { req_id, message })
+                .await;
+        }
+    }
+}
+
+fn make_find_files_command(config: &FindFilesConfig) -> Command {
+    let mut command = Command::new("rg");
+    command
+        .arg("--files")
+        .arg("--color=never")
+        .arg("--no-follow")
+        .arg(format!("--threads={RIPGREP_THREADS}"));
+    for glob in &config.exclude {
+        command.arg("--glob").arg(format!("!{glob}"));
+    }
+    command.arg("--").arg(&config.root);
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true);
+    command
+}
+
+#[derive(Eq, PartialEq)]
+struct RankedPath {
+    rank: u8,
+    relative_len: usize,
+    path: String,
+}
+
+impl Ord for RankedPath {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.rank
+            .cmp(&other.rank)
+            .then_with(|| self.relative_len.cmp(&other.relative_len))
+            .then_with(|| self.path.cmp(&other.path))
+    }
+}
+
+impl PartialOrd for RankedPath {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+async fn run_ripgrep_files(config: &FindFilesConfig) -> Result<(Vec<String>, bool), String> {
+    let mut child = make_find_files_command(config)
+        .spawn()
+        .map_err(|error| format!("Could not start ripgrep: {error}"))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "Could not capture ripgrep output.".to_owned())?;
+    let mut reader = BufReader::new(stdout);
+    let mut line = Vec::with_capacity(512);
+    let limit = config.max_results as usize;
+    let query_trimmed_lower = config.query.trim().to_lowercase();
+    let blank_query = query_trimmed_lower.is_empty();
+    let root_prefix = format!("{}/", config.root.to_string_lossy().trim_end_matches('/'));
+    let roots = [config.root.clone()];
+
+    let mut ranked = BinaryHeap::with_capacity(limit.min(1024));
+    let mut unranked = Vec::with_capacity(if blank_query { limit.min(1024) } else { 0 });
+    let mut truncated = false;
+
+    loop {
+        let has_line = read_bounded_line(&mut reader, &mut line)
+            .await
+            .map_err(|error| format!("Could not read ripgrep output: {error}"))?;
+        if !has_line {
+            break;
+        }
+        let Ok(raw_path) = std::str::from_utf8(&line) else {
+            line.clear();
+            continue;
+        };
+        let path = raw_path.trim_end_matches('\r');
+        if !path_is_in_roots(path, &roots) {
+            line.clear();
+            continue;
+        }
+        if blank_query {
+            if unranked.len() >= limit {
+                truncated = true;
+                line.clear();
+                break;
+            }
+            unranked.push(path.to_owned());
+            line.clear();
+            continue;
+        }
+        let relative = path.strip_prefix(&root_prefix).unwrap_or(path);
+        if fuzzy_match_path(&config.query, relative) {
+            let file_name = relative.rsplit('/').next().unwrap_or(relative);
+            let candidate = RankedPath {
+                rank: file_match_rank(&query_trimmed_lower, file_name),
+                relative_len: relative.len(),
+                path: path.to_owned(),
+            };
+            if ranked.len() < limit {
+                ranked.push(candidate);
+            } else {
+                truncated = true;
+                if let Some(worst) = ranked.peek() {
+                    if &candidate < worst {
+                        ranked.pop();
+                        ranked.push(candidate);
+                    }
+                }
+            }
+        }
+        line.clear();
+    }
+
+    if blank_query && truncated {
+        let _ = child.start_kill();
+    }
+    let status = child
+        .wait()
+        .await
+        .map_err(|error| format!("Could not wait for ripgrep: {error}"))?;
+    if !status.success() && !(blank_query && truncated) && status.code() != Some(1) {
+        return Err(match status.code() {
+            Some(code) => format!("Ripgrep exited with status {code}."),
+            None => "Ripgrep terminated unexpectedly.".to_owned(),
+        });
+    }
+
+    let paths = if blank_query {
+        unranked
+    } else {
+        let mut sorted = ranked.into_vec();
+        sorted.sort();
+        sorted.into_iter().map(|item| item.path).collect()
+    };
+    Ok((paths, truncated))
+}
+
+fn fuzzy_match_path(query: &str, relative: &str) -> bool {
+    if query.trim().is_empty() {
+        return true;
+    }
+    let query_chars: Vec<char> = query.chars().flat_map(char::to_lowercase).collect();
+    let mut index = 0;
+    for ch in relative.chars().flat_map(char::to_lowercase) {
+        if ch == query_chars[index] {
+            index += 1;
+            if index == query_chars.len() {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn file_match_rank(query_trimmed_lower: &str, file_name: &str) -> u8 {
+    if query_trimmed_lower.is_empty() {
+        return 0;
+    }
+    let candidate_lower = file_name.to_lowercase();
+    let Some(mut at) = candidate_lower.find(query_trimmed_lower) else {
+        return 3;
+    };
+    if at == 0 {
+        return 0;
+    }
+    while let Some(pos) = candidate_lower[at..].find(query_trimmed_lower) {
+        let match_start = at + pos;
+        if let Some(prev) = candidate_lower[..match_start].chars().next_back() {
+            if !prev.is_alphanumeric() {
+                return 1;
+            }
+        }
+        let Some(next_char) = candidate_lower[match_start..].chars().next() else {
+            break;
+        };
+        at = match_start + next_char.len_utf8();
+    }
+    2
 }
 
 async fn run_ripgrep(
@@ -741,5 +996,95 @@ mod tests {
         task.await.unwrap();
         assert_eq!(matches, 1);
         assert_eq!(done, (1, true));
+    }
+
+    #[tokio::test]
+    async fn find_files_ranks_matches_respects_excludes_and_truncates() {
+        if tokio::process::Command::new("rg")
+            .arg("--version")
+            .output()
+            .await
+            .is_err()
+        {
+            return;
+        }
+        let workspace = tempdir().unwrap();
+        let nested = workspace.path().join("src/nested");
+        let excluded = workspace.path().join("target/debug");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::create_dir_all(&excluded).unwrap();
+        let best = nested.join("main.rs");
+        let second = workspace.path().join("src/my_main.rs");
+        let subseq = workspace.path().join("src/m_a_i_n.txt");
+        let ignored = excluded.join("main.rs");
+        for file in [&best, &second, &subseq, &ignored] {
+            tokio::fs::write(file, "fn main() {}\n").await.unwrap();
+        }
+        let vfs = Vfs::new(&[workspace.path().to_path_buf()]).unwrap();
+
+        let (sender, mut receiver) = mpsc::channel(4);
+        let (_, task) = start(
+            vfs.clone(),
+            SearchMessage::FindFilesReq {
+                req_id: 77,
+                root: workspace.path().to_string_lossy().into_owned(),
+                query: "main".into(),
+                exclude: vec!["target".into()],
+                max_results: 2,
+            },
+            sender,
+        )
+        .unwrap();
+        let response = timeout(Duration::from_secs(5), receiver.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        task.await.unwrap();
+        match response {
+            SearchMessage::FilesFound {
+                req_id: 77,
+                paths,
+                truncated,
+                ..
+            } => {
+                assert!(truncated);
+                assert_eq!(
+                    paths,
+                    vec![
+                        best.to_string_lossy().into_owned(),
+                        second.to_string_lossy().into_owned(),
+                    ]
+                );
+            }
+            other => panic!("expected FilesFound, got {other:?}"),
+        }
+
+        let (sender, mut receiver) = mpsc::channel(4);
+        let (_, task) = start(
+            vfs,
+            SearchMessage::FindFilesReq {
+                req_id: 78,
+                root: workspace.path().to_string_lossy().into_owned(),
+                query: String::new(),
+                exclude: vec!["target".into()],
+                max_results: 2,
+            },
+            sender,
+        )
+        .unwrap();
+        let response = timeout(Duration::from_secs(5), receiver.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        task.await.unwrap();
+        assert!(matches!(
+            response,
+            SearchMessage::FilesFound {
+                req_id: 78,
+                paths,
+                truncated: true,
+                ..
+            } if paths.len() == 2
+        ));
     }
 }

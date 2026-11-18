@@ -26,6 +26,7 @@ sealed interface SearchEvent {
         val preview: String,
     ) : SearchEvent
 
+    data class FilesFound(override val requestId: Long, val paths: List<String>, val truncated: Boolean, val elapsedMs: Int) : SearchEvent
     data class Done(override val requestId: Long, val total: Int, val truncated: Boolean, val elapsedMs: Int) : SearchEvent
     data class Error(override val requestId: Long, val message: String) : SearchEvent
 }

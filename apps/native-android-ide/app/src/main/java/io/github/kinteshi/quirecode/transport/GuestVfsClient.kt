@@ -49,6 +49,8 @@ private const val NATIVE_APP_ORIGIN = "avf-native-android://localhost"
 const val PROBE_COMMANDS_FEATURE = "probe_commands"
 /** Welcome feature of daemons that list and revoke paired devices (G30). */
 const val DEVICES_FEATURE = "devices"
+/** Welcome feature of daemons that answer `SearchMessage::FindFilesReq` (`rg --files`). */
+const val FIND_FILES_FEATURE = "find_files"
 
 /** HTTP headers for Cloudflare Access service-token authentication (G32). */
 fun accessHeaders(credentials: AccessCredentials?): Map<String, String> =
@@ -425,6 +427,30 @@ class GuestVfsClient(
             listener(event)
         }
         if (!sendFrame(MessagePackVfsCodec.searchStart(requestId, query))) {
+            searchListeners.remove(requestId)
+            return null
+        }
+        return requestId
+    }
+
+    /** Whether the connected daemon searches workspace files with ripgrep (`find_files`). */
+    val findsFilesRemotely: Boolean get() = FIND_FILES_FEATURE in guestFeatures
+
+    /** Searches every file under [root] with ripgrep on the daemon (`rg --files`). */
+    fun findFiles(
+        root: String,
+        query: String,
+        exclude: List<String>,
+        maxResults: Int = 200,
+        listener: (SearchEvent) -> Unit,
+    ): Long? {
+        if (!findsFilesRemotely) return null
+        val requestId = requestIds.incrementAndGet()
+        searchListeners[requestId] = { event ->
+            if (event !is SearchEvent.Match) searchListeners.remove(requestId)
+            listener(event)
+        }
+        if (!sendFrame(MessagePackVfsCodec.findFiles(requestId, root, query, exclude, maxResults))) {
             searchListeners.remove(requestId)
             return null
         }

@@ -270,5 +270,33 @@ class AardinkEditorSurfaceTest {
             it.name.startsWith("offsetAt") && it.parameterTypes.contentEquals(arrayOf(Long::class.javaPrimitiveType))
         }
         offsetAt.returnType.getMethod("getOffset")
+        CodeEditorState::class.java.getMethod("getInlineCompletions\$com_aardarch_editor")
+        com.aardarch.aardink.core.CodeDocument::class.java.getMethod("getVersion\$com_aardarch_editor")
+    }
+
+    @Test
+    fun acceptsInlineGhostTextWordByWordAndReturnsFalseWhenEmpty() {
+        val surface = surface("x ")
+        surface.state.selection = TextRange(2)
+        org.junit.Assert.assertFalse(surface.acceptInlineCompletionWord())
+
+        val tracker = AardinkGhostReflect.tracker(surface.state)!!
+        tracker.javaClass.getMethod("setProvided", Boolean::class.javaPrimitiveType).invoke(tracker, true)
+        val version = AardinkGhostReflect.documentVersion(surface.state.document)!!
+        AardinkGhostReflect.reseed(tracker, version, "foo bar baz", 2)
+
+        assertTrue(surface.acceptInlineCompletionWord())
+        assertEquals("x foo", surface.text)
+        assertEquals(5..5, surface.selectionOffsets)
+        assertEquals(listOf(5 to " bar baz"), AardinkGhostReflect.settledPieces(tracker))
+
+        assertTrue(surface.acceptInlineCompletionWord())
+        assertEquals("x foo bar", surface.text)
+        assertEquals(listOf(9 to " baz"), AardinkGhostReflect.settledPieces(tracker))
+
+        assertTrue(surface.acceptInlineCompletionWord())
+        assertEquals("x foo bar baz", surface.text)
+        assertEquals(emptyList<Pair<Int, String>>(), AardinkGhostReflect.settledPieces(tracker))
+        org.junit.Assert.assertFalse(surface.acceptInlineCompletionWord())
     }
 }

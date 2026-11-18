@@ -90,6 +90,31 @@ internal fun cellGhostText(source: String, caret: Int, suggestion: CellSuggestio
     return ghostAfterTyped(source.substring(suggestion.start, caret), suggestion.text)?.takeIf { it.isNotEmpty() }
 }
 
+/** The next logical word chunk from inline ghost [text] for partial acceptance (`Ctrl+Right`). */
+internal fun nextInlineCompletionWord(text: String): String {
+    if (text.isEmpty()) return ""
+    var index = 0
+    if (text.startsWith("\r\n")) {
+        index = 2
+    } else if (text[0] == '\n') {
+        index = 1
+    }
+    if (index > 0 && (index == text.length || text[index] == '\r' || text[index] == '\n')) {
+        return text.substring(0, index)
+    }
+    while (index < text.length && (text[index] == ' ' || text[index] == '\t')) index++
+    if (index == text.length || text[index] == '\r' || text[index] == '\n') {
+        return text.substring(0, index)
+    }
+    fun isWord(char: Char) = char.isLetterOrDigit() || char == '_'
+    if (isWord(text[index])) {
+        while (index < text.length && isWord(text[index])) index++
+    } else {
+        while (index < text.length && !text[index].isWhitespace() && !isWord(text[index])) index++
+    }
+    return text.substring(0, index)
+}
+
 /** Draws [ghost] after [caret] in [color] without changing the text the field edits. */
 internal class GhostTextTransformation(
     private val base: VisualTransformation,

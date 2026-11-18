@@ -213,6 +213,8 @@ pub enum SystemMessage {
 pub const FEATURE_PROBE_COMMANDS: &str = "probe_commands";
 /// Welcome feature: the daemon answers [`SystemMessage::ListDevices`] and [`SystemMessage::RevokeDevice`].
 pub const FEATURE_DEVICES: &str = "devices";
+/// Welcome feature: the daemon answers [`SearchMessage::FindFilesReq`].
+pub const FEATURE_FIND_FILES: &str = "find_files";
 
 /// A device paired with a code, as the daemon keeps it (no token).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -489,6 +491,19 @@ pub enum SearchMessage {
     Error {
         req_id: u64,
         message: String,
+    },
+    FindFilesReq {
+        req_id: u64,
+        root: String,
+        query: String,
+        exclude: Vec<String>,
+        max_results: u32,
+    },
+    FilesFound {
+        req_id: u64,
+        paths: Vec<String>,
+        truncated: bool,
+        elapsed_ms: u32,
     },
 }
 
@@ -1194,6 +1209,19 @@ mod tests {
             MultiplexedPacket::Search(SearchMessage::Error {
                 req_id: 40,
                 message: "search failed".into(),
+            }),
+            MultiplexedPacket::Search(SearchMessage::FindFilesReq {
+                req_id: 41,
+                root: "/workspace".into(),
+                query: "lib.rs".into(),
+                exclude: vec!["target".into()],
+                max_results: 200,
+            }),
+            MultiplexedPacket::Search(SearchMessage::FilesFound {
+                req_id: 41,
+                paths: vec!["/workspace/src/lib.rs".into()],
+                truncated: false,
+                elapsed_ms: 8,
             }),
             MultiplexedPacket::Git(GitMessage::Req {
                 req_id: 50,

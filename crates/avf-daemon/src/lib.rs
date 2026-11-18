@@ -21,7 +21,8 @@ mod vfs;
 
 use avf_protocol::{
     decode, encode, FsEventKind, MultiplexedPacket, PtyPayload, RejectReason, SystemMessage,
-    VfsErrorCode, VfsMessage, FEATURE_DEVICES, FEATURE_PROBE_COMMANDS, MAX_CHUNK_SIZE, MAX_FRAME_SIZE,
+    VfsErrorCode, VfsMessage, FEATURE_DEVICES, FEATURE_FIND_FILES, FEATURE_PROBE_COMMANDS,
+    MAX_CHUNK_SIZE, MAX_FRAME_SIZE,
     PROTOCOL_VERSION,
 };
 #[cfg(feature = "native-protocol")]
@@ -754,10 +755,15 @@ async fn handle_socket(mut socket: WebSocket, state: AppState, peer: Option<IpAd
             protocol_version: PROTOCOL_VERSION,
             daemon_version: env!("CARGO_PKG_VERSION").to_owned(),
             pty_sessions: state.pty.sessions().await,
-            features: if state.config.devices_file.is_some() {
-                vec![FEATURE_PROBE_COMMANDS.to_owned(), FEATURE_DEVICES.to_owned()]
-            } else {
-                vec![FEATURE_PROBE_COMMANDS.to_owned()]
+            features: {
+                let mut features = vec![
+                    FEATURE_PROBE_COMMANDS.to_owned(),
+                    FEATURE_FIND_FILES.to_owned(),
+                ];
+                if state.config.devices_file.is_some() {
+                    features.push(FEATURE_DEVICES.to_owned());
+                }
+                features
             },
         }),
     )
@@ -1872,7 +1878,8 @@ async fn process_search_message(
     search_messages: &mpsc::Sender<SearchMessage>,
 ) -> Result<(), ()> {
     match message {
-        start @ SearchMessage::StartReq { req_id, .. } => {
+        start @ (SearchMessage::StartReq { req_id, .. }
+        | SearchMessage::FindFilesReq { req_id, .. }) => {
             tasks.retain(|_, task| !task.is_finished());
             if tasks.contains_key(&req_id) {
                 return send_outbound(
@@ -1936,6 +1943,7 @@ async fn process_search_message(
             }
         },
         SearchMessage::Match { req_id, .. }
+        | SearchMessage::FilesFound { req_id, .. }
         | SearchMessage::Done { req_id, .. }
         | SearchMessage::Error { req_id, .. } => {
             send_outbound(
@@ -2841,8 +2849,10 @@ mod tests {
                 };
                 let received_id = match &message {
                     SearchMessage::StartReq { req_id, .. }
+                    | SearchMessage::FindFilesReq { req_id, .. }
                     | SearchMessage::Cancel { req_id }
                     | SearchMessage::Match { req_id, .. }
+                    | SearchMessage::FilesFound { req_id, .. }
                     | SearchMessage::Done { req_id, .. }
                     | SearchMessage::Error { req_id, .. } => *req_id,
                 };

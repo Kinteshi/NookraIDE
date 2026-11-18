@@ -107,13 +107,20 @@ internal class AardinkLanguageService(
             withContext(Dispatchers.Main) { controller.showHoverAt(this@AardinkLanguageService.document.path, LspPosition(line, column)) }
             return null
         }
-        val client = controller.languageClientFor(this.document.path)?.takeIf { it.isReady } ?: return null
         val (line, column) = document.offsetToLineCol(offset)
-        val reply = client.hover(this.document.path, LspPosition(line, column)).awaitOrNull()
-        val markdown = reply?.takeIf { it.isJsonObject }?.asJsonObject?.get("contents")?.let(::hoverContents)
+        val position = LspPosition(line, column)
+        val debugFuture = withContext(Dispatchers.Main) { controller.evaluateDebugHover(document.text, position) }
+        val debugMarkdown = debugFuture?.awaitOrNull()?.takeIf { it.isNotBlank() }
+        val client = controller.languageClientFor(this.document.path)?.takeIf { it.isReady }
+        val reply = client?.hover(this.document.path, position)?.awaitOrNull()
+        val lspMarkdown = reply?.takeIf { it.isJsonObject }?.asJsonObject?.get("contents")?.let(::hoverContents)
+            ?.takeIf { it.isNotBlank() }
+        val combined = listOfNotNull(debugMarkdown, lspMarkdown).joinToString("\n\n---\n\n").takeIf { it.isNotBlank() }
+            ?: return null
         // Aardink's card always draws a title with a line under it: the word, rather than an empty row.
-        val word = wordRange(document, offset)?.let { document.subSequence(it.first, it.last + 1).toString() }.orEmpty()
-        return markdown?.takeIf { it.isNotBlank() }?.let { HoverDoc(title = word, content = it) }
+        val title = debugHoverExpression(document.text, line, column)?.first
+            ?: wordRange(document, offset)?.let { document.subSequence(it.first, it.last + 1).toString() }.orEmpty()
+        return HoverDoc(title = title, content = combined)
     }
 
     override suspend fun signatureHelp(document: CodeDocument, offset: Int): SignatureHelp? {
