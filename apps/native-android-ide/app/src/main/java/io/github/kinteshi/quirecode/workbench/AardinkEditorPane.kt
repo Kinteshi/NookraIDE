@@ -18,6 +18,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.sp
 import com.aardarch.aardink.core.ContentChange
 import com.aardarch.aardink.core.CodeDocument
@@ -156,9 +158,21 @@ internal fun AardinkEditorView(controller: WorkbenchController, document: Docume
         }
     }
     CompositionLocalProvider(LocalEditorTheme provides theme, com.aardarch.aardink.ui.LocalCodeFenceTokenizers provides fenceTokenizers) {
+        val editorDescription = codeEditorDescription(
+            path = document.path,
+            language = controller.lspLanguageId(document.path) ?: document.languageId.ifEmpty { "plain text" },
+            lineCount = state.document.lineCount,
+            cursorLine = (controller.cursorPosition?.line ?: state.cursorLine) + 1,
+            cursorCol = (controller.cursorPosition?.character ?: state.cursorColumn) + 1,
+            problemCount = surface.problems.size,
+        )
         CodeEditorLayout(
             state = state,
-            modifier = Modifier.fillMaxSize().focusRequester(surface.focusRequester).then(hoverWatch),
+            modifier = Modifier
+                .fillMaxSize()
+                .focusRequester(surface.focusRequester)
+                .then(hoverWatch)
+                .semantics { contentDescription = editorDescription },
             languageService = service,
             foldState = surface.foldState,
             foldingProvider = surface.foldingProvider,

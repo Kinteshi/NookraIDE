@@ -36,6 +36,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
@@ -231,7 +237,7 @@ fun KeyBarRow(modifier: Modifier = Modifier, onLatch: () -> Unit = {}) {
 @Composable
 private fun BarKeyButton(key: BarKey) {
     val scope = rememberCoroutineScope()
-    BarKeyFace(key.label, Latch.Off, icon = key.icon, modifier = Modifier.pointerInput(key) {
+    BarKeyFace(key.label, Latch.Off, icon = key.icon, onAccessibilityActivate = { KeyBar.press(key.keyCode) }, modifier = Modifier.pointerInput(key) {
         detectTapGestures(
             onPress = {
                 // Arrows and pages repeat while held, as a physical key does.
@@ -254,11 +260,17 @@ private fun BarKeyButton(key: BarKey) {
 
 @Composable
 private fun LatchButton(label: String, latch: Latch, onTap: () -> Unit) {
-    BarKeyFace(label, latch, modifier = Modifier.pointerInput(label) { detectTapGestures(onTap = { onTap() }) })
+    BarKeyFace(label, latch, onAccessibilityActivate = onTap, modifier = Modifier.pointerInput(label) { detectTapGestures(onTap = { onTap() }) })
 }
 
 @Composable
-private fun BarKeyFace(label: String, latch: Latch, icon: ImageVector? = null, modifier: Modifier) {
+private fun BarKeyFace(
+    label: String,
+    latch: Latch,
+    icon: ImageVector? = null,
+    onAccessibilityActivate: (() -> Unit)? = null,
+    modifier: Modifier,
+) {
     val colors = MaterialTheme.colorScheme
     val background = when (latch) {
         Latch.Off -> colors.surfaceContainerHighest
@@ -270,6 +282,7 @@ private fun BarKeyFace(label: String, latch: Latch, icon: ImageVector? = null, m
         Latch.Once -> colors.onSecondaryContainer
         Latch.Locked -> colors.onPrimary
     }
+    val (spoken, latchState) = keyBarKeyDescription(label, latch)
     Box(
         modifier
             .height(36.dp)
@@ -278,9 +291,17 @@ private fun BarKeyFace(label: String, latch: Latch, icon: ImageVector? = null, m
             .background(background)
             .then(if (latch == Latch.Once) Modifier.border(1.dp, colors.primary, RoundedCornerShape(8.dp)) else Modifier)
             .noKeyFocus()
+            .semantics(mergeDescendants = true) {
+                contentDescription = spoken
+                if (latchState != null) stateDescription = latchState
+                role = Role.Button
+                if (onAccessibilityActivate != null) {
+                    onClick { onAccessibilityActivate(); true }
+                }
+            }
             .padding(horizontal = 10.dp),
         contentAlignment = Alignment.Center,
     ) {
-        if (icon != null) Icon(icon, contentDescription = label, tint = content) else Text(label, style = MaterialTheme.typography.labelLarge, color = content)
+        if (icon != null) Icon(icon, contentDescription = null, tint = content) else Text(label, style = MaterialTheme.typography.labelLarge, color = content)
     }
 }

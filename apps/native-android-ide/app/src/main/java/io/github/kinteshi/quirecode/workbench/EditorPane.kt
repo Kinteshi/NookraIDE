@@ -96,6 +96,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected as semanticsSelected
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
@@ -261,7 +267,12 @@ private fun MarkdownPreviewButtons(controller: WorkbenchController, preview: Mar
         Box(
             Modifier.size(26.dp).clip(RoundedCornerShape(6.dp))
                 .background(if (on) colors.secondaryContainer else androidx.compose.ui.graphics.Color.Transparent)
-                .clickable { controller.toggleMarkdownPreview(mode) },
+                .clickable { controller.toggleMarkdownPreview(mode) }
+                .semantics {
+                    contentDescription = label
+                    stateDescription = if (on) "Active" else "Inactive"
+                    role = Role.Button
+                },
             contentAlignment = Alignment.Center,
         ) {
             Icon(icon, contentDescription = label, modifier = Modifier.size(16.dp), tint = if (on) colors.onSecondaryContainer else colors.onSurfaceVariant)
@@ -315,6 +326,8 @@ private fun EditorTab(controller: WorkbenchController, document: DocumentSession
     val preview = controller.previewTab == path
     val pinned = path in controller.pinnedTabs
     var menu by remember { mutableStateOf(false) }
+    val tabName = path.removePrefix("scratch:/").substringAfterLast('/')
+    val deleted = path in controller.deletedFiles
     val colorMs = if (controller.settings.animations) 120 else 0
     val tabColor by animateColorAsState(if (selected) colors.surface else colors.surfaceContainerHigh.copy(alpha = 0.65f), tween(colorMs), label = "tabColor")
     val tabContentColor by animateColorAsState(if (selected) colors.onSurface else colors.onSurfaceVariant, tween(colorMs), label = "tabContentColor")
@@ -331,6 +344,11 @@ private fun EditorTab(controller: WorkbenchController, document: DocumentSession
                 Row(
                     Modifier
                         .weight(1f)
+                        .semantics {
+                            role = Role.Tab
+                            semanticsSelected = selected
+                            contentDescription = editorTabDescription(tabName, selected, dirty, preview, pinned, deleted)
+                        }
                         .combinedClickable(
                             onClick = { controller.selectDocument(path) },
                             // Only the preview tab waits for a second tap, so other tabs switch at once.
@@ -358,7 +376,6 @@ private fun EditorTab(controller: WorkbenchController, document: DocumentSession
                     size = 15.dp,
                     tint = if (selected) colors.primary else colors.onSurfaceVariant,
                 )
-                val deleted = path in controller.deletedFiles
                 Text(
                     path.substringAfterLast('/') + if (deleted) " (deleted)" else "",
                     style = MaterialTheme.typography.labelLarge,
@@ -368,9 +385,16 @@ private fun EditorTab(controller: WorkbenchController, document: DocumentSession
                     maxLines = 1,
                 )
                 Box(
-                    Modifier.size(26.dp).clip(RoundedCornerShape(13.dp)).clickable {
-                        if (pinned) controller.unpinTab(path) else controller.requestCloseDocument(path)
-                    },
+                    Modifier
+                        .size(26.dp)
+                        .clip(RoundedCornerShape(13.dp))
+                        .clickable {
+                            if (pinned) controller.unpinTab(path) else controller.requestCloseDocument(path)
+                        }
+                        .semantics {
+                            role = Role.Button
+                            contentDescription = editorTabActionDescription(tabName, dirty, pinned)
+                        },
                     contentAlignment = Alignment.Center,
                 ) {
                     when {
@@ -424,8 +448,12 @@ private fun Breadcrumbs(path: String, onNavigate: (String) -> Unit, actions: @Co
                     segment,
                     style = MaterialTheme.typography.labelMedium,
                     color = if (last) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = if (last) Modifier else Modifier.clip(RoundedCornerShape(4.dp)).clickable { onNavigate(target) }
-                        .padding(horizontal = 2.dp),
+                    modifier = (if (last) Modifier else Modifier.clip(RoundedCornerShape(4.dp)).clickable { onNavigate(target) }
+                        .padding(horizontal = 2.dp))
+                        .semantics {
+                            contentDescription = if (last) "Current file: $segment" else "Breadcrumb folder: $segment"
+                            if (!last) role = Role.Button
+                        },
                 )
                 if (!last) {
                     Icon(

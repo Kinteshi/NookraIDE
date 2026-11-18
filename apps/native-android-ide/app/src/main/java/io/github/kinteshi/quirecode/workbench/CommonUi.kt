@@ -45,6 +45,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 
@@ -116,6 +118,7 @@ internal fun PaneGutter(onDrag: (Float) -> Unit, onStopped: () -> Unit, modifier
         modifier
             .width(12.dp)
             .fillMaxHeight()
+            .semantics { contentDescription = "Resize pane" }
             .pointerHoverIcon(PointerIcon(android.view.PointerIcon.TYPE_HORIZONTAL_DOUBLE_ARROW))
             .draggable(
                 orientation = Orientation.Horizontal,

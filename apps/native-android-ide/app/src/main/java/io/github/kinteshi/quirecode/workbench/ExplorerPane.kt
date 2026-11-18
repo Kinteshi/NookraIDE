@@ -75,6 +75,12 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
@@ -194,7 +200,7 @@ private fun ExplorerTree(controller: WorkbenchController, directory: String) {
         if (atRoot) {
             val colors = MaterialTheme.colorScheme
             Row(
-                Modifier.fillMaxWidth().padding(start = 12.dp, end = 6.dp, top = 6.dp, bottom = 4.dp),
+                Modifier.fillMaxWidth().padding(start = 12.dp, end = 6.dp, top = 6.dp, bottom = 4.dp).semantics { heading() },
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
@@ -227,6 +233,7 @@ private fun ExplorerTree(controller: WorkbenchController, directory: String) {
                                 "..",
                                 muted = true,
                                 selected = drag.target != null && drag.target == parent,
+                                contentDescription = if (parent.isNotEmpty()) "Parent folder, ${controller.displayName(parent)}" else "Parent folder",
                                 trailing = if (tree && rows.any { it.expanded }) {
                                     {
                                         Tooltip("Collapse folders") { IconButton(onClick = controller::collapseFolders, modifier = Modifier.size(24.dp)) {
@@ -309,6 +316,17 @@ private fun ExplorerTree(controller: WorkbenchController, directory: String) {
                                 mark?.let { { ExplorerMark(it, dark) } }
                             },
                             labelColor = mark?.tone?.color(dark),
+                            contentDescription = explorerRowDescription(
+                                entry = entry,
+                                label = row.label,
+                                expanded = row.expanded,
+                                tree = tree,
+                                selected = picked,
+                                active = !selecting && entry.path == controller.activePath,
+                                keptOffline = entry.isDirectory && controller.isKeptOffline(entry.path),
+                                mark = mark,
+                            ),
+                            stateDescription = if (tree && entry.isDirectory) (if (row.expanded) "Expanded" else "Collapsed") else null,
                         ) {
                             when {
                                 modifiers.isShiftPressed -> controller.selectExplorerRange(entry.path, rows.map { it.entry.path })
@@ -440,7 +458,15 @@ private fun SelectionBar(controller: WorkbenchController, selection: List<String
 private fun OpenEditorsHeader(controller: WorkbenchController) {
     val colors = MaterialTheme.colorScheme
     Row(
-        Modifier.fillMaxWidth().clickable { controller.openEditorsExpanded = !controller.openEditorsExpanded }.padding(horizontal = 12.dp, vertical = 6.dp),
+        Modifier
+            .fillMaxWidth()
+            .clickable { controller.openEditorsExpanded = !controller.openEditorsExpanded }
+            .semantics {
+                heading()
+                stateDescription = if (controller.openEditorsExpanded) "Expanded" else "Collapsed"
+                role = Role.Button
+            }
+            .padding(horizontal = 12.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
@@ -469,20 +495,30 @@ private fun OpenEditorRow(controller: WorkbenchController, document: io.github.k
     } else {
         parentFolder.removePrefix(root).trim('/')
     }
+    val fileName = path.removePrefix("scratch:/").substringAfterLast('/')
+    val deleted = path in controller.deletedFiles
+    val active = path == controller.activePath
     PaneRow(
         when {
             path.endsWith(".ipynb") -> Icons.Outlined.Code
             else -> Icons.AutoMirrored.Outlined.InsertDriveFile
         },
-        path.removePrefix("scratch:/").substringAfterLast('/') + (if (path in controller.deletedFiles) " (deleted)" else "") + if (folder.isNotEmpty() && !path.startsWith("scratch:")) "  ·  $folder" else "",
-        labelColor = MaterialTheme.colorScheme.error.takeIf { path in controller.deletedFiles },
+        fileName + (if (deleted) " (deleted)" else "") + if (folder.isNotEmpty() && !path.startsWith("scratch:")) "  ·  $folder" else "",
+        labelColor = MaterialTheme.colorScheme.error.takeIf { deleted },
         leading = controller.fileIconTheme?.let { theme ->
             { FileIconView(path.substringAfterLast('/'), theme, LocalDarkTheme.current, Icons.AutoMirrored.Outlined.InsertDriveFile) }
         },
-        selected = path == controller.activePath,
+        selected = active,
+        contentDescription = openEditorRowDescription(fileName, if (path.startsWith("scratch:")) "" else folder, active, dirty, deleted),
         trailing = {
             Box(
-                Modifier.size(24.dp).clickable { controller.requestCloseDocument(path) },
+                Modifier
+                    .size(24.dp)
+                    .clickable { controller.requestCloseDocument(path) }
+                    .semantics {
+                        contentDescription = editorTabActionDescription(fileName, dirty, pinned = false)
+                        role = Role.Button
+                    },
                 contentAlignment = Alignment.Center,
             ) {
                 if (dirty) {

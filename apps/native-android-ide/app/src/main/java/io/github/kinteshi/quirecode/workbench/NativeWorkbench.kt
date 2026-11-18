@@ -88,6 +88,10 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.res.painterResource
 import io.github.kinteshi.quirecode.R
 import androidx.compose.material.icons.outlined.Close
@@ -369,7 +373,10 @@ private fun TopBar(controller: WorkbenchController, expanded: Boolean) {
                 contentColor = if (workspaceName != null) colors.onSurface else colors.onPrimaryContainer,
                 border = if (workspaceName != null) androidx.compose.foundation.BorderStroke(1.dp, colors.outlineVariant) else null,
                 shape = RoundedCornerShape(10.dp),
-                modifier = Modifier.height(36.dp).widthIn(max = 220.dp),
+                modifier = Modifier.height(36.dp).widthIn(max = 220.dp).semantics {
+                    contentDescription = workspaceName?.let { "Workspace: $it, switch workspace" } ?: "Open workspace"
+                    role = Role.Button
+                },
             ) {
                 Row(
                     Modifier.padding(start = 10.dp, end = 6.dp),
@@ -391,7 +398,10 @@ private fun TopBar(controller: WorkbenchController, expanded: Boolean) {
             onClick = { controller.runCommand("workbench.action.quickOpen") },
             color = colors.surfaceContainerHighest,
             shape = CircleShape,
-            modifier = Modifier.weight(1f).height(40.dp).padding(horizontal = 8.dp),
+            modifier = Modifier.weight(1f).height(40.dp).padding(horizontal = 8.dp).semantics {
+                contentDescription = "Search files by name, Quick Open"
+                role = Role.Button
+            },
         ) {
             Row(Modifier.padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Outlined.Search, contentDescription = null, tint = colors.onSurfaceVariant, modifier = Modifier.size(20.dp))
@@ -445,7 +455,10 @@ private fun WorkbenchRail(controller: WorkbenchController) {
                 val changes = controller.gitStatus?.entries?.size ?: 0
                 Tooltip("Source Control", "workbench.view.scm") {
                     BadgedBox(badge = { if (changes > 0) Badge { Text("$changes") } }) {
-                        Icon(Icons.AutoMirrored.Outlined.CallSplit, contentDescription = null)
+                        Icon(
+                            Icons.AutoMirrored.Outlined.CallSplit,
+                            contentDescription = if (changes > 0) "Source Control, $changes changes" else "Source Control",
+                        )
                     }
                 }
             },
@@ -460,7 +473,10 @@ private fun WorkbenchRail(controller: WorkbenchController) {
             icon = {
                 Tooltip("Problems", "workbench.actions.view.problems") {
                     BadgedBox(badge = { if (controller.diagnostics.isNotEmpty()) Badge { Text("${controller.diagnostics.size}") } }) {
-                        Icon(Icons.Outlined.ErrorOutline, contentDescription = null)
+                        Icon(
+                            Icons.Outlined.ErrorOutline,
+                            contentDescription = if (controller.diagnostics.isNotEmpty()) "Problems, ${controller.diagnostics.size} problems" else "Problems",
+                        )
                     }
                 }
             },
@@ -596,7 +612,12 @@ private fun StatusBar(controller: WorkbenchController, expanded: Boolean) {
             val warnings = controller.diagnostics.count { it.severity == 2 }
             Tooltip("Problems", "workbench.actions.view.problems") {
                 Row(
-                    Modifier.clickable { controller.runCommand("workbench.actions.view.problems") },
+                    Modifier
+                        .clickable { controller.runCommand("workbench.actions.view.problems") }
+                        .semantics(mergeDescendants = true) {
+                            contentDescription = statusBarProblemsDescription(errors, warnings)
+                            role = Role.Button
+                        },
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(3.dp),
                 ) {
@@ -614,12 +635,23 @@ private fun StatusBar(controller: WorkbenchController, expanded: Boolean) {
             color = colors.onSurfaceVariant,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f).clickable { controller.runCommand("workbench.action.output.toggleOutput") },
+            modifier = Modifier
+                .weight(1f)
+                .clickable { controller.runCommand("workbench.action.output.toggleOutput") }
+                .semantics {
+                    contentDescription = "Status: ${controller.status}, toggle output"
+                    role = Role.Button
+                },
         )
         controller.guestStats?.takeIf { controller.connected && controller.settings.statusBarGuestResources }?.let { stats ->
             val pressure = stats.totalMb > 0 && stats.footprintMb * 100 / stats.totalMb >= 80
             Row(
-                Modifier.clickable { controller.dialog = WorkbenchDialog.GuestResources },
+                Modifier
+                    .clickable { controller.dialog = WorkbenchDialog.GuestResources }
+                    .semantics(mergeDescendants = true) {
+                        contentDescription = "Guest resources"
+                        role = Role.Button
+                    },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(
@@ -638,7 +670,11 @@ private fun StatusBar(controller: WorkbenchController, expanded: Boolean) {
         }
         // Language servers' work in progress (indexing, loading the project), the newest first.
         controller.serverProgress.values.lastOrNull()?.let { progress ->
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(
+                Modifier.semantics(mergeDescendants = true) { contentDescription = "Language server busy: $progress" },
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
                 CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 1.5.dp, color = colors.onSurfaceVariant)
                 Text(progress, style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 260.dp))
             }
@@ -678,7 +714,16 @@ private fun StatusBar(controller: WorkbenchController, expanded: Boolean) {
 @Composable
 private fun StatusItem(text: String, icon: ImageVector? = null, tooltip: String = "", command: String? = null, onClick: (() -> Unit)? = null) {
     Tooltip(tooltip, command) { Row(
-        Modifier.then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
+        Modifier.then(
+            if (onClick != null) {
+                Modifier.clickable(onClick = onClick).semantics(mergeDescendants = true) {
+                    if (tooltip.isNotEmpty()) contentDescription = "$tooltip: $text"
+                    role = Role.Button
+                }
+            } else {
+                Modifier
+            },
+        ),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {

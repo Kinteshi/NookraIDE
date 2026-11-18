@@ -9,6 +9,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -100,6 +101,10 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
@@ -123,31 +128,40 @@ fun NotebookEditor(controller: WorkbenchController, session: NotebookSession) {
     controller.documentRevision
     val colors = MaterialTheme.colorScheme
     Column(Modifier.fillMaxSize().background(colors.surface)) {
-        Row(
-            Modifier.fillMaxWidth().background(colors.surfaceContainerLow).padding(horizontal = 8.dp, vertical = 2.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            AssistChip(
-                modifier = Modifier.noKeyFocus(),
-                onClick = { controller.chooseKernel(session) },
-                // Before a run: the kernel the notebook names (it starts on the first run), as in VS Code.
-                label = { Text(session.kernelName ?: session.notebook.kernelDisplayName ?: "Select kernel") },
-                leadingIcon = { Icon(Icons.Outlined.Memory, contentDescription = null, modifier = Modifier.size(18.dp)) },
-            )
-            Text(
-                if (session.kernelName == null && session.kernelState == "No kernel" && session.notebook.kernelDisplayName != null) "Not started" else session.kernelState,
-                style = MaterialTheme.typography.labelMedium,
-                color = colors.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 10.dp),
-            )
-            if (session.busy) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-            Spacer(Modifier.weight(1f))
-            ToolbarButton(Icons.Outlined.FastForward, "Run all") { controller.runAllCells(session) }
-            ToolbarButton(Icons.Outlined.Stop, "Interrupt") { controller.interruptKernel(session) }
-            ToolbarButton(Icons.Outlined.RestartAlt, "Restart kernel") { controller.restartKernel(session) }
-            ToolbarButton(Icons.Outlined.ClearAll, "Clear outputs") { controller.clearAllOutputs(session) }
-            ToolbarButton(Icons.Outlined.DataObject, "Variables") { controller.showVariables() }
-            ToolbarButton(Icons.Outlined.Save, "Save") { controller.saveNotebook(session) }
+        BoxWithConstraints(Modifier.fillMaxWidth().background(colors.surfaceContainerLow)) {
+            Row(
+                Modifier
+                    .horizontalScroll(rememberScrollState())
+                    .widthIn(min = maxWidth)
+                    .padding(horizontal = 8.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    AssistChip(
+                        modifier = Modifier.noKeyFocus(),
+                        onClick = { controller.chooseKernel(session) },
+                        // Before a run: the kernel the notebook names (it starts on the first run), as in VS Code.
+                        label = { Text(session.kernelName ?: session.notebook.kernelDisplayName ?: "Select kernel") },
+                        leadingIcon = { Icon(Icons.Outlined.Memory, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                    )
+                    Text(
+                        if (session.kernelName == null && session.kernelState == "No kernel" && session.notebook.kernelDisplayName != null) "Not started" else session.kernelState,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = colors.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 10.dp),
+                    )
+                    if (session.busy) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    ToolbarButton(Icons.Outlined.FastForward, "Run all") { controller.runAllCells(session) }
+                    ToolbarButton(Icons.Outlined.Stop, "Interrupt") { controller.interruptKernel(session) }
+                    ToolbarButton(Icons.Outlined.RestartAlt, "Restart kernel") { controller.restartKernel(session) }
+                    ToolbarButton(Icons.Outlined.ClearAll, "Clear outputs") { controller.clearAllOutputs(session) }
+                    ToolbarButton(Icons.Outlined.DataObject, "Variables") { controller.showVariables() }
+                    ToolbarButton(Icons.Outlined.Save, "Save") { controller.saveNotebook(session) }
+                }
+            }
         }
         // Cells added, moved or deleted: the language server gets the notebook again.
         LaunchedEffect(session, session.notebook.cells.map { it.id }) { controller.scheduleCellMirrorSync(session, delayMs = 200) }
@@ -200,7 +214,12 @@ fun NotebookEditor(controller: WorkbenchController, session: NotebookSession) {
 
 @Composable
 private fun ToolbarButton(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
-    Tooltip(label) { IconButton(onClick = onClick, modifier = Modifier.noKeyFocus()) { Icon(icon, contentDescription = label) } }
+    Tooltip(label) {
+        IconButton(
+            onClick = onClick,
+            modifier = Modifier.noKeyFocus().semantics { contentDescription = label },
+        ) { Icon(icon, contentDescription = label) }
+    }
 }
 
 /** The cursor's visual row (wrapped rows count); falls back to logical lines before the first layout. */
@@ -231,8 +250,10 @@ private fun NotebookCellView(
     val colors = MaterialTheme.colorScheme
     val selected = session.selectedCell == cell.id
     val dark = LocalDarkTheme.current
+    val cellIndex = session.notebook.cells.indexOf(cell).coerceAtLeast(0)
     Column(
         modifier
+            .semantics { contentDescription = notebookCellDescription(cellIndex, session.notebook.cells.size, cell, selected) }
             .background(if (session.draggedCell == cell.id) colors.surface else Color.Transparent)
             .widthIn(max = 1100.dp)
             .fillMaxWidth()
@@ -335,6 +356,7 @@ private fun CellRunButton(controller: WorkbenchController, session: NotebookSess
             fontFamily = FontFamily.Monospace,
             style = MaterialTheme.typography.labelMedium,
             color = colors.primary,
+            modifier = Modifier.semantics { contentDescription = "Cell queued" },
         )
         selected -> Tooltip("Run cell") { IconButton(onClick = { controller.runCell(session, cell) }, modifier = Modifier.size(32.dp).noKeyFocus()) {
             Icon(Icons.Outlined.PlayArrow, contentDescription = "Run cell", tint = colors.primary)
@@ -344,6 +366,9 @@ private fun CellRunButton(controller: WorkbenchController, session: NotebookSess
             fontFamily = FontFamily.Monospace,
             style = MaterialTheme.typography.labelMedium,
             color = colors.onSurfaceVariant,
+            modifier = Modifier.semantics {
+                contentDescription = if (cell.executionCount != null) "Execution count ${cell.executionCount}" else "Not run yet"
+            },
         )
     }
 }
@@ -600,6 +625,14 @@ private fun CellSourceEditor(
                 .fillMaxWidth()
                 .heightIn(min = 40.dp)
                 .padding(12.dp)
+                .semantics {
+                    val label = when (cell.type) {
+                        CellType.Code -> "Code"
+                        CellType.Markdown -> "Markdown"
+                        CellType.Raw -> "Raw"
+                    }
+                    contentDescription = "$label cell ${session.notebook.cells.indexOf(cell).coerceAtLeast(0) + 1} editor"
+                }
                 .cellProblemSquiggles(session.cellProblems[cell.id].orEmpty(), layout?.takeIf { it.layoutInput.text.length == field.text.length })
                 .cellHover(controller, session, cell) { layout?.takeIf { it.layoutInput.text.length == field.text.length } }
                 .focusRequester(focus)

@@ -39,6 +39,8 @@ import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.TextFieldValue
@@ -280,6 +282,9 @@ internal fun AardinkCellEditor(controller: WorkbenchController, session: Noteboo
                     .height(height)
                     .padding(vertical = CELL_TEXT_PADDING / 2)
                     .focusRequester(focus)
+                    .semantics {
+                        contentDescription = "${if (cell.type == CellType.Code) "Code" else "Raw"} cell ${session.notebook.cells.indexOf(cell).coerceAtLeast(0) + 1} editor"
+                    }
                     .onPreviewKeyEvent { event ->
                         if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                         // The kernel's completions take Up, Down, Enter, Tab and Esc while they're open.

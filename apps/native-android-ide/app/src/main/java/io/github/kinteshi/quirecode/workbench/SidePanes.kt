@@ -10,8 +10,12 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.runtime.LaunchedEffect
@@ -91,7 +95,13 @@ fun SidebarContent(controller: WorkbenchController, view: SidebarView, modifier:
             Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 6.dp, bottom = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(view.title, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+            Text(
+                view.title,
+                style = MaterialTheme.typography.titleSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
             if (view == SidebarView.Explorer && controller.workspaceAvailable) {
                 Tooltip("New file") { IconButton(onClick = { controller.beginNewEntry(folder = false) }) {
                     Icon(Icons.AutoMirrored.Outlined.NoteAdd, contentDescription = "New file")
@@ -423,6 +433,9 @@ fun PaneRow(
     dragModifier: Modifier = Modifier,
     /** Drawn instead of [icon] (a file icon theme's glyph). */
     leading: (@Composable () -> Unit)? = null,
+    contentDescription: String? = null,
+    stateDescription: String? = null,
+    role: Role? = Role.Button,
     onClick: () -> Unit,
 ) {
     val colors = MaterialTheme.colorScheme
@@ -431,6 +444,12 @@ fun PaneRow(
             .fillMaxWidth()
             .padding(horizontal = 6.dp)
             .background(if (selected) colors.secondaryContainer else androidx.compose.ui.graphics.Color.Transparent, MaterialTheme.shapes.small)
+            .semantics {
+                if (contentDescription != null) this.contentDescription = contentDescription
+                if (stateDescription != null) this.stateDescription = stateDescription
+                this.selected = selected
+                if (role != null) this.role = role
+            }
             .then(if (onLongClick != null) Modifier.onSecondaryClick(onLongClick) else Modifier)
             .combinedClickable(onLongClick = onLongClick.takeIf { longClick }, onClick = onClick)
             // After the click handler, so a drag that ends consumes the release before it becomes a tap.

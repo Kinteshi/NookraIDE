@@ -58,6 +58,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -107,6 +111,10 @@ internal fun CellOutputs(controller: WorkbenchController, session: NotebookSessi
                     .background(colors.surfaceContainerLow)
                     .noKeyFocus()
                     .clickable { controller.setOutputsHidden(session, cell, false) }
+                    .semantics {
+                        contentDescription = if (cell.outputs.size == 1) "Show 1 hidden output" else "Show ${cell.outputs.size} hidden outputs"
+                        role = Role.Button
+                    }
                     .padding(horizontal = 12.dp, vertical = 8.dp),
             )
         }
@@ -290,7 +298,15 @@ internal fun CellOutput(
     val colors = MaterialTheme.colorScheme
     val settings = controller.settings
     val presentation = cell.outputPresentation[index] ?: OutputPresentation()
-    val modifier = Modifier.fillMaxWidth().padding(top = 6.dp, start = 4.dp)
+    val viewsForSemantics = remember(output) { outputViews(output) }
+    val viewForSemantics = remember(output, attachedScript, presentation.view, settings) {
+        if (output.get("output_type")?.asString in setOf("execute_result", "display_data")) {
+            shownView(viewsForSemantics, presentation, settings, attachedScript != null || outputHtmlScripted(output))
+        } else null
+    }
+    val modifier = Modifier.fillMaxWidth().padding(top = 6.dp, start = 4.dp).semantics {
+        contentDescription = cellOutputDescription(index, cell.outputs.size, output, viewForSemantics)
+    }
     val lineLimit = settings.outputLineLimit
     fun expand(expanded: Boolean) {
         cell.outputPresentation[index] = presentation.copy(expanded = expanded)
