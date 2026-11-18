@@ -432,6 +432,7 @@ class WorkbenchController(private val context: Context) {
     private var scheduledServerStop: ScheduledFuture<*>? = null
     private var scheduledChatStop: ScheduledFuture<*>? = null
     private var scheduledAutoSave: ScheduledFuture<*>? = null
+    private var scheduledEditRefresh: ScheduledFuture<*>? = null
     private val diagnosticsByClient = mutableMapOf<LanguageClient, MutableMap<String, List<LanguageDiagnostic>>>()
 
     // Status and output log -------------------------------------------------------------------
@@ -541,8 +542,14 @@ class WorkbenchController(private val context: Context) {
         }
     var pagedDocument by mutableStateOf<PagedDocument?>(null)
         private set
-    /** Bumped on edits so dirty markers recompose; DocumentSession itself is not observable. */
+    /** Bumped when dirty/structural file state changes; avoid per-keystroke bumps so typing stays off UI recomposition. */
     var documentRevision by mutableIntStateOf(0)
+        private set
+    /** Bumped after typing settles (180 ms debounce) for full-text decorations and Markdown/SVG previews. */
+    var editRevision by mutableIntStateOf(0)
+        private set
+    /** Bumped when status-bar document metadata (encoding, line ending, indentation) changes. */
+    var documentMetaRevision by mutableIntStateOf(0)
         private set
     val notebooks = mutableMapOf<String, NotebookSession>()
     val activeDocument: DocumentSession? get() = documents.firstOrNull { it.path == activePath }
@@ -2731,6 +2738,7 @@ class WorkbenchController(private val context: Context) {
 
     /** The conflicts Git left in the active file, for the editor's actions over them. */
     fun activeConflicts(): List<MergeConflict> {
+        editRevision
         documentRevision
         val document = activeDocument?.takeUnless { it.binary } ?: return emptyList()
         return conflictsCache.of(document.text) { text -> if ("<<<<<<<" !in text) emptyList() else findConflicts(text) }
@@ -5149,13 +5157,20 @@ class WorkbenchController(private val context: Context) {
         deletedFiles.remove(path)
         if (previewTab == path) previewTab = null
         pinnedTabs.remove(path)
-        documents.firstOrNull { it.path == path }?.let(closedDocuments::add)
+        documents.firstOrNull { it.path == path }?.let { closed ->
+            closedDocuments.add(closed)
+            while (closedDocuments.size > 8) closedDocuments.removeAt(0)
+        }
         notifyDocumentClosed(path)
         notebooks.remove(path)?.kernel?.stop()
         markdownPreviews.remove(path)
         hexFiles.remove(path)
         closeNotebookMirror(path)
         documents.removeAll { it.path == path }
+        if (documents.isEmpty()) {
+            conflictsCache.clear()
+            pythonCellsCache.clear()
+        }
         if (activePath == path) activePath = documents.lastOrNull()?.path
         persistSession()
         scheduleIdleServerStop()
@@ -5876,9 +5891,11 @@ class WorkbenchController(private val context: Context) {
         return runCatching { repository.readBytes(path, MAX_PREVIEW_IMAGE_BYTES).get(15, TimeUnit.SECONDS) }.getOrNull()
     }
 
-    fun onDocumentEdited(document: DocumentSession) {
-        documentRevision++
+    fun onDocumentEdited(document: DocumentSession, dirtyChanged: Boolean = true) {
+        if (dirtyChanged || previewTab == document.path) documentRevision++
         if (previewTab == document.path) keepTab(document.path)
+        scheduledEditRefresh?.cancel(false)
+        scheduledEditRefresh = timer.schedule({ post { editRevision++ } }, 180, TimeUnit.MILLISECONDS)
         synchronized(scheduledDraftWrites) {
             scheduledDraftWrites.remove(document.path)?.cancel(false)
             scheduledDraftWrites[document.path] = timer.schedule(
@@ -8525,6 +8542,7 @@ class WorkbenchController(private val context: Context) {
         repository.persistDraft(document)
         dialog = null
         documentRevision++
+        documentMetaRevision++
         status = "Encoding set to $encoding"
     }
 
@@ -8537,6 +8555,7 @@ class WorkbenchController(private val context: Context) {
         editorSurface?.setText(normalized)
         notifyDocumentChanged(document.path, document.version, normalized)
         onDocumentEdited(document)
+        documentMetaRevision++
         dialog = null
         status = "Line endings set to $selected"
     }
@@ -8547,6 +8566,7 @@ class WorkbenchController(private val context: Context) {
         document.indentation = value
         editorSurface?.applyConfig(editorConfig())
         documentRevision++
+        documentMetaRevision++
         status = "Indenting with ${value.label.lowercase()}"
     }
 
@@ -8557,6 +8577,7 @@ class WorkbenchController(private val context: Context) {
         val found = indentation(document)
         editorSurface?.applyConfig(editorConfig())
         documentRevision++
+        documentMetaRevision++
         status = if (document.detectedIndentation == null) "Nothing indented yet: using the settings (${found.label})" else "Detected ${found.label}"
     }
 
@@ -8574,6 +8595,7 @@ class WorkbenchController(private val context: Context) {
         }
         editorSurface?.applyConfig(editorConfig())
         documentRevision++
+        documentMetaRevision++
         dialog = null
         status = if (target.insertSpaces) "Converted indentation to spaces (${target.tabSize})" else "Converted indentation to tabs (width ${target.tabSize})"
     }
@@ -10296,6 +10318,7 @@ class WorkbenchController(private val context: Context) {
 
     /** The `# %%` cells of the active Python file (none for other files). */
     fun activePythonCells(): List<PythonCell> {
+        editRevision
         documentRevision
         val document = activeDocument?.takeIf { !it.binary && activeNotebook == null && it.languageId == "py" } ?: return emptyList()
         return pythonCellsCache.of(document.text, ::pythonCells)

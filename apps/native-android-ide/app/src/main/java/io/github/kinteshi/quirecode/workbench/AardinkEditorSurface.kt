@@ -63,7 +63,10 @@ internal class AardinkEditorSurface(val state: CodeEditorState) : EditorSurface 
      */
     private var keyedSelection: TextRange? = null
 
+    private var cachedText: String? = null
+
     init {
+        state.addContentListener { cachedText = null }
         state.addSelectionListener { ranges, reason ->
             val keyed = keyedSelection
             keyedSelection = null
@@ -75,7 +78,8 @@ internal class AardinkEditorSurface(val state: CodeEditorState) : EditorSurface 
         }
     }
 
-    override val text: String get() = state.text
+    override val text: String
+        get() = cachedText ?: state.text.also { cachedText = it }
     override val selection: EditorSelection
         get() = state.selection.let { EditorSelection(positionAt(it.min), positionAt(it.max)) }
     override val visibleLines: VisibleLines

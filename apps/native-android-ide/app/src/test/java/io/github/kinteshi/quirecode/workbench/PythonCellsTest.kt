@@ -49,4 +49,15 @@ class PythonCellsTest {
         assertEquals(listOf(1, 6, 8), cellsToRun(cells, 0, CellRange.All).map { it.marker })
         assertTrue(cellsToRun(cells, 5, CellRange.Current).isEmpty())
     }
+
+    @Test
+    fun fastPathHandlesNormalCommentsCrlfAndXmlCells() {
+        assertTrue(pythonCells("# normal comment\nx = 1\n# another comment\n").isEmpty())
+        val crlf = "#%% Fast\r\nx = 1\r\n# <codecell>\r\ny = 2\r\n"
+        val cells = pythonCells(crlf)
+        assertEquals(listOf(0, 2), cells.map { it.marker })
+        assertEquals("Fast", cells[0].title)
+        assertEquals("x = 1", pythonCellCode(crlf, cells[0]))
+        assertEquals("y = 2", pythonCellCode(crlf, cells[1]))
+    }
 }

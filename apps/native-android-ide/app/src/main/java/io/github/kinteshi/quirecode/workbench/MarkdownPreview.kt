@@ -149,6 +149,7 @@ private val random = SecureRandom()
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 internal fun MarkdownPreview(controller: WorkbenchController, document: DocumentSession, followEditor: Boolean, modifier: Modifier = Modifier) {
+    controller.editRevision
     controller.documentRevision
     val colors = MaterialTheme.colorScheme
     val text = document.text

@@ -586,7 +586,7 @@ private fun CompactNavigation(controller: WorkbenchController) {
 
 @Composable
 private fun StatusBar(controller: WorkbenchController, expanded: Boolean) {
-    controller.documentRevision
+    controller.documentMetaRevision
     val colors = MaterialTheme.colorScheme
     val document = controller.activeDocument
     Row(
@@ -688,8 +688,7 @@ private fun StatusBar(controller: WorkbenchController, expanded: Boolean) {
         // An image has no lines, encoding or language to show.
         if (document != null && controller.activeNotebook == null && !document.binary) {
             // There from the start (a file just opened has its cursor at the top), so the items beside it don't move at the first tap.
-            val cursor = controller.cursorPosition
-            StatusItem("Ln ${(cursor?.line ?: 0) + 1}, Col ${(cursor?.character ?: 0) + 1}", tooltip = "Go to Line/Column", command = "workbench.action.gotoLine") { controller.showGoToLine() }
+            CursorStatusItem(controller)
             StatusItem(controller.indentation(document).label, tooltip = "Select Indentation") { controller.dialog = WorkbenchDialog.IndentationPicker }
             StatusItem(document.encoding, tooltip = "Select Encoding") { controller.dialog = WorkbenchDialog.Encoding }
             StatusItem(if (document.eol == "\r\n") "CRLF" else "LF", tooltip = "Select End of Line Sequence") { controller.dialog = WorkbenchDialog.LineEnding }
@@ -708,6 +707,15 @@ private fun StatusBar(controller: WorkbenchController, expanded: Boolean) {
                 null
             })
         }
+    }
+}
+
+/** Isolated so cursor movement only recomposes the `Ln X, Col Y` indicator rather than the whole status bar. */
+@Composable
+private fun CursorStatusItem(controller: WorkbenchController) {
+    val cursor = controller.cursorPosition
+    StatusItem("Ln ${(cursor?.line ?: 0) + 1}, Col ${(cursor?.character ?: 0) + 1}", tooltip = "Go to Line/Column", command = "workbench.action.gotoLine") {
+        controller.showGoToLine()
     }
 }
 

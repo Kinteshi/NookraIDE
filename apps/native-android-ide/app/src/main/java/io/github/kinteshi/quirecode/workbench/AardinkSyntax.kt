@@ -47,8 +47,18 @@ internal class SyntaxTheme(
     val highContrast: Boolean = false,
     val palette: SyntaxPalette? = null,
 ) {
-    val key: String = "$name/${json.hashCode()}/${semanticColors.hashCode()}/$light/${workbenchColors.hashCode()}/$highContrast"
+    val key: String = "$name/${json.hashCode()}/${semanticColors.hashCode()}/$light/${workbenchColors.hashCode()}/$highContrast/${palette?.javaClass?.simpleName}"
+
+    override fun equals(other: Any?): Boolean = other is SyntaxTheme && key == other.key
+    override fun hashCode(): Int = key.hashCode()
 }
+
+private val assetTextCache = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+private fun readCachedAsset(context: Context, assetPath: String): String =
+    assetTextCache.getOrPut(assetPath) {
+        context.applicationContext.assets.open(assetPath).use { it.reader().readText() }
+    }
 
 internal fun syntaxTheme(context: Context, colors: ColorScheme, dark: Boolean, syntax: SyntaxColors): SyntaxTheme {
     val prefs = context.getSharedPreferences("native-ide-assets", Context.MODE_PRIVATE)
@@ -75,7 +85,7 @@ internal fun syntaxTheme(context: Context, colors: ColorScheme, dark: Boolean, s
         )
     }
     val file = if (dark) DARK_SYNTAX_THEME else LIGHT_SYNTAX_THEME
-    val json = context.assets.open("textmate/$file").use { it.reader().readText() }
+    val json = readCachedAsset(context, "textmate/$file")
     val highContrast = syntax == SyntaxColors.HighContrast
     return SyntaxTheme(
         file,
@@ -92,6 +102,10 @@ internal fun syntaxTheme(context: Context, colors: ColorScheme, dark: Boolean, s
 internal object AardinkSyntax {
     private const val PYTHON_SCOPE = "source.python"
     private var registry: Pair<String, Registry>? = null
+    private var tokenColorsCache: Pair<List<String>, Pair<Map<TokenType, Color>, Map<TokenType, com.aardarch.aardink.core.TokenFontStyle>>>? = null
+    private val editorThemeCache = object : android.util.LruCache<String, EditorTheme>(6) {}
+    private var fenceTokenizerRegistry: Registry? = null
+    private val fenceTokenizerCache = java.util.concurrent.ConcurrentHashMap<String, java.util.Optional<IncrementalTokenizer>>()
 
     /**
      * All 20 built-in syntax languages from `aardink-languages`, excluding PlainText so `.txt` files
@@ -173,7 +187,19 @@ internal object AardinkSyntax {
         return TextMateTokenizer(grammar, null)
     }
 
-    /** VS Code's language ids that aren't their files' extension. */
+    /** Shared code-fence / cell tokenizer lookup cached per [registry]. */
+    @Synchronized
+    fun fenceTokenizerProvider(registry: Registry): (String) -> IncrementalTokenizer? {
+        if (fenceTokenizerRegistry !== registry) {
+            fenceTokenizerRegistry = registry
+            fenceTokenizerCache.clear()
+        }
+        return { language ->
+            fenceTokenizerCache.getOrPut(language) {
+                java.util.Optional.ofNullable(codeFenceTokenizer(registry, language))
+            }.orElse(null)
+        }
+    }
     private val FENCE_EXTENSIONS = mapOf(
         "typescript" to "ts", "javascript" to "js", "typescriptreact" to "tsx", "javascriptreact" to "jsx",
         "shellscript" to "sh", "bash" to "sh", "shell" to "sh", "zsh" to "sh", "rust" to "rs", "golang" to "go",
@@ -188,7 +214,7 @@ internal object AardinkSyntax {
         val scope = scopeFor(document) ?: return null
         val json = runCatching {
             if (scope == PYTHON_SCOPE) {
-                context.assets.open("textmate/python.language-configuration.json").use { it.reader().readText() }
+                readCachedAsset(context, "textmate/python.language-configuration.json")
             } else {
                 AssetPackGrammarLoader.configurationFile(scope)?.readText()
             }
@@ -218,44 +244,56 @@ internal object AardinkSyntax {
         return Triple(palette.aardinkTokenColors(), palette.aardinkTokenStyles(), null)
     }
 
+    @Synchronized
+    private fun cachedTokenColors(registry: Registry): Pair<Map<TokenType, Color>, Map<TokenType, com.aardarch.aardink.core.TokenFontStyle>> {
+        val map = registry.colorMap
+        tokenColorsCache?.takeIf { it.first == map }?.let { return it.second }
+        return textMateTokenColors(map).also { tokenColorsCache = map to it }
+    }
+
     fun editorTheme(theme: SyntaxTheme, registry: Registry, colors: ColorScheme, dark: Boolean): EditorTheme {
-        val (tokenColors, tokenStyles) = textMateTokenColors(registry.colorMap)
+        val cacheKey = "${theme.key}/$dark/${colors.surface.value}/${colors.primary.value}/${colors.onSurface.value}/${colors.outlineVariant.value}/${colors.surfaceContainerHigh.value}/${colors.surfaceContainerHighest.value}"
+        editorThemeCache.get(cacheKey)?.let { return it }
+        val (tokenColors, tokenStyles) = cachedTokenColors(registry)
         val semantic = semanticColorsByKind(theme.light, theme.semanticColors)
             .map { (kind, color) -> semanticType(kind) to Color(color) }
             .toMap()
-        if (theme.highContrast) {
+        val built = if (theme.highContrast) {
             val hc = if (dark) EditorThemes.HighContrastDark else EditorThemes.HighContrastLight
-            return hc.copy(
+            hc.copy(
                 tokenColors = hc.tokenColors + tokenColors + semantic,
                 tokenFontStyles = hc.tokenFontStyles + tokenStyles,
             )
+        } else {
+            val base = EditorTheme.fromColorScheme(colors, dark)
+            val (builtInColors, builtInStyles, importedBg) = resolveBuiltInTheme(theme)
+            fun chromeColor(vararg keys: String): Color? =
+                keys.firstNotNullOfOrNull { key -> theme.workbenchColors[key]?.let { runCatching { parseThemeColor(it) }.getOrNull() } }
+            base.copy(
+                // An imported theme brings its own background.
+                background = if (theme.imported) importedBg ?: themeBackground(theme.json) ?: base.background else base.background,
+                tokenColors = base.tokenColors + builtInColors + tokenColors + semantic,
+                tokenFontStyles = base.tokenFontStyles + builtInStyles + tokenStyles,
+                bracketPairColors = (if (theme.light) LIGHT_BRACKET_COLORS else BRACKET_COLORS).map(::Color),
+                chromeColors = ChromeColors(
+                    indentGuide = chromeColor("editorIndentGuide.background1", "editorIndentGuide.background")
+                        ?: colors.outlineVariant.copy(alpha = 0.35f),
+                    activeIndentGuide = chromeColor("editorIndentGuide.activeBackground1", "editorIndentGuide.activeBackground")
+                        ?: colors.primary.copy(alpha = 0.65f),
+                    bracketPairGuide = chromeColor("editorBracketPairGuide.background1") ?: Color.Unspecified,
+                    ruler = chromeColor("editorRuler.foreground") ?: colors.outlineVariant.copy(alpha = 0.4f),
+                    widgetBackground = chromeColor("editorWidget.background") ?: colors.surfaceContainerHigh,
+                    widgetForeground = chromeColor("editorWidget.foreground") ?: colors.onSurface,
+                    widgetBorder = chromeColor("editorWidget.border") ?: colors.outlineVariant,
+                    inlayHint = chromeColor("editorInlayHint.foreground") ?: colors.onSurfaceVariant,
+                    inlayHintBackground = chromeColor("editorInlayHint.background") ?: colors.surfaceContainerHighest.copy(alpha = 0.6f),
+                    codeLens = chromeColor("editorCodeLens.foreground") ?: colors.onSurfaceVariant,
+                    ghostText = chromeColor("editorGhostText.foreground") ?: colors.onSurfaceVariant.copy(alpha = 0.55f),
+                ),
+            )
         }
-        val base = EditorTheme.fromColorScheme(colors, dark)
-        val (builtInColors, builtInStyles, importedBg) = resolveBuiltInTheme(theme)
-        fun chromeColor(vararg keys: String): Color? =
-            keys.firstNotNullOfOrNull { key -> theme.workbenchColors[key]?.let { runCatching { parseThemeColor(it) }.getOrNull() } }
-        return base.copy(
-            // An imported theme brings its own background.
-            background = if (theme.imported) importedBg ?: themeBackground(theme.json) ?: base.background else base.background,
-            tokenColors = base.tokenColors + builtInColors + tokenColors + semantic,
-            tokenFontStyles = base.tokenFontStyles + builtInStyles + tokenStyles,
-            bracketPairColors = (if (theme.light) LIGHT_BRACKET_COLORS else BRACKET_COLORS).map(::Color),
-            chromeColors = ChromeColors(
-                indentGuide = chromeColor("editorIndentGuide.background1", "editorIndentGuide.background")
-                    ?: colors.outlineVariant.copy(alpha = 0.35f),
-                activeIndentGuide = chromeColor("editorIndentGuide.activeBackground1", "editorIndentGuide.activeBackground")
-                    ?: colors.primary.copy(alpha = 0.65f),
-                bracketPairGuide = chromeColor("editorBracketPairGuide.background1") ?: Color.Unspecified,
-                ruler = chromeColor("editorRuler.foreground") ?: colors.outlineVariant.copy(alpha = 0.4f),
-                widgetBackground = chromeColor("editorWidget.background") ?: colors.surfaceContainerHigh,
-                widgetForeground = chromeColor("editorWidget.foreground") ?: colors.onSurface,
-                widgetBorder = chromeColor("editorWidget.border") ?: colors.outlineVariant,
-                inlayHint = chromeColor("editorInlayHint.foreground") ?: colors.onSurfaceVariant,
-                inlayHintBackground = chromeColor("editorInlayHint.background") ?: colors.surfaceContainerHighest.copy(alpha = 0.6f),
-                codeLens = chromeColor("editorCodeLens.foreground") ?: colors.onSurfaceVariant,
-                ghostText = chromeColor("editorGhostText.foreground") ?: colors.onSurfaceVariant.copy(alpha = 0.55f),
-            ),
-        )
+        editorThemeCache.put(cacheKey, built)
+        return built
     }
 
     /** What a language server's token type is drawn as. */

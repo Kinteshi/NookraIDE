@@ -124,8 +124,6 @@ import androidx.compose.material.icons.outlined.Info
 
 @Composable
 fun EditorArea(controller: WorkbenchController, modifier: Modifier = Modifier) {
-    // Reading the revision makes tab dirty markers recompose after edits.
-    controller.documentRevision
     val activeDocument = controller.activeDocument
     val paged = controller.pagedDocument
     Column(modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {

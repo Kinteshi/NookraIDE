@@ -3366,6 +3366,23 @@ Completed on 2026-11-18 (closing `G8`).
   * Verified offline saved `metadata.widgets` rendering on a fixture notebook containing `PlayModel` linked via `LinkModel` to `IntSliderModel`, `ColorPickerModel` (`#e53935`), `DatePickerModel` (`2026-11-18`), binary `svg+xml` `ImageModel`, WAV `AudioModel`, and inline `AnyModel` (`AnyWidget inline: 42`), visually inspected the screenshot, and re-verified all 6 live `AccessibilityAndScreenshotTest` cases.
 * **Tests:** Added binary/custom comm, `LinkModel`, and `metadata.widgets` round-trip tests in `WidgetsTest.kt`, plus pure unit tests (`NotebookRichWidgetsTest.kt`: CSS colors, `0`-indexed `DatePicker` serialization, media MIME/dimension/`206` byte-range slicing, third-party HTML host). Verified 453 app unit tests (451 passed, 2 opt-in skipped when env vars unset), live `AccessibilityAndScreenshotTest`, debug APK assemble, notices check, Rust tests, and `git diff --check`.
 
+## 84. Post-flip memory & keystroke-to-frame performance pass (G1, G2)
+
+Completed on 2026-11-18 (closing `G1` and `G2`).
+
+* **`G2` — Keystroke-to-frame latency (`AardinkEditorPane.kt`, `AardinkEditorSurface.kt`, `EditorPane.kt`, `NativeWorkbench.kt`, `WorkbenchController.kt`, `DocumentRepository.kt`, `TextEditorHost.kt`, `PythonCells.kt`, `TextMateTokenizer.kt`, `JsonRpcConnection.kt`):**
+  * Moved `codeEditorDescription(...)` inside `.semantics { ... }` in `AardinkEditorPane.kt` so cursor movement and typing no longer recompose `AardinkEditorView` / `CodeEditorLayout`.
+  * Removed per-keystroke `documentRevision++` recomposition storms across `EditorArea` (`EditorPane.kt`), `StatusBar` (`NativeWorkbench.kt`), and `AardinkDecorations`: `onDocumentEdited` now only bumps `documentRevision` when `dirty` changes (`dirtyChanged`) or preview tabs unpin, schedules `editRevision` with a `180 ms` debounce for full-file decorations (`activeConflicts()`, `activePythonCells()`) and `MarkdownPreview` / `SvgPreview`, and isolates `CursorStatusItem` + `documentMetaRevision` in `StatusBar`.
+  * Cached `AardinkEditorSurface.text` between edits and short-circuited `DocumentSession.updateText` / `EditorSurfaceHost` with reference equality (`===`) so full-file strings are materialized at most once per keystroke.
+  * Added a zero-split fast path in `PythonCells.kt` (skipping files without cell markers in < 10 µs and scanning line indices directly), replaced `split('\n').map { removeSuffix("\r") }` with single-pass line slicing in `TextMateTokenizer.kt`, and offloaded `JsonRpcConnection.send` (`gson.toJson` + `sendRpcMessage`) onto a dedicated FIFO single-thread executor per connection.
+* **`G1` — Memory footprint & caching (`AardinkSyntax.kt`, `WorkbenchController.kt`):**
+  * Added equality/hashCode on `SyntaxTheme`, cached bundled APK theme/config assets (`dark_plus.json`, `light_plus.json`, `python.language-configuration.json`), cached `textMateTokenColors(registry.colorMap)`, cached `EditorTheme` instances in an LRU cache (size 6), and shared `AardinkSyntax.fenceTokenizerProvider(registry)` across tabs and notebook cells.
+  * Bounded `closedDocuments` to 8 entries in `WorkbenchController.closeDocument` and cleared `conflictsCache` / `pythonCellsCache` when the last document closes.
+* **Measured on the tablet (`SM-X930`, `192.0.2.66:40433`, 5 Python/Markdown files + notebook + 2 terminals, `log.tag.AVFPERF DEBUG`):**
+  * **Keystroke to frame (64 injected keyevents, `big_edit.py` 1,500 lines):** improved from baseline `9.0` min / `12.7 ms` median / `19.2 ms` p95 / `32.9 ms` max down to **`6.0 ms` min / `11.4 ms` median / `13.0 ms` p95** (meeting the `<= 16 ms` budget; after the initial clean→dirty flip frame on key #1, all remaining samples stayed in `6.0–13.1 ms`).
+  * **Memory (`dumpsys meminfo`, debug APK):** `225.8–236.7 MB` PSS / `360.0–370.6 MB` RSS (under `<= 250 MB` PSS budget, down from batch 55's `262–290 MB` PSS / `414–442 MB` RSS).
+* **Tests:** Added `PythonCellsTest.fastPathHandlesNormalCommentsCrlfAndXmlCells`; verified full app unit suite, live `AccessibilityAndScreenshotTest` on `SM-X930`, debug APK assemble, Rust tests, clippy, ARM64 `zigbuild`, notices check (374 components), and `git diff --check`.
+
 ## Backlog
 ### Open backlog (11-08)
 The current lists of what's open, in two: the general backlog, and the Aardink switch's until it's complete. The older
@@ -3378,8 +3395,8 @@ Grouped (11-08) so that what's cheaper done together is done together; the numbe
 
 | Group | # | Item | Size | Description |
 |---|---|------|------|-------------|
-| **1. Performance, after the flip** | G1 | 52 | M–L | Memory against the 250 MB budget: Aardink 262–290 MB PSS, 414–442 MB RSS (batch 55; sora 308–393 / 420–504) |
-| | G2 | 53 | M | Key to frame against the 16 ms budget: with the input method, Aardink 30 ms median / 36 ms p95, sora 24 / 31 (batch 55) |
+| **1. Performance, after the flip** | G1 | 52 | Done in 84 | Memory against 250 MB budget: `225.8–236.7 MB` PSS / `360.0–370.6 MB` RSS (debug build; batch 55 was 262–290 PSS / 414–442 RSS); cached APK syntax assets/`EditorTheme`/`textMateTokenColors`/fences, bounded `closedDocuments` (8), cleared caches on empty workbench |
+| | G2 | 53 | Done in 84 | Key to frame against 16 ms p95 budget: **`11.4 ms` median / `13.0 ms` p95** injected (down from `12.7 / 19.2 ms`); moved `codeEditorDescription` into `.semantics`, dropped per-keystroke `documentRevision` recomposition in `EditorArea`/`StatusBar`/`AardinkDecorations`, fast-pathed `pythonCells` & `splitLines`, cached single-copy `state.text`, and offloaded `JsonRpcConnection.send` |
 | **2. Guest away** | G17 | 69 | S, the user's | Check the "guest stopped" banner with the guest stopped on purpose while connected; the rest was done in batch 57 (G14 and G5 too) |
 | **3. Backends, and running without Terminal** | G13 | 65 | S–M to explore, L+ to adopt | Other backends: proot, Termux and others |
 | | G16 | 68 | S to try the grant, L+ to do | Bundle the image and use AVF without Terminal: not for store installs |

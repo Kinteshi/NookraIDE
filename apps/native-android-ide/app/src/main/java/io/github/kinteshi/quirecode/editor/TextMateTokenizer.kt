@@ -316,7 +316,22 @@ class TextMateTokenizer(
         return types.getOrPut(kind or (color shl 4) or (style shl 20)) { NamedTokenType(typeName(kind, color, style)) }
     }
 
-    private fun splitLines(text: String): List<String> = text.split('\n').map { it.removeSuffix("\r") }
+    private fun splitLines(text: String): List<String> {
+        var estimated = 16
+        for (i in text.indices) if (text[i] == '\n') estimated++
+        val out = ArrayList<String>(estimated)
+        var start = 0
+        val len = text.length
+        while (start <= len) {
+            val nl = text.indexOf('\n', start)
+            val end = if (nl < 0) len else nl
+            val cleanEnd = if (end > start && text[end - 1] == '\r') end - 1 else end
+            out.add(text.substring(start, cleanEnd))
+            if (nl < 0) break
+            start = nl + 1
+        }
+        return out
+    }
 
     private fun lineStarts(lines: List<String>): IntArray {
         val starts = IntArray(lines.size)

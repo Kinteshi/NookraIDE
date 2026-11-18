@@ -14,13 +14,34 @@ private val markdownMarker = Regex("""^#\s*(%%\s*\[markdown]|<markdowncell>)""")
 
 fun pythonCells(text: String): List<PythonCell> {
     if ('#' !in text) return emptyList()
-    val lines = text.split('\n')
-    val markers = lines.indices.filter { codeMarker.containsMatchIn(lines[it].trimEnd('\r')) }
-    return markers.mapIndexed { index, line ->
-        val raw = lines[line].trimEnd('\r')
-        val markdown = markdownMarker.containsMatchIn(raw)
-        val title = codeMarker.find(raw)?.groupValues?.get(2)?.trim()?.removePrefix("[markdown]")?.trim().orEmpty()
-        PythonCell(line, (markers.getOrNull(index + 1) ?: lines.size) - 1, title, markdown)
+    if ("%%" !in text && "<codecell>" !in text && "<markdowncell>" !in text && "In[" !in text) return emptyList()
+    val hits = ArrayList<Triple<Int, String, Boolean>>()
+    var lineIndex = 0
+    var pos = 0
+    val len = text.length
+    while (pos <= len) {
+        val nl = text.indexOf('\n', pos)
+        val rawEnd = if (nl < 0) len else nl
+        val trimmedEnd = if (rawEnd > pos && text[rawEnd - 1] == '\r') rawEnd - 1 else rawEnd
+        // Only slice/regex lines whose trimmed start looks like a comment (`#`).
+        var firstNonWs = pos
+        while (firstNonWs < trimmedEnd && text[firstNonWs] == ' ') firstNonWs++
+        if (firstNonWs < trimmedEnd && text[firstNonWs] == '#') {
+            val raw = text.substring(pos, trimmedEnd)
+            val match = codeMarker.find(raw)
+            if (match != null) {
+                val title = match.groupValues[2].trim().removePrefix("[markdown]").trim()
+                hits.add(Triple(lineIndex, title, markdownMarker.containsMatchIn(raw)))
+            }
+        }
+        lineIndex++
+        if (nl < 0) break
+        pos = nl + 1
+    }
+    if (hits.isEmpty()) return emptyList()
+    return hits.mapIndexed { idx, (markerLine, title, markdown) ->
+        val endLine = (hits.getOrNull(idx + 1)?.first ?: lineIndex) - 1
+        PythonCell(markerLine, endLine, title, markdown)
     }
 }
 
@@ -63,5 +84,11 @@ internal class TextCache<T> {
             text = current
             value = it
         }
+    }
+
+    @Synchronized
+    fun clear() {
+        text = null
+        value = null
     }
 }

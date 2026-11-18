@@ -152,7 +152,7 @@ class EditorSurfaceHost : TextEditorHost {
             when (normalized) {
                 is EditorEvent.ContentChanged -> {
                     if (!binding.suppressContentEvents) {
-                        if (normalized.text != document.text) document.updateText(normalized.text)
+                        if (normalized.text !== document.text && normalized.text != document.text) document.updateText(normalized.text)
                         emit(normalized.copy(version = document.version))
                     }
                 }

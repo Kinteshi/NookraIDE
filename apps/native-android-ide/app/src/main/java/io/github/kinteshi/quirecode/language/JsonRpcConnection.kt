@@ -12,6 +12,7 @@ import java.io.IOException
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 
@@ -31,6 +32,9 @@ class JsonRpcConnection(
 ) {
     private val requestIds = AtomicLong(0)
     private val pendingRequests = ConcurrentHashMap<Long, CompletableFuture<JsonElement>>()
+    private val sendExecutor = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "avf-rpc-send-${kind.lowercase()}").apply { isDaemon = true }
+    }
     @Volatile var bridgeId: UUID? = null
         private set
 
@@ -97,7 +101,22 @@ class JsonRpcConnection(
 
     private fun send(message: JsonObject): CompletableFuture<Unit> {
         val id = bridgeId ?: return CompletableFuture.failedFuture(IOException("Guest tool is not started"))
-        return transport.sendRpcMessage(id, gson.toJson(message))
+        val done = CompletableFuture<Unit>()
+        sendExecutor.execute {
+            if (bridgeId != id) {
+                done.completeExceptionally(IOException("Guest tool is not started"))
+                return@execute
+            }
+            try {
+                val payload = gson.toJson(message)
+                transport.sendRpcMessage(id, payload).whenComplete { _, error ->
+                    if (error != null) done.completeExceptionally(error) else done.complete(Unit)
+                }
+            } catch (t: Throwable) {
+                done.completeExceptionally(t)
+            }
+        }
+        return done
     }
 
     private fun onRpcEvent(event: RpcEvent) {

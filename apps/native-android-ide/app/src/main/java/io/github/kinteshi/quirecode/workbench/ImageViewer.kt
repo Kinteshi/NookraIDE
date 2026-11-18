@@ -99,7 +99,7 @@ fun ImageViewer(controller: WorkbenchController, path: String, modifier: Modifie
 /** An SVG file's text drawn as a picture; edits redraw it shortly after typing stops. */
 @Composable
 fun SvgPreview(controller: WorkbenchController, path: String, text: () -> String, modifier: Modifier = Modifier) {
-    val revision = controller.documentRevision
+    val revision = controller.editRevision to controller.documentRevision
     val loaded by produceState<Loaded>(Loaded.Loading, path, revision) {
         if (value !is Loaded.Loading) delay(200)
         val source = text()

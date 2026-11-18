@@ -134,13 +134,7 @@ internal fun AardinkEditorView(controller: WorkbenchController, document: Docume
     }
     val theme = remember(syntax, registry, colors, dark) { AardinkSyntax.editorTheme(syntax, registry, colors, dark) }
     // Code in hover, signature help and a suggestion's details, coloured by its fence's language.
-    val fenceTokenizers = remember(registry) {
-        val made = java.util.concurrent.ConcurrentHashMap<String, java.util.Optional<com.aardarch.aardink.core.IncrementalTokenizer>>()
-        val lookup: (String) -> com.aardarch.aardink.core.IncrementalTokenizer? = { language ->
-            made.getOrPut(language) { java.util.Optional.ofNullable(AardinkSyntax.codeFenceTokenizer(registry, language)) }.orElse(null)
-        }
-        lookup
-    }
+    val fenceTokenizers = remember(registry) { AardinkSyntax.fenceTokenizerProvider(registry) }
     // The mouse resting on a word: what Aardink's hover tracking saw is taken (so it shows no card of its own) and the
     // workbench's card shows there. After the editor's own pointer handling, which runs first in this pass.
     val pointerScope = androidx.compose.runtime.rememberCoroutineScope()
@@ -158,21 +152,22 @@ internal fun AardinkEditorView(controller: WorkbenchController, document: Docume
         }
     }
     CompositionLocalProvider(LocalEditorTheme provides theme, com.aardarch.aardink.ui.LocalCodeFenceTokenizers provides fenceTokenizers) {
-        val editorDescription = codeEditorDescription(
-            path = document.path,
-            language = controller.lspLanguageId(document.path) ?: document.languageId.ifEmpty { "plain text" },
-            lineCount = state.document.lineCount,
-            cursorLine = (controller.cursorPosition?.line ?: state.cursorLine) + 1,
-            cursorCol = (controller.cursorPosition?.character ?: state.cursorColumn) + 1,
-            problemCount = surface.problems.size,
-        )
         CodeEditorLayout(
             state = state,
             modifier = Modifier
                 .fillMaxSize()
                 .focusRequester(surface.focusRequester)
                 .then(hoverWatch)
-                .semantics { contentDescription = editorDescription },
+                .semantics {
+                    contentDescription = codeEditorDescription(
+                        path = document.path,
+                        language = controller.lspLanguageId(document.path) ?: document.languageId.ifEmpty { "plain text" },
+                        lineCount = state.document.lineCount,
+                        cursorLine = (controller.cursorPosition?.line ?: state.cursorLine) + 1,
+                        cursorCol = (controller.cursorPosition?.character ?: state.cursorColumn) + 1,
+                        problemCount = surface.problems.size,
+                    )
+                },
             languageService = service,
             foldState = surface.foldState,
             foldingProvider = surface.foldingProvider,
@@ -246,8 +241,9 @@ internal fun AardinkEditorView(controller: WorkbenchController, document: Docume
                 }
             }
             if (changes.any { !it.isReset }) {
-                document.updateText(state.text)
-                controller.onDocumentEdited(document)
+                val wasDirty = document.dirty
+                document.updateText(surface.text)
+                controller.onDocumentEdited(document, dirtyChanged = wasDirty != document.dirty)
             }
         }
         state.addContentListener(edited)
@@ -306,7 +302,7 @@ private fun AardinkDecorations(controller: WorkbenchController, document: Docume
     val values = controller.debugInlineValues?.takeIf { it.first == document.path }?.second.orEmpty()
     val valueColor = colors.tertiary
     LaunchedEffect(surface, values, valueColor) { surface.setLineEndNotes("inline-values", values, valueColor) }
-    controller.documentRevision
+    controller.editRevision
     val blameLine = controller.cursorPosition?.line?.takeIf { controller.settings.gitBlame && !document.dirty }
     val blame = blameLine?.let { controller.blameLines[it] }?.let { line ->
         mapOf(blameLine to if (line.uncommitted) "You, not committed yet" else "${line.author}, ${relativeTime(line.time)} • ${line.summary}")

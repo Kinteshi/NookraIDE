@@ -73,12 +73,12 @@ data class DocumentSession(
     var savedText: String? = if (dirty) null else text
 
     fun updateText(nextText: String) {
-        if (text != nextText) {
+        if (text !== nextText && text != nextText) {
             text = nextText
             val firstLineBreak = nextText.indexOf('\n')
             if (firstLineBreak >= 0) eol = if (firstLineBreak > 0 && nextText[firstLineBreak - 1] == '\r') "\r\n" else "\n"
             version += 1
-            dirty = nextText != savedText
+            dirty = savedText !== nextText && nextText != savedText
         }
     }
 
