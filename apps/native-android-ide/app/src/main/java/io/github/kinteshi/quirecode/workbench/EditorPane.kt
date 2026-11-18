@@ -131,16 +131,17 @@ fun EditorArea(controller: WorkbenchController, modifier: Modifier = Modifier) {
             // A device folder's file (G29): its folder's name and the path below it; a crumb goes to that folder.
             val treeRoot = io.github.kinteshi.quirecode.document.treeRootOf(document.path)
             val treeName = treeRoot?.let(controller::displayName)
+            val (remoteDisplay, remoteNavigate) = workspaceBreadcrumbPath(document.path, controller.workspaceRoot)
             Breadcrumbs(
                 when {
                     device -> "/This device/${document.path.substringAfterLast('/')}"
                     treeRoot != null -> "/" + controller.displayPath(document.path)
-                    else -> document.path
+                    else -> remoteDisplay
                 },
                 when {
                     device -> { _ -> }
                     treeRoot != null -> { crumb -> controller.navigateToDirectory(treeRoot + crumb.removePrefix("/$treeName")) }
-                    else -> controller::navigateToDirectory
+                    else -> { crumb -> controller.navigateToDirectory(remoteNavigate(crumb)) }
                 },
             ) {
                 if (controller.hasPreview(document.path)) MarkdownPreviewButtons(controller, preview)
@@ -565,27 +566,16 @@ private fun EmptyEditor(controller: WorkbenchController) = BoxWithConstraints(Mo
         Spacer(Modifier.height(20.dp))
         // Wraps at phone width rather than squeezing the buttons.
         androidx.compose.foundation.layout.FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+            horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            if (!controller.connected && controller.profiles.isNotEmpty()) {
-                androidx.compose.material3.FilledTonalButton(onClick = controller::openConnect) {
-                    Icon(Icons.Outlined.Cloud, contentDescription = null, modifier = Modifier.padding(end = 8.dp).size(18.dp))
-                    Text("Connections")
-                }
+            androidx.compose.material3.Button(onClick = { controller.showOpenFolder() }) {
+                Icon(Icons.Outlined.FolderOpen, contentDescription = null, modifier = Modifier.padding(end = 8.dp).size(18.dp))
+                Text("Open workspace…")
             }
             androidx.compose.material3.OutlinedButton(onClick = { controller.newUntitledFile() }) {
                 Icon(Icons.AutoMirrored.Outlined.NoteAdd, contentDescription = null, modifier = Modifier.padding(end = 8.dp).size(18.dp))
                 Text("New untitled file")
-            }
-            androidx.compose.material3.OutlinedButton(onClick = { controller.pickLocalFile?.invoke() }) {
-                Icon(Icons.Outlined.PhoneAndroid, contentDescription = null, modifier = Modifier.padding(end = 8.dp).size(18.dp))
-                Text("Open from device…")
-            }
-            // A folder on this device as the workspace, no guest needed (G29).
-            androidx.compose.material3.OutlinedButton(onClick = controller::beginOpenDeviceFolder) {
-                Icon(Icons.Outlined.FolderOpen, contentDescription = null, modifier = Modifier.padding(end = 8.dp).size(18.dp))
-                Text("Open device folder…")
             }
         }
         // VS Code's Start page: the last folders, a tap away (without a guest, from this device's copies).

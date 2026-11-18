@@ -11,10 +11,12 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -68,6 +70,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.kinteshi.quirecode.transport.ConnectionProfile
 import io.github.kinteshi.quirecode.transport.ProfileRoute
@@ -92,54 +95,49 @@ private val ConnectionState.away: Boolean
     )
 
 /**
- * The top bar's connection chip (G22): the whole status in a few words (the connection's name, Connecting…, Offline,
- * Pair again, Set up), calm colours rather than an alarm; a tap opens the Connections dialog.
+ * The bottom-left remote status indicator (G22), modeled after VS Code's Remote indicator in
+ * the status bar: calm Material You colours and concise state; a tap opens the Connections dialog.
  */
 @Composable
-internal fun ConnectionChip(controller: WorkbenchController) {
+internal fun ConnectionChip(controller: WorkbenchController, compact: Boolean = false) {
     val colors = MaterialTheme.colorScheme
     val summary = controller.connection
     val animate = controller.settings.animations
     val colorMs = if (animate) 160 else 0
-    val (targetContainer, targetLabel, targetIcon) = when (summary.state) {
-        ConnectionState.Connected, ConnectionState.Connecting -> Triple(
-            Color.Transparent,
-            colors.onSurface,
-            colors.primary,
-        )
-        ConnectionState.OnDevice, ConnectionState.NotSetUp, ConnectionState.Idle -> Triple(
-            colors.primaryContainer,
-            colors.onPrimaryContainer,
-            colors.onPrimaryContainer,
-        )
-        else -> Triple(
-            colors.secondaryContainer,
-            colors.onSecondaryContainer,
-            colors.onSecondaryContainer,
-        )
+    val (targetContainer, targetContent) = when (summary.state) {
+        ConnectionState.Connected, ConnectionState.OnDevice -> colors.primaryContainer to colors.onPrimaryContainer
+        ConnectionState.Connecting, ConnectionState.Idle -> colors.surfaceContainerHighest to colors.onSurface
+        ConnectionState.NotSetUp -> colors.primary to colors.onPrimary
+        else -> colors.secondaryContainer to colors.onSecondaryContainer
     }
     val containerColor by animateColorAsState(targetContainer, tween(colorMs), label = "chipContainer")
-    val labelColor by animateColorAsState(targetLabel, tween(colorMs), label = "chipLabel")
-    val iconColor by animateColorAsState(targetIcon, tween(colorMs), label = "chipIcon")
-    val chipColors = AssistChipDefaults.assistChipColors(
-        containerColor = containerColor,
-        labelColor = labelColor,
-        leadingIconContentColor = iconColor,
-    )
+    val contentColor by animateColorAsState(targetContent, tween(colorMs), label = "chipContent")
     Tooltip(summary.title) {
-        AssistChip(
+        Surface(
             onClick = controller::openConnect,
-            label = { Text(summary.chip, maxLines = 1) },
-            leadingIcon = {
+            color = containerColor,
+            contentColor = contentColor,
+            shape = RoundedCornerShape(6.dp),
+            modifier = Modifier.height(22.dp).widthIn(max = if (compact) 116.dp else 190.dp).animateContentSize(tween(if (animate) 150 else 0)),
+        ) {
+            Row(
+                Modifier.padding(horizontal = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+            ) {
                 if (summary.state == ConnectionState.Connecting) {
-                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                    CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 1.6.dp, color = contentColor)
                 } else {
-                    Icon(summary.state.icon(), contentDescription = null, modifier = Modifier.size(18.dp))
+                    Icon(summary.state.icon(), contentDescription = summary.title, modifier = Modifier.size(13.dp))
                 }
-            },
-            colors = chipColors,
-            modifier = Modifier.widthIn(max = 220.dp).animateContentSize(tween(if (animate) 150 else 0)),
-        )
+                Text(
+                    summary.chip,
+                    style = MaterialTheme.typography.labelMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
     }
 }
 

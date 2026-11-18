@@ -55,6 +55,7 @@ import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Keyboard
+import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.NoteAdd
@@ -87,6 +88,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.painterResource
+import io.github.kinteshi.quirecode.R
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -344,22 +347,44 @@ private fun TopBar(controller: WorkbenchController, expanded: Boolean) {
                 Icon(Icons.Outlined.Menu, contentDescription = "Toggle side bar")
             } }
         }
-        // The workspace name opens Open Workspace (switch hosts, recents, device folders, or folders on this host).
-        Column(
-            Modifier.widthIn(max = 220.dp).clip(RoundedCornerShape(8.dp))
-                .clickable { controller.showOpenFolder() }
-                .padding(horizontal = 6.dp),
+        // App mark (with DEV badge in dev builds only), beside an explicit Workspace switcher button.
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            modifier = Modifier.padding(start = if (expanded) 0.dp else 4.dp),
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("QuireCode", style = MaterialTheme.typography.titleMedium, maxLines = 1)
-                DevBadge()
-            }
-            Text(
-                controller.workspaceRoot?.let(controller::displayName) ?: "Choose workspace…",
-                style = MaterialTheme.typography.labelSmall,
-                color = colors.onSurfaceVariant,
-                maxLines = 1,
+            Icon(
+                painterResource(R.drawable.ic_launcher_monochrome),
+                contentDescription = DevBuild.appName,
+                tint = colors.primary,
+                modifier = Modifier.size(30.dp),
             )
+            DevBadge()
+        }
+        val workspaceName = controller.workspaceRoot?.let(controller::displayName)
+        Tooltip(controller.workspaceRoot?.let(controller::displayPath) ?: "Open workspace", "workbench.action.files.openFolder") {
+            Surface(
+                onClick = { controller.showOpenFolder() },
+                color = if (workspaceName != null) colors.surfaceContainerHigh else colors.primaryContainer,
+                contentColor = if (workspaceName != null) colors.onSurface else colors.onPrimaryContainer,
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.height(36.dp).widthIn(max = 220.dp),
+            ) {
+                Row(
+                    Modifier.padding(start = 10.dp, end = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Icon(Icons.Outlined.FolderOpen, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Text(
+                        workspaceName ?: "Open workspace…",
+                        style = MaterialTheme.typography.labelLarge,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Icon(Icons.Outlined.KeyboardArrowDown, contentDescription = null, modifier = Modifier.size(16.dp))
+                }
+            }
         }
         Surface(
             onClick = { controller.runCommand("workbench.action.quickOpen") },
@@ -378,7 +403,6 @@ private fun TopBar(controller: WorkbenchController, expanded: Boolean) {
                 )
             }
         }
-        ConnectionChip(controller)
         Box {
             Tooltip("More") { IconButton(onClick = { menu = true }) { Icon(Icons.Outlined.MoreVert, contentDescription = "More") } }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
@@ -548,19 +572,12 @@ private fun StatusBar(controller: WorkbenchController, expanded: Boolean) {
             // Android swallows most taps in the bottom gesture zone (44 px on the tablet), which
             // covered the whole bar; sit above it.
             .windowInsetsPadding(WindowInsets.mandatorySystemGestures.exclude(WindowInsets.safeDrawing).only(WindowInsetsSides.Bottom))
-            .height(28.dp)
-            .padding(horizontal = 10.dp),
+            .height(30.dp)
+            .padding(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        val dotColor by animateColorAsState(
-            if (controller.connected) colors.primary else colors.outline,
-            tween(if (controller.settings.animations) 180 else 0),
-            label = "statusDot",
-        )
-        Box(
-            Modifier.size(8.dp).background(dotColor, CircleShape),
-        )
+        ConnectionChip(controller, compact = !expanded)
         // VS Code's left end: the branch and the problem counts, each a tap from its view.
         if (expanded) {
             controller.gitStatus?.branch?.takeIf { controller.connected }?.let { branch ->

@@ -198,8 +198,8 @@ private fun ExplorerTree(controller: WorkbenchController, directory: String) {
                         PaneRow(
                             // The arrow only where it goes somewhere.
                             if (atRoot) Icons.Outlined.FolderOpen else Icons.AutoMirrored.Outlined.ArrowBack,
-                            if (atRoot) controller.displayPath(directory) else "..",
-                            muted = true,
+                            if (atRoot) controller.displayName(directory) else "..",
+                            muted = !atRoot,
                             selected = drag.target != null && drag.target == parent && !atRoot,
                             trailing = if (tree && rows.any { it.expanded }) {
                                 {

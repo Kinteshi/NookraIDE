@@ -360,4 +360,20 @@ class ConnectionsTest {
         )
         assertEquals(listOf(device, pcProjects), visible)
     }
+
+    @Test
+    fun relativeHostAndWorkspaceBreadcrumbPathsAnchorToRoots() {
+        assertEquals("Projects", relativeHostDisplayPath("/tmp/host/Projects", listOf("/tmp/host/Projects")))
+        assertEquals("Projects/proj-a/src", relativeHostDisplayPath("/tmp/host/Projects/proj-a/src", listOf("/tmp/host/Projects")))
+        assertEquals("/other/dir", relativeHostDisplayPath("/other/dir", listOf("/tmp/host/Projects")))
+
+        val (display, nav) = workspaceBreadcrumbPath("/home/droid/Projects/proj-b/src/main.rs", "/home/droid/Projects/proj-b")
+        assertEquals("/proj-b/src/main.rs", display)
+        assertEquals("/home/droid/Projects/proj-b", nav("/proj-b"))
+        assertEquals("/home/droid/Projects/proj-b/src", nav("/proj-b/src"))
+
+        val (outsideDisplay, outsideNav) = workspaceBreadcrumbPath("/etc/hosts", "/home/droid/Projects/proj-b")
+        assertEquals("/etc/hosts", outsideDisplay)
+        assertEquals("/etc", outsideNav("/etc"))
+    }
 }

@@ -3285,6 +3285,22 @@ Completed on 2026-11-17 (requested workspace flow pass). Unified host and folder
   * Ran a temporary TLS `quirecode-daemon` over `adb reverse` (`proj-a`, `proj-b`), verified offline **Open workspace** (`This device` / `All recent` / `Connections`), verified pairing opens `Open workspace` on the new host automatically, switched `proj-a` → `proj-b` via **Browse folders…** with `(127.0.0.1, proj-a)` kept in Recents, and confirmed deleting the host removes both entries from `All recent` with zero crashes in `logcat`.
 * **Tests:** Added `visibleRecentWorkspacesDropsDeletedHostsAndComparesHostFolderPair` in `ConnectionsTest.kt`; verified app unit tests (435 total: 434 passed, 1 skipped), Rust tests (147 passed), clippy, debug assemble, ARM64 `zigbuild`, notices check, and `git diff --check`.
 
+## 79. Workbench chrome & path decluttering polish
+
+Completed on 2026-11-17 (requested UI/UX follow-up to Batch 78). Simplified the top bar, home screen, workspace dialog, Explorer header, editor breadcrumbs, and bottom-left Remote status placement.
+
+* **Top bar & bottom-left Remote indicator (`NativeWorkbench.kt`, `ConnectionsUi.kt`):**
+  * Replaced the `"QuireCode"` text header with the monochrome launcher icon (`ic_launcher_monochrome` + `DEV` badge in dev builds) beside an explicit tonal **Workspace switcher pill** (`FolderOpen` + workspace name or `"Open workspace…"` + dropdown chevron).
+  * Moved `ConnectionChip` from `TopBar` to the bottom-left corner of `StatusBar`, replacing the anonymous `statusDot` circle with a compact VS Code Remote-style status badge (`height = 22.dp`, tonal container states) above Android's bottom gesture inset.
+* **Home screen & `This device` picker (`EditorPane.kt`, `WorkspaceDialogs.kt`):**
+  * Dropped `Open device folder…`, `Open from device…`, and duplicate `Connections` from `EmptyEditor` in favor of a single primary **Open workspace…** `Button` beside `New untitled file`; moved **Pick file…** (`pickLocalFile`) into `WorkspacePickerSource.ThisDevice` beside **Pick folder…**.
+* **Clean workspace & host paths (`Connections.kt`, `WorkspaceDialogs.kt`, `ExplorerPane.kt`, `EditorPane.kt`):**
+  * Hid single-root `AssistChip` noise in `WorkspacePickerSource.RemoteHost` (`controller.roots.size > 1`) and added `relativeHostDisplayPath` so the dialog path bar anchors to the configured host root instead of full filesystem paths.
+  * Updated `ExplorerTree` (`atRoot`) to show the short workspace name (`controller.displayName(directory)`), and added `workspaceBreadcrumbPath` so editor breadcrumbs start at the opened workspace folder rather than host root segments.
+* **Checked on the tablet (`SM-X930`, `192.0.2.66:40433`):**
+  * Verified logo + tonal workspace pill + bottom-left `+ Set up` pill and simplified Welcome CTAs, verified `Pick folder…` / `Pick file…` inside `This device`, paired a temporary TLS host (`/tmp/b79-host/Projects/proj-a/src/main.rs`) and confirmed single-root chip suppression + `Projects` path bar, confirmed `proj-a` in Explorer and `proj-a > src > main.rs` breadcrumbs, and verified tapping the bottom-left `127.0.0.1` badge opens `Connections` with zero crashes.
+* **Tests:** Added `relativeHostAndWorkspaceBreadcrumbPathsAnchorToRoots` in `ConnectionsTest.kt`; verified app unit tests (436 total: 435 passed, 1 skipped), Rust tests (147 passed), clippy, debug assemble, ARM64 `zigbuild`, notices check, and `git diff --check`.
+
 ## Backlog
 ### Open backlog (11-08)
 The current lists of what's open, in two: the general backlog, and the Aardink switch's until it's complete. The older

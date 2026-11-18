@@ -240,6 +240,39 @@ internal fun visibleRecentWorkspaces(
 }
 
 /**
+ * Formats a host folder path relative to the longest configured root in [roots]
+ * (e.g. `/tmp/host/Projects/app` → `Projects/app`), falling back to [path] if outside all roots.
+ */
+internal fun relativeHostDisplayPath(path: String, roots: List<String>): String {
+    val cleanPath = path.trimEnd('/').ifEmpty { return path }
+    val match = roots
+        .map { it.trimEnd('/') }
+        .filter { it.isNotEmpty() && (cleanPath == it || cleanPath.startsWith("$it/")) }
+        .maxByOrNull { it.length }
+        ?: return path
+    val rootName = match.substringAfterLast('/').ifEmpty { match }
+    val rel = cleanPath.removePrefix(match).trimStart('/')
+    return if (rel.isEmpty()) rootName else "$rootName/$rel"
+}
+
+/**
+ * Anchors editor breadcrumbs to [workspaceRoot] when a remote file lies inside it
+ * (e.g. `/home/droid/Projects/app/src/main.rs` → `"/app/src/main.rs"` and crumb
+ * navigation back into `/home/droid/Projects/app/...`), falling back to [path] otherwise.
+ */
+internal fun workspaceBreadcrumbPath(path: String, workspaceRoot: String?): Pair<String, (String) -> String> {
+    val root = workspaceRoot?.trimEnd('/')?.takeIf { it.isNotEmpty() } ?: return path to { it }
+    if (path != root && !path.startsWith("$root/")) return path to { it }
+    val rootName = root.substringAfterLast('/').ifEmpty { root }
+    val rel = path.removePrefix(root).trimStart('/')
+    val display = if (rel.isEmpty()) "/$rootName" else "/$rootName/$rel"
+    return display to { crumb ->
+        val sub = crumb.removePrefix("/$rootName").trimStart('/')
+        if (sub.isEmpty()) root else "$root/$sub"
+    }
+}
+
+/**
  * Orders [routes] for [preferred] and the current network state (G37):
  * if [preferred] is specific, matching routes go first; under Auto, local Wi-Fi/LAN goes first at home
  * (`onLocalNetwork`), and Tailscale (or tunnel if no VPN) goes first away from home.

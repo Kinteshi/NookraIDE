@@ -23,6 +23,7 @@ import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.Computer
 import androidx.compose.material.icons.outlined.CreateNewFolder
+import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.History
@@ -39,6 +40,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -144,22 +146,27 @@ internal fun OpenFolderDialog(controller: WorkbenchController, dialog: Workbench
 
                     WorkbenchDialog.WorkspacePickerSource.ThisDevice -> {
                         Surface(color = colors.surfaceContainerLow, shape = MaterialTheme.shapes.medium, modifier = Modifier.fillMaxWidth()) {
-                            Row(
-                                Modifier.padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            ) {
-                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                     Text("Device storage", style = MaterialTheme.typography.titleSmall)
                                     Text(
-                                        "Pick any folder on this tablet without needing a Linux machine.",
+                                        "Pick a folder or standalone file on this tablet without needing a Linux machine.",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = colors.onSurfaceVariant,
                                     )
                                 }
-                                FilledTonalButton(onClick = controller::beginOpenDeviceFolder) {
-                                    Icon(Icons.Outlined.FolderOpen, contentDescription = null, modifier = Modifier.padding(end = 6.dp).size(18.dp))
-                                    Text("Pick folder…")
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    FilledTonalButton(onClick = controller::beginOpenDeviceFolder) {
+                                        Icon(Icons.Outlined.FolderOpen, contentDescription = null, modifier = Modifier.padding(end = 6.dp).size(18.dp))
+                                        Text("Pick folder…")
+                                    }
+                                    OutlinedButton(onClick = {
+                                        controller.dialog = null
+                                        controller.pickLocalFile?.invoke()
+                                    }) {
+                                        Icon(Icons.Outlined.Description, contentDescription = null, modifier = Modifier.padding(end = 6.dp).size(18.dp))
+                                        Text("Pick file…")
+                                    }
                                 }
                             }
                         }
@@ -242,13 +249,15 @@ internal fun OpenFolderDialog(controller: WorkbenchController, dialog: Workbench
                                 hostRecents.take(3).forEach { item -> RecentWorkspaceRow(controller, item) }
                                 HorizontalDivider(Modifier.padding(vertical = 4.dp))
                             }
-                            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                controller.roots.forEach { root ->
-                                    AssistChip(
-                                        onClick = { controller.showOpenFolder(root, source) },
-                                        label = { Text(root.trimEnd('/').substringAfterLast('/').ifEmpty { root }) },
-                                        leadingIcon = { Icon(Icons.Outlined.Folder, contentDescription = null, modifier = Modifier.size(18.dp)) },
-                                    )
+                            if (controller.roots.size > 1) {
+                                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    controller.roots.forEach { root ->
+                                        AssistChip(
+                                            onClick = { controller.showOpenFolder(root, source) },
+                                            label = { Text(root.trimEnd('/').substringAfterLast('/').ifEmpty { root }) },
+                                            leadingIcon = { Icon(Icons.Outlined.Folder, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                                        )
+                                    }
                                 }
                             }
                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -258,7 +267,7 @@ internal fun OpenFolderDialog(controller: WorkbenchController, dialog: Workbench
                                     }
                                 }
                                 Text(
-                                    dialog.path,
+                                    relativeHostDisplayPath(dialog.path, controller.roots),
                                     style = MaterialTheme.typography.bodyMedium,
                                     maxLines = 1,
                                     overflow = TextOverflow.StartEllipsis,
