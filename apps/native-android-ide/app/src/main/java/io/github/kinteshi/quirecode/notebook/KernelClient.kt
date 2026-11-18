@@ -2,6 +2,7 @@ package io.github.kinteshi.quirecode.notebook
 
 import io.github.kinteshi.quirecode.language.JsonRpcConnection
 import io.github.kinteshi.quirecode.transport.GuestVfsClient
+import com.google.gson.JsonArray
 import com.google.gson.JsonNull
 import com.google.gson.JsonObject
 import java.util.concurrent.CompletableFuture
@@ -143,10 +144,11 @@ class KernelClient(transport: GuestVfsClient) {
         }, timeoutSeconds = null).thenApply(::parseVariableTable)
 
     /** A widget change for the kernel: `{"method": "update", "state": …}` or `{"method": "custom", "content": …}`. */
-    fun commMessage(commId: String, data: JsonObject): CompletableFuture<Unit> =
+    fun commMessage(commId: String, data: JsonObject, buffers: List<String> = emptyList()): CompletableFuture<Unit> =
         connection.request("comm_msg", JsonObject().apply {
             addProperty("comm_id", commId)
             add("data", data)
+            if (buffers.isNotEmpty()) add("buffers", JsonArray().apply { buffers.forEach(::add) })
         }, timeoutSeconds = null).thenApply { }
 
     fun interrupt(): CompletableFuture<Unit> = connection.request("interrupt", JsonNull.INSTANCE).thenApply { }

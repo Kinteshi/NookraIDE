@@ -827,7 +827,7 @@ class WorkbenchController(private val context: Context) {
                         session.kernelState = "Disconnected"
                         session.kernelName = null
                         session.busy = false
-                        session.widgets.models.clear()
+                        session.widgets.clearLive()
                         val now = System.currentTimeMillis()
                         session.notebook.cells.forEach { cell ->
                             if (cell.running) cell.lastRun = CellRun(failed = true, millis = cell.runStartedAt?.let { now - it }, finishedAt = now)
@@ -9961,6 +9961,8 @@ class WorkbenchController(private val context: Context) {
         notebooks[document.path] = notebookSession(document, notebook).also { session ->
             // Before its kernel runs, the cells resolve imports with the Python it ran last time.
             session.kernelPython = notebook.kernelName?.let { kernelPythons()[it] }?.takeIf { it.isJsonPrimitive }?.asString
+            // Restore any saved metadata.widgets snapshot so widgets render immediately offline or before a run.
+            session.widgets.loadSavedState(notebook.metadata)
         }
         return true
     }
@@ -9999,7 +10001,7 @@ class WorkbenchController(private val context: Context) {
             post {
                 session.kernelState = message
                 session.kernelName = null
-                session.widgets.models.clear()
+                session.widgets.clearLive()
                 val now = System.currentTimeMillis()
                 notebook.cells.forEach { cell ->
                     if (cell.running) cell.lastRun = CellRun(failed = true, millis = cell.runStartedAt?.let { now - it }, finishedAt = now)
@@ -10013,22 +10015,39 @@ class WorkbenchController(private val context: Context) {
         return session
     }
 
-    /** A widget the user changed (a slider moved, text typed): shown at once and sent to the kernel. */
+    /** A widget the user changed (a slider moved, text typed): shown at once, linked, and sent to the kernel. */
     fun changeWidget(session: NotebookSession, model: io.github.kinteshi.quirecode.notebook.WidgetModel, change: JsonObject) {
-        sendToWidget(session, model, session.widgets.change(model, change))
+        val messages = session.widgets.changeAndPropagate(model, change)
+        messages.forEach { (commId, payload) -> sendToWidget(session, commId, payload) }
     }
 
     /** A widget event: "click" for a button, "submit" for Enter in a text box. */
     fun widgetEvent(session: NotebookSession, model: io.github.kinteshi.quirecode.notebook.WidgetModel, event: String) {
-        sendToWidget(session, model, NotebookWidgets.event(event))
+        sendToWidget(session, model.id, NotebookWidgets.event(event))
     }
 
-    private fun sendToWidget(session: NotebookSession, model: io.github.kinteshi.quirecode.notebook.WidgetModel, data: JsonObject) {
+    /** Raw comm message (JSON + base64 binary buffers) sent from an embedded WebView widget. */
+    fun sendRawWidgetComm(session: NotebookSession, commId: String, dataJson: String, buffersJson: String) {
+        val data = runCatching { JsonParser.parseString(dataJson).asJsonObject }.getOrNull() ?: return
+        val buffers = runCatching {
+            JsonParser.parseString(buffersJson).asJsonArray.mapNotNull { elem ->
+                elem.takeIf { it.isJsonPrimitive }?.asString
+            }
+        }.getOrDefault(emptyList())
+        sendToWidget(session, commId, data, buffers)
+    }
+
+    private fun sendToWidget(
+        session: NotebookSession,
+        commId: String,
+        data: JsonObject,
+        buffers: List<String> = emptyList(),
+    ) {
         if (!session.kernel.isStarted) {
             status = "The widget's kernel isn't running; run the cell again"
             return
         }
-        session.kernel.commMessage(model.id, data).whenComplete { _, error ->
+        session.kernel.commMessage(commId, data, buffers).whenComplete { _, error ->
             if (error != null) post { status = "Widget: ${error.cause?.message ?: error.message}" }
         }
     }
@@ -10809,6 +10828,7 @@ class WorkbenchController(private val context: Context) {
                 {
                     post {
                         if (notebooks[path] !== session || !session.notebook.dirty) return@post
+                        session.widgets.writeSavedState(session.notebook)
                         session.document.updateText(session.notebook.toJson())
                         io.execute { repository.persistDraft(session.document) }
                     }
@@ -11287,6 +11307,7 @@ class WorkbenchController(private val context: Context) {
             restoreDeletedFile(session.document) { saveNotebook(session) }
             return
         }
+        session.widgets.writeSavedState(session.notebook)
         session.document.updateText(session.notebook.toJson())
         status = "Saving ${session.document.path}"
         repository.save(session.document).whenComplete { result, error ->

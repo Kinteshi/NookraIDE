@@ -358,10 +358,22 @@ internal fun CellOutput(
                 val modelId = data.get(WIDGET_VIEW_MIME)?.takeIf { it.isJsonObject }?.asJsonObject?.get("model_id")?.asString
                 val model = modelId?.let { session.widgets.models[it] }
                 if (model != null && settings.liveWidgets) {
-                    WidgetView(controller, session, model, modifier)
+                    if (model.savedOnly && !session.kernel.isStarted) {
+                        Column(modifier) {
+                            WidgetView(controller, session, model, Modifier.fillMaxWidth())
+                            Text(
+                                "Saved widget state · run the cell to connect a kernel",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = colors.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 4.dp),
+                            )
+                        }
+                    } else {
+                        WidgetView(controller, session, model, modifier)
+                    }
                     return
                 }
-                // Not live: the kernel that made it is gone (a reopened notebook), or Settings say text.
+                // Not live and not in saved metadata: offer plain repr fallback + clear instruction.
                 Column(modifier) {
                     if (data.has("text/plain")) OutputText(mime("text/plain").stripAnsi(), colors.onSurface, Modifier)
                     Text(

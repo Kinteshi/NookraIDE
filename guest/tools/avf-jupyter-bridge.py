@@ -417,10 +417,13 @@ class Bridge:
             self.capturing[state["msg_id"]] = comm_id
 
     def comm_msg(self, params):
-        """A widget change from the client (a slider moved, a button clicked)."""
+        """A widget change from the client (a slider moved, a button clicked, or binary buffers)."""
         if self.client is None:
             raise RuntimeError("Start a kernel first")
         message = self.client.session.msg("comm_msg", {"comm_id": params["comm_id"], "data": params.get("data", {})})
+        raw_buffers = params.get("buffers") or []
+        if raw_buffers:
+            message["buffers"] = [base64.b64decode(item) for item in raw_buffers]
         self.client.shell_channel.send(message)
         return {"msg_id": message["header"]["msg_id"]}
 

@@ -1,25 +1,41 @@
 package io.github.kinteshi.quirecode.workbench
 
+import android.graphics.BitmapFactory
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -27,6 +43,8 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RangeSlider
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -36,7 +54,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -45,8 +71,18 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ArrowDropDown
-import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.CalendarToday
 import androidx.compose.material.icons.outlined.Cancel
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Pause
+import androidx.compose.material.icons.outlined.PlayArrow
+import androidx.compose.material.icons.outlined.Repeat
+import androidx.compose.material.icons.outlined.Stop
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneOffset
+import kotlin.math.roundToInt
 import io.github.kinteshi.quirecode.notebook.CellType
 import io.github.kinteshi.quirecode.notebook.NotebookCell
 import io.github.kinteshi.quirecode.notebook.WidgetModel
@@ -125,13 +161,15 @@ internal fun WidgetView(controller: WorkbenchController, session: NotebookSessio
                 tint = if (valid) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
             )
         }
+        "PlayModel" -> PlayWidget(model, modifier, ::change)
+        "ColorPickerModel" -> Described(state, modifier) { ColorPickerWidget(model) { change("value", it) } }
+        "DatePickerModel" -> Described(state, modifier) { DatePickerWidget(model) { change("value", it) } }
+        "ImageModel" -> ImageWidget(model, modifier)
+        "AudioModel" -> AudioVideoWidget(model, isVideo = false, modifier)
+        "VideoModel" -> AudioVideoWidget(model, isVideo = true, modifier)
+        "LinkModel", "DirectionalLinkModel" -> Unit
         "OutputModel" -> OutputWidget(controller, session, model, modifier)
-        else -> Text(
-            "[${model.name.removeSuffix("Model").ifEmpty { "Unknown" }} widget: not drawn here yet]",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = modifier,
-        )
+        else -> ThirdPartyWidgetView(controller, session, model, modifier)
     }
 }
 
@@ -441,6 +479,336 @@ private fun ProgressWidget(state: JsonObject) {
     )
 }
 
+/** `ipywidgets.Play`: timer-driven integer playback control (`jslink`-aware via [NotebookWidgets.changeAndPropagate]). */
+@Composable
+private fun PlayWidget(model: WidgetModel, modifier: Modifier, change: (String, Any?) -> Unit) {
+    val state = model.state
+    val minVal = (state.number("min")?.roundToLong() ?: 0L).toInt()
+    val maxVal = (state.number("max")?.roundToLong() ?: 100L).toInt().coerceAtLeast(minVal)
+    val stepVal = (state.number("step")?.roundToLong() ?: 1L).toInt().coerceAtLeast(1)
+    val intervalMs = (state.number("interval")?.roundToLong() ?: 100L).toInt().coerceAtLeast(16)
+    val value = (state.number("value")?.roundToLong() ?: minVal.toLong()).toInt().coerceIn(minVal, maxVal)
+    val playing = state.flag("playing")
+    val repeat = state.flag("repeat")
+    val showRepeat = state.get("show_repeat")?.takeIf { it.isJsonPrimitive }?.asBoolean ?: true
+    val disabled = state.flag("disabled")
+
+    LaunchedEffect(model.id, playing, repeat, intervalMs, minVal, maxVal, stepVal, disabled) {
+        if (!playing || disabled) return@LaunchedEffect
+        var current = value
+        while (true) {
+            delay(intervalMs.toLong())
+            val next = current + stepVal
+            if (next <= maxVal) {
+                current = next
+                change("value", next)
+            } else if (repeat) {
+                current = minVal
+                change("value", minVal)
+            } else {
+                change("playing", false)
+                break
+            }
+        }
+    }
+
+    Described(state, modifier) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+            IconButton(
+                onClick = { change("playing", !playing) },
+                enabled = !disabled,
+            ) {
+                Icon(
+                    if (playing) Icons.Outlined.Pause else Icons.Outlined.PlayArrow,
+                    contentDescription = if (playing) "Pause" else "Play",
+                )
+            }
+            IconButton(
+                onClick = {
+                    if (playing) change("playing", false)
+                    if (value != minVal) change("value", minVal)
+                },
+                enabled = !disabled,
+            ) {
+                Icon(Icons.Outlined.Stop, contentDescription = "Stop")
+            }
+            if (showRepeat) {
+                FilterChip(
+                    selected = repeat,
+                    onClick = { change("repeat", !repeat) },
+                    enabled = !disabled,
+                    leadingIcon = { Icon(Icons.Outlined.Repeat, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                    label = { Text("Loop", style = MaterialTheme.typography.labelMedium) },
+                )
+            }
+            Text(
+                "$value / $maxVal",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 6.dp),
+            )
+        }
+    }
+}
+
+private val COLOR_PICKER_PRESETS = listOf(
+    Color(0xFF000000), Color(0xFF424242), Color(0xFF9E9E9E), Color(0xFFFFFFFF),
+    Color(0xFFE53935), Color(0xFFFB8C00), Color(0xFFFDD835), Color(0xFF43A047),
+    Color(0xFF00897B), Color(0xFF1E88E5), Color(0xFF3949AB), Color(0xFF8E24AA),
+    Color(0xFFD81B60), Color(0xFF6D4C41), Color(0xFF00ACC1), Color(0xFF7CB342),
+)
+
+/** `ipywidgets.ColorPicker`: swatch button + concise mode + Material 3 palette & RGB dialog. */
+@Composable
+private fun ColorPickerWidget(model: WidgetModel, send: (String) -> Unit) {
+    val state = model.state
+    val rawValue = state.text("value").ifBlank { "#000000" }
+    val parsedColor = remember(rawValue) { parseCssColor(rawValue) ?: Color.Black }
+    val concise = state.flag("concise")
+    val disabled = state.flag("disabled")
+    var showDialog by remember { mutableStateOf(false) }
+
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Box(
+            Modifier
+                .size(28.dp)
+                .clip(RoundedCornerShape(6.dp))
+                .background(parsedColor)
+                .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(6.dp))
+                .clickable(enabled = !disabled) { showDialog = true }
+                .semantics {
+                    contentDescription = "Pick color, $rawValue"
+                    role = Role.Button
+                },
+        )
+        if (!concise) {
+            Text(
+                rawValue,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+
+    if (showDialog) {
+        var r by remember(rawValue) { mutableStateOf((parsedColor.red * 255f).roundToInt()) }
+        var g by remember(rawValue) { mutableStateOf((parsedColor.green * 255f).roundToInt()) }
+        var b by remember(rawValue) { mutableStateOf((parsedColor.blue * 255f).roundToInt()) }
+        var hexText by remember(rawValue) { mutableStateOf(formatCssHex(parsedColor)) }
+        fun setRgb(nr: Int, ng: Int, nb: Int) {
+            r = nr.coerceIn(0, 255)
+            g = ng.coerceIn(0, 255)
+            b = nb.coerceIn(0, 255)
+            hexText = formatCssHex(Color(red = r, green = g, blue = b))
+        }
+        AlertDialog(
+            onDismissRequest = { showDialog = false },
+            title = { Text(state.text("description").ifBlank { "Pick color" }) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Box(
+                            Modifier
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(red = r, green = g, blue = b))
+                                .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp)),
+                        )
+                        OutlinedTextField(
+                            value = hexText,
+                            onValueChange = { next ->
+                                hexText = next
+                                parseCssColor(next)?.let { c ->
+                                    r = (c.red * 255f).roundToInt()
+                                    g = (c.green * 255f).roundToInt()
+                                    b = (c.blue * 255f).roundToInt()
+                                }
+                            },
+                            singleLine = true,
+                            label = { Text("Hex") },
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        COLOR_PICKER_PRESETS.forEach { preset ->
+                            Box(
+                                Modifier
+                                    .size(26.dp)
+                                    .clip(CircleShape)
+                                    .background(preset)
+                                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape)
+                                    .clickable {
+                                        setRgb(
+                                            (preset.red * 255f).roundToInt(),
+                                            (preset.green * 255f).roundToInt(),
+                                            (preset.blue * 255f).roundToInt(),
+                                        )
+                                    },
+                            )
+                        }
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("R", Modifier.width(18.dp), style = MaterialTheme.typography.labelMedium)
+                        Slider(value = r.toFloat(), onValueChange = { setRgb(it.roundToInt(), g, b) }, valueRange = 0f..255f, modifier = Modifier.weight(1f))
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("G", Modifier.width(18.dp), style = MaterialTheme.typography.labelMedium)
+                        Slider(value = g.toFloat(), onValueChange = { setRgb(r, it.roundToInt(), b) }, valueRange = 0f..255f, modifier = Modifier.weight(1f))
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("B", Modifier.width(18.dp), style = MaterialTheme.typography.labelMedium)
+                        Slider(value = b.toFloat(), onValueChange = { setRgb(r, g, it.roundToInt()) }, valueRange = 0f..255f, modifier = Modifier.weight(1f))
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val chosen = parseCssColor(hexText)?.let(::formatCssHex) ?: formatCssHex(Color(red = r, green = g, blue = b))
+                    send(chosen)
+                    showDialog = false
+                }) { Text("Select") }
+            },
+            dismissButton = { TextButton(onClick = { showDialog = false }) { Text("Cancel") } },
+        )
+    }
+}
+
+/** `ipywidgets.DatePicker`: reads/writes 0-indexed-month JSON dates and opens Material 3 [DatePickerDialog]. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DatePickerWidget(model: WidgetModel, send: (Any?) -> Unit) {
+    val state = model.state
+    val currentDate = remember(state) { parseIpyWidgetDate(state.get("value")) }
+    val disabled = state.flag("disabled")
+    var open by remember { mutableStateOf(false) }
+
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        OutlinedButton(onClick = { open = true }, enabled = !disabled) {
+            Icon(Icons.Outlined.CalendarToday, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(currentDate?.toString() ?: "Pick date")
+        }
+        if (currentDate != null && !disabled) {
+            IconButton(onClick = { send(null) }) {
+                Icon(Icons.Outlined.Close, contentDescription = "Clear date", modifier = Modifier.size(18.dp))
+            }
+        }
+    }
+
+    if (open) {
+        val initialMillis = remember(currentDate) {
+            (currentDate ?: LocalDate.now()).atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
+        }
+        val pickerState = rememberDatePickerState(initialSelectedDateMillis = initialMillis)
+        DatePickerDialog(
+            onDismissRequest = { open = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    pickerState.selectedDateMillis?.let { millis ->
+                        val picked = Instant.ofEpochMilli(millis).atZone(ZoneOffset.UTC).toLocalDate()
+                        send(toIpyWidgetDateJson(picked))
+                    }
+                    open = false
+                }) { Text("OK") }
+            },
+            dismissButton = { TextButton(onClick = { open = false }) { Text("Cancel") } },
+        ) { DatePicker(state = pickerState) }
+    }
+}
+
+/** `ipywidgets.Image`: renders decoded binary PNG/JPEG/WebP/GIF or SVG buffer (`format="svg+xml"`). */
+@Composable
+private fun ImageWidget(model: WidgetModel, modifier: Modifier) {
+    val state = model.state
+    val format = state.text("format").ifBlank { "png" }
+    val bytes = remember(model.id, model.revision, model.buffers) { model.bufferBytes("value") }
+    val widthDp = remember(state) { parseCssPxOrDp(state.text("width")) }
+    val heightDp = remember(state) { parseCssPxOrDp(state.text("height")) }
+
+    val widthMod = if (widthDp != null) Modifier.widthIn(max = widthDp.dp) else Modifier.fillMaxWidth()
+    val heightMod = if (heightDp != null) Modifier.heightIn(max = heightDp.dp) else Modifier.heightIn(max = 520.dp)
+
+    if (bytes == null || bytes.isEmpty()) {
+        Text(
+            "[Image widget: empty image buffer]",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = modifier,
+        )
+        return
+    }
+    val textBody = remember(bytes, format) {
+        if (format.contains("svg", ignoreCase = true) || format.equals("url", ignoreCase = true)) {
+            bytes.toString(Charsets.UTF_8).trim()
+        } else null
+    }
+    if (textBody != null && (format.contains("svg", ignoreCase = true) || textBody.startsWith("<svg"))) {
+        SvgOutput(textBody, modifier.then(widthMod)) {
+            Text(
+                "[SVG widget could not be parsed]",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        return
+    }
+    if (textBody != null && format.equals("url", ignoreCase = true) &&
+        (textBody.startsWith("https://") || textBody.startsWith("http://"))
+    ) {
+        val safeUrl = textBody.replace("&", "&amp;").replace("\"", "&quot;").replace("<", "&lt;").replace(">", "&gt;")
+        HtmlOutput("""<img src="$safeUrl" style="max-width:100%;height:auto;border-radius:6px;" />""", LocalDarkTheme.current, modifier.then(widthMod))
+        return
+    }
+    val bitmap = remember(bytes) {
+        runCatching { BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap() }.getOrNull()
+    }
+    if (bitmap != null) {
+        val ratio = if (bitmap.height > 0) bitmap.width.toFloat() / bitmap.height else 1f
+        Image(
+            bitmap = bitmap,
+            contentDescription = state.text("description").ifBlank { "Image widget" },
+            contentScale = ContentScale.Fit,
+            modifier = modifier
+                .then(widthMod)
+                .then(heightMod)
+                .aspectRatio(ratio.coerceIn(0.2f, 5f))
+                .clip(RoundedCornerShape(6.dp)),
+        )
+    } else {
+        Text(
+            "[Image widget ($format): could not decode ${bytes.size} bytes]",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = modifier,
+        )
+    }
+}
+
+/** `ipywidgets.Audio` and `ipywidgets.Video`: delegates binary or URL playback to [MediaWidgetView]. */
+@Composable
+private fun AudioVideoWidget(model: WidgetModel, isVideo: Boolean, modifier: Modifier) {
+    val state = model.state
+    val format = state.text("format").ifBlank { if (isVideo) "mp4" else "mp3" }
+    val bytes = remember(model.id, model.revision, model.buffers) { model.bufferBytes("value") }
+    val autoplay = state.flag("autoplay")
+    val loop = state.flag("loop")
+    val controls = state.get("controls")?.takeIf { it.isJsonPrimitive }?.asBoolean ?: true
+    val widthDp = parseCssPxOrDp(state.text("width"))
+    val heightDp = parseCssPxOrDp(state.text("height"))
+    MediaWidgetView(
+        model = model,
+        isVideo = isVideo,
+        bytes = bytes,
+        format = format,
+        autoplay = autoplay,
+        loop = loop,
+        controls = controls,
+        widthDp = widthDp,
+        heightDp = heightDp,
+        modifier = modifier,
+    )
+}
+
 /** An Output widget's outputs, drawn as a cell's (interact() puts its function's results here). */
 @Composable
 private fun OutputWidget(controller: WorkbenchController, session: NotebookSession, model: WidgetModel, modifier: Modifier) {
@@ -466,6 +834,7 @@ private fun JsonObject.labels(): List<String> =
 
 private fun json(value: Any?): com.google.gson.JsonElement = when (value) {
     null -> com.google.gson.JsonNull.INSTANCE
+    is com.google.gson.JsonElement -> value
     is Boolean -> JsonPrimitive(value)
     is Number -> JsonPrimitive(value)
     is String -> JsonPrimitive(value)
