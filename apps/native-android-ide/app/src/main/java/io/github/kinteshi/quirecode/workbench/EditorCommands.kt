@@ -11,7 +11,7 @@ object EditorCommands {
         command("workbench.action.files.save", "Save", "Ctrl+S"),
         command("workbench.action.files.saveAs", "Save As", "Ctrl+Shift+S"),
         command("workbench.action.files.openFile", "Open File", "Ctrl+O"),
-        command("workbench.action.files.openFolder", "File: Open Folder...", "Ctrl+K Ctrl+O"),
+        command("workbench.action.files.openFolder", "File: Open Workspace… (Host or Device Folder)", "Ctrl+K Ctrl+O"),
         command("workbench.action.quickOpen", "Quick Open", "Ctrl+P"),
         command("workbench.action.showCommands", "Show All Commands", "Ctrl+Shift+P"),
         command("workbench.action.closeActiveEditor", "Close Editor", "Ctrl+W"),

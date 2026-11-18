@@ -3268,6 +3268,23 @@ Completed on 2026-11-17 (requested polish pass). Refined saved-connection manage
   * Installed Batch 77 `QuireCode Dev` on a fresh cleared state (`pm clear` + `POST_NOTIFICATIONS`), verified the **Welcome to QuireCode** card, stepped through all 4 steps of `OnboardingTourDialog`, launched `Welcome.kt` via **Try a highlighted sample file**, verified **Saved connections** empty state and **Guided setup (recommended)**, verified live `Linux Terminal is ready on this tablet` in the wizard, saved a manual `Guest` profile, toggled Auto-connect off to confirm **`Manual`** + bounded menu items, opened **`Remove Guest?`** confirmation, verified **Settings → About → Welcome & quick tour**, confirmed zero crashes in `logcat`, and reset dev app state (`pm clear` + `POST_NOTIFICATIONS`).
 * **Tests:** Added unit tests for `connectionRowCopy` in `ConnectionsTest.kt`; verified app unit tests (434 total: 433 passed, 1 skipped), debug assemble, notices check, and `git diff --check`.
 
+## 78. Intentional host → folder workspace flow
+
+Completed on 2026-11-17 (requested workspace flow pass). Unified host and folder selection so every workspace explicitly belongs to a host (`All recent`, `This device`, `Linux guest`, or a paired computer), whether online or offline.
+
+* **Unified **Open workspace** picker (`WorkbenchModels.kt`, `WorkspaceDialogs.kt`, `WorkbenchController.kt`):**
+  * Added `WorkspacePickerSource` (`RecentAll`, `ThisDevice`, `RemoteHost(profileId)`) to `WorkbenchDialog.OpenFolder`, allowing `showOpenFolder(path, source)` to work even while disconnected.
+  * Added a scrollable host `FilterChip` bar (`All recent`, `This device`, saved hosts with live status, and `Connections`), inline per-folder `Open` buttons (`Icons.AutoMirrored.Outlined.OpenInNew`), **Pick folder…** inside `This device`, **Connect & browse** for offline saved hosts, and per-host recent workspace rows.
+* **Host-first switching & ask-on-connect (`WorkbenchController.kt`, `ConnectionsUi.kt`):**
+  * Switching connections manually (`requestConnectionSwitch` with `askFolder = true`) or pairing a new host clears stale remote workspace state (`askFolderOnConnect`) and opens the **Open workspace** picker scoped to the newly connected host once saved, whereas startup and background reconnect restore leave `askFolderOnConnect = false`.
+  * Added **Browse folders…** buttons to `StatusCard` (when `Connected`) and `ConnectionRow`'s overflow menu (`openHostWorkspacePicker`), making project switching inside a host take one tap.
+* **Unified entry points & deleted-host cleanup (`NativeWorkbench.kt`, `ExplorerPane.kt`, `EditorPane.kt`, `EditorCommands.kt`, `Connections.kt`):**
+  * Merged `Open folder…` and `Open device folder…` into `"Open workspace…"` (`Ctrl+K Ctrl+O`) in the overflow menu, updated the top-left header pill (`"Choose workspace…"`), Explorer empty states, Welcome `"Open Workspace"` shortcut, and command label `"File: Open Workspace… (Host or Device Folder)"`.
+  * Added `visibleRecentWorkspaces` (`Connections.kt`), filtering active checks by `(connectionId, path)` pair and excluding non-device recents whose host was deleted; updated `deleteProfile(id)` to remove all `recentWorkspaces` entries matching `connectionId == id`.
+* **Checked on the tablet (`SM-X930`, `192.0.2.66:40433`):**
+  * Ran a temporary TLS `quirecode-daemon` over `adb reverse` (`proj-a`, `proj-b`), verified offline **Open workspace** (`This device` / `All recent` / `Connections`), verified pairing opens `Open workspace` on the new host automatically, switched `proj-a` → `proj-b` via **Browse folders…** with `(127.0.0.1, proj-a)` kept in Recents, and confirmed deleting the host removes both entries from `All recent` with zero crashes in `logcat`.
+* **Tests:** Added `visibleRecentWorkspacesDropsDeletedHostsAndComparesHostFolderPair` in `ConnectionsTest.kt`; verified app unit tests (435 total: 434 passed, 1 skipped), Rust tests (147 passed), clippy, debug assemble, ARM64 `zigbuild`, notices check, and `git diff --check`.
+
 ## Backlog
 ### Open backlog (11-08)
 The current lists of what's open, in two: the general backlog, and the Aardink switch's until it's complete. The older

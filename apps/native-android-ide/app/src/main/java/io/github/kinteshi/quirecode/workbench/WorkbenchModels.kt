@@ -205,8 +205,20 @@ sealed interface WorkbenchDialog {
     /** Set Value of a variable in the paused frame. */
     data class SetVariable(val variable: io.github.kinteshi.quirecode.debug.DebugVariable) : WorkbenchDialog
     /** Confirms a guest command that runs in a new terminal; [done] is the status when it exits 0. */
-    /** Open Folder: the folder shown, its subfolders once listed, and a listing or create error. */
-    data class OpenFolder(val path: String, val folders: List<io.github.kinteshi.quirecode.transport.FileEntry>? = null, val error: String? = null) : WorkbenchDialog
+    /** Which host or collection [OpenFolder] is showing. */
+    sealed interface WorkspacePickerSource {
+        data object RecentAll : WorkspacePickerSource
+        data object ThisDevice : WorkspacePickerSource
+        data class RemoteHost(val profileId: String) : WorkspacePickerSource
+    }
+
+    /** Open Workspace: recent (host, folder) pairs, device folders, and host folder browsers. */
+    data class OpenFolder(
+        val path: String,
+        val folders: List<io.github.kinteshi.quirecode.transport.FileEntry>? = null,
+        val error: String? = null,
+        val source: WorkspacePickerSource = WorkspacePickerSource.RecentAll,
+    ) : WorkbenchDialog
     data class GuestCommand(
         val title: String,
         val text: String,

@@ -109,13 +109,26 @@ fun ExplorerList(controller: WorkbenchController) {
         controller.offline && !controller.offlineServed -> OfflineFilesList(controller)
         // The connection's own words (G22): set up, connecting, offline and why.
         !controller.workspaceAvailable && !controller.offlineServed && controller.roots.isEmpty() -> controller.connection.let { summary ->
-            EmptyState(Icons.Outlined.CloudOff, summary.title, "Explorer shows the files of the machine QuireCode is connected to.") {
-                androidx.compose.material3.FilledTonalButton(onClick = controller::openConnect) {
-                    Text(if (summary.state == ConnectionState.NotSetUp) "Set up" else "Connections")
+            EmptyState(Icons.Outlined.CloudOff, summary.title, "Open a device folder, a recent workspace, or connect to a host.") {
+                androidx.compose.foundation.layout.Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    androidx.compose.material3.FilledTonalButton(onClick = { controller.showOpenFolder() }) {
+                        Text("Open workspace…")
+                    }
+                    androidx.compose.material3.TextButton(onClick = controller::openConnect) {
+                        Text(if (summary.state == ConnectionState.NotSetUp) "Set up a host" else "Connections")
+                    }
                 }
             }
         }
         directory.isEmpty() -> LazyColumn {
+            item {
+                androidx.compose.material3.FilledTonalButton(
+                    onClick = { controller.showOpenFolder() },
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                ) {
+                    Text("Open workspace…")
+                }
+            }
             items(controller.roots) { root ->
                 PaneRow(Icons.Outlined.Folder, root.substringAfterLast('/').ifEmpty { root }) { controller.loadDirectory(root) }
             }

@@ -343,4 +343,21 @@ class ConnectionsTest {
         assertEquals("Wi-Fi, Tailscale · Auto-connect #1 · Connected (Tailscale) · Prefer Tailscale", connectedCopy.primary)
         assertNull(connectedCopy.lastUsed)
     }
+
+    @Test
+    fun visibleRecentWorkspacesDropsDeletedHostsAndComparesHostFolderPair() {
+        val device = RecentWorkspace("tree:/notes", connectionId = null)
+        val guestProjects = RecentWorkspace("/home/droid/Projects", connectionId = "guest")
+        val pcProjects = RecentWorkspace("/home/droid/Projects", connectionId = "pc")
+        val deletedPc = RecentWorkspace("/home/user/old", connectionId = "deleted-pc")
+        val orphanLegacy = RecentWorkspace("/home/user/legacy", connectionId = null)
+
+        val visible = visibleRecentWorkspaces(
+            recents = listOf(device, guestProjects, pcProjects, deletedPc, orphanLegacy),
+            activeWorkspaceRoot = "/home/droid/Projects",
+            activeConnectionId = "guest",
+            profileIds = setOf("guest", "pc"),
+        )
+        assertEquals(listOf(device, pcProjects), visible)
+    }
 }

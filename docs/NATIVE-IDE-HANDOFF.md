@@ -6,7 +6,7 @@ the engine seam, batches, testing on the device) is in [CONTRIBUTING.md](../CONT
 
 ## Current state (2026-11-17)
 
-* **Progress:** batches 1–77 are done (41 was exploration with no app change); **batch 76** (`G41` zero-download highlighting via Aardink `BuiltInLanguages:0.10.0` ahead of `tm4e` + full theme mapping + `A14` typing-crash fix) and **batch 77** (connection management polish — delete confirmation, `Manual` / route summary, empty card, live guest check — plus 4-step onboarding journey, revamped Welcome card, and `Welcome.kt` sample playground) are implemented, unit-tested, and checked on the tablet.
+* **Progress:** batches 1–78 are done (41 was exploration with no app change); **batch 76** (`G41` zero-download highlighting via Aardink `BuiltInLanguages:0.10.0` ahead of `tm4e` + full theme mapping + `A14` typing-crash fix), **batch 77** (connection management polish + 4-step onboarding journey), and **batch 78** (unified `Open workspace` host→folder picker, `This device` integration, `askFolderOnConnect` on host switch/pairing, **Browse folders…** actions, and deleted-host Recents cleanup) are implemented, unit-tested, and checked on the tablet.
 * **What's open:** [Open backlog](NATIVE-IDE-BATCHES.md#open-backlog-11-08), in two lists: the remaining general
   backlog and the Aardink switch's, which replaces this file's old "Remaining" list.
 * **Next batch:** pick next (candidates: `G1` + `G2`, `G9` + `G10`, or `G4` + `G7`).
@@ -14,7 +14,7 @@ the engine seam, batches, testing on the device) is in [CONTRIBUTING.md](../CONT
 * **Offline & remote features (batches 62–75):** file sharing/import/export (group 9, batch 62), Tailscale daemon hardening (batch 63), device folder workspaces without a guest (batch 64), paired device management UI (batch 65), guest folders kept offline with sync, offline Explorer, Quick Open, and offline search (batch 66), offline/device-only previews, images, hex view, snippets, and kernel-less notebook editing (batch 67, completing G29), and Troubleshoot port-vs-daemon probing + Tailscale split-tunneling guidance, Cloudflare Tunnel (`--tunnel`, public TLS), and router port forwarding (batch 68, completing G30 and G31); batch 69 fixed issues from review. Batch 70 implements and verifies G33/G34 (connection kinds and ordering, Recent origins and connection-scoped workspace/cache state). Batch 71 implements and verifies G39/G38 (workspace-first launch/offline recovery, explicit Reconnect, Work offline, workspace-switch confirmation, route-aware Troubleshoot, and TCP-probe-backed forwarding checks). Batch 74 implements and verifies G35/G36 (guided Add a connection wizard, live Tailscale status, copy/share host commands, daemon QR output, CameraX+ZXing scanner, and clipboard offer). Batch 75 implements and verifies G37/G32 (multi-route profiles, automatic route failover, `pair --all`, per-profile preferred route in Settings, and encrypted Cloudflare Access service token headers).
 * **The switch to Aardink:** [AARDINK-SWITCH-PLAN.md](AARDINK-SWITCH-PLAN.md). All phases are done (batches 42 to 57), now pinned to Aardink 0.10.0 (batch 72) with native `0.10.0` features adopted (batch 73), `A7` concluded (11-17), and `aardink-languages:0.10.0` prioritized ahead of `tm4e` (batch 76): **Aardink is the editor**; sora-editor was removed in batch 57, and `tm4e` serves as fallback for languages beyond Aardink's 20 built-ins. The workbench's own Material You cards are drawn over Aardink from its geometry (batch 54). Review each Aardink release against the plan (its "Release reviews"). Requests to Aardink are drafted or listed, not filed.
 * **Waiting on the user:** whether to continue the glibc test (backlog item 70 d).
-* **Tablet:** wireless ADB is paired and connected on `192.0.2.66:40433`; `QuireCode Dev` was updated with the batch 77 build, verified on device (onboarding tour, sample file, connection rows, delete confirmation, About link), and reset to clean app state (`pm clear`).
+* **Tablet:** wireless ADB is paired and connected on `192.0.2.66:40433`; `QuireCode Dev` was updated with the batch 78 build, verified on device (offline workspace picker, host pairing → folder prompt, Browse folders switch between `proj-a`/`proj-b`, Recents pair tracking, and deleted-host Recents removal), and reset to clean app state (`pm clear`).
 
 ## Where things are
 
@@ -37,7 +37,7 @@ cargo test -p avf-daemon -p avf-protocol
 PATH=$HOME/.cargo/bin:$PATH cargo zigbuild --release -p avf-daemon --target aarch64-unknown-linux-gnu.2.28
 ```
 
-At last run (batch 77): 434 app unit tests (433 passed, 1 opt-in live-host test skipped; on Java 21, installed beside 17) and 147 daemon/protocol tests pass; debug assemble, ARM64 `zigbuild`, and notices check pass (374 components). Clippy passes with the same five pre-existing lints; batch 77 was also checked on the tablet. CI runs app and Rust tests on every push.
+At last run (batch 78): 435 app unit tests (434 passed, 1 opt-in live-host test skipped; on Java 21, installed beside 17) and 147 daemon/protocol tests pass; debug assemble, ARM64 `zigbuild`, and notices check pass (374 components). Clippy passes with the same five pre-existing lints; batch 78 was also checked on the tablet. CI runs app and Rust tests on every push.
 
 ## Reference tablet (Galaxy Tab S11 Ultra, SM-X930)
 

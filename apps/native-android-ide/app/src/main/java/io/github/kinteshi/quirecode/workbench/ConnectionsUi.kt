@@ -31,6 +31,7 @@ import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.Explore
+import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.LinkOff
 import androidx.compose.material.icons.outlined.MoreVert
@@ -314,6 +315,7 @@ private fun StatusCard(controller: WorkbenchController, summary: ConnectionSumma
                         if (controller.daemonVersionNotice?.status == DaemonVersionStatus.Older) {
                             FilledTonalButton(onClick = controller::updateGuestDaemon) { Text("Update the daemon") }
                         }
+                        FilledTonalButton(onClick = { controller.showOpenFolder() }) { Text("Browse folders…") }
                         TextButton(onClick = controller::requestWorkOffline, enabled = !controller.busy) { Text("Work offline") }
                     }
                     ConnectionState.OnDevice -> if (facts.workingOffline && controller.profiles.any { it.id == controller.profileId }) {
@@ -403,6 +405,12 @@ private fun ConnectionRow(controller: WorkbenchController, profile: ConnectionPr
                                 onClick = { menu = false; controller.switchConnection(profile) },
                             )
                         }
+                        DropdownMenuItem(
+                            text = { Text("Browse folders…") },
+                            leadingIcon = { Icon(Icons.Outlined.FolderOpen, contentDescription = null) },
+                            enabled = !controller.busy,
+                            onClick = { menu = false; controller.openHostWorkspacePicker(profile) },
+                        )
                         DropdownMenuItem(
                             text = { Text("Move up in auto-connect order") },
                             leadingIcon = { Icon(Icons.Outlined.ArrowUpward, contentDescription = null) },

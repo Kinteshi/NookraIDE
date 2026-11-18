@@ -223,6 +223,23 @@ internal fun connectionRowCopy(
 }
 
 /**
+ * Filters saved recent `(connectionId, path)` workspaces for display in Recent lists: hides the
+ * currently open `(connectionId, path)` pair and drops non-device entries whose host connection has
+ * been deleted from [profileIds].
+ */
+internal fun visibleRecentWorkspaces(
+    recents: List<RecentWorkspace>,
+    activeWorkspaceRoot: String?,
+    activeConnectionId: String?,
+    profileIds: Set<String>,
+): List<RecentWorkspace> = recents.filter { recent ->
+    val isActivePair = activeWorkspaceRoot != null &&
+        recent.path == activeWorkspaceRoot &&
+        (recent.isDeviceFolder || recent.connectionId == activeConnectionId)
+    !isActivePair && (recent.isDeviceFolder || (recent.connectionId != null && recent.connectionId in profileIds))
+}
+
+/**
  * Orders [routes] for [preferred] and the current network state (G37):
  * if [preferred] is specific, matching routes go first; under Auto, local Wi-Fi/LAN goes first at home
  * (`onLocalNetwork`), and Tailscale (or tunnel if no VPN) goes first away from home.

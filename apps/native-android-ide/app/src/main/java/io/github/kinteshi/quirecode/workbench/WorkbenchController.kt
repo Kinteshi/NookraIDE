@@ -515,6 +515,8 @@ class WorkbenchController(private val context: Context) {
     /** Set while switching: closing the old tabs must not overwrite their saved session. */
     private var switchingWorkspace = false
     private var pendingRecentWorkspace: RecentWorkspace? = null
+    /** Set on pairing or explicit host switch so the user intentionally picks a folder once connected. */
+    private var askFolderOnConnect = false
 
     private val closedDocuments = mutableListOf<DocumentSession>()
     private var activePathState by mutableStateOf<String?>(null)
@@ -1194,13 +1196,13 @@ class WorkbenchController(private val context: Context) {
     }
 
     fun deleteProfile(id: String) {
-        val keptEntries = recentWorkspaces.filter { it.connectionId == id && files.offline?.serves(it.path, id) == true }
         profileStore.delete(id)
         profiles = profileStore.profiles()
-        recentWorkspaces = recentWorkspaces.filterNot { it.connectionId == id && it !in keptEntries }
+        recentWorkspaces = recentWorkspaces.filterNot { it.connectionId == id }
         persistRecentWorkspaces()
         refreshLauncherShortcuts()
         if (profileId != id) return
+        askFolderOnConnect = false
         connectionCheck = null
         // Its problems go with it; the next saved connection is the one to connect to.
         resetConnectionProblems()
@@ -1282,13 +1284,29 @@ class WorkbenchController(private val context: Context) {
                 if (currentDirectory.isNotEmpty() && !served(currentDirectory)) currentDirectory = ""
                 expandedFolders.removeAll { !served(it) }
                 folderChildren.keys.filterNot(served).forEach(folderChildren::remove)
+                val deviceOpening = workspaceRoot == null && sessionWorkspace?.let(::isTreePath) == true
+                val recentTarget = pendingRecentWorkspace?.takeIf { recent ->
+                    recent.connectionId == profileId && guestRoots.any { isPathWithinRoot(recent.path, it) }
+                }
+                pendingRecentWorkspace = null
+                val shouldAskFolder = askFolderOnConnect && recentTarget == null && guestRoots.isNotEmpty() && !deviceWorkspace && !deviceOpening
+                if (shouldAskFolder) {
+                    askFolderOnConnect = false
+                    workspaceRoot = null
+                } else if (recentTarget == null && !deviceWorkspace && !deviceOpening) {
+                    askFolderOnConnect = false
+                }
+                val savedId = run {
+                    // Track id in case profileStore.save runs async below.
+                    profileId
+                }
                 if (dialog == WorkbenchDialog.Connect) dialog = null
                 io.execute {
-                    val savedProfile = profileId?.let { id -> profiles.firstOrNull { it.id == id } }
+                    val savedProfile = savedId?.let { id -> profiles.firstOrNull { it.id == id } }
                     val persistedEndpoint = savedProfile?.endpoint ?: endpoint
                     val persistedPin = if (savedProfile != null) savedProfile.fingerprint else pin
                     val saved = profileStore.save(
-                        profileId,
+                        savedId,
                         profileName,
                         persistedEndpoint,
                         token,
@@ -1302,6 +1320,9 @@ class WorkbenchController(private val context: Context) {
                         profileName = saved.name
                         profiles = profileStore.profiles()
                         files.offline?.activeConnectionId = saved.id
+                        if (shouldAskFolder) {
+                            showOpenFolder(guestRoots.first(), WorkbenchDialog.WorkspacePickerSource.RemoteHost(saved.id))
+                        }
                     }
                 }
                 startKeepAlive("Connected")
@@ -1326,17 +1347,11 @@ class WorkbenchController(private val context: Context) {
                 // A folder opened offline may belong to another guest than this one. A device folder stays (G29): the
                 // guest adds terminals, Copilot and the rest, the workspace is still the device's.
                 if (workspaceRoot?.let { root -> isGuestPath(root) && guestRoots.none { isPathWithinRoot(root, it) } } == true) workspaceRoot = null
-                // A device folder still opening (its settings load before workspaceRoot is set) counts as open: at
-                // startup the connection could land first and replace it with the guest's last folder.
-                val deviceOpening = workspaceRoot == null && sessionWorkspace?.let(::isTreePath) == true
-                val recentTarget = pendingRecentWorkspace?.takeIf { recent ->
-                    recent.connectionId == profileId && guestRoots.any { isPathWithinRoot(recent.path, it) }
-                }
-                pendingRecentWorkspace = null
                 when {
                     recentTarget != null && (recentTarget.path != workspaceRoot || sessionConnectionId != profileId) ->
                         openWorkspace(recentTarget.path)
                     deviceWorkspace || deviceOpening -> startCopilot()
+                    shouldAskFolder -> Unit
                     workspaceRoot == null -> chooseWorkspace(guestRoots, ::onWorkspaceConnected)
                     isGuestPath(workspaceRoot!!) && sessionConnectionId != profileId -> openWorkspace(workspaceRoot!!)
                     else -> onWorkspaceConnected(workspaceRoot!!)
@@ -3123,16 +3138,18 @@ class WorkbenchController(private val context: Context) {
     private fun requestConnectionSwitch(
         profile: io.github.kinteshi.quirecode.transport.ConnectionProfile,
         recent: RecentWorkspace?,
+        askFolder: Boolean = false,
     ) {
         if (profile.id != profileId) {
             val hasUnsaved = hasGuestUnsavedEdits()
             val hasRunning = hasGuestWorkRunning()
             if (hasUnsaved || hasRunning) {
+                if (askFolder) askFolderOnConnect = true
                 dialog = WorkbenchDialog.ConfirmConnectionSwitch(profile.id, recent, hasUnsaved, hasRunning)
                 return
             }
         }
-        performConnectionSwitch(profile, recent)
+        performConnectionSwitch(profile, recent, askFolder = askFolder)
     }
 
     private fun hasGuestUnsavedEdits(): Boolean {
@@ -3184,16 +3201,26 @@ class WorkbenchController(private val context: Context) {
     private fun performConnectionSwitch(
         profile: io.github.kinteshi.quirecode.transport.ConnectionProfile,
         recent: RecentWorkspace?,
+        askFolder: Boolean = false,
     ) {
         if (recent != null) pendingRecentWorkspace = recent
+        val switchingHost = profile.id != profileId || profile.id != sessionConnectionId
         replacingConnection = connected
         if (profile.endpoint != endpoint) forgetMachineExplorer()
+        if (recent == null && switchingHost && !deviceWorkspace) workspaceRoot = null
+        askFolderOnConnect = recent == null && (askFolder || askFolderOnConnect || switchingHost || workspaceRoot == null)
         autoConnectFallbacks = emptyList()
         selectProfile(profile)
         resetConnectionProblems()
         updateGuestStoppedAt(null)
         updateOfflineByChoice(false)
         connectionCheck = null
+        if (recent == null && askFolderOnConnect) {
+            dialog = WorkbenchDialog.OpenFolder(
+                path = "",
+                source = WorkbenchDialog.WorkspacePickerSource.RemoteHost(profile.id),
+            )
+        }
         requestGuestConnection()
     }
 
@@ -3267,6 +3294,7 @@ class WorkbenchController(private val context: Context) {
                 dialog = WorkbenchDialog.Connect
                 if (connect) {
                     replacingConnection = connected
+                    askFolderOnConnect = id == null || id != profileId || workspaceRoot == null
                     resetConnectionProblems()
                     updateGuestStoppedAt(null)
                     updateOfflineByChoice(false)
@@ -3475,6 +3503,7 @@ class WorkbenchController(private val context: Context) {
             connectGuest()
             return
         }
+        askFolderOnConnect = false
         when {
             rejected?.reason == "InvalidToken" -> {
                 waitingForLinuxTerminal = false
@@ -3682,10 +3711,13 @@ class WorkbenchController(private val context: Context) {
                     status = pairingError!!
                     return@post
                 }
+                completeOnboarding()
                 if (target != endpoint) {
                     replacingConnection = connected
                     forgetMachineExplorer()
+                    if (!deviceWorkspace) workspaceRoot = null
                 }
+                askFolderOnConnect = existing == null || target != endpoint || workspaceRoot == null
                 profileId = existing?.id
                 profileName = existing?.name ?: "Linux guest"
                 endpoint = target
@@ -3752,6 +3784,7 @@ class WorkbenchController(private val context: Context) {
                         return@post
                     }
                     busy = false
+                    val previousEndpoint = endpoint
                     if (route.endpoint != endpoint) {
                         replacingConnection = connected
                         forgetMachineExplorer()
@@ -3772,10 +3805,15 @@ class WorkbenchController(private val context: Context) {
                             accessClientSecret = accessCreds?.clientSecret,
                         )
                         post {
+                            completeOnboarding()
                             profiles = profileStore.profiles()
                             selectProfile(saved)
                             endpoint = route.endpoint
                             profileFingerprint = route.fingerprint
+                            if (existing == null || route.endpoint != previousEndpoint || workspaceRoot == null) {
+                                if (!deviceWorkspace) workspaceRoot = null
+                                askFolderOnConnect = true
+                            }
                             resetConnectionProblems()
                             dialog = null
                             requestGuestConnection()
@@ -4253,14 +4291,14 @@ class WorkbenchController(private val context: Context) {
         }
     }
 
-    /** Recent folders this guest serves, the open one left out. */
+    /** Recent `(host, folder)` pairs for Recents & the Workspace Picker (deleted hosts excluded). */
     val recentWorkspaceChoices: List<RecentWorkspace>
-        get() = recentWorkspaces.filter { recent ->
-            recent.path != workspaceRoot &&
-                (recent.isDeviceFolder ||
-                    profiles.any { it.id == recent.connectionId } ||
-                    !connected && files.servesOffline(recent.path, recent.connectionId))
-        }
+        get() = visibleRecentWorkspaces(
+            recents = recentWorkspaces,
+            activeWorkspaceRoot = workspaceRoot,
+            activeConnectionId = sessionConnectionId ?: profileId,
+            profileIds = profiles.mapTo(mutableSetOf()) { it.id },
+        )
 
     private fun rememberWorkspace(path: String, connectionId: String? = profileId.takeIf { isGuestPath(path) }) {
         val recent = RecentWorkspace(path, connectionId.takeIf { isGuestPath(path) })
@@ -4471,28 +4509,65 @@ class WorkbenchController(private val context: Context) {
         }
     }
 
-    /** File > Open Folder: browses the guest's roots for a folder to open as the workspace. */
-    fun showOpenFolder(path: String? = null) {
-        if (!connected) {
-            status = "Connect to a guest to open a folder"
-            openConnect()
-            return
+    /** File > Open Workspace: unified `(host, folder)` picker across Recent, This device, and paired hosts. */
+    fun showOpenFolder(
+        path: String? = null,
+        source: WorkbenchDialog.WorkspacePickerSource? = null,
+    ) {
+        val targetSource = source ?: when {
+            path != null && !isTreePath(path) && profileId != null -> WorkbenchDialog.WorkspacePickerSource.RemoteHost(profileId!!)
+            connected && profileId != null -> WorkbenchDialog.WorkspacePickerSource.RemoteHost(profileId!!)
+            deviceWorkspace -> WorkbenchDialog.WorkspacePickerSource.ThisDevice
+            recentWorkspaceChoices.isNotEmpty() -> WorkbenchDialog.WorkspacePickerSource.RecentAll
+            profiles.isNotEmpty() -> WorkbenchDialog.WorkspacePickerSource.RemoteHost(profiles.first().id)
+            else -> WorkbenchDialog.WorkspacePickerSource.ThisDevice
         }
-        val start = path
-            ?: workspaceRoot?.substringBeforeLast('/')?.takeIf { parent -> roots.any { isPathWithinRoot(parent, it) } }
-            ?: roots.firstOrNull()
-            ?: return
-        dialog = WorkbenchDialog.OpenFolder(start)
-        files.listDir(start).whenComplete { result, error ->
-            post {
-                val shown = dialog as? WorkbenchDialog.OpenFolder ?: return@post
-                if (shown.path != start) return@post
-                dialog = shown.copy(
-                    folders = result?.let { sortedEntries(it).filter(FileEntry::isDirectory) },
-                    error = error?.let { it.cause?.message ?: it.message ?: "Could not list the folder" },
-                )
+        when (targetSource) {
+            WorkbenchDialog.WorkspacePickerSource.RecentAll -> {
+                dialog = WorkbenchDialog.OpenFolder(path = "", source = targetSource)
+            }
+            WorkbenchDialog.WorkspacePickerSource.ThisDevice -> {
+                dialog = WorkbenchDialog.OpenFolder(path = "", source = targetSource)
+            }
+            is WorkbenchDialog.WorkspacePickerSource.RemoteHost -> {
+                val active = connected && profileId == targetSource.profileId
+                if (!active) {
+                    dialog = WorkbenchDialog.OpenFolder(path = "", source = targetSource)
+                    return
+                }
+                val start = path
+                    ?: workspaceRoot?.substringBeforeLast('/')?.takeIf { parent -> roots.any { isPathWithinRoot(parent, it) } }
+                    ?: roots.firstOrNull()
+                if (start == null) {
+                    dialog = WorkbenchDialog.OpenFolder(
+                        path = "",
+                        error = "This host has no workspace folders configured",
+                        source = targetSource,
+                    )
+                    return
+                }
+                dialog = WorkbenchDialog.OpenFolder(start, source = targetSource)
+                files.listDir(start).whenComplete { result, error ->
+                    post {
+                        val shown = dialog as? WorkbenchDialog.OpenFolder ?: return@post
+                        if (shown.source != targetSource || shown.path != start) return@post
+                        dialog = shown.copy(
+                            folders = result?.let { sortedEntries(it).filter(FileEntry::isDirectory) },
+                            error = error?.let { it.cause?.message ?: it.message ?: "Could not list the folder" },
+                        )
+                    }
+                }
             }
         }
+    }
+
+    /** Switches to [profile] (or connects if needed) and opens the Workspace Picker scoped to its folders. */
+    fun openHostWorkspacePicker(profile: io.github.kinteshi.quirecode.transport.ConnectionProfile) {
+        if (connected && profile.id == profileId) {
+            showOpenFolder(source = WorkbenchDialog.WorkspacePickerSource.RemoteHost(profile.id))
+            return
+        }
+        requestConnectionSwitch(profile, recent = null, askFolder = true)
     }
 
     /** Creates [name] inside the folder the Open Folder dialog shows, then shows the new folder. */
@@ -4521,6 +4596,7 @@ class WorkbenchController(private val context: Context) {
      */
     /** Asks before switching workspaces on the same connection or to a device folder when guest work is running (G39). */
     fun requestOpenWorkspace(path: String) {
+        askFolderOnConnect = false
         val target = (if (isTreePath(path)) path.trimEnd('/') else normalizeGuestPath(path)) ?: return
         if (workspaceRoot != null && target != workspaceRoot && (isTreePath(target) || (connected && sessionConnectionId == profileId))) {
             val hasUnsaved = hasGuestUnsavedEdits()

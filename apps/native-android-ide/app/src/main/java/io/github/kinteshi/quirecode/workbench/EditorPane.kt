@@ -542,7 +542,7 @@ private fun EmptyEditor(controller: WorkbenchController) = BoxWithConstraints(Mo
         }
         // Each line does what it says; the keys are for next time.
         val actions: List<Triple<androidx.compose.ui.graphics.vector.ImageVector, String, Pair<String, () -> Unit>>> = listOf(
-            Triple(Icons.Outlined.FolderOpen, "Open Folder", "Ctrl+K Ctrl+O" to { if (controller.connected) controller.showOpenFolder() else controller.openConnect() }),
+            Triple(Icons.Outlined.FolderOpen, "Open Workspace", "Ctrl+K Ctrl+O" to { controller.showOpenFolder() }),
             Triple(Icons.Outlined.Search, "Quick Open", "Ctrl+P" to { controller.runCommand("workbench.action.quickOpen") }),
             Triple(Icons.Outlined.Widgets, "Command Palette", "Ctrl+Shift+P" to { controller.runCommand("workbench.action.showCommands") }),
             Triple(Icons.Outlined.Terminal, "Toggle Terminal", "Ctrl+`" to { controller.runCommand("workbench.action.terminal.toggleTerminal") }),

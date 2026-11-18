@@ -344,10 +344,10 @@ private fun TopBar(controller: WorkbenchController, expanded: Boolean) {
                 Icon(Icons.Outlined.Menu, contentDescription = "Toggle side bar")
             } }
         }
-        // The workspace name opens Open Folder (switch to another or a recent one).
+        // The workspace name opens Open Workspace (switch hosts, recents, device folders, or folders on this host).
         Column(
             Modifier.widthIn(max = 220.dp).clip(RoundedCornerShape(8.dp))
-                .clickable { if (controller.connected) controller.showOpenFolder() else controller.openConnect() }
+                .clickable { controller.showOpenFolder() }
                 .padding(horizontal = 6.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -355,7 +355,7 @@ private fun TopBar(controller: WorkbenchController, expanded: Boolean) {
                 DevBadge()
             }
             Text(
-                controller.workspaceRoot?.let(controller::displayName) ?: "No workspace",
+                controller.workspaceRoot?.let(controller::displayName) ?: "Choose workspace…",
                 style = MaterialTheme.typography.labelSmall,
                 color = colors.onSurfaceVariant,
                 maxLines = 1,
@@ -383,8 +383,7 @@ private fun TopBar(controller: WorkbenchController, expanded: Boolean) {
             Tooltip("More") { IconButton(onClick = { menu = true }) { Icon(Icons.Outlined.MoreVert, contentDescription = "More") } }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                 MenuItem("Command palette", "Ctrl+Shift+P", Icons.Outlined.Widgets) { menu = false; controller.runCommand("workbench.action.showCommands") }
-                MenuItem("Open folder…", "Ctrl+K Ctrl+O", Icons.Outlined.FolderOpen) { menu = false; controller.showOpenFolder() }
-                MenuItem("Open device folder…", "", Icons.Outlined.PhoneAndroid) { menu = false; controller.beginOpenDeviceFolder() }
+                MenuItem("Open workspace…", "Ctrl+K Ctrl+O", Icons.Outlined.FolderOpen) { menu = false; controller.showOpenFolder() }
                 MenuItem("New file…", "", Icons.Outlined.NoteAdd) { menu = false; controller.beginNewEntry(folder = false) }
                 MenuItem("New untitled file", "Ctrl+N", Icons.Outlined.NoteAdd) { menu = false; controller.newUntitledFile() }
                 MenuItem("New terminal", "Ctrl+Shift+`", Icons.Outlined.Terminal) { menu = false; controller.newTerminal() }
