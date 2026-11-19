@@ -32,11 +32,14 @@ class JsonRpcConnection(
 ) {
     private val requestIds = AtomicLong(0)
     private val pendingRequests = ConcurrentHashMap<Long, CompletableFuture<JsonElement>>()
-    private val sendExecutor = Executors.newSingleThreadExecutor { runnable ->
-        Thread(runnable, "avf-rpc-send-${kind.lowercase()}").apply { isDaemon = true }
-    }
     @Volatile var bridgeId: UUID? = null
         private set
+
+    companion object {
+        private val sendExecutor = Executors.newSingleThreadExecutor { runnable ->
+            Thread(runnable, "avf-rpc-send").apply { isDaemon = true }
+        }
+    }
 
     /** Handles requests the peer sends; return null to answer "method not found". */
     @Volatile var requestHandler: ((String, JsonObject) -> CompletableFuture<JsonElement>?)? = null

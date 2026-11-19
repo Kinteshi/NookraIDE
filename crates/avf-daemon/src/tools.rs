@@ -1127,6 +1127,11 @@ pub fn list_installed(home: &Path) -> Result<Vec<ToolManifest>, String> {
             continue;
         }
         validate_tool_name(&name)?;
+        // Retired tools removed from the bundled catalog (for example `gemini`, replaced by
+        // `antigravity`) stay ignored rather than breaking `tools list` or other installed tools.
+        let Some(expected) = catalog.tools.iter().find(|tool| tool.name == name) else {
+            continue;
+        };
         let manifest_path = entry.path().join("manifest.json");
         let metadata = match fs::symlink_metadata(&manifest_path) {
             Ok(metadata) => metadata,
@@ -1156,15 +1161,10 @@ pub fn list_installed(home: &Path) -> Result<Vec<ToolManifest>, String> {
                 name, manifest.name
             ));
         }
-        let expected = catalog
-            .tools
-            .iter()
-            .find(|tool| tool.name == name)
-            .ok_or_else(|| format!("Installed tool '{name}' is not in the allowlisted catalog."))?;
+        // An older daemon's manifest for a catalog tool whose version or install spec changed
+        // is skipped so it never blocks other tools; the app offers to reinstall it on demand.
         if &manifest != expected {
-            return Err(format!(
-                "Installed tool '{name}' does not match its allowlisted catalog manifest."
-            ));
+            continue;
         }
         installed.push(manifest);
     }
@@ -1818,5 +1818,30 @@ mod tests {
         });
         assert!(result.unwrap_err().contains("Invalid tool name"));
         assert!(!invoked);
+    }
+
+    #[test]
+    fn retired_and_stale_tool_manifests_do_not_break_other_tools() {
+        let home = tempdir().unwrap();
+        let ruff = install_tool_with(home.path(), "ruff", |_| Ok(())).unwrap();
+        let tools = ensure_tools_root(home.path()).unwrap();
+
+        // Retired tool left over from an earlier daemon release (e.g. `gemini`).
+        let retired = tools.join("gemini");
+        fs::create_dir(&retired).unwrap();
+        fs::write(retired.join("manifest.json"), r#"{"name":"gemini","version":"0.64.0"}"#).unwrap();
+
+        // Stale version of an existing catalog tool.
+        let mut stale_ty = catalog_lookup("ty").unwrap();
+        stale_ty.version = "0.0.1-old".into();
+        let ty_dir = tools.join("ty");
+        fs::create_dir(&ty_dir).unwrap();
+        fs::write(
+            ty_dir.join("manifest.json"),
+            serde_json::to_string_pretty(&stale_ty).unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(list_installed(home.path()).unwrap(), vec![ruff]);
     }
 }

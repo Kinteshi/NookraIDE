@@ -91,7 +91,10 @@ internal class AardinkEditorSurface(val state: CodeEditorState) : EditorSurface 
     override fun positionAt(offset: Int): LspPosition =
         state.document.offsetToLineCol(offset.coerceIn(0, state.document.length)).let { LspPosition(it.first, it.second) }
 
-    override fun setText(value: String) = state.loadText(value)
+    override fun setText(value: String) {
+        state.loadText(value)
+        cachedText = value
+    }
 
     override fun applyEdits(edits: List<LspTextEdit>) {
         state.executeEdits(edits.map { TextEdit(offsetOf(it.range.start) until offsetOf(it.range.end), it.newText) })
