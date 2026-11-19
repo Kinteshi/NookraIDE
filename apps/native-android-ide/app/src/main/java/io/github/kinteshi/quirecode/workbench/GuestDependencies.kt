@@ -90,15 +90,15 @@ enum class GuestDependency(
         "Claude Code",
         listOf("claude-agent-acp"),
         "Claude Code in the Chat view (and `claude` in terminals)",
-        "npm: Claude Code's ACP adapter 0.91.0 on Node.js 24.22.0 (checksum-verified), in ~/.local/share/materialcode; about 330 MB, plus 205 MB for Node.js (shared with Gemini)",
+        "npm: Claude Code's ACP adapter 0.91.0 on Node.js 24.22.0 (checksum-verified), in ~/.local/share/materialcode; about 330 MB, plus 205 MB for Node.js",
         "quirecode-daemon tools install claude-code",
     ),
-    Gemini(
-        "Gemini CLI",
-        listOf("gemini"),
-        "Gemini in the Chat view (and `gemini` in terminals)",
-        "npm: Gemini CLI 0.64.0 on Node.js 24.22.0 (checksum-verified), in ~/.local/share/materialcode; about 100 MB, plus 205 MB for Node.js (shared with Claude Code)",
-        "quirecode-daemon tools install gemini",
+    Antigravity(
+        "Antigravity CLI",
+        listOf("antigravity"),
+        "Antigravity in the Chat view (and `antigravity` in terminals)",
+        "Google Antigravity CLI 1.5.12 (checksum-verified standalone binary), in ~/.local/bin; about 90 MB",
+        "quirecode-daemon tools install antigravity",
     ),
     // Language servers beyond Python and TypeScript, offered when a file of their language opens.
     Gopls(
@@ -247,7 +247,7 @@ enum class GuestDependency(
         fun forAgent(kind: ChatAgentKind): GuestDependency? = when (kind) {
             ChatAgentKind.Copilot -> null
             ChatAgentKind.ClaudeCode -> ClaudeCode
-            ChatAgentKind.Gemini -> Gemini
+            ChatAgentKind.Antigravity -> Antigravity
         }
     }
 }
@@ -282,11 +282,10 @@ internal fun missingDependencyIn(message: String): GuestDependency? {
         "tool 'gh' is not installed" in lower -> GuestDependency.GitHubCli
         "tool 'typescript' is not installed" in lower -> GuestDependency.TypeScript
         "tool 'claude-code' is not installed" in lower -> GuestDependency.ClaudeCode
-        "tool 'gemini' is not installed" in lower -> GuestDependency.Gemini
+        "tool 'antigravity' is not installed" in lower -> GuestDependency.Antigravity
         "tool 'js-debug' is not installed" in lower || "js-debug is not set up" in lower -> GuestDependency.JsDebug
         "tool 'codelldb' is not installed" in lower || "codelldb is not set up" in lower -> GuestDependency.CodeLldb
         "claude-code is not set up" in lower -> GuestDependency.ClaudeCode
-        "gemini is not set up" in lower -> GuestDependency.Gemini
         "could not start ripgrep" in lower && notFound -> GuestDependency.Ripgrep
         "could not start git" in lower && notFound -> GuestDependency.Git
         "unable to find git executable" in lower -> GuestDependency.Git

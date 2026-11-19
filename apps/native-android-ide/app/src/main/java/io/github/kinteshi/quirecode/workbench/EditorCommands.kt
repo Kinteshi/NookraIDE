@@ -227,7 +227,7 @@ object EditorCommands {
         command("github.copilot.chat.signInCli", "Copilot: Sign In to Chat with copilot login", ""),
         command("avf.chat.selectCopilot", "Chat: Use Copilot", ""),
         command("avf.chat.selectClaudeCode", "Chat: Use Claude Code", ""),
-        command("avf.chat.selectGemini", "Chat: Use Gemini", ""),
+        command("avf.chat.selectAntigravity", "Chat: Use Antigravity", ""),
         command("avf.chat.signIn", "Chat: Sign In to the Chat Agent", ""),
         command("workbench.action.files.openLocalFile", "File: Open File from Device...", ""),
         command("jupyter.runallcells", "Jupyter: Run All Cells", ""),

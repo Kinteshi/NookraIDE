@@ -186,7 +186,7 @@ fun CopilotChatPane(controller: WorkbenchController, modifier: Modifier = Modifi
                         when (kind) {
                             ChatAgentKind.Copilot -> "Chat signs in through the GitHub CLI, which Git then uses too. This runs `gh auth login` in a terminal and shows a one-time code here."
                             ChatAgentKind.ClaudeCode -> "Uses your Claude subscription. This runs Claude Code's sign-in in a terminal; open the page it gives here and paste the code back."
-                            ChatAgentKind.Gemini -> "Uses your Google account. This runs Gemini CLI's sign-in in a terminal; open the page it gives here and paste the code back."
+                            ChatAgentKind.Antigravity -> "Uses your Google account. This runs Antigravity CLI's sign-in in a terminal; open the page it gives here and paste the code back."
                         },
                         style = MaterialTheme.typography.bodySmall,
                     )
@@ -421,7 +421,7 @@ private fun ChatEntryView(entry: ChatEntry, controller: WorkbenchController) {
     }
 }
 
-/** The chat's title, which picks the agent: Copilot, Claude Code or Gemini. */
+/** The chat's title, which picks the agent: Copilot, Claude Code or Antigravity. */
 @Composable
 private fun ChatAgentPicker(controller: WorkbenchController) {
     var open by remember { mutableStateOf(false) }
@@ -450,7 +450,7 @@ private fun ChatAgentPicker(controller: WorkbenchController) {
     }
 }
 
-/** A Claude Code or Gemini sign-in: the page to open, then the code it shows, typed into the waiting login. */
+/** A Claude Code or Antigravity sign-in: the page to open, then the code it shows, typed into the waiting login. */
 @Composable
 private fun SignInLinkCard(entry: ChatEntry.SignInLink, controller: WorkbenchController) {
     val colors = MaterialTheme.colorScheme
@@ -460,7 +460,7 @@ private fun SignInLinkCard(entry: ChatEntry.SignInLink, controller: WorkbenchCon
             Text(
                 when {
                     entry.done -> "Signed in to ${entry.agent}"
-                    entry.codeSent && entry.quitAfterCode -> "When the terminal shows Gemini's prompt, you're signed in"
+                    entry.codeSent && entry.quitAfterCode -> "When the terminal shows ${entry.agent}'s prompt, you're signed in"
                     entry.codeSent -> "Checking the code…"
                     else -> "Sign in to ${entry.agent}"
                 },

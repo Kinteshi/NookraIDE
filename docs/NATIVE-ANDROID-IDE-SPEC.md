@@ -357,7 +357,7 @@ A Secondary Side Bar view with conversation threads per workspace. Capabilities:
 
 ### 8.4 Agent Client Protocol (terminal agents, native UI)
 
-Implement an ACP client (Zed's Agent Client Protocol) over the `Rpc` bridge with `RpcKind::Acp`. Supported agents are tool packs of kind `acp-agent`: Claude Code (via its ACP adapter), Gemini CLI, Codex CLI (adapter), and any ACP-speaking agent installed in the guest. The UI shows the agent's plan, tool calls with approvals, file diffs rendered in the app's diff editor, terminal output, and permission prompts, all native. Sessions persist in the guest; the app can reattach after reconnecting. When ACP is unavailable for an agent, the Agents view launches it in a terminal tab as in Track A.
+Implement an ACP client (Zed's Agent Client Protocol) over the `Rpc` bridge with `RpcKind::Acp`. Supported agents are tool packs of kind `acp-agent`: GitHub Copilot, Claude Code (via its ACP adapter), Antigravity CLI, and any ACP-speaking agent installed in the guest. The UI shows the agent's plan, tool calls with approvals, file diffs rendered in the app's diff editor, terminal output, and permission prompts, all native. Sessions persist in the guest; the app can reattach after reconnecting. When ACP is unavailable for an agent, the Agents view launches it in a terminal tab as in Track A.
 
 ### 8.5 MCP
 

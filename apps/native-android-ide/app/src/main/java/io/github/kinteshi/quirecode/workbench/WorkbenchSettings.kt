@@ -428,7 +428,10 @@ data class WorkbenchSettings(
                 inlineSuggestDelayMs = number(INLINE_SUGGEST_DELAY)?.toInt()?.coerceIn(0, 5000)
                     ?: defaults.inlineSuggestDelayMs,
                 chatIdleMinutes = number(CHAT_IDLE_MINUTES)?.toInt()?.coerceIn(1, 120) ?: defaults.chatIdleMinutes,
-                chatAgent = ChatAgentKind.entries.firstOrNull { it.key == string(CHAT_AGENT) } ?: defaults.chatAgent,
+                chatAgent = when (val saved = string(CHAT_AGENT)) {
+                    "gemini" -> ChatAgentKind.Antigravity
+                    else -> ChatAgentKind.entries.firstOrNull { it.key == saved } ?: defaults.chatAgent
+                },
                 chatReasoningEffort = string(CHAT_REASONING_EFFORT)?.takeIf { it in REASONING_EFFORTS } ?: defaults.chatReasoningEffort,
                 chatResume = bool(CHAT_RESUME, defaults.chatResume),
                 jupyterDefaultKernel = string(JUPYTER_DEFAULT_KERNEL) ?: defaults.jupyterDefaultKernel,

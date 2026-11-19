@@ -14,7 +14,7 @@ class ChatAgentsTest {
     }
 
     @Test
-    fun geminiLinkComesBeforeItsCodePrompt() {
+    fun antigravityLinkComesBeforeItsCodePrompt() {
         val url = "https://accounts.google.com/o/oauth2/v2/auth?redirect_uri=https%3A%2F%2Fcodeassist.google.com%2Fauthcode&state=23c9"
         val output = "Please visit the following URL to authorize the application:\r\n\r\n$url\r\n\r\nEnter the authorization code: "
         assertEquals(SignInLink(url), parseSignInLink(output))
@@ -27,7 +27,7 @@ class ChatAgentsTest {
 
     @Test
     fun agentsLaunchTheirCatalogTools() {
-        assertEquals(listOf("copilot", "claude-code", "gemini"), ChatAgentKind.entries.map { it.tool })
-        assertEquals("avf-node-agent login gemini && exit", ChatAgentKind.Gemini.loginCommand)
+        assertEquals(listOf("copilot", "claude-code", "antigravity"), ChatAgentKind.entries.map { it.tool })
+        assertEquals("antigravity acp --login && exit", ChatAgentKind.Antigravity.loginCommand)
     }
 }

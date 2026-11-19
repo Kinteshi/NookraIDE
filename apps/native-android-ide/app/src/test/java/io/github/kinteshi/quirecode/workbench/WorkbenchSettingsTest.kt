@@ -190,4 +190,12 @@ class WorkbenchSettingsTest {
         assertEquals("smooth", invalid.cursorBlinking)
         assertEquals("same", invalid.wrappingIndent)
     }
+
+    @Test
+    fun legacyGeminiChatAgentMigratesToAntigravity() {
+        val legacy = WorkbenchSettings.from(JsonParser.parseString("""{"avf.chat.agent":"gemini"}""").asJsonObject)
+        assertEquals(io.github.kinteshi.quirecode.ai.ChatAgentKind.Antigravity, legacy.chatAgent)
+        val explicit = WorkbenchSettings.from(JsonParser.parseString("""{"avf.chat.agent":"antigravity"}""").asJsonObject)
+        assertEquals(io.github.kinteshi.quirecode.ai.ChatAgentKind.Antigravity, explicit.chatAgent)
+    }
 }

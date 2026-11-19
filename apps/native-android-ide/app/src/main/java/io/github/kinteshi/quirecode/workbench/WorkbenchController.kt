@@ -8967,9 +8967,8 @@ class WorkbenchController(private val context: Context) {
                 "If chat still asks, run “Copilot: Sign In to Chat with copilot login” from the command palette."
         ChatAgentKind.ClaudeCode ->
             "Claude Code needs a sign-in with your Claude account. Tap “Sign in”, open the page, and paste the code it shows."
-        ChatAgentKind.Gemini ->
-            "Gemini needs a sign-in with your Google account. Tap “Sign in”, open the page, and paste the code it shows. " +
-                "An API key works too: put GEMINI_API_KEY=… in ~/.gemini/.env in the guest."
+        ChatAgentKind.Antigravity ->
+            "Antigravity needs a sign-in with your Google account. Tap “Sign in”, open the page, and paste the code it shows."
     }
 
     /** A failed chat request: when the agent isn't installed, the notice comes with an offer to install it. */
@@ -9342,7 +9341,7 @@ class WorkbenchController(private val context: Context) {
                     val id = terminal
                     parseSignInLink(output.toString())?.takeIf { id != null }?.let { link ->
                         shown = true
-                        post { chatEntries.add(ChatEntry.SignInLink(kind.label, link.url, id!!, quitAfterCode = kind == ChatAgentKind.Gemini)) }
+                        post { chatEntries.add(ChatEntry.SignInLink(kind.label, link.url, id!!, quitAfterCode = false)) }
                     }
                 }
             },
@@ -9366,7 +9365,7 @@ class WorkbenchController(private val context: Context) {
         if (index >= 0) chatEntries[index] = entry.copy(codeSent = true)
     }
 
-    /** Gemini stays open after signing in; this quits it, which ends the login's shell. */
+    /** Some CLIs stay open after signing in; this quits them, which ends the login's shell. */
     fun closeSignInAgent(entry: ChatEntry.SignInLink) {
         vfs.ptyInput(entry.terminal, "/quit".toByteArray())
         timer.schedule({ vfs.ptyInput(entry.terminal, "\r".toByteArray()) }, 400, TimeUnit.MILLISECONDS)
@@ -12271,7 +12270,7 @@ class WorkbenchController(private val context: Context) {
             "github.copilot.chat.signInCli" -> signInChatInTerminal()
             "avf.chat.selectCopilot" -> selectChatAgent(ChatAgentKind.Copilot)
             "avf.chat.selectClaudeCode" -> selectChatAgent(ChatAgentKind.ClaudeCode)
-            "avf.chat.selectGemini" -> selectChatAgent(ChatAgentKind.Gemini)
+            "avf.chat.selectAntigravity", "avf.chat.selectGemini" -> selectChatAgent(ChatAgentKind.Antigravity)
             "avf.chat.signIn" -> signInChatAgent()
             "markdown.showPreview" -> toggleMarkdownPreview(MarkdownPreviewMode.Only)
             "markdown.showPreviewToSide" -> toggleMarkdownPreview(MarkdownPreviewMode.Side)

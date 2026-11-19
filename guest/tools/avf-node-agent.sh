@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# QuireCode's launcher for what runs on Node.js: the chat agents Claude Code (through its ACP
-# adapter, which carries the Claude Code CLI) and Gemini CLI, the language servers published
+# QuireCode's launcher for what runs on Node.js: the chat agent Claude Code (through its ACP
+# adapter, which carries the Claude Code CLI), the language servers published
 # on npm (Bash, YAML, JSON, HTML, CSS, Dockerfile, SQL) and VS Code's JavaScript debugger.
 #
 #   avf-node-agent setup <name>     installs a pinned Node.js and the pinned npm package
@@ -13,7 +13,7 @@
 #                                   session on it (each program it debugs gets one)
 #
 # Everything lives under ~/.local/share/materialcode; nothing is installed globally, and the
-# system's own Node.js (if any) is left alone. <agent> is claude-code or gemini; a server is one
+# system's own Node.js (if any) is left alone. <agent> is claude-code; a server is one
 # of the names in package_of.
 set -euo pipefail
 
@@ -37,13 +37,12 @@ fail() {
 package_of() {
     case "$1" in
         claude-code) echo "@agentclientprotocol/claude-agent-acp@0.91.0" ;;
-        gemini) echo "@google/gemini-cli@0.64.0" ;;
         bash-language-server) echo "bash-language-server@5.8.1" ;;
         yaml-language-server) echo "yaml-language-server@2.0.0" ;;
         json-language-server | html-language-server | css-language-server) echo "vscode-langservers-extracted@4.10.0" ;;
         docker-langserver) echo "dockerfile-language-server-nodejs@0.15.0" ;;
         sql-language-server) echo "sql-language-server@1.7.1" ;;
-        *) fail "unknown name '$1' (an agent: claude-code or gemini; or a language server)" ;;
+        *) fail "unknown name '$1' (an agent: claude-code; or a language server)" ;;
     esac
 }
 
@@ -59,7 +58,7 @@ overrides_of() {
 # Where a package goes: agents under agents/, servers under servers/ (one folder per package).
 dir_of() {
     case "$1" in
-        claude-code | gemini) echo "$ROOT/agents/$1" ;;
+        claude-code) echo "$ROOT/agents/$1" ;;
         json-language-server | html-language-server | css-language-server) echo "$ROOT/servers/vscode-langservers" ;;
         *) echo "$ROOT/servers/$1" ;;
     esac
@@ -70,7 +69,6 @@ entry_of() {
     modules="$(dir_of "$1")/node_modules"
     case "$1" in
         claude-code) echo "$modules/@agentclientprotocol/claude-agent-acp/dist/index.js" ;;
-        gemini) echo "$modules/@google/gemini-cli/bundle/gemini.js" ;;
         bash-language-server) echo "$modules/bash-language-server/out/cli.js" ;;
         yaml-language-server) echo "$modules/yaml-language-server/bin/yaml-language-server" ;;
         json-language-server) echo "$modules/vscode-langservers-extracted/bin/vscode-json-language-server" ;;
@@ -78,7 +76,7 @@ entry_of() {
         css-language-server) echo "$modules/vscode-langservers-extracted/bin/vscode-css-language-server" ;;
         docker-langserver) echo "$modules/dockerfile-language-server-nodejs/bin/docker-langserver" ;;
         sql-language-server) echo "$modules/sql-language-server/npm_bin/cli.js" ;;
-        *) fail "unknown name '$1' (an agent: claude-code or gemini; or a language server)" ;;
+        *) fail "unknown name '$1' (an agent: claude-code; or a language server)" ;;
     esac
 }
 
@@ -204,9 +202,6 @@ setup() {
             write_wrapper claude-agent-acp 'exec "$HOME/.local/bin/avf-node-agent" claude-code "$@"'
             write_wrapper claude 'exec "$HOME/.local/bin/avf-node-agent" claude-code --cli "$@"'
             ;;
-        gemini)
-            write_wrapper gemini 'exec "$HOME/.local/bin/avf-node-agent" gemini "$@"'
-            ;;
         # A server's own name runs it too (the app checks for it, and it works in a terminal).
         *)
             write_wrapper "$agent" "exec \"\$HOME/.local/bin/avf-node-agent\" $agent \"\$@\""
@@ -251,7 +246,7 @@ remove() {
             rm -rf "$(dir_of "$agent")"
             ;;
     esac
-    # Node.js goes when nothing is left to run on it. Sign-ins (~/.claude, ~/.gemini) stay.
+    # Node.js goes when nothing is left to run on it. Sign-ins (~/.claude) stay.
     local left
     left=$(find "$ROOT/agents" "$ROOT/servers" "$ROOT/debuggers" -mindepth 1 -maxdepth 1 2>/dev/null | head -n 1 || true)
     if [ -z "$left" ]; then rm -rf "$ROOT"/node-v*; fi
@@ -275,31 +270,7 @@ login() {
             # Prints a sign-in link; the code the page shows is pasted back here.
             run claude-code --cli auth login --claudeai
             ;;
-        gemini)
-            # Without a browser in the guest, Gemini prints a link and asks for the code. Choose
-            # Google sign-in up front unless the user picked a method already, and take that
-            # choice back if no sign-in came of it: with Google chosen but no credentials,
-            # `gemini --acp` prompts for a code on the protocol's own stdout.
-            local settings="$HOME/.gemini/settings.json" chose=""
-            if [ ! -e "$settings" ]; then
-                mkdir -p "$HOME/.gemini"
-                echo '{"security":{"auth":{"selectedType":"oauth-personal"}}}' > "$settings"
-                chose=1
-            fi
-            # shellcheck disable=SC2329
-            undo_choice() {
-                if [ -n "$chose" ] && [ ! -s "$HOME/.gemini/oauth_creds.json" ]; then rm -f "$settings"; fi
-            }
-            trap undo_choice EXIT
-            trap 'exit 1' HUP INT TERM
-            echo "Sign in with the link Gemini prints, paste the code, then type /quit."
-            local entry
-            entry=$(entry_of gemini)
-            [ -x "$NODE_DIR/bin/node" ] && [ -f "$entry" ] || fail "gemini is not set up; run: quirecode-daemon tools install gemini"
-            NO_BROWSER=true PATH="$NODE_DIR/bin:$PATH" "$NODE_DIR/bin/node" "$entry"
-            [ -s "$HOME/.gemini/oauth_creds.json" ] || fail "no Google sign-in was saved"
-            ;;
-        *) fail "unknown agent '$agent' (claude-code or gemini)" ;;
+        *) fail "unknown agent '$agent' (claude-code)" ;;
     esac
 }
 
@@ -308,7 +279,7 @@ case "${1:-}" in
     remove) [ $# -eq 2 ] || fail "usage: avf-node-agent remove <agent>"; remove "$2" ;;
     js-debug) shift; run_js_debug "$@" ;;
     login) [ $# -eq 2 ] || fail "usage: avf-node-agent login <agent>"; login "$2" ;;
-    claude-code | gemini | bash-language-server | yaml-language-server | json-language-server | \
+    claude-code | bash-language-server | yaml-language-server | json-language-server | \
         html-language-server | css-language-server | docker-langserver | sql-language-server) run "$@" ;;
     *) fail "usage: avf-node-agent setup|remove|login <agent> | <agent> [args]" ;;
 esac

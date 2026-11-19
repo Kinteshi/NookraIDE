@@ -1592,9 +1592,22 @@ mod tests {
 
     #[test]
     fn script_setup_arguments_are_bounded() {
-        let mut manifest = catalog_lookup("gemini").unwrap();
+        let mut manifest = catalog_lookup("claude-code").unwrap();
         manifest.install.script.as_mut().unwrap().setup = vec![String::new()];
         assert!(validate_manifest(&manifest).unwrap_err().contains("setup arguments"));
+    }
+
+    #[test]
+    fn antigravity_catalog_entry_is_a_standalone_acp_download() {
+        let manifest = catalog_lookup("antigravity").unwrap();
+        assert_eq!(manifest.kind, "acp-agent");
+        assert_eq!(manifest.command, ["antigravity", "acp", "--stdio"]);
+        let download = manifest.install.download.as_ref().unwrap();
+        assert_eq!(download.binary, "antigravity");
+        assert_eq!(download.archive_member, "antigravity");
+        assert!(download.artifacts.contains_key("aarch64"));
+        assert!(download.artifacts.contains_key("x86_64"));
+        assert!(validate_manifest(&manifest).is_ok());
     }
 
     #[test]

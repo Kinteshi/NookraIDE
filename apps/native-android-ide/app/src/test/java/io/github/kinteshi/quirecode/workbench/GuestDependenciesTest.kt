@@ -21,7 +21,7 @@ class GuestDependenciesTest {
         assertEquals(GuestDependency.Git, missingDependencyIn("could not start Git: No such file or directory (os error 2)"))
         assertEquals(GuestDependency.JupyterBridge, missingDependencyIn("tool 'jupyter' is not installed in the guest registry"))
         assertEquals(GuestDependency.ClaudeCode, missingDependencyIn("tool 'claude-code' is not installed in the guest registry"))
-        assertEquals(GuestDependency.Gemini, missingDependencyIn("avf-node-agent: gemini is not set up; run: quirecode-daemon tools install gemini"))
+        assertEquals(GuestDependency.Antigravity, missingDependencyIn("tool 'antigravity' is not installed in the guest registry"))
         // Git ran but something else failed.
         assertEquals(null, missingDependencyIn("could not start Git credential prompt listener: Address in use"))
         assertEquals(null, missingDependencyIn("fatal: not a git repository"))

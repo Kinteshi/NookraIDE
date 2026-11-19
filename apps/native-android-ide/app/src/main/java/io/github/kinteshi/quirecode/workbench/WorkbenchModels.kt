@@ -261,12 +261,12 @@ sealed interface ChatEntry {
     data class Notice(val text: String) : ChatEntry
     /** `copilot login --device-code` is waiting for [code] to be entered at [url]. */
     data class DeviceCode(val url: String, val code: String, val done: Boolean = false) : ChatEntry
-    /** A Claude Code or Gemini login in [terminal] waits for the code the page at [url] shows. */
+    /** A Claude Code or Antigravity login in [terminal] waits for the code the page at [url] shows. */
     data class SignInLink(
         val agent: String,
         val url: String,
         val terminal: UUID,
-        /** Gemini stays open after signing in and needs `/quit`. */
+        /** True when a CLI stays open after signing in and needs `/quit`. */
         val quitAfterCode: Boolean = false,
         val codeSent: Boolean = false,
         val done: Boolean = false,
