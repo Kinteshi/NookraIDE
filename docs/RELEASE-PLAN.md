@@ -1,23 +1,32 @@
 # Release plan: 0.1.0
 
 Decisions and open questions for the first release, from the user's discussion on 2026-11-08. The release backlog (R1 to
-R11) is in [NATIVE-IDE-BATCHES.md](NATIVE-IDE-BATCHES.md#release-backlog-first-release); this file holds what was decided
+R13) is in [NATIVE-IDE-BATCHES.md](NATIVE-IDE-BATCHES.md#release-backlog-first-release); this file holds what was decided
 and the options still open, so they survive a context reset.
 
-## Status (11-09)
+## Status (11-22)
 
-R1 to R11 are done (batch 58). The release-signed build was installed on the tablet and walked through as a new user's
-first run (R7), which found and fixed four problems, one of them the installer able to stop the VM. CI and the release
-workflow's dry run pass. **On hold (user, 11-09):** the repository is private, where GitHub doesn't enforce the
-ruleset the user made for `main` (it needs a public repository or Pro), and a private release can't be downloaded by
-others. The user keeps developing and decides the visibility later. Left, in this order:
+The sanitized `Kinteshi/NookraIDE` repository is public; `Kinteshi/NookraIDE-private-archive` remains private. The
+README correctly says there is not yet a public release. No `v0.1.0` tag or release exists.
 
-1. **The user protects `main`** on GitHub (Settings > Branches): only the admin can.
-2. **Tag `v0.1.0`** on `main` and push the tag: the release workflow builds, signs, checks and publishes the release with
-   [releases/0.1.0.md](releases/0.1.0.md) as its notes.
+CI passed on `e79df28` (run 45078824349). The signed release dry run passed on that commit (run 45078830381); its APK
+matched the established `CN=Kinteshi` certificate fingerprint, and public workflow dispatches no longer upload a
+pre-release APK artifact. An earlier private dry run (45076568266) passed checksum verification; its artifact was
+deleted before the repository became public.
 
-Still open from batch 57, for after the release: A7 (the user's own try of the Book Cover and the on-screen keyboard)
-and G17's check with the guest stopped on purpose.
+**Still before the release tag:**
+
+1. Revalidate guest migration and pairing. The current tablet guest still runs the old `quirecode.service`; the
+   installer can install missing tools, and explicit permission was unavailable.
+2. Revalidate screenshot goldens without clearing the installed dev app's data. The existing runner calls `pm clear`,
+   so it was not run on the maintainer's device.
+3. Obtain trademark clearance for the name and icon. Preliminary web research is not legal clearance.
+4. Choose branch protection for `main`; it currently has no ruleset or required checks. Private vulnerability reporting
+   is enabled.
+5. Get the maintainer's immediate confirmation before creating and pushing `v0.1.0`.
+
+The user-facing install and release notes are in [releases/0.1.0.md](releases/0.1.0.md). A7 (the user's own try of the
+Book Cover and on-screen keyboard) was concluded 11-17; G17's guest-stopped check remains a separate backlog item.
 
 ## Next batch, then 0.1.0 (decided; the batch is done)
 
@@ -98,11 +107,11 @@ development, never for releases. Steps, run by the user so the password never pa
    switch), which clears its settings, connections and offline copies on the device (the guest's files are untouched).
    Export settings.json first. The new app id from R2 makes it a separate app anyway.
 
-**Set up by the user, 11-08**: the keystore is `~/keys/android-release.jks` (mode 0600 now), and the four secrets are on
-`Kinteshi/QuireCode`. Checked with the release workflow's dry run (run 42550650913, manual): everything built, and the
-APK is signed by `CN=Kinteshi`, certificate SHA-256 `3553139293d0c4514898daa2294db0b05a19960be7479d71fb7902fa49f6db4c`
-(compare with `keytool -list -v -keystore ~/keys/android-release.jks`). GitHub hides the alias's value wherever it appears
-in the logs, so the word "release" shows as `***` there.
+**Set up by the user, 11-08; reconfigured for the new repository 11-22:** the four release secret names are configured
+on `Kinteshi/NookraIDE`; only the names were checked, never their values. The signed dry run on 11-22 verified that the
+APK uses `CN=Kinteshi` with certificate SHA-256
+`3553139293d0c4514898daa2294db0b05a19960be7479d71fb7902fa49f6db4c`. The release workflow now fails if a different
+certificate signs the APK.
 
 ## How releases work (recommended, not yet decided)
 

@@ -1,10 +1,9 @@
 # Native IDE (Track B): work batches
 
-Privacy note: real device and tailnet addresses, device names and private notebook names in historical entries were
-replaced with examples. Commit IDs recorded before the history rewrite refer to the former history.
+Privacy note: real device and tailnet addresses, device names and private notebook filenames in historical entries were
+replaced with documentation examples. Commit IDs recorded before the history rewrite refer to the former history.
 
-This is the plan of record for Track B. Each batch ends in one commit on
-`agents/reset-and-implement-native-android-ide`, and this file is updated in that commit.
+This is the plan of record for Track B. Each batch is recorded in a commit on `main`.
 Device procedures, build commands and the details of finished work are in
 [NATIVE-IDE-HANDOFF.md](NATIVE-IDE-HANDOFF.md).
 
@@ -377,8 +376,8 @@ stack, variables, debug console. Restore the F9 binding when it works.
   * Tablet: `gh` installed through the daemon, but `gh auth login` failed ("error connecting to
     github.com"): Go's resolver timed out (`lookup github.com: i/o timeout`). The guest image
     ships `/etc/resolv.conf` from its build machine (nameserver 169.254.169.254, Google Cloud
-    search domains), which doesn't answer; glibc works through systemd-resolved (nss `resolve`,
-    a second link with 10.16.230.177), but Go reads the file directly. Not EDNS0
+    search domains), which doesn't answer; glibc works through systemd-resolved (`nss-resolve`),
+    but Go reads the file directly. Not EDNS0
     (`GODEBUG=netedns0=0`), post-quantum TLS (`tlsmlkem=0`), HTTP/2, or parallel A/AAAA
     (`single-request`, tested with the file restored afterwards).
   * Fix, with the user's OK: `/etc/resolv.conf` → `/run/systemd/resolve/stub-resolv.conf`
@@ -2346,7 +2345,7 @@ User's pick: A5. 381 app unit tests pass.
   is about 6 ms a key slower here: for G2, which starts from these numbers. The guest stayed up throughout.
 * Not checked on the tablet: the on-screen keyboard (A7), imported themes, keybindings.json chords beyond Ctrl+K V and
   Ctrl+K Ctrl+I, rename and code actions (the workbench's, unchanged), the banner's new colour.
-* Seen, not investigated: a notebook tab the user had open (`private-notebook-2.ipynb`) wasn't restored after a force
+* Seen, not investigated: a private notebook tab wasn't restored after a force
   stop; perhaps a preview tab (tapped once), which may not be restored.
 * Left for the user: daily use for as long as they choose (the rest of A5), then phase 7.
 
@@ -3237,7 +3236,7 @@ Completed on 2026-11-17. Implemented multi-route computer profiles (`G37`) and C
   * Added encrypted AES-GCM storage for `AccessCredentials` (`CF-Access-Client-Id` and `CF-Access-Client-Secret`) in `ConnectionProfileStore.kt` and `GuestVfsClient.accessHeaders` / `extraHeaders` on HTTP pairing, WebSocket connections (`GuestVfsClient.kt`), and `probeDaemonPort` (`Connections.kt`).
   * Added optional `CF-Access-Client-Id` / `CF-Access-Client-Secret` inputs (and `Clear`) to `ConnectionEditorDialog` and expandable Access service token inputs to `PairingInputSection` / `ComputerPairingDialog` (`ConnectionWizardUi.kt`, `ConnectionsUi.kt`), plus **Second lock: Cloudflare Access service token** instructions in `docs/HOSTING-THE-DAEMON.md`.
 * **Checked on the tablet (`SM-X930`, `192.0.2.66:39495`):**
-  * Installed Batch 75 `QuireCode Dev`, started a temporary TLS `quirecode-daemon` on `127.0.0.1:19875` via `adb reverse`, and paired using a two-route `avf://` string (`192.168.1.1:19879` + `alt=127.0.0.1:19875`): observed automatic failover from the unreachable primary route to `127.0.0.1:19875`, `/tmp/b75-host/Projects` opening in Explorer, the top-bar chip showing `192.168.1.1 · Local`, `Connections` showing `Wi-Fi, Local · Connected (Local)`, `Edit 192.168.1.1` displaying fallback routes, preferred route chips, and Cloudflare Access fields, and **Settings → Guest** showing `Preferred route (192.168.1.1)` with zero errors in `logcat`. Cleaned up daemon, forwards, temp files, and reset tablet dev state (`pm clear` + `POST_NOTIFICATIONS`).
+  * Installed Batch 75 `QuireCode Dev`, started a temporary TLS `quirecode-daemon` on `127.0.0.1:19875` via `adb reverse`, and paired using a two-route `avf://` string (`192.0.2.1:19879` + `alt=127.0.0.1:19875`): observed automatic failover from the unreachable primary route to `127.0.0.1:19875`, `/tmp/b75-host/Projects` opening in Explorer, the top-bar chip showing `192.0.2.1 · Local`, `Connections` showing `Wi-Fi, Local · Connected (Local)`, `Edit 192.0.2.1` displaying fallback routes, preferred route chips, and Cloudflare Access fields, and **Settings → Guest** showing `Preferred route (192.0.2.1)` with zero errors in `logcat`. Cleaned up daemon, forwards, temp files, and reset tablet dev state (`pm clear` + `POST_NOTIFICATIONS`).
 * **Tests:** Added/updated unit tests in `PinnedTlsTest.kt`, `ConnectionProfileStoreTest.kt`, `GuestVfsClientTest.kt`, `ConnectionsTest.kt`, and `crates/avf-daemon/src/tls.rs`; verified app unit tests, debug assemble, daemon/protocol tests, ARM64 `zigbuild`, `clippy`, and `third-party-notices.py`.
 
 ## 76. Zero-download syntax highlighting with Aardink `BuiltInLanguages` (`G41`)
@@ -3446,8 +3445,32 @@ The user requested a complete rebrand and approved changing the Android app ID a
   fragment icon appeared; the old dev and release apps remained installed. The guest was still running and was not
   migrated. No pairing, old private data transfer or guest package installation was attempted.
 * **Left / not checked:** Live guest migration and pairing, release app, themed icon and screenshot goldens were not
-  checked. Existing exports remain in the old folder. Trademark clearance is outstanding; the repository rename is
-  remote but this batch has not been pushed.
+  checked. Existing exports remain in the old folder. Trademark clearance is outstanding. The sanitized repository
+  history is now on the public `Kinteshi/NookraIDE`; the original archive remains private.
+
+## 88. Publish the sanitized source and prepare v0.1.0 (11-22; done, tablet checks limited)
+
+Request: "Can you do all of that for me? Find improvement opportunities on the way."
+
+* **Publication:** Made the sanitized `Kinteshi/NookraIDE` public and verified that `Kinteshi/NookraIDE-private-archive`
+  remains private. No release tag was created.
+* **Release safeguards:** The release workflow now pins the APK's expected certificate SHA-256 and skips uploading a
+  dry-run APK artifact when the repository is public. Enabled GitHub private vulnerability reporting and added
+  `SECURITY.md`. Removed a private network address and notebook filenames from historical notes.
+* **Checks:** The signed dry run passed on `e79df28` (run 45078830381); the certificate was `CN=Kinteshi` with the
+  established SHA-256 fingerprint, and the artifact step was skipped. CI passed on that commit (run 45078824349).
+  An earlier private dry run (run 45076568266) passed all four artifact checksum checks; its artifact was deleted
+  before publication. The release tag remains absent.
+* **Tablet:** Confirmed the old `quirecode.service` was active using a read-only terminal command. Did not run the
+  installer because it can install missing guest tools and explicit permission was unavailable. Did not run
+  `scripts/on-device-tests.py` because it clears dev-app data and removes ADB reverse rules. Linux Terminal and the
+  guest were left running.
+* **Found and fixed:** The old signer check accepted any non-debug key; it now verifies the established signing
+  certificate. Public dry runs no longer publish an unreleased signed APK. Enabled private vulnerability reporting and
+  added a private reporting policy.
+* **Left:** Main-branch protection still needs a maintainer decision; guest migration/pairing and screenshot goldens
+  need safe revalidation; name/logo trademark clearance is outstanding. The `v0.1.0` tag requires immediate
+  maintainer confirmation.
 
 ## Backlog
 ### Open backlog (11-08)
@@ -3552,10 +3575,10 @@ Loose ends: placed in the groups above (11-08).
 
 #### Release backlog (first release)
 
-**On hold (user, 11-09):** the original release work is done but the tag. Since then, the batches 86–87 rebrand still needs
-broader device validation, possible screenshot-golden rebaselining, and name/logo trademark clearance. The repository is private, and GitHub enforces the user's
-ruleset for `main` only on a public repository (or with Pro), and a private release can't be downloaded by others. The
-user holds the release and keeps developing; `v0.1.0` is tagged when they decide on the repository's visibility.
+**Status (11-22):** The sanitized repository is public and the original archive remains private. The signed dry run and
+CI pass, but there is no `v0.1.0` tag or release. Guest migration/pairing and screenshot-golden revalidation remain
+unchecked; trademark clearance is outstanding; `main` has no branch protection. The maintainer must confirm
+immediately before tagging.
 
 Decisions and options are in [RELEASE-PLAN.md](RELEASE-PLAN.md). **The batch before it is done (57)**, but G17's check (A7 concluded 11-17); **next: 0.1.0**, R2 to R11. Registered 11-08, from the user: "let us think about releasing… items in the backlog I don't want to sweep under the rug…
 we have to polish the app for an initial release cycle". Nothing here is started. R1 decides which G and A items the first
@@ -3574,12 +3597,14 @@ release waits for; the rest stay in their lists for later releases.
 | | R9 | Done (58), checked on the tablet | Diagnostics for bug reports: a Copy Diagnostics command (versions, device, guest state, recent errors); no telemetry |
 | | R10 | Done (58) | Out of the release: the aardink-lab module, debug probes, Track A's leftovers (SPEC.md, the untracked `android/`), developer docs kept apart from users' |
 | **4. The repository** | R11 | Done (58) but the tag | This branch becomes the definitive `main`; the other branches and trials (old `main`, the four `agents/*` on GitHub) are scrapped, after a check of the history for secrets; release tags from then on (user, 11-08) |
+| **2. Build and ship** | R12 | Done (88) | Pin the expected release certificate SHA-256; do not upload signed pre-release artifacts from a public dry run |
+| **4. The repository** | R13 | Open | Protect `main` with CI checks and prevent force-push/deletion; decide whether direct pushes or pull requests are the preferred workflow |
 
 Why these groups: 1 sets the scope and the name, which everything else is labelled with; 2 is one pipeline, built once; 3 is
 one pass through the app as a new user meets it.
 
 To investigate (user, 10-28):
-* (Done in batch 16, with a notebook-side finding.) Plotly figures updating in place (the user's private-notebook-1.ipynb: `plot_handle =
+* (Done in batch 16, with a notebook-side finding.) Plotly figures updating in place (a private notebook: `plot_handle =
   display(fig, display_id=True)`, then `plot_handle.update(fig)` per epoch). First look: the
   Jupyter bridge maps `update_display_data` to a new `display_data` output and drops
   `transient.display_id` (`guest/tools/avf-jupyter-bridge.py`, `to_nbformat_output`), so each
