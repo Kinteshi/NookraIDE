@@ -8,7 +8,7 @@ import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
 
 /**
- * QuireCode's Quick Settings tile: a tap opens the IDE; the tile is lit while the app is
+ * Nookra IDE's Quick Settings tile: a tap opens the IDE; the tile is lit while the app is
  * connected to the guest.
  */
 class IdeTileService : TileService() {

@@ -468,7 +468,7 @@ private fun Breadcrumbs(path: String, onNavigate: (String) -> Unit, actions: @Co
 }
 
 /**
- * The welcome page's first-run card: shows the three ways QuireCode runs (on this device alone, in
+ * The welcome page's first-run card: shows the three ways Nookra IDE runs (on this device alone, in
  * Linux Terminal's guest, or on a computer) alongside guided setup, the 30-second tour, and a
  * sample playground buffer.
  */
@@ -482,7 +482,7 @@ private fun GetStartedCard(controller: WorkbenchController) {
         modifier = Modifier.widthIn(max = 560.dp).fillMaxWidth(),
     ) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Welcome to QuireCode", style = MaterialTheme.typography.titleMedium, color = colors.onSurface)
+            Text("Welcome to Nookra IDE", style = MaterialTheme.typography.titleMedium, color = colors.onSurface)
             Text(
                 "Edit local folders right away, or connect to a Linux machine for terminals, language servers, notebooks, and AI.",
                 style = MaterialTheme.typography.bodyMedium,
@@ -563,7 +563,7 @@ private fun EmptyEditor(controller: WorkbenchController) = BoxWithConstraints(Mo
             modifier = Modifier.size(96.dp),
         )
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("QuireCode", style = MaterialTheme.typography.headlineMedium, color = colors.onSurface)
+            Text("Nookra IDE", style = MaterialTheme.typography.headlineMedium, color = colors.onSurface)
             DevBadge()
         }
         Spacer(Modifier.height(16.dp))

@@ -2593,7 +2593,7 @@ class WorkbenchController(private val context: Context) {
         dialog = WorkbenchDialog.GuestCommand(
             title = "Remove ${dependency.label}?",
             text = "This removes ${dependency.label} from the guest, with what it installed, and unregisters it. " +
-                "${dependency.usedFor} stops working until it is installed again; QuireCode offers it then. " +
+                "${dependency.usedFor} stops working until it is installed again; Nookra IDE offers it then. " +
                 "It runs in a new terminal.",
             command = command,
             done = "${dependency.label} removed",
@@ -3478,7 +3478,7 @@ class WorkbenchController(private val context: Context) {
             recentMessages = outputLog.toList(),
         )
         val report = diagnosticsReport(info, secrets = listOf(token))
-        context.getSystemService(ClipboardManager::class.java)?.setPrimaryClip(ClipData.newPlainText("QuireCode diagnostics", report))
+        context.getSystemService(ClipboardManager::class.java)?.setPrimaryClip(ClipData.newPlainText("Nookra IDE diagnostics", report))
         status = "Diagnostics copied: paste them in your bug report (read them first; nothing was sent)"
     }
 
@@ -3755,7 +3755,7 @@ class WorkbenchController(private val context: Context) {
     }
 
     /**
-     * What the daemon lists this device as when it pairs ("QuireCode on Galaxy Tab S11 Ultra"), to tell devices apart and
+     * What the daemon lists this device as when it pairs ("Nookra IDE on Galaxy Tab S11 Ultra"), to tell devices apart and
      * revoke one (`quirecode-daemon devices`, G30): the device's own name from Android's settings, else its model.
      */
     private fun pairingDeviceName(): String {
@@ -4554,7 +4554,7 @@ class WorkbenchController(private val context: Context) {
         val flags = android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
         val granted = runCatching { resolver.takePersistableUriPermission(uri, flags) }.isSuccess
         if (!granted) {
-            status = "Android didn't let QuireCode keep access to that folder; pick another"
+            status = "Android didn't let Nookra IDE keep access to that folder; pick another"
             return
         }
         val root = treeRoot(uri.toString())
@@ -4697,7 +4697,7 @@ class WorkbenchController(private val context: Context) {
         if (isTreePath(target)) {
             // A device folder (G29): no guest needed, only the folder's grant.
             if (!files.device.hasAccess(target)) {
-                status = "QuireCode no longer has access to ${displayName(target)}; open it again with Open Device Folder"
+                status = "Nookra IDE no longer has access to ${displayName(target)}; open it again with Open Device Folder"
                 forgetRecentWorkspace(target)
                 return
             }
@@ -6040,7 +6040,7 @@ class WorkbenchController(private val context: Context) {
             return
         }
         val sample = buildString {
-            appendLine("// Welcome to QuireCode — edit here, try Ctrl+P (Quick Open),")
+            appendLine("// Welcome to Nookra IDE — edit here, try Ctrl+P (Quick Open),")
             appendLine("// or open Settings > Appearance to switch between Classic and Material You themes.")
             appendLine()
             appendLine("data class Mode(val name: String, val highlightedBuiltIn: Boolean)")
@@ -7846,7 +7846,7 @@ class WorkbenchController(private val context: Context) {
         }
         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         val text = surface.text.substring(range.first, range.last)
-        clipboard.setPrimaryClip(ClipData.newPlainText("QuireCode", text))
+        clipboard.setPrimaryClip(ClipData.newPlainText("Nookra IDE", text))
         if (cut) surface.deleteSelection()
     }
 
@@ -11442,7 +11442,7 @@ class WorkbenchController(private val context: Context) {
                     }
                     if (bytes.size > MAX_LANGUAGE_PACK_BYTES) throw IOException("The pack is larger than expected")
                     val digest = java.security.MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
-                    if (digest != pack.sha256) throw IOException("The download doesn't match the checksum QuireCode expects")
+                    if (digest != pack.sha256) throw IOException("The download doesn't match the checksum Nookra IDE expects")
                     AssetPackInstaller(packsDirectory).install(bytes.inputStream())
                 }
                 AssetPackGrammarLoader.loadPack(directory)

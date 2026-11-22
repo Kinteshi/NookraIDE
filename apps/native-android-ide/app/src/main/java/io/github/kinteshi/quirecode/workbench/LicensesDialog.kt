@@ -105,7 +105,7 @@ internal fun LicensesDialog(controller: WorkbenchController) {
                 components == null -> Text("Loading…")
                 else -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        "QuireCode is licensed under the Apache License 2.0. It includes the work of others, each under its own licence:",
+                        "Nookra IDE is licensed under the Apache License 2.0. It includes the work of others, each under its own licence:",
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     OutlinedTextField(

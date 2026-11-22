@@ -124,7 +124,7 @@ class DapClient(private val transport: GuestVfsClient, val tool: String = DEBUGP
             addProperty("request_seq", request.get("seq")?.asInt ?: 0)
             addProperty("success", success)
             addProperty("command", request.get("command")?.asString ?: "")
-            if (success) add("body", JsonObject()) else addProperty("message", "Not supported by QuireCode")
+            if (success) add("body", JsonObject()) else addProperty("message", "Not supported by Nookra IDE")
         }
         transport.sendRpcMessage(id, gson.toJson(response))
     }

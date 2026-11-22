@@ -123,7 +123,7 @@ internal fun guidedCommands(option: RemoteSetupOption, os: ComputerOs): GuidedCo
     }
 }
 
-/** Trims [raw] and returns it if it is a valid QuireCode `avf://` pairing string (G36). */
+/** Trims [raw] and returns it if it is a valid Nookra IDE `avf://` pairing string (G36). */
 internal fun extractConnectionStringFromText(raw: String?): String? {
     val trimmed = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return null
     return trimmed.takeIf { parseConnectionString(it) != null }

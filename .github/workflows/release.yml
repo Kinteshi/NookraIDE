@@ -89,4 +89,4 @@ jobs:
         if: ${{ startsWith(github.ref, 'refs/tags/') }}
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/* --title "QuireCode $VERSION" --notes-file "docs/releases/$VERSION.md"
+        run: gh release create "$GITHUB_REF_NAME" dist/* --title "Nookra IDE $VERSION" --notes-file "docs/releases/$VERSION.md"

@@ -111,7 +111,7 @@ class DeviceTreeFs(private val resolver: ContentResolver, private val executor: 
         val cursor = try {
             resolver.query(children, columns, null, null, null)
         } catch (error: SecurityException) {
-            throw GuestVfsException("PermissionDenied", "QuireCode no longer has access to this folder; open it again")
+            throw GuestVfsException("PermissionDenied", "Nookra IDE no longer has access to this folder; open it again")
         } ?: throw IOException("Couldn't list ${treeRelative(path).ifEmpty { "the folder" }}")
         return cursor.use {
             buildList {

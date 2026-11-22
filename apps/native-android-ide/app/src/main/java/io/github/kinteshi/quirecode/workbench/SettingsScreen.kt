@@ -509,7 +509,7 @@ private fun LazyListScope.files(controller: WorkbenchController, settings: Workb
     }
     item { SwitchRow(Icons.Outlined.Image, "Open SVG files as images", "Drawn in the image viewer; the buttons by the file path show the source", settings.svgAsImage) { set(WorkbenchSettings.SVG_AS_IMAGE, it) } }
     item { Section("Folders") }
-    item { SwitchRow(Icons.Outlined.History, "Recent folders in the launcher", "Long-press QuireCode's icon to open one of the last four folders", settings.launcherShortcuts) { set(WorkbenchSettings.LAUNCHER_SHORTCUTS, it) } }
+    item { SwitchRow(Icons.Outlined.History, "Recent folders in the launcher", "Long-press Nookra IDE's icon to open one of the last four folders", settings.launcherShortcuts) { set(WorkbenchSettings.LAUNCHER_SHORTCUTS, it) } }
     item {
         SwitchRow(Icons.AutoMirrored.Outlined.DriveFileMove, "Open the last folder offline", "Without a guest, its tabs come back from this device's copies; saves wait for the guest", settings.offlineWorkspace) {
             set(WorkbenchSettings.OFFLINE_WORKSPACE, it)
@@ -870,7 +870,7 @@ private fun LazyListScope.about(controller: WorkbenchController) {
             Icons.Outlined.Info,
             "Version ${version ?: "unknown"}" + if (DevBuild.enabled) " (dev build)" else "",
             if (DevBuild.enabled) {
-                "A development build, installed beside QuireCode with its own settings and pairing"
+                "A development build, installed beside Nookra IDE with its own settings and pairing"
             } else {
                 "A native code editor for tablets, with a Linux machine behind it"
             },

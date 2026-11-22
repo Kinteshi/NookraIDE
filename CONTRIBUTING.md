@@ -1,11 +1,11 @@
-# Contributing to QuireCode
+# Contributing to Nookra IDE
 
-This repository holds **QuireCode**, a native Android IDE for tablets, and the Rust daemon it talks to inside the
+This repository holds **Nookra IDE**, a native Android IDE for tablets, and the Rust daemon it talks to inside the
 Android Virtualization Framework (AVF) Debian guest. These guidelines are for anyone changing it, people and coding
 agents alike. They describe what the product is meant to be, the decisions that follow from that, and how work is done
 and recorded here. When a change would go against one of them, raise it first rather than working around it.
 
-## What QuireCode is
+## What Nookra IDE is
 
 * **A native editor for a tablet, with a Linux machine behind it.** The app is Kotlin and Jetpack Compose. Everything heavy,
   including language servers, debuggers, Jupyter kernels, Git, search, terminals and Copilot, runs in the AVF guest

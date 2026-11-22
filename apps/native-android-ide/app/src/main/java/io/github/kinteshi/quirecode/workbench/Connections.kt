@@ -98,7 +98,7 @@ fun connectionSummary(facts: ConnectionFacts): ConnectionSummary {
         )
         ConnectionState.NotSetUp -> ConnectionSummary(
             state, "Set up", "Not set up yet",
-            "QuireCode works on a Linux machine: this tablet's Linux guest, or a computer on your network. Set one up once; " +
+            "Nookra IDE works on a Linux machine: this tablet's Linux guest, or a computer on your network. Set one up once; " +
                 "afterwards the app connects by itself.",
         )
         ConnectionState.Idle -> ConnectionSummary(state, "Connect", "Not connected", "Connect to ${facts.name} to open its files.")

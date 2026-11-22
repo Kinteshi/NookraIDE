@@ -256,7 +256,7 @@ fun WorkbenchDialogHost(controller: WorkbenchController) {
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        "Open ${controller.displayName(dialog.recent.path)} from this device? QuireCode will disconnect " +
+                        "Open ${controller.displayName(dialog.recent.path)} from this device? Nookra IDE will disconnect " +
                             "from ${controller.profileName.ifBlank { "the current guest" }}.",
                     )
                     if (dialog.hasUnsaved) Text("Unsaved edits are kept as drafts for this folder.")
@@ -331,11 +331,11 @@ fun WorkbenchDialogHost(controller: WorkbenchController) {
                     Text(
                         "• Apps start too many background processes. Android allows 32 across all apps, and the virtual machine takes 6. " +
                             "Past that, switching apps makes Android stop some, which can include the guest. Build tools, data loaders and " +
-                            "other terminal apps can start many. QuireCode starts none on the tablet; its work runs in the guest.",
+                            "other terminal apps can start many. Nookra IDE starts none on the tablet; its work runs in the guest.",
                     )
                     Text(
                         "Developer options may have a switch that lifts that limit (\"Disable child process restrictions\" on Android 14 and " +
-                            "later). It's a device setting for you to decide on; QuireCode doesn't change it.",
+                            "later). It's a device setting for you to decide on; Nookra IDE doesn't change it.",
                         style = MaterialTheme.typography.bodySmall,
                     )
                     Text(
@@ -1205,7 +1205,7 @@ private fun GuestSetupDialog(controller: WorkbenchController, setup: WorkbenchDi
                     )
                     FilledTonalButton(onClick = controller::openDeveloperOptions) { Text("Developer options") }
                 }
-                Text("1. Run this in Linux Terminal. It installs the QuireCode daemon and its tools, then prints a pairing code.", style = MaterialTheme.typography.bodyMedium)
+                Text("1. Run this in Linux Terminal. It installs the Nookra IDE daemon and its tools, then prints a pairing code.", style = MaterialTheme.typography.bodyMedium)
                 when {
                     controller.setupError != null -> Text(controller.setupError!!, style = MaterialTheme.typography.bodySmall, color = colors.error)
                     controller.setupCommand == null -> Text("Preparing the setup files…", style = MaterialTheme.typography.bodySmall)

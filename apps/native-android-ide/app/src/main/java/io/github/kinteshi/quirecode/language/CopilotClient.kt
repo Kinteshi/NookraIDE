@@ -46,7 +46,7 @@ class CopilotClient(
         transport,
         initializationOptions = JsonObject().apply {
             add("editorInfo", JsonObject().apply {
-                addProperty("name", "QuireCode")
+                addProperty("name", "Nookra IDE")
                 addProperty("version", editorVersion)
             })
             add("editorPluginInfo", JsonObject().apply {

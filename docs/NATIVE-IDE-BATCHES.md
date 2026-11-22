@@ -3398,6 +3398,25 @@ Completed on 2026-11-18 (closing `G12`, completing the Size S grant-feasibility 
   * Reverted the temporary debug manifest and probe hook after recording the result; `G16` now has a proven green light for future L+ implementation (not for store installs).
 * **`G18` — Dropped (user, 2026-11-18):** Marked dropped in the Open backlog and removed the pending glibc-test question from `docs/NATIVE-IDE-HANDOFF.md`.
 
+## 86. Nookra IDE rebrand (11-22; done, not checked on tablet)
+
+Request: the user selected Nookra IDE and the Collected fragments concept, then asked to "rebrand away!"
+
+* Renamed user-facing app, setup, pairing, diagnostics and documentation references to **Nookra IDE**; debug builds use
+  **Nookra IDE Dev**. Added the selected **Collected fragments** mark as editable SVG, adaptive launcher and monochrome
+  icons, with a warm, dotted debug variant, and matching notification and Quick Settings icons.
+  The labels are in `app/build.gradle.kts`, the welcome screen is in `EditorPane.kt`, and the pairing instruction is in
+  `crates/avf-daemon/src/lib.rs`; the master icon is `docs/branding/nookra-ide-icon.svg`.
+* Preserved application IDs, `quirecode-daemon`, existing configuration and export paths, release asset names, and the
+  `Kinteshi/QuireCode` repository URL for compatibility.
+* **Checks:** 455 Android unit tests (453 passed, two opt-in tests skipped); 152 Rust tests; clippy (five pre-existing
+  warnings); debug and release APK assembly and ARM64 daemon `zigbuild`. Confirmed both APK labels and IDs and that their
+  bundled daemon matches the rebuilt binary. Checked the icon paths against the SVG.
+* **Found and fixed:** The bundled ARM64 daemon needed rebuilding after the pairing instruction changed; the rebuilt binary
+  was packaged into the debug APK.
+* **Not checked:** No tablet interaction. The old device screenshot goldens may need rebaselining after visual review.
+  The name and logo have not received trademark clearance; existing uses of Nookra were found during preliminary research.
+
 ## Backlog
 ### Open backlog (11-08)
 The current lists of what's open, in two: the general backlog, and the Aardink switch's until it's complete. The older
@@ -3413,7 +3432,7 @@ Grouped (11-08) so that what's cheaper done together is done together; the numbe
 | **1. Performance, after the flip** | G1 | 52 | Done in 84 | Memory against 250 MB budget: `225.8–236.7 MB` PSS / `360.0–370.6 MB` RSS (debug build; batch 55 was 262–290 PSS / 414–442 RSS); cached APK syntax assets/`EditorTheme`/`textMateTokenColors`/fences, bounded `closedDocuments` (8), cleared caches on empty workbench |
 | | G2 | 53 | Done in 84 | Key to frame against 16 ms p95 budget: **`11.4 ms` median / `13.0 ms` p95** injected (down from `12.7 / 19.2 ms`); moved `codeEditorDescription` into `.semantics`, dropped per-keystroke `documentRevision` recomposition in `EditorArea`/`StatusBar`/`AardinkDecorations`, fast-pathed `pythonCells` & `splitLines`, cached single-copy `state.text`, and offloaded `JsonRpcConnection.send` |
 | **2. Guest away** | G17 | 69 | S, the user's | Check the "guest stopped" banner with the guest stopped on purpose while connected; the rest was done in batch 57 (G14 and G5 too) |
-| **3. Backends, and running without Terminal** | G13 | 65 | S–M to explore, L+ to adopt | Other backends: proot, Termux and others |
+| **3. Backends, and running without Terminal** | G13 | 65 | S–M to explore, L+ to adopt | Other backends: proot, Termux and others. Preliminary research recommends an opt-in Termux + PRoot proof of concept; adoption remains undecided |
 | | G16 | 68 | Grant proven in 85; L+ to build | Bundle the image and use AVF without Terminal (not for store installs). Batch 85 verified on `SM-X930` (Android 16): `adb shell pm grant` grants both `MANAGE_VIRTUAL_MACHINE` and `USE_CUSTOM_VIRTUAL_MACHINE` (`exit=0`), `VirtualMachineManager` is on `BOOTCLASSPATH`, `getCapabilities() == 3` (protected + non-protected VMs), and `get()` succeeds from `untrusted_app` with no SELinux/hidden-API block |
 | | G18 | 70 | Dropped (user, 11-18) | Mode without Terminal: local backend, ML on another machine, glibc test |
 | **4. Tests and accessibility** | G9 | 22 | Done in 82 | Accessibility pass: TalkBack labels, `contentDescription`, `stateDescription`, `Role`, `heading()`, and click actions across Explorer, editor, tabs, breadcrumbs, `KeyBar`, notebooks/outputs, top bar, and status bar |
@@ -3501,7 +3520,8 @@ Loose ends: placed in the groups above (11-08).
 
 #### Release backlog (first release)
 
-**On hold (user, 11-09):** everything is done but the tag. The repository is private, and GitHub enforces the user's
+**On hold (user, 11-09):** the original release work is done but the tag. Since then, the batch 86 rebrand still needs
+device validation, possible screenshot-golden rebaselining, and name/logo trademark clearance. The repository is private, and GitHub enforces the user's
 ruleset for `main` only on a public repository (or with Pro), and a private release can't be downloaded by others. The
 user holds the release and keeps developing; `v0.1.0` is tagged when they decide on the repository's visibility.
 
@@ -3512,7 +3532,7 @@ release waits for; the rest stay in their lists for later releases.
 | Group | # | Size | Description |
 |---|---|---|---|
 | **1. Decide** | R1 | Decided 11-08; its batch done (57) | 0.1.0 follows batch 57: A5, A6, A7, G20, G6 and the whole of group 2 (G14, G17, G5 and its loose ends) |
-| | R2 | Done (58) | **QuireCode**, app id `io.github.kinteshi.quirecode`, Quire's icon; the guest daemon is `quirecode-daemon` (`quirecode.service`, `~/.config/quirecode`); the repository is `Kinteshi/QuireCode` |
+| | R2 | Done (58); rebranded in 86 | **Nookra IDE**, app id `io.github.kinteshi.quirecode`, Collected fragments icon; the guest daemon is `quirecode-daemon` (`quirecode.service`, `~/.config/quirecode`); the repository is `Kinteshi/QuireCode` |
 | | R3 | Done (58) | Licence **Apache-2.0**: LICENSE and NOTICE, Cargo changed, notices generated from what ships and shown in Settings > About |
 | **2. Build and ship** | R4 | Done (58) | Release builds: version from the tag, signing from the environment, R8 (25 MB); the user's release key, checked by CI's dry run |
 | | R5 | Done (58) | CI and releases (GitHub Actions): tests, notices check, daemon for the guest and hosts, signed APK, checksums, release from a tag; notes in docs/releases/ |

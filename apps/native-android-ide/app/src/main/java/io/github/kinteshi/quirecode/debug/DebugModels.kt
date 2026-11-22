@@ -95,7 +95,7 @@ fun pythonLaunchArguments(program: String, cwd: String, python: String, justMyCo
 /** `initialize` for [adapterId]; js-debug starts each program in a session of its own through [startDebugging]. */
 fun dapInitializeArguments(adapterId: String = "debugpy", startDebugging: Boolean = false): JsonObject = JsonObject().apply {
     addProperty("clientID", "avf-studio")
-    addProperty("clientName", "QuireCode")
+    addProperty("clientName", "Nookra IDE")
     addProperty("adapterID", adapterId)
     if (startDebugging) addProperty("supportsStartDebuggingRequest", true)
     addProperty("linesStartAt1", true)

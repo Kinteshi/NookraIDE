@@ -32,7 +32,7 @@ class DiagnosticsTest {
     @Test
     fun reportHasTheFactsAndRedactsTheToken() {
         val report = diagnosticsReport(info, secrets = listOf("secret-token"))
-        assertTrue(report.startsWith("QuireCode diagnostics\n"))
+        assertTrue(report.startsWith("Nookra IDE diagnostics\n"))
         assertTrue(report.contains("App: 0.1.0 (100)\n"))
         assertTrue(report.contains("Guest: connected (127.0.0.1:19870)"))
         assertTrue(report.contains("Language servers: python ready"))

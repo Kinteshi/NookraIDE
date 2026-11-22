@@ -1,6 +1,6 @@
-# Working on QuireCode: a guide for coding agents
+# Working on Nookra IDE: a guide for coding agents
 
-This guide is for any coding agent (or person) picking up work on QuireCode. It says how the work is done, how to report it,
+This guide is for any coding agent (or person) picking up work on Nookra IDE. It says how the work is done, how to report it,
 what must never happen on the maintainer's devices, and what earlier sessions learned the hard way. It doesn't depend on
 any one agent's tools.
 
@@ -155,7 +155,7 @@ real incidents.
   maintainer may pick the tablet up mid-session. If another app is in front, stop.
 * **Ask before touching Settings.** Settings live on the device. If one differs from what you expect, the maintainer
   probably changed it, so ask before reverting.
-* **Test in the dev app.** Test builds install as `io.github.kinteshi.quirecode.dev` ("QuireCode Dev", orange, DEV badge)
+* **Test in the dev app.** Test builds install as `io.github.kinteshi.quirecode.dev` ("Nookra IDE Dev", orange, DEV badge)
   and stay installed beside the release app. The release-signed app is only updated with CI's APK.
 * **Clean up after a batch:**
   * your test folders in the guest;

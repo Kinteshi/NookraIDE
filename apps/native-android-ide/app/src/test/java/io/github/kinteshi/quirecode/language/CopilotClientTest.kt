@@ -43,7 +43,7 @@ class CopilotClientTest {
             assertEquals("Lsp", guest.startedKinds.poll(5, TimeUnit.SECONDS))
             assertEquals(COPILOT_LANGUAGE_SERVER_TOOL, guest.startedTools.poll(5, TimeUnit.SECONDS))
             val options = initializeParams.poll(5, TimeUnit.SECONDS)!!.getAsJsonObject("initializationOptions")
-            assertEquals("QuireCode", options.getAsJsonObject("editorInfo").get("name").asString)
+            assertEquals("Nookra IDE", options.getAsJsonObject("editorInfo").get("name").asString)
             assertEquals("1.2.3", options.getAsJsonObject("editorPluginInfo").get("version").asString)
 
             val signIn = copilot.signIn().get(5, TimeUnit.SECONDS)!!

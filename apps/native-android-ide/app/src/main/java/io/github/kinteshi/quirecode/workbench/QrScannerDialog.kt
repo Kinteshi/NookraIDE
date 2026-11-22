@@ -233,7 +233,7 @@ internal fun QrScannerDialog(onScanned: (String) -> Unit, onDismiss: () -> Unit)
                         }
                         if (nonConnectionNotice) {
                             Text(
-                                "Found a QR code, but it isn't a QuireCode connection string (avf://…).",
+                                "Found a QR code, but it isn't a Nookra IDE connection string (avf://…).",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.secondary,
                             )

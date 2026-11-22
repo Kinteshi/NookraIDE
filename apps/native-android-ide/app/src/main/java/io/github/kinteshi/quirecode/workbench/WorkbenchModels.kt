@@ -102,7 +102,7 @@ sealed interface WorkbenchDialog {
     /** Keyboard Shortcuts waits for the keys to give [commandId]. */
     data class RecordKeybinding(val commandId: String) : WorkbenchDialog
     data object KeybindingsJson : WorkbenchDialog
-    /** The language packs QuireCode knows, to fetch one by hand. */
+    /** The language packs Nookra IDE knows, to fetch one by hand. */
     data object LanguagePacks : WorkbenchDialog
     /** Terminal: Rename… for terminal [id]. */
     data class TerminalRename(val id: UUID, val name: String) : WorkbenchDialog

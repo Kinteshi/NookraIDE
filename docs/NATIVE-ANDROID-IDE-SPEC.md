@@ -1,7 +1,7 @@
 # AVF Studio — Track B: Native Android IDE Specification
 
 > **Status:** v1.0 draft. Companion to `SPEC.md` (Track A, VS Code Host), which was removed for 0.1.0 (it's in the git
-> history before then); the sections of it cited here are no longer in the tree. The app is now QuireCode.
+> history before then); the sections of it cited here are no longer in the tree. The app is now Nookra IDE.
 > **Audience:** implementing agents and reviewers.
 > **One-line summary:** a Kotlin/Jetpack Compose IDE that looks and behaves like VS Code, renders natively on Android, and runs every heavy service (language servers, debuggers, terminals, Git, search, Jupyter kernels, AI agents) inside the AVF Debian guest through the same `avf-daemon` used by Track A.
 

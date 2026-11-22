@@ -612,7 +612,7 @@ def run_scenarios(serial: str, daemon_bin: pathlib.Path, shot_dir: pathlib.Path 
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Run on-device QuireCode accessibility and golden screenshot suite")
+    parser = argparse.ArgumentParser(description="Run on-device Nookra IDE accessibility and golden screenshot suite")
     parser.add_argument("--serial", default=os.environ.get("AVF_DEVICE_SERIAL", ""), help="ADB device serial (e.g. 192.0.2.66:40433)")
     parser.add_argument("--apk", type=pathlib.Path, default=DEFAULT_APK)
     parser.add_argument("--daemon", type=pathlib.Path, default=DEFAULT_DAEMON)

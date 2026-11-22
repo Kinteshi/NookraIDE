@@ -1,16 +1,20 @@
 # Native IDE (Track B) — handoff
 
-Last updated: 2026-11-18 (UTC). Read this first when resuming. The batch plan and its status are in [NATIVE-IDE-BATCHES.md](NATIVE-IDE-BATCHES.md). Scope decisions are in
+Last updated: 2026-11-22 (UTC). Read this first when resuming. The batch plan and its status are in [NATIVE-IDE-BATCHES.md](NATIVE-IDE-BATCHES.md). Scope decisions are in
 [NATIVE-ANDROID-IDE-SPEC.md](NATIVE-ANDROID-IDE-SPEC.md) under "Scope reset (2026-10-23)". How work is done here (Material You,
 the engine seam, batches, testing on the device) is in [CONTRIBUTING.md](../CONTRIBUTING.md). For agents: how to work with the maintainer, the device's hard rules and the lessons so far are in [AGENT-GUIDE.md](AGENT-GUIDE.md).
 
-## Current state (2026-11-18)
+## Current state (2026-11-22)
 
-* **Progress:** batches 1–85 are done (41 was exploration with no app change); **batch 82** (`G9` accessibility + `G10` automated on-device goldens), **batch 83** (`G8` binary buffers, media, pickers, `Play`, third-party `html-manager`/`anywidget`, saved `metadata.widgets`), **batch 84** (`G1` + `G2` post-flip performance pass: `225.8–236.7 MB` PSS, `11.4 ms` median / `13.0 ms` p95 injected key-to-frame), and **batch 85** (`G12` Antigravity CLI v1.5.12 replacing Gemini CLI, `G16` AVF `pm grant` + `VirtualMachineManager` runtime probe passing on `SM-X930`, and `G18` dropped) are implemented, unit-tested, and checked on the tablet.
+* **Rebrand:** Nookra IDE replaces the QuireCode display name, with the Collected fragments icon. The app ID, existing
+  daemon commands, configuration paths and repository URL stay unchanged so updates, settings and pairings remain usable.
+  The new branding has not yet been checked on the tablet; screenshot goldens may need rebaselining and name and logo
+  trademark clearance remains outstanding.
+* **Progress:** batches 1–86 are done (41 was exploration with no app change); **batch 82** (`G9` accessibility + `G10` automated on-device goldens), **batch 83** (`G8` binary buffers, media, pickers, `Play`, third-party `html-manager`/`anywidget`, saved `metadata.widgets`), **batch 84** (`G1` + `G2` post-flip performance pass: `225.8–236.7 MB` PSS, `11.4 ms` median / `13.0 ms` p95 injected key-to-frame), and **batch 85** (`G12` Antigravity CLI v1.5.12 replacing Gemini CLI, `G16` AVF `pm grant` + `VirtualMachineManager` runtime probe passing on `SM-X930`, and `G18` dropped) were unit-tested and checked on the tablet. **Batch 86** rebrands the app and is unit-tested and built, but not yet checked on the tablet.
 * **What's open:** [Open backlog](NATIVE-IDE-BATCHES.md#open-backlog-11-08), in two lists: the remaining general
   backlog and the Aardink switch's, which replaces this file's old "Remaining" list.
 * **Next batch:** pick next (remaining general backlog: `G13` proot/Termux backends, `G16` L+ own-AVF VM implementation [grant proven in 85], `G17` guest-stopped check; or `v0.1.0` release when repository goes public).
-* **Release 0.1.0 on hold:** all release backlog items (R1–R10: Apache-2.0, notices, signing, CI workflows, QuireCode renaming, diagnostics) and branch consolidation (R11) are finished. Tagging and release are paused awaiting user decision on repository visibility.
+* **Release 0.1.0 on hold:** the original release backlog items (R1–R10: Apache-2.0, notices, signing, CI workflows, naming, diagnostics) and branch consolidation (R11) are finished. The rebrand still needs device validation and trademark clearance. Tagging and release are paused awaiting user decision on repository visibility.
 * **Offline & remote features (batches 62–75):** file sharing/import/export (group 9, batch 62), Tailscale daemon hardening (batch 63), device folder workspaces without a guest (batch 64), paired device management UI (batch 65), guest folders kept offline with sync, offline Explorer, Quick Open, and offline search (batch 66), offline/device-only previews, images, hex view, snippets, and kernel-less notebook editing (batch 67, completing G29), and Troubleshoot port-vs-daemon probing + Tailscale split-tunneling guidance, Cloudflare Tunnel (`--tunnel`, public TLS), and router port forwarding (batch 68, completing G30 and G31); batch 69 fixed issues from review. Batch 70 implements and verifies G33/G34 (connection kinds and ordering, Recent origins and connection-scoped workspace/cache state). Batch 71 implements and verifies G39/G38 (workspace-first launch/offline recovery, explicit Reconnect, Work offline, workspace-switch confirmation, route-aware Troubleshoot, and TCP-probe-backed forwarding checks). Batch 74 implements and verifies G35/G36 (guided Add a connection wizard, live Tailscale status, copy/share host commands, daemon QR output, CameraX+ZXing scanner, and clipboard offer). Batch 75 implements and verifies G37/G32 (multi-route profiles, automatic route failover, `pair --all`, per-profile preferred route in Settings, and encrypted Cloudflare Access service token headers).
 * **The switch to Aardink:** [AARDINK-SWITCH-PLAN.md](AARDINK-SWITCH-PLAN.md). All phases are done (batches 42 to 57), now pinned to Aardink 0.10.0 (batch 72) with native `0.10.0` features adopted (batch 73), `A7` concluded (11-17), and `aardink-languages:0.10.0` prioritized ahead of `tm4e` (batch 76): **Aardink is the editor**; sora-editor was removed in batch 57, and `tm4e` serves as fallback for languages beyond Aardink's 20 built-ins. The workbench's own Material You cards are drawn over Aardink from its geometry (batch 54). Review each Aardink release against the plan (its "Release reviews"). Requests to Aardink are drafted or listed, not filed.
 * **Tablet:** wireless ADB is paired and connected on `192.0.2.66:40433`; `QuireCode Dev` was updated with the batch 85 build, verified with `G16` AVF `pm grant` + `VirtualMachineManager` probe and `AccessibilityAndScreenshotTest`, restored to full window bounds, and reset to clean app state (`pm clear`).
@@ -18,8 +22,8 @@ the engine seam, batches, testing on the device) is in [CONTRIBUTING.md](../CONT
 ## Where things are
 
 * **Branch:** `main` of `github.com/Kinteshi/QuireCode` (private). Since 11-08 it's the only branch: the earlier trials were deleted after a backup (`~/backups/AVFStudio-before-rewrite-2026-11-08.bundle`), and the history's authors rewritten to `Kinteshi <36821534+Kinteshi@users.noreply.github.com>`, the identity commits use from now. Pushing is the user's call. The untracked top-level `android/` folder holds build leftovers from Track A, so ignore it.
-* **App:** `apps/native-android-ide`, app id and package `io.github.kinteshi.quirecode` (QuireCode; `com.avfstudio.nativeide` before 11-08).
-  Debug builds are a separate app, `io.github.kinteshi.quirecode.dev` ("QuireCode Dev"), so testing on the tablet never
+* **App:** `apps/native-android-ide`, app id and package `io.github.kinteshi.quirecode` (Nookra IDE; formerly QuireCode).
+  Debug builds are a separate app, `io.github.kinteshi.quirecode.dev` ("Nookra IDE Dev"), so testing on the tablet never
   replaces the release-signed app (signed builds come only from CI, whose key's password never enters a session). The
   dev app pairs with the guest like any client (`quirecode-daemon pair`); it stays installed beside the release app (user, 11-09); remove test files when a batch's checks end. It
   looks different on purpose (batch 60): an orange palette by default, a DEV badge by its name, its own launcher icon.
@@ -36,7 +40,7 @@ cargo test -p avf-daemon -p avf-protocol
 PATH=$HOME/.cargo/bin:$PATH cargo zigbuild --release -p avf-daemon --target aarch64-unknown-linux-gnu.2.28
 ```
 
-At last run (batch 85): 455 app unit tests (453 passed and 2 opt-in live-host/device tests skipped when unset; on Java 21, installed beside 17), all 6 `AccessibilityAndScreenshotTest` cases pass live against `SM-X930` with `AVF_DEVICE_SERIAL=192.0.2.66:40433`, and 150 daemon/protocol tests pass; debug assemble, ARM64 `zigbuild`, and notices check pass (374 components). Clippy passes with the same five pre-existing lints. CI runs app and Rust tests on every push.
+At last run (batch 86): 455 app unit tests (453 passed and 2 opt-in live-host/device tests skipped when unset), 152 daemon/protocol tests, debug and release assemble, ARM64 `zigbuild`, and clippy passed (five pre-existing warnings). The batch 85 live device results and screenshot goldens predate the rebrand and have not been rechecked. CI runs app and Rust tests on every push.
 
 ## Reference tablet (Galaxy Tab S11 Ultra, SM-X930)
 

@@ -22,7 +22,7 @@ android {
         versionName = version
         versionCode = versionCodeOf(version)
         buildConfigField("String", "AARDINK_VERSION", "\"$aardinkVersion\"")
-        manifestPlaceholders["appLabel"] = "QuireCode"
+        manifestPlaceholders["appLabel"] = "Nookra IDE"
         buildConfigField("boolean", "DEV_BUILD", "false")
     }
 
@@ -40,11 +40,11 @@ android {
     }
 
     buildTypes {
-        // A debug build is its own app beside the release-signed one ("QuireCode Dev"), so trying a change on the
+        // A debug build is its own app beside the release-signed one ("Nookra IDE Dev"), so trying a change on the
         // tablet doesn't need the release key or replace the installed app; it pairs with the guest like any client.
         debug {
             applicationIdSuffix = ".dev"
-            manifestPlaceholders["appLabel"] = "QuireCode Dev"
+            manifestPlaceholders["appLabel"] = "Nookra IDE Dev"
             // Told apart at a glance: an orange palette by default, a DEV badge, its own launcher icon (src/debug/res).
             buildConfigField("boolean", "DEV_BUILD", "true")
         }

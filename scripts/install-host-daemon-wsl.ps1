@@ -100,5 +100,5 @@ Start-ScheduledTask -TaskName $TaskName
 # Install the daemon in the distro; it prints the connection string for the app.
 Invoke-Wsl "bash '$repo/scripts/install-native-daemon.sh' --remote --port $Port --address $address '$DaemonPath' $Workspace" | Out-Host
 Write-Host ""
-Write-Host "Paste the avf:// connection string above into QuireCode: Connect > Set up or pair > Pair with computer."
+Write-Host "Paste the avf:// connection string above into Nookra IDE: Connect > Set up or pair > Pair with computer."
 Write-Host "New code later: wsl -d $Distro -- ~/.local/bin/quirecode-daemon pair --remote ${address}:$Port"

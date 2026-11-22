@@ -1,6 +1,6 @@
-# Hosting the QuireCode daemon on a computer
+# Hosting the Nookra IDE daemon on a computer
 
-QuireCode's editor runs on the tablet; files, terminals, language servers, Git, search, Jupyter
+Nookra IDE's editor runs on the tablet; files, terminals, language servers, Git, search, Jupyter
 and the debugger run wherever the **daemon** runs. Usually that is the Linux guest on the tablet
 itself (the connection chip → *Add a connection* → *This tablet's Linux guest*). This guide covers running it on a **Linux computer** or a
 **Windows computer (through WSL2)** on your network, so the tablet works on that machine's files
@@ -56,7 +56,7 @@ Requirements: x86_64 or arm64 Linux with systemd, `curl`, `tar`, and Git for Sou
 
 3. Open the port if a firewall is active, for example `sudo ufw allow 19870/tcp`.
 
-4. In QuireCode: the connection chip at the top right → **Add a connection → Guided setup** (or **A computer on your network** / **Pair with a computer** on the welcome page), scan the QR code or paste the connection string it prints, and tap
+4. In Nookra IDE: the connection chip at the top right → **Add a connection → Guided setup** (or **A computer on your network** / **Pair with a computer** on the welcome page), scan the QR code or paste the connection string it prints, and tap
    **Pair and connect**. The app saves the connection and reconnects to it on launch; the chip's
    dialog switches between it and the tablet's guest.
 
@@ -66,7 +66,7 @@ Need a new code later (another tablet, or a reinstall of the app)?
 quirecode-daemon pair --all --port 19870
 ```
 
-`--all` detects both the computer's LAN IP and Tailscale IP (if signed in) and prints one multi-route link and QR code (`--remote HOST:PORT` can also be repeated, and `--tunnel HOST` added alongside). One pairing then covers both routes: QuireCode tries the local network at home, Tailscale away, and lets you set a preferred route per connection in **Settings → Guest**.
+`--all` detects both the computer's LAN IP and Tailscale IP (if signed in) and prints one multi-route link and QR code (`--remote HOST:PORT` can also be repeated, and `--tunnel HOST` added alongside). One pairing then covers both routes: Nookra IDE tries the local network at home, Tailscale away, and lets you set a preferred route per connection in **Settings → Guest**.
 
 ## Away from home: Tailscale
 
@@ -88,7 +88,7 @@ the internet does. TLS, the pinned certificate and the device tokens work as abo
    It binds to the address `tailscale ip -4` gives (100.x.y.z), keeps retrying at boot until
    Tailscale is up, and prints the connection string with that address (and the machine's
    MagicDNS name, if you'd rather type that).
-4. In QuireCode: the connection chip → **Add a connection → A computer on your network**, paste it.
+4. In Nookra IDE: the connection chip → **Add a connection → A computer on your network**, paste it.
 
 The tablet reaches the computer whenever Tailscale is on, on any network. A new code later:
 `quirecode-daemon pair --remote 100.x.y.z:19870`.
@@ -129,7 +129,7 @@ validated by Android's trusted Root CAs (`fp=public`).
    ```
 
    It prints `avf://quirecode.example.com:443?fp=public&code=XXXX-XXXX` and a QR code. Scan the QR code or paste the string into **Add a
-   connection → Guided setup** (or **A computer on your network**) in QuireCode.
+   connection → Guided setup** (or **A computer on your network**) in Nookra IDE.
 
 How the daemon treats tunnel traffic: `cloudflared` connects to the daemon from 127.0.0.1, but adds
 `CF-Connecting-IP` with the real client's address. The daemon goes by that address, so through the
@@ -149,7 +149,7 @@ You can place the tunnel behind a [Cloudflare Access](https://developers.cloudfl
 
 1. In Cloudflare Zero Trust → **Access → Service Auth → Service Tokens**, create a token and copy its **Client ID** and **Client Secret**.
 2. Create an Access Application for your tunnel hostname with a **Service Auth** policy allowing that Service Token.
-3. In QuireCode, enter that **Client ID** and **Client Secret** under **Cloudflare Access (optional)** when pairing or editing the connection (stored encrypted with Android's Keystore alongside your device token). QuireCode sends them on both WebSocket handshakes and Troubleshoot health checks.
+3. In Nookra IDE, enter that **Client ID** and **Client Secret** under **Cloudflare Access (optional)** when pairing or editing the connection (stored encrypted with Android's Keystore alongside your device token). Nookra IDE sends them on both WebSocket handshakes and Troubleshoot health checks.
 
 ## Router port forwarding
 
@@ -183,7 +183,7 @@ quirecode-daemon log                   # the last 40 connections, pairings and r
 The same list is in the app: the connection chip's **Connections** dialog, while connected, shows the devices paired
 with that computer (the one in use marked "This device"), revokes one, and shows the recent connections.
 
-A device's name is what the app sends when it pairs: "QuireCode on" and the tablet's name. When the
+A device's name is what the app sends when it pairs: "Nookra IDE on" and the tablet's name. When the
 app pairs again with a computer it already has a connection to, it sends its old token along, and
 the daemon replaces that earlier pairing (the log says "replacing its earlier pairing"). Pairings are
 never replaced by name: two tablets of one model have the same name, and any app can claim one. A

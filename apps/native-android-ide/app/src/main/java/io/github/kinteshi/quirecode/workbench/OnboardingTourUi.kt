@@ -55,7 +55,7 @@ import androidx.compose.ui.unit.dp
 private const val TOUR_STEPS = 4
 
 /**
- * 4-step welcome and onboarding tour explaining where QuireCode can run code, how the tablet
+ * 4-step welcome and onboarding tour explaining where Nookra IDE can run code, how the tablet
  * workbench is laid out, what works with zero downloads, and one-tap actions to begin.
  */
 @Composable

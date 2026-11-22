@@ -11,13 +11,13 @@ import androidx.compose.ui.unit.dp
 import io.github.kinteshi.quirecode.BuildConfig
 
 /**
- * The debug build is its own app ("QuireCode Dev", `.dev`) installed beside the release one. So the two aren't
+ * The debug build is its own app ("Nookra IDE Dev", `.dev`) installed beside the release one. So the two aren't
  * mistaken for each other, the dev app defaults to its own orange palette instead of the wallpaper's colours, has an
  * orange launcher icon, and shows a DEV badge by its name.
  */
 object DevBuild {
     val enabled: Boolean = BuildConfig.DEV_BUILD
-    val appName: String = if (enabled) "QuireCode Dev" else "QuireCode"
+    val appName: String = if (enabled) "Nookra IDE Dev" else "Nookra IDE"
 
     /** Settings the dev app starts from, under the user's: the dev palette instead of dynamic colour. */
     val defaultSettings: String = if (enabled) """{"avf.theme.dynamicColor":false}""" else "{}"

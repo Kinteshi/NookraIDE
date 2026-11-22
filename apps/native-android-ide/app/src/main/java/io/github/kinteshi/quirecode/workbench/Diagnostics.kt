@@ -36,7 +36,7 @@ const val DIAGNOSTICS_RECENT_MESSAGES = 30
  */
 fun diagnosticsReport(info: DiagnosticsInfo, secrets: List<String> = emptyList()): String {
     val text = buildString {
-        appendLine("QuireCode diagnostics")
+        appendLine("Nookra IDE diagnostics")
         appendLine()
         appendLine("App: ${info.appVersion} (${info.versionCode})${if (info.debuggable) ", debug build" else ""}")
         appendLine("Editor: ${info.editor}")

@@ -164,7 +164,7 @@ pub fn print_pairing_code(args: &[String]) -> Result<(), String> {
     if remotes.is_empty() && tunnel.is_none() {
         println!("    Pairing code:  {code}");
         println!();
-        println!("In QuireCode, tap the connection chip, then Add a connection > This tablet's Linux guest,");
+        println!("In Nookra IDE, tap the connection chip, then Add a connection > This tablet's Linux guest,");
         println!("and enter it. The code works once,");
     } else if remotes.is_empty() {
         let (host, port) = tunnel.as_ref().unwrap();
@@ -232,7 +232,7 @@ fn print_remote_pairing(connection: &str, routes: &[String]) {
         }
     }
     println!();
-    println!("In QuireCode, tap the connection chip, then Add a connection > A computer on your network,");
+    println!("In Nookra IDE, tap the connection chip, then Add a connection > A computer on your network,");
     println!("and scan this QR code or paste the connection string. The code in it works once,");
 }
 

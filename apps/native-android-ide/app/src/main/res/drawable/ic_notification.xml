@@ -5,19 +5,9 @@
     android:height="24dp"
     android:viewportWidth="58"
     android:viewportHeight="58">
-    <group
-        android:translateX="-28"
-        android:translateY="-25">
+    <group android:translateX="-25" android:translateY="-23">
         <path
-            android:pathData="M68,30 L36,54 L68,78 M60,36 L36,54 L60,72"
-            android:strokeColor="#FFFFFFFF"
-            android:strokeWidth="7"
-            android:strokeLineCap="round"
-            android:strokeLineJoin="round" />
-        <path
-            android:pathData="M78,40 L78,68"
-            android:strokeColor="#FFFFFFFF"
-            android:strokeWidth="5"
-            android:strokeLineCap="round" />
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M45,31 L58,27 Q61,26 63,29 L68,40 Q69,43 66,45 L57,51 Q54,53 51,51 L42,46 Q39,44 40,41 L42,34 Q43,32 45,31 Z M34,49 Q36,46 39,48 L50,54 Q53,56 52,59 L47,73 Q46,76 43,76 L30,72 Q27,71 28,68 Z M65,49 Q68,47 70,50 L79,66 Q81,69 78,71 L68,77 Q65,79 63,76 L56,63 Q55,60 57,57 Z" />
     </group>
 </vector>

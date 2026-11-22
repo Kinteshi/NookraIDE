@@ -239,14 +239,14 @@ internal fun ConnectionWizardDialog(controller: WorkbenchController) {
                                 command = commands.setupStep,
                                 note = commands.note,
                                 onCopy = { copyGuideCommand(controller, context, "install command", commands.setupStep) },
-                                onShare = { shareGuideCommands(context, "QuireCode host install", commands.setupStep) },
+                                onShare = { shareGuideCommands(context, "Nookra IDE host install", commands.setupStep) },
                             )
                             CommandCard(
                                 title = "New pairing code / QR later",
                                 command = commands.pairCommand,
                                 note = null,
                                 onCopy = { copyGuideCommand(controller, context, "pair command", commands.pairCommand) },
-                                onShare = { shareGuideCommands(context, "QuireCode pair command", commands.pairCommand) },
+                                onShare = { shareGuideCommands(context, "Nookra IDE pair command", commands.pairCommand) },
                             )
 
                             Text("4. Pair with the printed QR code or link", style = MaterialTheme.typography.titleSmall, color = colors.primary)
