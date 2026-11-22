@@ -3398,7 +3398,7 @@ Completed on 2026-11-18 (closing `G12`, completing the Size S grant-feasibility 
   * Reverted the temporary debug manifest and probe hook after recording the result; `G16` now has a proven green light for future L+ implementation (not for store installs).
 * **`G18` — Dropped (user, 2026-11-18):** Marked dropped in the Open backlog and removed the pending glibc-test question from `docs/NATIVE-IDE-HANDOFF.md`.
 
-## 86. Nookra IDE rebrand (11-22; done, not checked on tablet)
+## 86. Nookra IDE rebrand (11-22; done, limited tablet check)
 
 Request: the user selected Nookra IDE and the Collected fragments concept, then asked to "rebrand away!"
 
@@ -3414,8 +3414,12 @@ Request: the user selected Nookra IDE and the Collected fragments concept, then 
   bundled daemon matches the rebuilt binary. Checked the icon paths against the SVG.
 * **Found and fixed:** The bundled ARM64 daemon needed rebuilding after the pairing instruction changed; the rebuilt binary
   was packaged into the debug APK.
-* **Not checked:** No tablet interaction. The old device screenshot goldens may need rebaselining after visual review.
-  The name and logo have not received trademark clearance; existing uses of Nookra were found during preliminary research.
+* **Tablet follow-up (11-22):** Installed the debug APK over the existing dev app without clearing data, opened it on
+  `SM-X930`, and visually checked the Nookra IDE name, DEV badge and fragment mark in the offline workbench and taskbar.
+  The previous workspace state remained present; no workspace files were opened. The guest was unreachable.
+* **Not checked:** The release app, themed launcher icon, pairing and device golden suite were not checked on the tablet.
+  Old screenshot goldens may need rebaselining. The name and logo have not received trademark clearance; existing uses
+  of Nookra were found during preliminary research.
 
 ## Backlog
 ### Open backlog (11-08)
@@ -3521,7 +3525,7 @@ Loose ends: placed in the groups above (11-08).
 #### Release backlog (first release)
 
 **On hold (user, 11-09):** the original release work is done but the tag. Since then, the batch 86 rebrand still needs
-device validation, possible screenshot-golden rebaselining, and name/logo trademark clearance. The repository is private, and GitHub enforces the user's
+broader device validation, possible screenshot-golden rebaselining, and name/logo trademark clearance. The repository is private, and GitHub enforces the user's
 ruleset for `main` only on a public repository (or with Pro), and a private release can't be downloaded by others. The
 user holds the release and keeps developing; `v0.1.0` is tagged when they decide on the repository's visibility.
 
