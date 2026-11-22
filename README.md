@@ -4,6 +4,9 @@
 
 A native code editor for Android tablets, with a Linux machine behind it.
 
+**Early development:** There is no public release yet. Device coverage is limited, and the name and icon have not
+received trademark clearance.
+
 Nookra IDE looks and works like VS Code: its keybindings, settings, themes and grammars. It's built for a tablet with a
 keyboard. The editor, Explorer, terminals, notebooks and Git are in the app. Language servers, debuggers, Jupyter
 kernels and your tools run in the Linux guest of Android's **Linux Terminal**, on the same tablet, through a small daemon
@@ -18,6 +21,18 @@ that the app installs there. The daemon can also run on a Linux or Windows compu
 * A hardware keyboard is recommended. The on-screen keyboard works too, with a key bar for Esc, Tab, Ctrl, Alt and the arrows.
 
 ## Install
+
+No release APK is available yet. To try the current source, build the ARM64 guest daemon and the Android debug app.
+This requires Rust, cargo-zigbuild, Zig, JDK 17 and 21, and an Android SDK; see
+[CONTRIBUTING.md](CONTRIBUTING.md) and [the build instructions](docs/NATIVE-IDE-HANDOFF.md#build-and-test).
+
+```sh
+./scripts/build-guest-bundle.sh
+./apps/native-android-ide/gradlew -p apps/native-android-ide :app:testDebugUnitTest :app:assembleDebug
+```
+
+The debug APK is `apps/native-android-ide/app/build/outputs/apk/debug/app-debug.apk`. It is a separate development
+installation, not a release-signed build. Once releases are available:
 
 1. Download `nookra-<version>.apk` from the [latest release](../../releases/latest) and install it. To get updates,
    watch the releases, or add this repository to [Obtainium](https://github.com/ImranR98/Obtainium).

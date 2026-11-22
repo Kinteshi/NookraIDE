@@ -141,7 +141,7 @@ Suggested order of the clean-up itself, each destructive step confirmed with the
    private keys, token/secret/password assignments, long hex strings): **no secrets found**. The one hit was a VS Code CLI
    version hash. Also seen, for the user to decide on before the history goes public:
    * The first two commits (`23bc319` "Add AVF Studio spec and docs" and `9747fba` "Translate spec and docs to English",
-     10-15) are authored as `[redacted username] <[redacted personal email]>`, a personal email; every later commit uses the GitHub
+     10-15) originally used a personal email; every later commit uses the GitHub
      noreply address. They're in every branch and already on GitHub. Rewriting their author (a mailmap with
      `git filter-repo`) changes every commit's hash, so it would go with step 3's force push, or be left as is.
      **User, 11-08:** they'll swap it for GitHub's private (noreply) address, later. Done once, with step 3's force push:
