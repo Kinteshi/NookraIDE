@@ -9,7 +9,7 @@ and recorded here. When a change would go against one of them, raise it first ra
 
 * **A native editor for a tablet, with a Linux machine behind it.** The app is Kotlin and Jetpack Compose. Everything heavy,
   including language servers, debuggers, Jupyter kernels, Git, search, terminals and Copilot, runs in the AVF guest
-  through `quirecode-daemon` ([`crates/avf-daemon`](crates/avf-daemon)). The guest stays an ordinary Linux machine that the
+  through `nookra-daemon` ([`crates/avf-daemon`](crates/avf-daemon)). The guest stays an ordinary Linux machine that the
   developer manages.
 * **The app hosts the editor; it doesn't replace the developer's tools.** Don't build app-side copies of things a
   developer installs in the guest (toolchains, linters, agents, environments). Offer to install a missing language server

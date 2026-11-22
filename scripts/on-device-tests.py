@@ -2,8 +2,8 @@
 """
 Automated on-device accessibility & golden-screenshot test runner (G9 / G10).
 
-Starts a temporary TLS quirecode-daemon with a deterministic fixture workspace,
-forwards it over `adb reverse`, installs/launches `io.github.kinteshi.quirecode.dev`,
+Starts a temporary TLS nookra-daemon with a deterministic fixture workspace,
+forwards it over `adb reverse`, installs/launches `io.github.kinteshi.nookraide.dev`,
 walks workbench scenarios while auditing TalkBack labels and UI bounds, and either
 records (`--update-goldens`) or verifies (`--verify`) reference screenshots against
 `apps/native-android-ide/app/src/test/resources/goldens/workbench-goldens.json`.
@@ -25,12 +25,12 @@ import xml.etree.ElementTree as ET
 
 from PIL import Image
 
-PACKAGE = "io.github.kinteshi.quirecode.dev"
-ACTIVITY = "io.github.kinteshi.quirecode.MainActivity"
+PACKAGE = "io.github.kinteshi.nookraide.dev"
+ACTIVITY = "io.github.kinteshi.nookraide.MainActivity"
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 GOLDENS_PATH = REPO_ROOT / "apps/native-android-ide/app/src/test/resources/goldens/workbench-goldens.json"
 DEFAULT_APK = REPO_ROOT / "apps/native-android-ide/app/build/outputs/apk/debug/app-debug.apk"
-DEFAULT_DAEMON = REPO_ROOT / "target/debug/quirecode-daemon"
+DEFAULT_DAEMON = REPO_ROOT / "target/debug/nookra-daemon"
 
 GRID_COLS = 16
 GRID_ROWS = 10
@@ -430,7 +430,7 @@ def run_scenarios(serial: str, daemon_bin: pathlib.Path, shot_dir: pathlib.Path 
     results: dict[str, dict] = {}
     daemon_proc: subprocess.Popen | None = None
 
-    with tempfile.TemporaryDirectory(prefix="quirecode-e2e-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="nookra-e2e-") as tmp:
         home = pathlib.Path(tmp)
         build_fixture_workspace(home)
         cfg = home / ".config/avf-studio"

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# QuireCode's launcher for what runs on Node.js: the chat agent Claude Code (through its ACP
+# Nookra IDE's launcher for what runs on Node.js: the chat agent Claude Code (through its ACP
 # adapter, which carries the Claude Code CLI), the language servers published
 # on npm (Bash, YAML, JSON, HTML, CSS, Dockerfile, SQL) and VS Code's JavaScript debugger.
 #
@@ -170,8 +170,8 @@ run_js_debug() {
     case "$mode" in serve | connect) ;; *) fail "usage: avf-node-agent js-debug serve|connect <port>" ;; esac
     case "$port" in '' | *[!0-9]*) fail "js-debug needs a port number" ;; esac
     [ -x "$NODE_DIR/bin/node" ] && [ -f "$JS_DEBUG_DIR/js-debug/src/dapDebugServer.js" ] ||
-        fail "js-debug is not set up; run: quirecode-daemon tools install js-debug"
-    # The programs it starts find the user's own node first, QuireCode's otherwise.
+        fail "js-debug is not set up; run: nookra-daemon tools install js-debug"
+    # The programs it starts find the user's own node first, Nookra IDE's otherwise.
     PATH="$PATH:$NODE_DIR/bin" exec "$NODE_DIR/bin/node" -e "$JS_DEBUG_BRIDGE" "$mode" "$port" "$JS_DEBUG_DIR/js-debug/src/dapDebugServer.js"
 }
 
@@ -259,7 +259,7 @@ run() {
     local entry
     entry=$(entry_of "$agent")
     [ -x "$NODE_DIR/bin/node" ] && [ -f "$entry" ] ||
-        fail "$agent is not set up; run: quirecode-daemon tools install $agent"
+        fail "$agent is not set up; run: nookra-daemon tools install $agent"
     PATH="$NODE_DIR/bin:$PATH" exec "$NODE_DIR/bin/node" "$entry" "$@"
 }
 

@@ -1,7 +1,7 @@
 //! Paired devices, the connection log and limits on failed attempts (G30's hardening).
 //!
 //! Each pairing gives the device a token of its own, kept here only as a SHA-256 digest, so one device can be
-//! revoked (`quirecode-daemon devices revoke ID`) without pairing the others again. The installer's shared token
+//! revoked (`nookra-daemon devices revoke ID`) without pairing the others again. The installer's shared token
 //! (`AVF_TOKEN`) still works, but only from this machine itself (loopback: the tablet's own guest, behind Linux
 //! Terminal's forwarding); from the network, a device token is required. Every connection, pairing and refusal is
 //! logged to `connections.log`, and an address that fails too often is refused for a while.
@@ -184,7 +184,7 @@ pub fn revoke(path: &Path, which: &str) -> Result<Device, String> {
                 .collect();
             match named.as_slice() {
                 [index] => *index,
-                [] => return Err(format!("no paired device is called {which}; 'quirecode-daemon devices' lists them")),
+                [] => return Err(format!("no paired device is called {which}; 'nookra-daemon devices' lists them")),
                 _ => return Err(format!("several devices are called {which}; revoke one by its id")),
             }
         }
@@ -292,7 +292,7 @@ pub fn recent_log(path: &Path, lines: usize) -> Vec<String> {
     all[all.len().saturating_sub(lines)..].iter().map(|line| (*line).to_owned()).collect()
 }
 
-/// `quirecode-daemon devices [revoke ID]` and `quirecode-daemon log [-n N]`.
+/// `nookra-daemon devices [revoke ID]` and `nookra-daemon log [-n N]`.
 pub fn run_cli(command: &str, args: &[String], config_dir: &Path) -> Result<(), String> {
     match command {
         "devices" => match args {
@@ -315,7 +315,7 @@ pub fn run_cli(command: &str, args: &[String], config_dir: &Path) -> Result<(), 
                     );
                 }
                 println!();
-                println!("'quirecode-daemon devices revoke ID' unpairs one; it's disconnected within 15 seconds.");
+                println!("'nookra-daemon devices revoke ID' unpairs one; it's disconnected within 15 seconds.");
                 Ok(())
             }
             [verb, which] if verb == "revoke" => {
@@ -324,13 +324,13 @@ pub fn run_cli(command: &str, args: &[String], config_dir: &Path) -> Result<(), 
                 println!("Revoked {} ({}). It has to pair again to connect.", device.id, device.name);
                 Ok(())
             }
-            _ => Err("usage: quirecode-daemon devices [revoke ID]".to_owned()),
+            _ => Err("usage: nookra-daemon devices [revoke ID]".to_owned()),
         },
         "log" => {
             let lines = match args {
                 [] => 40,
                 [flag, count] if flag == "-n" => count.parse::<usize>().map_err(|_| "-n takes a number")?,
-                _ => return Err("usage: quirecode-daemon log [-n LINES]".to_owned()),
+                _ => return Err("usage: nookra-daemon log [-n LINES]".to_owned()),
             };
             let text = fs::read_to_string(log_path(config_dir)).unwrap_or_default();
             let all: Vec<&str> = text.lines().collect();
@@ -351,7 +351,7 @@ mod tests {
     use super::*;
 
     fn temp_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("quirecode-devices-{name}-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("nookra-devices-{name}-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&dir).unwrap();
         dir
     }
@@ -360,8 +360,8 @@ mod tests {
     fn issued_tokens_authenticate_until_revoked() {
         let dir = temp_dir("issue");
         let path = devices_path(&dir);
-        let (tablet, tablet_token) = issue(&path, "QuireCode on SM-X930").unwrap();
-        let (_, phone_token) = issue(&path, "QuireCode on Pixel").unwrap();
+        let (tablet, tablet_token) = issue(&path, "Nookra IDE on SM-X930").unwrap();
+        let (_, phone_token) = issue(&path, "Nookra IDE on Pixel").unwrap();
         assert_eq!(tablet_token.len(), 64);
         assert_ne!(tablet_token, phone_token);
         let address: IpAddr = "100.64.0.2".parse().unwrap();
@@ -373,12 +373,12 @@ mod tests {
         // Only the digest is stored.
         assert!(!fs::read_to_string(&path).unwrap().contains(&tablet_token));
         assert!(authenticate(&path, &"0".repeat(64), None).unwrap().is_none());
-        assert_eq!(revoke(&path, &tablet.id).unwrap().name, "QuireCode on SM-X930");
+        assert_eq!(revoke(&path, &tablet.id).unwrap().name, "Nookra IDE on SM-X930");
         assert!(!is_paired(&path, &tablet.id));
         assert!(authenticate(&path, &tablet_token, None).unwrap().is_none());
         assert!(authenticate(&path, &phone_token, None).unwrap().is_some());
         // By name, when only one has it.
-        assert!(revoke(&path, "quirecode on pixel").is_ok());
+        assert!(revoke(&path, "nookra ide on pixel").is_ok());
         assert!(revoke(&path, "nobody").is_err());
     }
 
@@ -386,16 +386,16 @@ mod tests {
     fn pairing_again_replaces_only_the_pairing_whose_token_is_presented() {
         let dir = temp_dir("repair");
         let path = devices_path(&dir);
-        let (first, first_token, first_replaced) = issue_replacing(&path, "QuireCode on SM-X930", None).unwrap();
+        let (first, first_token, first_replaced) = issue_replacing(&path, "Nookra IDE on SM-X930", None).unwrap();
         assert!(first_replaced.is_none());
         // A second tablet of the same model keeps the first one's pairing: names prove nothing.
-        let (twin, twin_token, twin_replaced) = issue_replacing(&path, "QuireCode on SM-X930", None).unwrap();
+        let (twin, twin_token, twin_replaced) = issue_replacing(&path, "Nookra IDE on SM-X930", None).unwrap();
         assert!(twin_replaced.is_none());
         // A wrong or unknown token replaces nothing.
-        let (stranger, _, stranger_replaced) = issue_replacing(&path, "QuireCode on Pixel", Some("not-a-token")).unwrap();
+        let (stranger, _, stranger_replaced) = issue_replacing(&path, "Nookra IDE on Pixel", Some("not-a-token")).unwrap();
         assert!(stranger_replaced.is_none());
         // The first tablet pairs again with its old token: only its own entry goes.
-        let (second, second_token, replaced) = issue_replacing(&path, "QuireCode on SM-X930", Some(&first_token)).unwrap();
+        let (second, second_token, replaced) = issue_replacing(&path, "Nookra IDE on SM-X930", Some(&first_token)).unwrap();
         assert_eq!(replaced, Some(first.id.clone()));
         assert_ne!(first.id, second.id);
         assert!(!is_paired(&path, &first.id));
@@ -445,10 +445,10 @@ mod tests {
     fn the_log_appends_and_stays_small() {
         let dir = temp_dir("log");
         let path = log_path(&dir);
-        log(&path, Some("100.64.0.2".parse().unwrap()), "connected device ab12cd (QuireCode on SM-X930)");
+        log(&path, Some("100.64.0.2".parse().unwrap()), "connected device ab12cd (Nookra IDE on SM-X930)");
         log(&path, None, "revoked device ab12cd");
         let text = fs::read_to_string(&path).unwrap();
-        assert!(text.lines().next().unwrap().ends_with("100.64.0.2 connected device ab12cd (QuireCode on SM-X930)"));
+        assert!(text.lines().next().unwrap().ends_with("100.64.0.2 connected device ab12cd (Nookra IDE on SM-X930)"));
         assert_eq!(text.lines().count(), 2);
         let long = "x".repeat(1_000);
         for _ in 0..400 {

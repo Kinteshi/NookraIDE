@@ -269,7 +269,7 @@ fn integration_dir() -> Result<PathBuf, String> {
     let base = std::env::var_os("HOME")
         .map(|home| PathBuf::from(home).join(".cache"))
         .unwrap_or_else(std::env::temp_dir);
-    let dir = base.join("quirecode").join("shell-integration");
+    let dir = base.join("nookra").join("shell-integration");
     let zsh = dir.join("zsh");
     std::fs::create_dir_all(&zsh)
         .map_err(|error| format!("could not create {}: {error}", zsh.display()))?;

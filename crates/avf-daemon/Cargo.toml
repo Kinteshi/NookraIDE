@@ -6,7 +6,7 @@ license.workspace = true
 
 # The installed command; the package keeps its name (cargo -p avf-daemon).
 [[bin]]
-name = "quirecode-daemon"
+name = "nookra-daemon"
 path = "src/main.rs"
 
 [features]

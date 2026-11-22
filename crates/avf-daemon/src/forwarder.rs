@@ -44,7 +44,7 @@ fn wrapper_running(proc_dir: &Path) -> bool {
     })
 }
 
-/// `quirecode-daemon guest fix-port-forwarding [--undo]`, run with sudo. The forwarder isn't
+/// `nookra-daemon guest fix-port-forwarding [--undo]`, run with sudo. The forwarder isn't
 /// restarted: a restart is exactly what loses the forwards, so the fix waits for the next boot.
 pub fn run_cli(args: &[String]) -> io::Result<()> {
     match args {
@@ -52,7 +52,7 @@ pub fn run_cli(args: &[String]) -> io::Result<()> {
         [command, undo] if command == "fix-port-forwarding" && undo == "--undo" => undo_fix(),
         _ => Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "usage: quirecode-daemon guest fix-port-forwarding [--undo]",
+            "usage: nookra-daemon guest fix-port-forwarding [--undo]",
         )),
     }
 }

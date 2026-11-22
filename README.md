@@ -19,7 +19,7 @@ that the app installs there. The daemon can also run on a Linux or Windows compu
 
 ## Install
 
-1. Download `quirecode-<version>.apk` from the [latest release](../../releases/latest) and install it. To get updates,
+1. Download `nookra-<version>.apk` from the [latest release](../../releases/latest) and install it. To get updates,
    watch the releases, or add this repository to [Obtainium](https://github.com/ImranR98/Obtainium).
 2. Open **Linux Terminal** once, so the guest is running.
 3. Open Nookra IDE and choose **Set up the guest** (on the welcome page, or from the connection chip at the top right,
@@ -32,16 +32,16 @@ that the app installs there. The daemon can also run on a Linux or Windows compu
 The app remembers the connection. When the guest is running, it reconnects by itself. The connection chip at the top
 right always says where things stand; tap it for your connections, adding one, and a troubleshooting check.
 
-Want a new pairing code later, for another tablet or after reinstalling the app? Run `quirecode-daemon pair` in Linux
+Want a new pairing code later, for another tablet or after reinstalling the app? Run `nookra-daemon pair` in Linux
 Terminal.
 
 ### A computer instead of the tablet's guest
 
 The daemon also runs on a Linux computer, or on Windows through WSL2. Your files, tools and CPU are then the computer's.
-The release includes the daemon for both (`quirecode-daemon-<version>-linux-x86_64` and `-linux-arm64`). See
+The release includes the daemon for both (`nookra-daemon-<version>-linux-x86_64` and `-linux-arm64`). See
 [Hosting the daemon on a computer](docs/HOSTING-THE-DAEMON.md). To use the computer from anywhere without opening it to
 the internet, put both on [Tailscale](https://tailscale.com) and install with `--tailscale`. Each paired device has its
-own token, so one can be revoked (`quirecode-daemon devices`), and the daemon logs every connection.
+own token, so one can be revoked (`nookra-daemon devices`), and the daemon logs every connection.
 
 ### Without a Linux machine
 
@@ -52,7 +52,13 @@ debugging run in the guest, so they're only there when it's connected.
 
 ## Updating
 
-Install the new APK over the old one. If the guest's daemon is from an older release, the app says so and offers
+For installations with the former QuireCode app ID, Nookra IDE installs as a **separate app**: Android does not
+automatically transfer its settings, saved connections, offline copies or drafts. Keep the old app installed until
+you have saved any unsynced work, configured Nookra IDE and paired it again. The daemon installer migrates the old
+configuration and certificate when there is no conflicting Nookra configuration; it stops rather than overwriting
+conflicting configurations. Run the new setup before using `nookra-daemon` commands on an older guest.
+
+For later Nookra IDE releases, install the new APK over the old one. If the guest's daemon is from an older release, the app says so and offers
 **Update**. That runs the same setup again and keeps the pairing.
 
 ## When the guest goes away

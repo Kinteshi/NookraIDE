@@ -6,26 +6,25 @@ the engine seam, batches, testing on the device) is in [CONTRIBUTING.md](../CONT
 
 ## Current state (2026-11-22)
 
-* **Rebrand:** Nookra IDE replaces the QuireCode display name, with the Collected fragments icon. The app ID, existing
-  daemon commands, configuration paths and repository URL stay unchanged so updates, settings and pairings remain usable.
-  The dev app's name and icon were visually checked on the tablet; screenshot goldens may need rebaselining and name
-  and logo trademark clearance remains outstanding.
-* **Progress:** batches 1–86 are done (41 was exploration with no app change); **batch 82** (`G9` accessibility + `G10` automated on-device goldens), **batch 83** (`G8` binary buffers, media, pickers, `Play`, third-party `html-manager`/`anywidget`, saved `metadata.widgets`), **batch 84** (`G1` + `G2` post-flip performance pass: `225.8–236.7 MB` PSS, `11.4 ms` median / `13.0 ms` p95 injected key-to-frame), and **batch 85** (`G12` Antigravity CLI v1.5.12 replacing Gemini CLI, `G16` AVF `pm grant` + `VirtualMachineManager` runtime probe passing on `SM-X930`, and `G18` dropped) were unit-tested and checked on the tablet. **Batch 86** rebrands the app, is unit-tested and built, and has had a limited visual tablet check.
+* **Rebrand:** Nookra IDE replaces QuireCode, with the Collected fragments icon. Batch 87 changed the app ID,
+  daemon command and configuration path, and the repository has been renamed to `Kinteshi/NookraIDE`. The new app is
+  a separate Android installation; its old private data does not transfer automatically. Trademark clearance remains outstanding.
+* **Progress:** batches 1–87 are done (41 was exploration with no app change); **batch 82** (`G9` accessibility + `G10` automated on-device goldens), **batch 83** (`G8` binary buffers, media, pickers, `Play`, third-party `html-manager`/`anywidget`, saved `metadata.widgets`), **batch 84** (`G1` + `G2` post-flip performance pass: `225.8–236.7 MB` PSS, `11.4 ms` median / `13.0 ms` p95 injected key-to-frame), and **batch 85** (`G12` Antigravity CLI v1.5.12 replacing Gemini CLI, `G16` AVF `pm grant` + `VirtualMachineManager` runtime probe passing on `SM-X930`, and `G18` dropped) were unit-tested and checked on the tablet. **Batches 86–87** rebrand the app and have had limited visual tablet checks.
 * **What's open:** [Open backlog](NATIVE-IDE-BATCHES.md#open-backlog-11-08), in two lists: the remaining general
   backlog and the Aardink switch's, which replaces this file's old "Remaining" list.
 * **Next batch:** pick next (remaining general backlog: `G13` proot/Termux backends, `G16` L+ own-AVF VM implementation [grant proven in 85], `G17` guest-stopped check; or `v0.1.0` release when repository goes public).
 * **Release 0.1.0 on hold:** the original release backlog items (R1–R10: Apache-2.0, notices, signing, CI workflows, naming, diagnostics) and branch consolidation (R11) are finished. The rebrand still needs broader device validation and trademark clearance. Tagging and release are paused awaiting user decision on repository visibility.
 * **Offline & remote features (batches 62–75):** file sharing/import/export (group 9, batch 62), Tailscale daemon hardening (batch 63), device folder workspaces without a guest (batch 64), paired device management UI (batch 65), guest folders kept offline with sync, offline Explorer, Quick Open, and offline search (batch 66), offline/device-only previews, images, hex view, snippets, and kernel-less notebook editing (batch 67, completing G29), and Troubleshoot port-vs-daemon probing + Tailscale split-tunneling guidance, Cloudflare Tunnel (`--tunnel`, public TLS), and router port forwarding (batch 68, completing G30 and G31); batch 69 fixed issues from review. Batch 70 implements and verifies G33/G34 (connection kinds and ordering, Recent origins and connection-scoped workspace/cache state). Batch 71 implements and verifies G39/G38 (workspace-first launch/offline recovery, explicit Reconnect, Work offline, workspace-switch confirmation, route-aware Troubleshoot, and TCP-probe-backed forwarding checks). Batch 74 implements and verifies G35/G36 (guided Add a connection wizard, live Tailscale status, copy/share host commands, daemon QR output, CameraX+ZXing scanner, and clipboard offer). Batch 75 implements and verifies G37/G32 (multi-route profiles, automatic route failover, `pair --all`, per-profile preferred route in Settings, and encrypted Cloudflare Access service token headers).
 * **The switch to Aardink:** [AARDINK-SWITCH-PLAN.md](AARDINK-SWITCH-PLAN.md). All phases are done (batches 42 to 57), now pinned to Aardink 0.10.0 (batch 72) with native `0.10.0` features adopted (batch 73), `A7` concluded (11-17), and `aardink-languages:0.10.0` prioritized ahead of `tm4e` (batch 76): **Aardink is the editor**; sora-editor was removed in batch 57, and `tm4e` serves as fallback for languages beyond Aardink's 20 built-ins. The workbench's own Material You cards are drawn over Aardink from its geometry (batch 54). Review each Aardink release against the plan (its "Release reviews"). Requests to Aardink are drafted or listed, not filed.
-* **Tablet:** on 11-22, wireless ADB connected at `192.0.2.66:33227`; the batch 86 debug APK was installed over the existing dev app without clearing data. Its workbench, DEV badge, name and icon were visually checked. On Android 17 the Linux guest booted, its daemon health check passed, the app reconnected automatically, and a read-only command ran in both Linux Terminal and the app's terminal. The previous live golden and `G16` checks were on batch 85.
+* **Tablet:** on 11-22, wireless ADB connected at `192.0.2.66:33227`; the batch 87 debug APK was installed as a separate app and its welcome page was visually checked. The former apps remain installed; the guest still runs the former daemon and has not been migrated or paired with the new app. Batch 86 checked guest health and a read-only terminal command; the previous live golden and `G16` checks were on batch 85.
 
 ## Where things are
 
-* **Branch:** `main` of `github.com/Kinteshi/QuireCode` (private). Since 11-08 it's the only branch: the earlier trials were deleted after a backup (`~/backups/AVFStudio-before-rewrite-2026-11-08.bundle`), and the history's authors rewritten to `Kinteshi <36821534+Kinteshi@users.noreply.github.com>`, the identity commits use from now. Pushing is the user's call. The untracked top-level `android/` folder holds build leftovers from Track A, so ignore it.
-* **App:** `apps/native-android-ide`, app id and package `io.github.kinteshi.quirecode` (Nookra IDE; formerly QuireCode).
-  Debug builds are a separate app, `io.github.kinteshi.quirecode.dev` ("Nookra IDE Dev"), so testing on the tablet never
+* **Branch:** `main` of `github.com/Kinteshi/NookraIDE` (private). Since 11-08 it's the only branch: the earlier trials were deleted after a backup (`~/backups/AVFStudio-before-rewrite-2026-11-08.bundle`), and the history's authors rewritten to `Kinteshi <36821534+Kinteshi@users.noreply.github.com>`, the identity commits use from now. Pushing is the user's call. The untracked top-level `android/` folder holds build leftovers from Track A, so ignore it.
+* **App:** `apps/native-android-ide`, app id and package `io.github.kinteshi.nookraide` (formerly `io.github.kinteshi.quirecode`).
+  Debug builds are a separate app, `io.github.kinteshi.nookraide.dev` ("Nookra IDE Dev"), so testing on the tablet never
   replaces the release-signed app (signed builds come only from CI, whose key's password never enters a session). The
-  dev app pairs with the guest like any client (`quirecode-daemon pair`); it stays installed beside the release app (user, 11-09); remove test files when a batch's checks end. It
+  dev app pairs with the guest like any client (`nookra-daemon pair` after updating the guest); it stays installed beside the release app (user, 11-09); remove test files when a batch's checks end. It
   looks different on purpose (batch 60): an orange palette by default, a DEV badge by its name, its own launcher icon.
 * **Guest daemon:** `crates/avf-daemon` with protocol `crates/avf-protocol`. The guest tool catalog is `guest/tools/catalog.json`, and the Jupyter bridge is `guest/tools/avf-jupyter-bridge.py`; the daemon embeds both.
 * **Guest install script:** `scripts/install-native-daemon.sh`.
@@ -40,7 +39,7 @@ cargo test -p avf-daemon -p avf-protocol
 PATH=$HOME/.cargo/bin:$PATH cargo zigbuild --release -p avf-daemon --target aarch64-unknown-linux-gnu.2.28
 ```
 
-At last run (batch 86): 455 app unit tests (453 passed and 2 opt-in live-host/device tests skipped when unset), 152 daemon/protocol tests, debug and release assemble, ARM64 `zigbuild`, and clippy passed (five pre-existing warnings). The batch 85 live device results and screenshot goldens predate the rebrand and have not been rechecked. CI runs app and Rust tests on every push.
+At last run (batch 87): 455 app unit tests (453 passed and 2 opt-in live-host/device tests skipped when unset), 156 daemon/protocol tests, debug and release assemble, ARM64 `zigbuild`, and clippy passed (four pre-existing warnings). The batch 85 live device results and screenshot goldens predate the rebrand and have not been rechecked. CI runs app and Rust tests on every push.
 
 ## Reference tablet (Galaxy Tab S11 Ultra, SM-X930)
 
@@ -56,9 +55,11 @@ At last run (batch 86): 455 app unit tests (453 passed and 2 opt-in live-host/de
 * **Guest reset:** at 13:46 on 2026-10-23 the Debian image was reset from Terminal → Settings → Recovery (not by automation), which wiped the whole guest, Track A and the system code-server included. To re-provision Track B, push the arm64 daemon and run `scripts/install-native-daemon.sh` (it now bootstraps a pinned, checksum-verified uv 0.13.0 and no longer needs openssl). Then enter the new token in the app and accept port 19870 in the notification shade.
 * **Port forwarding after a reboot:** forwards can be missing even though the ports are allowed. Toggle the port off and on in Terminal → Settings → Controle de portas. A new port raises a notification; tap *Aceitar*.
 * **Hosting on a computer (batch 8):** see [HOSTING-THE-DAEMON.md](HOSTING-THE-DAEMON.md).
-* **Pairing (batch 4):** the app's Connect → "Set up or pair…" shows the setup command; on an installed guest, `quirecode-daemon pair` prints a one-time code to enter there. Typing the token by hand is now only a fallback.
+* **Pairing (batch 4):** the app's Connect → "Set up or pair…" shows the setup command; on the current tablet guest, `quirecode-daemon pair` prints a one-time code. After updating the guest use `nookra-daemon pair`. Typing the token by hand is only a fallback.
 * **The token:** never print it. To fill the app's Connect dialog, have a guest script copy the value to `/sdcard/Download`, type it on the device in 4-character chunks with `sleep 0.3` between them (8-character chunks still dropped characters), then delete the copy. The app saves the profile encrypted, so this is a one-time step per guest.
-* **Updating the daemon:** reinstall the binary, then `systemctl --user stop quirecode; sleep 3; start` (never `restart`).
+* **Updating the daemon:** the new installer migrates the former configuration and service. On an unmigrated guest the
+  service is still `quirecode`; afterwards use `systemctl --user stop nookra; sleep 3; systemctl --user start nookra`
+  (never `restart`). Do not install guest packages without the maintainer's permission.
 * **The tablet still panics:** a sixth host kernel panic happened at 13:06 on 2026-10-23 with the VM running (dropbox `SYSTEM_LAST_KMSG_10_20261023_130718_KP`). The log is truncated before the panic line.
 
 ## Done

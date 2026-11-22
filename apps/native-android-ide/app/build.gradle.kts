@@ -10,11 +10,11 @@ plugins {
 val aardinkVersion = "0.10.0"
 
 android {
-    namespace = "io.github.kinteshi.quirecode"
+    namespace = "io.github.kinteshi.nookraide"
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "io.github.kinteshi.quirecode"
+        applicationId = "io.github.kinteshi.nookraide"
         minSdk = 34
         targetSdk = 35
         // A release's version comes from its tag (CI passes -Pavf.version=0.1.0); other builds are the next one's dev build.
@@ -96,7 +96,7 @@ abstract class GuestBundleTask : DefaultTask() {
 
 val guestBundle = tasks.register<GuestBundleTask>("guestBundle") {
     sources.from(
-        rootProject.file("../../target/aarch64-unknown-linux-gnu/release/quirecode-daemon"),
+        rootProject.file("../../target/aarch64-unknown-linux-gnu/release/nookra-daemon"),
         rootProject.file("../../scripts/install-native-daemon.sh"),
     )
 }

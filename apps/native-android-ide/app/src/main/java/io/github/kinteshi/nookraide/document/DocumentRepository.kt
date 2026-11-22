@@ -1,0 +1,806 @@
+package io.github.kinteshi.nookraide.document
+
+import io.github.kinteshi.nookraide.transport.GuestVfs
+import io.github.kinteshi.nookraide.transport.GuestVfsException
+import java.io.IOException
+import java.io.ByteArrayOutputStream
+import java.nio.charset.CodingErrorAction
+import java.nio.charset.StandardCharsets
+import java.nio.CharBuffer
+import java.util.concurrent.CompletableFuture
+import kotlin.math.ceil
+
+const val MAX_EDITABLE_FILE_SIZE = 16L * 1024 * 1024
+const val MAX_PAGED_FILE_SIZE = 256L * 1024 * 1024
+const val LARGE_FILE_PAGE_SIZE = 1024 * 1024
+const val VFS_CHUNK_SIZE = 4 * 1024 * 1024
+const val BINARY_CACHE_ENCODING = "BASE64"
+
+private val CACHEABLE_IMAGE_EXTENSIONS = setOf("png", "jpg", "jpeg", "gif", "webp", "bmp", "ico")
+
+internal fun isCacheableImagePath(path: String): Boolean =
+    path.substringAfterLast('.', "").lowercase() in CACHEABLE_IMAGE_EXTENSIONS
+
+data class DocumentSnapshot(
+    val path: String,
+    val text: String,
+    val modifiedTs: Long?,
+    val dirty: Boolean,
+    val encoding: String = "UTF-8",
+    val eol: String = if (text.contains("\r\n")) "\r\n" else "\n",
+    /** The connection whose guest owns this copy; device files and legacy drafts have no scope. */
+    val cacheScope: String? = null,
+)
+
+interface DocumentCache {
+    fun load(path: String): DocumentSnapshot?
+    fun save(snapshot: DocumentSnapshot)
+    fun delete(path: String)
+    /** Whether a copy of [path] is kept, without reading it. */
+    fun contains(path: String): Boolean = load(path) != null
+}
+
+/** The file has NUL bytes, so it isn't text: the workbench shows it in the hex view. */
+class BinaryFileException : IOException("Binary files cannot be opened as text documents")
+
+sealed interface OpenDocument {
+    data class Editable(val document: DocumentSession) : OpenDocument
+    data class Paged(val document: PagedDocument) : OpenDocument
+}
+
+data class DocumentSession(
+    val path: String,
+    var text: String,
+    var baseModifiedTs: Long?,
+    var dirty: Boolean,
+    var version: Long = 1,
+    var conflict: RemoteConflict? = null,
+    var encoding: String = "UTF-8",
+    var eol: String = if (text.contains("\r\n")) "\r\n" else "\n",
+    /** Shown but not held as text (an image in the viewer): never cached, saved or sent to servers. */
+    val binary: Boolean = false,
+    /** Captured at open time so a delayed draft/save remains with the guest it came from. */
+    var cacheScope: String? = null,
+) {
+    /** Chosen in the status bar (or converted to); wins over detection and the settings. */
+    var indentation: io.github.kinteshi.nookraide.editor.Indentation? = null
+    /** What `editor.detectIndentation` found when the file opened; null when nothing was indented. */
+    var detectedIndentation: io.github.kinteshi.nookraide.editor.Indentation? = null
+    var indentationDetected = false
+    val languageId: String = path.substringAfterLast('.', "").lowercase()
+    val expectedModifiedTs: Long? get() = baseModifiedTs
+    /** The text as last loaded or saved, when known: editing back to it (undo) clears [dirty], as in VS Code. */
+    var savedText: String? = if (dirty) null else text
+
+    fun updateText(nextText: String) {
+        if (text !== nextText && text != nextText) {
+            text = nextText
+            val firstLineBreak = nextText.indexOf('\n')
+            if (firstLineBreak >= 0) eol = if (firstLineBreak > 0 && nextText[firstLineBreak - 1] == '\r') "\r\n" else "\n"
+            version += 1
+            dirty = savedText !== nextText && nextText != savedText
+        }
+    }
+
+    /** Records that [savedText] reached the guest (or the local draft); later edits make it dirty again. */
+    fun markSaved(savedText: String) {
+        this.savedText = savedText
+        dirty = text != savedText
+    }
+}
+
+data class PagedDocument(
+    val path: String,
+    val size: Long,
+    val modifiedTs: Long,
+    val offset: Long,
+    val text: String,
+    val pageIndex: Int,
+    val pageCount: Int,
+    val encoding: String = "UTF-8",
+) {
+    val canGoPrevious: Boolean get() = pageIndex > 0
+    val canGoNext: Boolean get() = pageIndex + 1 < pageCount
+}
+
+data class RemoteConflict(
+    val remoteText: String,
+    val remoteModifiedTs: Long,
+    val remoteEncoding: String = "UTF-8",
+)
+
+data class DecodedDocument(val text: String, val encoding: String)
+
+/** This device's copy of a guest file (G29). */
+sealed interface CopyState {
+    data object None : CopyState
+    data object Edited : CopyState
+    data class Clean(val modifiedTs: Long?) : CopyState
+}
+
+sealed interface SaveResult {
+    data class Saved(val modifiedTs: Long) : SaveResult
+    data object QueuedOffline : SaveResult
+    data class Conflict(val localText: String, val remote: RemoteConflict) : SaveResult
+}
+
+class DocumentRepository(
+    private val vfs: GuestVfs,
+    documentCache: DocumentCache,
+    private val deviceFiles: DeviceFileStore? = null,
+    private val cacheScopeForPath: (String) -> String? = { null },
+    private val legacyCacheScope: () -> String? = { null },
+) {
+    private val cache = object : DocumentCache {
+        private fun key(path: String, scope: String?) =
+            if (scope != null && isGuestPath(path)) "connection:$scope:$path" else path
+
+        fun loadScoped(path: String, scope: String?): DocumentSnapshot? {
+            val scopedKey = key(path, scope)
+            documentCache.load(scopedKey)?.let { return it.copy(path = path, cacheScope = scope) }
+            if (scope != null && scope == legacyCacheScope()) {
+                documentCache.load(path)?.let { legacy ->
+                    documentCache.save(legacy.copy(path = scopedKey))
+                    documentCache.delete(path)
+                    return legacy.copy(path = path, cacheScope = scope)
+                }
+            }
+            return null
+        }
+
+        override fun load(path: String): DocumentSnapshot? =
+            loadScoped(path, if (isGuestPath(path)) cacheScopeForPath(path) else null)
+
+        override fun save(snapshot: DocumentSnapshot) {
+            val scope = snapshot.cacheScope ?: if (isGuestPath(snapshot.path)) cacheScopeForPath(snapshot.path) else null
+            documentCache.save(snapshot.copy(path = key(snapshot.path, scope), cacheScope = null))
+        }
+
+        override fun delete(path: String) {
+            val scope = if (isGuestPath(path)) cacheScopeForPath(path) else null
+            documentCache.delete(key(path, scope))
+        }
+
+        override fun contains(path: String): Boolean {
+            val scope = if (isGuestPath(path)) cacheScopeForPath(path) else null
+            return containsScoped(path, scope)
+        }
+
+        fun containsScoped(path: String, scope: String?): Boolean {
+            return documentCache.contains(key(path, scope))
+        }
+    }
+
+    fun open(path: String): CompletableFuture<OpenDocument> =
+        if (isDevicePath(path)) openDeviceFile(path) else openGuestFile(path)
+
+    private fun openGuestFile(path: String): CompletableFuture<OpenDocument> {
+        val cacheScope = cacheScopeForPath(path)
+        return vfs.stat(path).thenCompose { entry ->
+            if (cacheScopeForPath(path) != cacheScope) {
+                return@thenCompose CompletableFuture.failedFuture(IOException("Connection changed while opening $path"))
+            }
+            if (entry.isDirectory) {
+                return@thenCompose CompletableFuture.failedFuture(
+                    IllegalArgumentException("Cannot open a directory as a document"),
+                )
+            }
+            if (entry.size > MAX_PAGED_FILE_SIZE) {
+                return@thenCompose CompletableFuture.failedFuture(
+                    IOException("File exceeds the 256 MiB paged-file limit"),
+                )
+            }
+            if (entry.size > MAX_EDITABLE_FILE_SIZE) {
+                return@thenCompose readPage(path, entry.size, entry.modifiedTs, 0L).thenApply {
+                    OpenDocument.Paged(it)
+                }
+            }
+
+            val cached = cache.loadScoped(path, cacheScope)
+            if (cached?.dirty == true) {
+                val document = DocumentSession(
+                    path = path,
+                    text = cached.text,
+                    baseModifiedTs = cached.modifiedTs,
+                    dirty = true,
+                    encoding = cached.encoding,
+                    eol = cached.eol,
+                    cacheScope = cached.cacheScope,
+                )
+                if (cached.modifiedTs != entry.modifiedTs) {
+                    return@thenCompose readAll(path, entry.size).thenApply { remote ->
+                        if (cacheScopeForPath(path) != cacheScope) throw IOException("Connection changed while opening $path")
+                        document.conflict = RemoteConflict(remote.text, entry.modifiedTs, remote.encoding)
+                        OpenDocument.Editable(document)
+                    }
+                }
+                return@thenCompose CompletableFuture.completedFuture(OpenDocument.Editable(document))
+            }
+
+            readAll(path, entry.size).thenApply { decoded ->
+                if (cacheScopeForPath(path) != cacheScope) throw IOException("Connection changed while opening $path")
+                val document = DocumentSession(
+                    path,
+                    decoded.text,
+                    entry.modifiedTs,
+                    dirty = false,
+                    encoding = decoded.encoding,
+                    eol = if (decoded.text.contains("\r\n")) "\r\n" else "\n",
+                    cacheScope = cacheScope,
+                )
+                cache.save(
+                    DocumentSnapshot(
+                        path,
+                        decoded.text,
+                        entry.modifiedTs,
+                        dirty = false,
+                        encoding = decoded.encoding,
+                        eol = document.eol,
+                        cacheScope = cacheScope,
+                    ),
+                )
+                OpenDocument.Editable(document)
+            }
+        }.exceptionallyCompose { error ->
+            val cached = cache.loadScoped(path, cacheScope)
+            when {
+                cached == null -> CompletableFuture.failedFuture(unwrap(error))
+                cached.encoding == BINARY_CACHE_ENCODING -> CompletableFuture.failedFuture(BinaryFileException())
+                else -> CompletableFuture.completedFuture(
+                    OpenDocument.Editable(
+                        DocumentSession(
+                            path = cached.path,
+                            text = cached.text,
+                            baseModifiedTs = cached.modifiedTs,
+                            dirty = cached.dirty,
+                            encoding = cached.encoding,
+                            eol = cached.eol,
+                            cacheScope = cached.cacheScope,
+                        ),
+                    ),
+                )
+            }
+        }
+    }
+
+    fun save(document: DocumentSession): CompletableFuture<SaveResult> {
+        val charset = when (document.encoding.uppercase()) {
+            "ISO-8859-1" -> StandardCharsets.ISO_8859_1
+            "UTF-16LE" -> StandardCharsets.UTF_16LE
+            "UTF-16BE" -> StandardCharsets.UTF_16BE
+            else -> StandardCharsets.UTF_8
+        }
+        val savingText = document.text
+        val bytes = try {
+            val encoded = charset.newEncoder()
+                .onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT)
+                .encode(CharBuffer.wrap(savingText))
+            ByteArray(encoded.remaining()).also(encoded::get)
+        } catch (error: java.nio.charset.CharacterCodingException) {
+            return CompletableFuture.failedFuture(
+                IOException("Document contains characters that cannot be represented as ${document.encoding}", error),
+            )
+        }
+        if (bytes.size > MAX_EDITABLE_FILE_SIZE) {
+            return CompletableFuture.failedFuture(
+                IOException("Editable files are limited to 16 MiB; large files are read-only and paged"),
+            )
+        }
+
+        cache.save(
+            DocumentSnapshot(
+                document.path,
+                document.text,
+                document.baseModifiedTs,
+                dirty = true,
+                encoding = document.encoding,
+                eol = document.eol,
+                cacheScope = document.cacheScope,
+            ),
+        )
+        if (isDevicePath(document.path)) return saveDeviceFile(document, savingText, bytes)
+        if (isGuestPath(document.path) && cacheScopeForPath(document.path) != document.cacheScope) {
+            return CompletableFuture.failedFuture(IOException("The connection changed; reconnect to the document's guest before saving"))
+        }
+        if (!vfs.isConnected(document.path)) {
+            return CompletableFuture.completedFuture(SaveResult.QueuedOffline)
+        }
+        return writeAll(document.path, bytes, document.baseModifiedTs)
+            .thenApply<SaveResult> { modifiedTs ->
+                document.baseModifiedTs = modifiedTs
+                document.markSaved(savingText)
+                document.conflict = null
+                cache.save(
+                    DocumentSnapshot(
+                        document.path,
+                        document.text,
+                        modifiedTs,
+                        // Typing that went on during the write stays unsaved.
+                        dirty = document.dirty,
+                        encoding = document.encoding,
+                        eol = document.eol,
+                        cacheScope = document.cacheScope,
+                    ),
+                )
+                SaveResult.Saved(modifiedTs)
+            }
+            .exceptionallyCompose { error ->
+                val cause = unwrap(error)
+                if (cause is GuestVfsException && cause.code == "Conflict") {
+                    loadRemoteConflict(document).thenApply<SaveResult> { conflict ->
+                        document.conflict = conflict
+                        SaveResult.Conflict(document.text, conflict)
+                    }
+                } else if (cause is IOException) {
+                    CompletableFuture.completedFuture<SaveResult>(SaveResult.QueuedOffline)
+                } else {
+                    CompletableFuture.failedFuture<SaveResult>(cause)
+                }
+            }
+    }
+
+    /** Whether this device keeps a copy of [path], so it opens without the guest. */
+    fun hasCopy(path: String): Boolean = cache.contains(path)
+
+    /** What this device holds for [path]: nothing, a clean copy as of a modification time, or unsaved edits. */
+    fun copyState(path: String): CopyState = copyState(cache.load(path))
+
+    private fun copyState(snapshot: DocumentSnapshot?): CopyState =
+        when {
+            snapshot == null -> CopyState.None
+            snapshot.dirty -> CopyState.Edited
+            else -> CopyState.Clean(snapshot.modifiedTs)
+        }
+
+    /**
+     * Keeps a clean copy of the guest's [path] (G29 "keep available offline"): read whole, decoded as when opened
+     * (or kept as bytes for an image). False for a non-image binary file (a NUL in its first 8 KB), which isn't kept.
+     * Never replaces unsaved edits.
+     */
+    fun storeCopy(path: String, size: Long, modifiedTs: Long): CompletableFuture<Boolean> {
+        val cacheScope = cacheScopeForPath(path)
+        if (cache.loadScoped(path, cacheScope)?.dirty == true) return CompletableFuture.completedFuture(true)
+        if (isCacheableImagePath(path)) {
+            return readBytes(path, size.toInt().coerceAtLeast(1)).thenApply { bytes ->
+                if (cacheScopeForPath(path) != cacheScope) throw IOException("Connection changed while keeping $path offline")
+                storeBytesCopy(path, bytes, modifiedTs, cacheScope)
+                true
+            }
+        }
+        return readAll(path, size).handle { decoded, error ->
+            // A binary file isn't kept; any other failure (the guest went away) stops the sync.
+            if (error != null) {
+                if (generateSequence(error) { it.cause }.any { it is BinaryFileException }) return@handle false
+                throw java.util.concurrent.CompletionException(unwrap(error))
+            }
+            if (cacheScopeForPath(path) != cacheScope) {
+                throw java.util.concurrent.CompletionException(IOException("Connection changed while keeping $path offline"))
+            }
+            if (decoded.text.take(8_192).contains('\u0000')) return@handle false
+            if (cache.loadScoped(path, cacheScope)?.dirty == true) return@handle true
+            cache.save(
+                DocumentSnapshot(
+                    path,
+                    decoded.text,
+                    modifiedTs,
+                    dirty = false,
+                    encoding = decoded.encoding,
+                    eol = if (decoded.text.contains("\r\n")) "\r\n" else "\n",
+                    cacheScope = cacheScope,
+                ),
+            )
+            true
+        }
+    }
+
+    /** Keeps a binary/image copy of [path] so the image viewer, Markdown previews and hex view work offline. */
+    fun storeBytesCopy(
+        path: String,
+        bytes: ByteArray,
+        modifiedTs: Long?,
+        cacheScope: String? = cacheScopeForPath(path),
+    ) {
+        if (cache.loadScoped(path, cacheScope)?.dirty == true) return
+        cache.save(
+            DocumentSnapshot(
+                path = path,
+                text = java.util.Base64.getEncoder().encodeToString(bytes),
+                modifiedTs = modifiedTs,
+                dirty = false,
+                encoding = BINARY_CACHE_ENCODING,
+                eol = "\n",
+                cacheScope = cacheScope,
+            ),
+        )
+    }
+
+    /**
+     * Keeps a byte copy of the guest's [path] for viewing it offline (the hex view), reading it only when this device
+     * has no copy as of [modifiedTs]: opening the same file again costs no second download, and its copy isn't
+     * re-encrypted each time. Unsaved edits are never replaced.
+     */
+    fun refreshBytesCopy(path: String, size: Long, modifiedTs: Long): CompletableFuture<Unit> {
+        val cacheScope = cacheScopeForPath(path)
+        val current = when (val state = copyState(cache.loadScoped(path, cacheScope))) {
+            CopyState.None -> false
+            CopyState.Edited -> true
+            is CopyState.Clean -> state.modifiedTs == modifiedTs
+        }
+        if (current) return CompletableFuture.completedFuture(Unit)
+        return readBytes(path, size.toInt().coerceAtLeast(1)).thenApply { bytes ->
+            if (cacheScopeForPath(path) != cacheScope) throw IOException("Connection changed while keeping $path offline")
+            storeBytesCopy(path, bytes, modifiedTs, cacheScope)
+        }
+    }
+
+    /** This device's copy of [path] when it's current as of [modifiedTs], else null. */
+    fun currentCopyBytes(path: String, modifiedTs: Long): ByteArray? =
+        (copyState(path) as? CopyState.Clean)?.takeIf { it.modifiedTs == modifiedTs }?.let { copyBytes(path) }
+
+    /** A copy's text, for searching what's kept offline (binary copies have no searchable text). */
+    fun copyText(path: String): String? = cache.load(path)?.takeIf { it.encoding != BINARY_CACHE_ENCODING }?.text
+
+    /** This device's copy of [path] as raw bytes (for images, previews, workspace settings, snippets and hex offline). */
+    fun copyBytes(path: String): ByteArray? {
+        val snapshot = cache.load(path) ?: return null
+        if (snapshot.encoding == BINARY_CACHE_ENCODING) {
+            return runCatching { java.util.Base64.getDecoder().decode(snapshot.text) }.getOrNull()
+        }
+        val charset = when (snapshot.encoding.uppercase()) {
+            "ISO-8859-1" -> StandardCharsets.ISO_8859_1
+            "UTF-16LE" -> StandardCharsets.UTF_16LE
+            "UTF-16BE" -> StandardCharsets.UTF_16BE
+            else -> StandardCharsets.UTF_8
+        }
+        return snapshot.text.toByteArray(charset)
+    }
+
+    /** Drops this device's copy of [path] unless it holds edits not saved to the guest. */
+    fun forgetCleanCopy(path: String) {
+        if (cache.load(path)?.dirty == false) cache.delete(path)
+    }
+
+    /** A whole file's bytes, for files the editor doesn't open (preview images); fails past [limit]. */
+    fun readBytes(path: String, limit: Int): CompletableFuture<ByteArray> {
+        if (isDevicePath(path)) return readDeviceBytes(path, limit)
+        if (cache.load(path)?.dirty == true) {
+            val dirtyBytes = copyBytes(path)
+            if (dirtyBytes != null) {
+                return if (dirtyBytes.size > limit) {
+                    CompletableFuture.failedFuture(IOException("$path is not a file under ${limit / (1024 * 1024)} MiB"))
+                } else {
+                    CompletableFuture.completedFuture(dirtyBytes)
+                }
+            }
+        }
+        if (!vfs.isConnected(path)) {
+            val cached = copyBytes(path)
+            if (cached != null) {
+                return if (cached.size > limit) {
+                    CompletableFuture.failedFuture(IOException("$path is not a file under ${limit / (1024 * 1024)} MiB"))
+                } else {
+                    CompletableFuture.completedFuture(cached)
+                }
+            }
+        }
+        return vfs.stat(path).thenCompose { entry ->
+            if (entry.isDirectory || entry.size > limit) {
+                return@thenCompose CompletableFuture.failedFuture<ByteArray>(IOException("$path is not a file under ${limit / (1024 * 1024)} MiB"))
+            }
+            val output = ByteArrayOutputStream(entry.size.toInt())
+            fun readNext(offset: Long): CompletableFuture<ByteArray> =
+                vfs.read(path, offset, minOf(VFS_CHUNK_SIZE.toLong(), entry.size - offset).toInt().coerceAtLeast(1)).thenCompose { response ->
+                    output.write(response.content)
+                    val next = offset + response.content.size
+                    when {
+                        response.eof || next >= entry.size -> CompletableFuture.completedFuture(output.toByteArray())
+                        response.content.isEmpty() -> CompletableFuture.failedFuture(IOException("Guest returned an empty non-final file chunk"))
+                        else -> readNext(next)
+                    }
+                }
+            readNext(0)
+        }.exceptionallyCompose { error ->
+            val cached = copyBytes(path)?.takeIf { it.size <= limit }
+            if (cached != null) {
+                CompletableFuture.completedFuture(cached)
+            } else {
+                CompletableFuture.failedFuture(unwrap(error))
+            }
+        }
+    }
+
+    /** [length] bytes from [offset] of a guest file (the hex view's pages); fewer at its end. */
+    fun readRange(path: String, offset: Long, length: Int): CompletableFuture<ByteArray> =
+        vfs.read(path, offset, length).thenApply { it.content }
+
+
+    private fun readDeviceBytes(path: String, limit: Int): CompletableFuture<ByteArray> {
+        val store = deviceFiles ?: return CompletableFuture.failedFuture(IOException("Device files can't be read here"))
+        val uri = deviceUri(path) ?: return CompletableFuture.failedFuture(IllegalArgumentException("Not a device file: $path"))
+        return CompletableFuture.supplyAsync {
+            store.read(uri).also { if (it.size > limit) throw IOException("$path is over ${limit / (1024 * 1024)} MiB") }
+        }
+    }
+
+    /**
+     * A device file, read through its content URI. An unsaved draft wins, as for guest files;
+     * without access any more (the file moved, the permission went), the last copy opens.
+     */
+    private fun openDeviceFile(path: String): CompletableFuture<OpenDocument> {
+        val store = deviceFiles ?: return CompletableFuture.failedFuture(IOException("Device files can't be opened here"))
+        val uri = deviceUri(path) ?: return CompletableFuture.failedFuture(IllegalArgumentException("Not a device file: $path"))
+        return CompletableFuture.supplyAsync {
+            val cached = cache.load(path)
+            if (cached?.dirty == true) {
+                return@supplyAsync OpenDocument.Editable(
+                    DocumentSession(path, cached.text, null, dirty = true, encoding = cached.encoding, eol = cached.eol),
+                )
+            }
+            val read = runCatching { store.read(uri) }
+            val bytes = read.getOrNull()
+            when {
+                bytes != null -> {
+                    if (bytes.size > MAX_EDITABLE_FILE_SIZE) throw IOException("Device files over 16 MiB can't be opened")
+                    val decoded = decodeDocument(bytes)
+                    val eol = if (decoded.text.contains("\r\n")) "\r\n" else "\n"
+                    cache.save(DocumentSnapshot(path, decoded.text, null, dirty = false, encoding = decoded.encoding, eol = eol))
+                    OpenDocument.Editable(DocumentSession(path, decoded.text, null, dirty = false, encoding = decoded.encoding, eol = eol))
+                }
+                cached != null -> OpenDocument.Editable(
+                    DocumentSession(path, cached.text, null, dirty = false, encoding = cached.encoding, eol = cached.eol),
+                )
+                else -> throw read.exceptionOrNull() ?: IOException("Can't read $path")
+            }
+        }
+    }
+
+    private fun saveDeviceFile(document: DocumentSession, savingText: String, bytes: ByteArray): CompletableFuture<SaveResult> {
+        val store = deviceFiles ?: return CompletableFuture.failedFuture(IOException("Device files can't be saved here"))
+        val uri = deviceUri(document.path) ?: return CompletableFuture.failedFuture(IllegalArgumentException("Not a device file"))
+        return CompletableFuture.supplyAsync {
+            store.write(uri, bytes)
+            document.markSaved(savingText)
+            cache.save(DocumentSnapshot(document.path, document.text, null, dirty = document.dirty, encoding = document.encoding, eol = document.eol))
+            SaveResult.Saved(System.currentTimeMillis())
+        }
+    }
+
+    /** Drops the cached draft for a document that was renamed, deleted or saved elsewhere. */
+    fun forget(path: String) {
+        cache.delete(path)
+    }
+
+    fun persistDraft(document: DocumentSession) {
+        if (document.binary) return
+        cache.save(
+            DocumentSnapshot(
+                document.path,
+                document.text,
+                document.baseModifiedTs,
+                dirty = document.dirty,
+                encoding = document.encoding,
+                eol = document.eol,
+                cacheScope = document.cacheScope,
+            ),
+        )
+    }
+
+    fun reconcile(document: DocumentSession): CompletableFuture<SaveResult> {
+        if (!document.dirty) return CompletableFuture.completedFuture(SaveResult.Saved(document.baseModifiedTs ?: 0L))
+        if (!vfs.isConnected(document.path)) return CompletableFuture.completedFuture(SaveResult.QueuedOffline)
+        return vfs.stat(document.path).thenCompose<SaveResult> { entry ->
+            if (document.baseModifiedTs != null && entry.modifiedTs != document.baseModifiedTs) {
+                loadRemoteConflict(document).thenApply<SaveResult> { conflict ->
+                    document.conflict = conflict
+                    SaveResult.Conflict(document.text, conflict)
+                }
+            } else {
+                save(document)
+            }
+        }
+    }
+
+    fun keepLocalAfterConflict(document: DocumentSession): CompletableFuture<SaveResult> {
+        val remote = document.conflict
+            ?: return CompletableFuture.failedFuture(IllegalStateException("Document has no pending conflict"))
+        document.baseModifiedTs = remote.remoteModifiedTs
+        return save(document)
+    }
+
+    fun discardLocalForRemote(document: DocumentSession): CompletableFuture<DocumentSession> {
+        val remote = document.conflict
+            ?: return CompletableFuture.failedFuture(IllegalStateException("Document has no pending conflict"))
+        document.text = remote.remoteText
+        document.baseModifiedTs = remote.remoteModifiedTs
+        document.encoding = remote.remoteEncoding
+        document.eol = if (remote.remoteText.contains("\r\n")) "\r\n" else "\n"
+        document.markSaved(remote.remoteText)
+        document.conflict = null
+        cache.save(
+            DocumentSnapshot(
+                document.path,
+                document.text,
+                document.baseModifiedTs,
+                dirty = false,
+                encoding = document.encoding,
+                eol = document.eol,
+            ),
+        )
+        return CompletableFuture.completedFuture(document)
+    }
+
+    fun page(path: String, current: PagedDocument, direction: Int): CompletableFuture<PagedDocument> {
+        val nextIndex = (current.pageIndex + direction).coerceIn(0, current.pageCount - 1)
+        val nextOffset = nextIndex.toLong() * LARGE_FILE_PAGE_SIZE
+        return readPage(path, current.size, current.modifiedTs, nextOffset, current.encoding)
+    }
+
+    private fun readAll(path: String, size: Long): CompletableFuture<DecodedDocument> {
+        val output = ByteArrayOutputStream(size.toInt())
+        var offset = 0L
+        fun readNext(): CompletableFuture<Unit> {
+            if (offset >= size) return CompletableFuture.completedFuture(Unit)
+            val amount = minOf(VFS_CHUNK_SIZE.toLong(), size - offset).toInt()
+            return vfs.read(path, offset, amount).thenCompose { response ->
+                output.write(response.content)
+                offset += response.content.size
+                if (response.content.isEmpty() && !response.eof) {
+                    return@thenCompose CompletableFuture.failedFuture(IOException("Guest returned an empty non-final file chunk"))
+                }
+                if (response.eof) CompletableFuture.completedFuture(Unit) else readNext()
+            }
+        }
+        return readNext().thenApply {
+            decodeDocument(output.toByteArray())
+        }
+    }
+
+    private fun readPage(
+        path: String,
+        size: Long,
+        modifiedTs: Long,
+        offset: Long,
+        knownEncoding: String? = null,
+    ): CompletableFuture<PagedDocument> {
+        val overlap = if (knownEncoding == null || knownEncoding == "UTF-8") 3L else 0L
+        val readOffset = (offset - overlap).coerceAtLeast(0L)
+        val length = minOf(
+            LARGE_FILE_PAGE_SIZE.toLong() + (offset - readOffset) + overlap,
+            size - readOffset,
+        ).coerceAtLeast(1L).toInt()
+        return vfs.read(path, readOffset, length).thenApply { response ->
+            val pages = ceil(size.toDouble() / LARGE_FILE_PAGE_SIZE).toInt().coerceAtLeast(1)
+            val decoded = decodePage(response.content, readOffset, offset, size, knownEncoding)
+            PagedDocument(
+                path = path,
+                size = size,
+                modifiedTs = response.modifiedTs,
+                offset = offset,
+                text = decoded.text,
+                pageIndex = (offset / LARGE_FILE_PAGE_SIZE).toInt(),
+                pageCount = pages,
+                encoding = decoded.encoding,
+            )
+        }
+    }
+
+    /** Writes [bytes] as [path]'s whole content, in chunks the daemon takes, then flushes it. */
+    fun writeAll(path: String, bytes: ByteArray, expectedModifiedTs: Long?): CompletableFuture<Long> {
+        if (bytes.isEmpty()) {
+            return vfs.write(path, 0L, byteArrayOf(), truncate = true, expectedModifiedTs)
+                .thenCompose { vfs.flush(path) }
+                .thenApply { it.modifiedTs ?: 0L }
+        }
+        var offset = 0
+        fun writeNext(): CompletableFuture<Long> {
+            if (offset >= bytes.size) {
+                return vfs.flush(path).thenApply { it.modifiedTs ?: 0L }
+            }
+            val end = minOf(offset + VFS_CHUNK_SIZE, bytes.size)
+            val chunk = bytes.copyOfRange(offset, end)
+            val first = offset == 0
+            return vfs.write(
+                path = path,
+                offset = offset.toLong(),
+                content = chunk,
+                truncate = first,
+                expectedModifiedTs = if (first) expectedModifiedTs else null,
+            ).thenCompose {
+                offset = end
+                writeNext()
+            }
+        }
+        return writeNext()
+    }
+
+    private fun loadRemoteConflict(document: DocumentSession): CompletableFuture<RemoteConflict> =
+        vfs.stat(document.path).thenCompose { entry ->
+            if (entry.size > MAX_EDITABLE_FILE_SIZE) {
+                CompletableFuture.failedFuture(
+                    IOException("Conflicting remote file is too large to merge as an editable document"),
+                )
+            } else {
+                readAll(document.path, entry.size).thenApply {
+                    RemoteConflict(it.text, entry.modifiedTs, it.encoding)
+                }
+            }
+        }
+
+    private fun unwrap(error: Throwable): Throwable {
+        var cause = error
+        while ((cause is java.util.concurrent.CompletionException || cause is java.util.concurrent.ExecutionException) &&
+            cause.cause != null
+        ) {
+            cause = cause.cause!!
+        }
+        return cause
+    }
+
+    private fun decodeDocument(bytes: ByteArray): DecodedDocument {
+        val (charset, encoding) = when {
+            bytes.startsWith(byteArrayOf(0xFF.toByte(), 0xFE.toByte())) ->
+                StandardCharsets.UTF_16LE to "UTF-16LE"
+            bytes.startsWith(byteArrayOf(0xFE.toByte(), 0xFF.toByte())) ->
+                StandardCharsets.UTF_16BE to "UTF-16BE"
+            else -> StandardCharsets.UTF_8 to "UTF-8"
+        }
+        if (encoding != "UTF-16LE" && encoding != "UTF-16BE" && bytes.any { it == 0.toByte() }) {
+            throw BinaryFileException()
+        }
+        val decoder = charset.newDecoder()
+            .onMalformedInput(CodingErrorAction.REPORT)
+            .onUnmappableCharacter(CodingErrorAction.REPORT)
+        return try {
+            DecodedDocument(decoder.decode(java.nio.ByteBuffer.wrap(bytes)).toString(), encoding)
+        } catch (_: java.nio.charset.CharacterCodingException) {
+            if (encoding != "UTF-8") throw IOException("Text file encoding is invalid")
+            DecodedDocument(
+                StandardCharsets.ISO_8859_1.decode(java.nio.ByteBuffer.wrap(bytes)).toString(),
+                "ISO-8859-1",
+            )
+        }
+    }
+
+    private fun decodePage(
+        bytes: ByteArray,
+        byteStart: Long,
+        logicalOffset: Long,
+        size: Long,
+        knownEncoding: String?,
+    ): DecodedDocument {
+        val encoding = knownEncoding ?: when {
+            bytes.startsWith(byteArrayOf(0xFF.toByte(), 0xFE.toByte())) -> "UTF-16LE"
+            bytes.startsWith(byteArrayOf(0xFE.toByte(), 0xFF.toByte())) -> "UTF-16BE"
+            else -> "UTF-8"
+        }
+        val charset = when (encoding) {
+            "UTF-16LE" -> StandardCharsets.UTF_16LE
+            "UTF-16BE" -> StandardCharsets.UTF_16BE
+            "ISO-8859-1" -> StandardCharsets.ISO_8859_1
+            else -> StandardCharsets.UTF_8
+        }
+        if (encoding != "UTF-8") {
+            val startIndex = (logicalOffset - byteStart).toInt().coerceIn(0, bytes.size)
+            return DecodedDocument(String(bytes, startIndex, bytes.size - startIndex, charset), encoding)
+        }
+
+        var startIndex = (logicalOffset - byteStart).toInt().coerceIn(0, bytes.size)
+        while (startIndex < bytes.size && isUtf8Continuation(bytes[startIndex])) startIndex++
+        val logicalEnd = minOf(size, logicalOffset + LARGE_FILE_PAGE_SIZE) - byteStart
+        var endIndex = logicalEnd.toInt().coerceIn(startIndex, bytes.size)
+        while (endIndex < bytes.size && isUtf8Continuation(bytes[endIndex])) endIndex++
+        val decoder = StandardCharsets.UTF_8.newDecoder()
+            .onMalformedInput(CodingErrorAction.REPORT)
+            .onUnmappableCharacter(CodingErrorAction.REPORT)
+        return DecodedDocument(
+            decoder.decode(java.nio.ByteBuffer.wrap(bytes, startIndex, endIndex - startIndex)).toString(),
+            encoding,
+        )
+    }
+
+    private fun isUtf8Continuation(byte: Byte): Boolean = byte.toInt() and 0xC0 == 0x80
+
+    private fun ByteArray.startsWith(prefix: ByteArray): Boolean =
+        size >= prefix.size && prefix.indices.all { this[it] == prefix[it] }
+}

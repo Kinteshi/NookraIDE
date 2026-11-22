@@ -68,21 +68,21 @@ jobs:
       - name: Files and checksums
         run: |
           mkdir dist
-          cp apps/native-android-ide/app/build/outputs/apk/release/app-release.apk "dist/quirecode-$VERSION.apk"
-          cp target/aarch64-unknown-linux-gnu/release/quirecode-daemon "dist/quirecode-daemon-$VERSION-linux-arm64"
-          cp target/x86_64-unknown-linux-gnu/release/quirecode-daemon "dist/quirecode-daemon-$VERSION-linux-x86_64"
+          cp apps/native-android-ide/app/build/outputs/apk/release/app-release.apk "dist/nookra-$VERSION.apk"
+          cp target/aarch64-unknown-linux-gnu/release/nookra-daemon "dist/nookra-daemon-$VERSION-linux-arm64"
+          cp target/x86_64-unknown-linux-gnu/release/nookra-daemon "dist/nookra-daemon-$VERSION-linux-x86_64"
           cp scripts/install-native-daemon.sh dist/
           (cd dist && sha256sum * > SHA256SUMS)
       - name: Signed with the release key, not a debug key
         run: |
-          signer=$("$ANDROID_HOME/build-tools/37.0.0/apksigner" verify --print-certs "dist/quirecode-$VERSION.apk")
+          signer=$("$ANDROID_HOME/build-tools/37.0.0/apksigner" verify --print-certs "dist/nookra-$VERSION.apk")
           echo "$signer"
           if echo "$signer" | grep -q "CN=Android Debug"; then echo "::error::the APK is debug-signed: the release key's secrets are missing"; exit 1; fi
       - name: Dry run's files
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
         uses: actions/upload-artifact@v4
         with:
-          name: quirecode-${{ env.VERSION }}-dry-run
+          name: nookra-${{ env.VERSION }}-dry-run
           path: dist/
           retention-days: 7
       - name: GitHub release

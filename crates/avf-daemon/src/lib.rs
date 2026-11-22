@@ -102,7 +102,7 @@ pub fn git_askpass_helper() -> Result<(), String> {
 /// `avf-daemon pair [--minutes N] [--remote HOST[:PORT]]`: issues a one-time code. With
 /// `--remote` (a TLS host on a LAN) it prints a connection string carrying the certificate
 /// fingerprint for the app's "Pair with a computer".
-/// `quirecode-daemon devices [revoke ID]` and `quirecode-daemon log [-n N]` (G30).
+/// `nookra-daemon devices [revoke ID]` and `nookra-daemon log [-n N]` (G30).
 pub fn run_devices_cli(command: &str, args: &[String]) -> Result<(), String> {
     devices::run_cli(command, args, &pairing::config_dir()?)
 }
@@ -410,7 +410,7 @@ pub async fn serve(config: AppConfig) -> io::Result<()> {
     if !config.bind_addr.ip().is_loopback() && !config.tls {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "QuireCode daemon may only bind beyond loopback with TLS",
+            "Nookra IDE daemon may only bind beyond loopback with TLS",
         ));
     }
     if !is_valid_token(&config.token) || config.allowed_origins.is_empty() {
@@ -3923,8 +3923,8 @@ mod tests {
         let project = temp.path().join("project");
         std::fs::create_dir(&project).unwrap();
         let devices_file = temp.path().join("devices.json");
-        let (tablet, tablet_token) = devices::issue(&devices_file, "QuireCode on Tab").unwrap();
-        let (phone, _) = devices::issue(&devices_file, "QuireCode on Phone").unwrap();
+        let (tablet, tablet_token) = devices::issue(&devices_file, "Nookra IDE on Tab").unwrap();
+        let (phone, _) = devices::issue(&devices_file, "Nookra IDE on Phone").unwrap();
         let config = AppConfig {
             bind_addr: "127.0.0.1:0".parse().unwrap(),
             token: "f".repeat(64),
@@ -3986,7 +3986,7 @@ mod tests {
         let SystemMessage::Devices { devices: after, error, recent, .. } = &replies[1] else { unreachable!() };
         assert!(error.is_none());
         assert_eq!(after.iter().map(|d| d.id.clone()).collect::<Vec<_>>(), vec![tablet.id.clone()]);
-        assert!(recent.iter().any(|line| line.contains(&format!("revoked device {} (QuireCode on Phone) from the app by device {}", phone.id, tablet.id))));
+        assert!(recent.iter().any(|line| line.contains(&format!("revoked device {} (Nookra IDE on Phone) from the app by device {}", phone.id, tablet.id))));
         let SystemMessage::Devices { error, .. } = &replies[2] else { unreachable!() };
         assert!(error.as_deref().unwrap().contains("nobody"));
         server.abort();

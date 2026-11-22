@@ -1,4 +1,4 @@
-# QuireCode shell integration for bash: OSC 133 marks (prompt, command, output, exit status)
+# Nookra IDE shell integration for bash: OSC 133 marks (prompt, command, output, exit status)
 # and OSC 633;E with the command line, as VS Code's terminal reads them. Started with
 # --init-file, so ~/.bashrc is read here, as an interactive bash would.
 if [ -f ~/.bashrc ]; then . ~/.bashrc; fi

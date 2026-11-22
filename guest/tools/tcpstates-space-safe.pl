@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 # MaterialCode tcpstates wrapper, installed over /usr/sbin/tcpstates-libbpf by
-# `quirecode-daemon guest fix-port-forwarding` (dpkg-divert keeps the real tool as
+# `nookra-daemon guest fix-port-forwarding` (dpkg-divert keeps the real tool as
 # tcpstates-libbpf.real; `--undo` puts it back).
 #
 # Linux Terminal's port forwarder (forwarder_guest_launcher) splits this tool's lines on

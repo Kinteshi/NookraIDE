@@ -1,4 +1,4 @@
-# QuireCode shell integration for zsh: the user's .zshrc, then OSC 133 marks (prompt,
+# Nookra IDE shell integration for zsh: the user's .zshrc, then OSC 133 marks (prompt,
 # command, output, exit status) and OSC 633;E with the command line, as VS Code's terminal reads them.
 ZDOTDIR=${__AVF_USER_ZDOTDIR:-$HOME}
 unset __AVF_USER_ZDOTDIR

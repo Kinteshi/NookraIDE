@@ -155,8 +155,9 @@ real incidents.
   maintainer may pick the tablet up mid-session. If another app is in front, stop.
 * **Ask before touching Settings.** Settings live on the device. If one differs from what you expect, the maintainer
   probably changed it, so ask before reverting.
-* **Test in the dev app.** Test builds install as `io.github.kinteshi.quirecode.dev` ("Nookra IDE Dev", orange, DEV badge)
-  and stay installed beside the release app. The release-signed app is only updated with CI's APK.
+* **Test in the dev app.** New test builds install as `io.github.kinteshi.nookraide.dev` ("Nookra IDE Dev", orange, DEV badge).
+  The old `io.github.kinteshi.quirecode.dev` is a separate installation and must not be removed without approval.
+  The dev app stays installed beside the release app. The release-signed app is only updated with CI's APK.
 * **Clean up after a batch:**
   * your test folders in the guest;
   * staged files in `/sdcard/Download` and `/data/local/tmp`;
@@ -195,7 +196,8 @@ reboots, so ask for it. Detailed notes are in the handoff's "Reference tablet" s
 **Guest commands:**
 * Push a script to `/sdcard/Download`, bring Linux Terminal to the front, and type `bash /mnt/shared/Download/x.sh`.
 * Write output to `/mnt/shared/Download/*.log` and read it back with adb.
-* To restart the daemon: `systemctl --user stop quirecode; sleep 3; systemctl --user start quirecode`. Never `restart`:
+* To restart the daemon: `systemctl --user stop nookra; sleep 3; systemctl --user start nookra`. On a guest not yet
+  migrated, use `quirecode` instead. Never `restart`:
   the port forwarder loses the port.
 * To update the guest daemon:
   * Build with `cargo zigbuild --release -p avf-daemon --target aarch64-unknown-linux-gnu.2.28`.
@@ -212,7 +214,8 @@ reboots, so ask for it. Detailed notes are in the handoff's "Reference tablet" s
 **The development machine as a remote host.** This WSL machine can play "a computer running the daemon". It is on the
 maintainer's tailnet as `example-host` (100.64.0.1); the tablet is 100.64.0.2.
 * Run the built daemon with a throwaway `HOME` and `AVF_BIND_ADDR=100.64.0.1:<port> AVF_TLS=1`.
-* Pair with `quirecode-daemon pair --remote …` and type the connection string on the tablet in chunks.
+* Pair with `nookra-daemon pair --remote …` (or `quirecode-daemon` on an unmigrated guest) and type the connection
+  string on the tablet in chunks.
 * Without Tailscale, use `AVF_BIND_ADDR=127.0.0.1:<port>` plus `adb reverse tcp:<port> tcp:<port>`.
 * Remove everything afterwards.
 
@@ -224,7 +227,7 @@ picker; Documents holds the maintainer's notes vault.
 ## 7. The code, in one page
 
 ```
-apps/native-android-ide/app/src/main/java/io/github/kinteshi/quirecode/
+apps/native-android-ide/app/src/main/java/io/github/kinteshi/nookraide/
   MainActivity.kt, GuestConnectionService.kt
   workbench/   ~90 files: the whole UI (Compose) and WorkbenchController.kt, the single state holder
   document/    DocumentRepository (drafts, the encrypted cache, saves with conflict checks), DeviceTreeFs and

@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Hosts the QuireCode daemon on Windows through WSL2, reachable by the app over the LAN.
+    Hosts the Nookra IDE daemon on Windows through WSL2, reachable by the app over the LAN.
 
 .DESCRIPTION
     Runs scripts/install-native-daemon.sh --remote inside a WSL2 distro (systemd enabled), then
@@ -52,7 +52,7 @@ if ((Invoke-Wsl "ps -p 1 -o comm=").Trim() -ne "systemd") {
 # The repository as the distro sees it (works whether it lives in Windows or in the distro).
 $repo = (Invoke-Wsl "wslpath -a '$((Split-Path -Parent $PSScriptRoot) -replace "'", "'\''")'").Trim()
 if (-not $DaemonPath) {
-    $DaemonPath = "$repo/target/release/quirecode-daemon"
+    $DaemonPath = "$repo/target/release/nookra-daemon"
     if ((Invoke-Wsl "test -x '$DaemonPath' && echo yes || echo no").Trim() -ne "yes") {
         Write-Host "Building the daemon in WSL (needs Rust: https://rustup.rs)…"
         Invoke-Wsl "cd '$repo' && cargo build --release -p avf-daemon" | Out-Host
@@ -87,7 +87,7 @@ netsh interface portproxy add v4tov4 listenport=$Port listenaddress=0.0.0.0 conn
 "@
 }
 Set-Content -Path $startup -Encoding UTF8 -Value @"
-# Written by install-host-daemon-wsl.ps1: keeps '$Distro' running for the QuireCode daemon.
+# Written by install-host-daemon-wsl.ps1: keeps '$Distro' running for the Nookra IDE daemon.
 Start-Process -WindowStyle Hidden -FilePath wsl.exe -ArgumentList '-d', '$Distro', '--exec', 'sleep', 'infinity'
 Start-Sleep -Seconds 5
 $proxyRefresh
@@ -101,4 +101,4 @@ Start-ScheduledTask -TaskName $TaskName
 Invoke-Wsl "bash '$repo/scripts/install-native-daemon.sh' --remote --port $Port --address $address '$DaemonPath' $Workspace" | Out-Host
 Write-Host ""
 Write-Host "Paste the avf:// connection string above into Nookra IDE: Connect > Set up or pair > Pair with computer."
-Write-Host "New code later: wsl -d $Distro -- ~/.local/bin/quirecode-daemon pair --remote ${address}:$Port"
+Write-Host "New code later: wsl -d $Distro -- ~/.local/bin/nookra-daemon pair --remote ${address}:$Port"

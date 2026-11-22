@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""QuireCode's C, C++ and Rust debug adapter: CodeLLDB's DAP adapter on stdin/stdout.
+"""Nookra IDE's C, C++ and Rust debug adapter: CodeLLDB's DAP adapter on stdin/stdout.
 
     avf-codelldb setup     downloads the pinned CodeLLDB release (checksum-verified) and writes
                            the `codelldb` command the app checks for
@@ -112,7 +112,7 @@ def remove() -> None:
 
 def serve(extra: list) -> None:
     if not ADAPTER.is_file():
-        fail("CodeLLDB is not set up; run: quirecode-daemon tools install codelldb")
+        fail("CodeLLDB is not set up; run: nookra-daemon tools install codelldb")
     listener = socket.socket()
     listener.bind(("127.0.0.1", 0))
     listener.listen(1)

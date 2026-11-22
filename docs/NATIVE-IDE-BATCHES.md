@@ -3408,7 +3408,7 @@ Request: the user selected Nookra IDE and the Collected fragments concept, then 
   The labels are in `app/build.gradle.kts`, the welcome screen is in `EditorPane.kt`, and the pairing instruction is in
   `crates/avf-daemon/src/lib.rs`; the master icon is `docs/branding/nookra-ide-icon.svg`.
 * Preserved application IDs, `quirecode-daemon`, existing configuration and export paths, release asset names, and the
-  `Kinteshi/QuireCode` repository URL for compatibility.
+  `Kinteshi/QuireCode` repository URL for compatibility at that time; batch 87 supersedes this.
 * **Checks:** 455 Android unit tests (453 passed, two opt-in tests skipped); 152 Rust tests; clippy (five pre-existing
   warnings); debug and release APK assembly and ARM64 daemon `zigbuild`. Confirmed both APK labels and IDs and that their
   bundled daemon matches the rebuilt binary. Checked the icon paths against the SVG.
@@ -3422,6 +3422,29 @@ Request: the user selected Nookra IDE and the Collected fragments concept, then 
 * **Not checked:** The release app, themed launcher icon, pairing and device golden suite were not checked on the tablet.
   Old screenshot goldens may need rebaselining. The name and logo have not received trademark clearance; existing uses
   of Nookra were found during preliminary research.
+
+## 87. Complete Nookra IDE rebrand (11-22; done, limited tablet check)
+
+The user requested a complete rebrand and approved changing the Android app ID and renaming the GitHub repository.
+* Renamed the repository and local origin to `Kinteshi/NookraIDE`, Android packages to
+  `io.github.kinteshi.nookraide` (`.dev` for debug), the daemon to `nookra-daemon` and `nookra.service`,
+  its configuration to `~/.config/nookra`, and setup/export and release asset names. The new Android app is a separate
+  installation: private data, connections and unsynced drafts do not transfer automatically. Keep the old app and
+  preserve its work; pair the new one separately. Imported keybindings still accept legacy command IDs.
+* The installer preserves a legacy configuration, pairing and certificate when migrating, stops its old service and
+  refuses conflicting configurations. Standalone daemon commands fall back to old configuration folders until migration.
+  Updated setup guidance to tell users to update the old daemon first; its version can match the new one.
+* **Checks:** 455 Android unit tests (453 passed, two opt-in tests skipped); 156 Rust tests; clippy (four existing
+  warnings); debug and release APKs, ARM64 `zigbuild`, script syntax and regenerated notices (374 components). Both APKs'
+  daemon and installer hashes match the rebuilt binary and source script. Installer tests cover migration, repeat install,
+  configuration conflicts and failure to stop the old service. An earlier concurrent Rust run had a clone-test failure;
+  it passed on the subsequent full runs.
+* **Tablet:** Installed and launched the new debug app separately on `SM-X930`. Its welcome page, name, DEV badge and
+  fragment icon appeared; the old dev and release apps remained installed. The guest was still running and was not
+  migrated. No pairing, old private data transfer or guest package installation was attempted.
+* **Left / not checked:** Live guest migration and pairing, release app, themed icon and screenshot goldens were not
+  checked. Existing exports remain in the old folder. Trademark clearance is outstanding; the repository rename is
+  remote but this batch has not been pushed.
 
 ## Backlog
 ### Open backlog (11-08)
@@ -3526,7 +3549,7 @@ Loose ends: placed in the groups above (11-08).
 
 #### Release backlog (first release)
 
-**On hold (user, 11-09):** the original release work is done but the tag. Since then, the batch 86 rebrand still needs
+**On hold (user, 11-09):** the original release work is done but the tag. Since then, the batches 86–87 rebrand still needs
 broader device validation, possible screenshot-golden rebaselining, and name/logo trademark clearance. The repository is private, and GitHub enforces the user's
 ruleset for `main` only on a public repository (or with Pro), and a private release can't be downloaded by others. The
 user holds the release and keeps developing; `v0.1.0` is tagged when they decide on the repository's visibility.
@@ -3538,7 +3561,7 @@ release waits for; the rest stay in their lists for later releases.
 | Group | # | Size | Description |
 |---|---|---|---|
 | **1. Decide** | R1 | Decided 11-08; its batch done (57) | 0.1.0 follows batch 57: A5, A6, A7, G20, G6 and the whole of group 2 (G14, G17, G5 and its loose ends) |
-| | R2 | Done (58); rebranded in 86 | **Nookra IDE**, app id `io.github.kinteshi.quirecode`, Collected fragments icon; the guest daemon is `quirecode-daemon` (`quirecode.service`, `~/.config/quirecode`); the repository is `Kinteshi/QuireCode` |
+| | R2 | Done (58); rebranded in 86–87 | **Nookra IDE**, app id `io.github.kinteshi.nookraide`, Collected fragments icon; daemon `nookra-daemon` (`nookra.service`, `~/.config/nookra`); repository `Kinteshi/NookraIDE`. Trademark clearance remains outstanding. |
 | | R3 | Done (58) | Licence **Apache-2.0**: LICENSE and NOTICE, Cargo changed, notices generated from what ships and shown in Settings > About |
 | **2. Build and ship** | R4 | Done (58) | Release builds: version from the tag, signing from the environment, R8 (25 MB); the user's release key, checked by CI's dry run |
 | | R5 | Done (58) | CI and releases (GitHub Actions): tests, notices check, daemon for the guest and hosts, signed APK, checksums, release from a tag; notes in docs/releases/ |

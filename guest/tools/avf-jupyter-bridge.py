@@ -3,7 +3,7 @@
 # requires-python = ">=3.9"
 # dependencies = ["jupyter_client>=8"]
 # ///
-"""Jupyter kernel bridge for the QuireCode native IDE.
+"""Jupyter kernel bridge for the Nookra IDE native IDE.
 
 Speaks newline-delimited JSON-RPC 2.0 on stdin/stdout (one bridge per notebook) and drives a
 single kernel through jupyter_client. Kernels come from the user's own environments (conda,

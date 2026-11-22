@@ -47,9 +47,10 @@ A `LICENSE` file at the root, a `NOTICE` file, and a third-party notices screen 
 
 ## Name and icon (open, the user's)
 
-**Update (11-22):** The user chose **Nookra IDE** and the Collected fragments icon. The app ID, daemon commands,
-configuration paths, and repository URL retain their existing names for compatibility. Trademark clearance remains
-outstanding; the earlier QuireCode decision below is historical.
+**Update (11-22):** The user chose **Nookra IDE** and the Collected fragments icon, then approved a full rename:
+the new app ID installs separately, the daemon command and configuration are renamed, and the repository is
+`Kinteshi/NookraIDE`. See the migration warning in the README. Trademark clearance remains outstanding; the earlier
+QuireCode decision below is historical.
 
 The name goes to the repository, the app, the app id and the daemon (`<name>d` or `<name>-daemon`). The current icon is pretty
 but common, a default look, so it changes with the name to give the app an identity. Icons must work as Android's themed

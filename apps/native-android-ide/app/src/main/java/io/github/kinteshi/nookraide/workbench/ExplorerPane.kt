@@ -1,0 +1,580 @@
+package io.github.kinteshi.nookraide.workbench
+
+import androidx.compose.material.icons.outlined.CloudOff
+import android.view.HapticFeedbackConstants
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.runtime.key
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.OfflinePin
+import androidx.compose.material.icons.outlined.DriveFolderUpload
+import androidx.compose.material.icons.outlined.FileUpload
+import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.outlined.Download
+import androidx.compose.material.icons.outlined.Share
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.DriveFileMove
+import androidx.compose.material.icons.automirrored.outlined.InsertDriveFile
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.outlined.NoteAdd
+import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.CheckBox
+import androidx.compose.material.icons.outlined.CheckBoxOutlineBlank
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Code
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.DriveFileRenameOutline
+import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.FolderOpen
+import androidx.compose.material.icons.outlined.KeyboardArrowDown
+import androidx.compose.material.icons.outlined.UnfoldLess
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.isCtrlPressed
+import androidx.compose.ui.input.pointer.isShiftPressed
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
+import kotlin.math.roundToInt
+
+/**
+ * A drag in Explorer (long press, then move): what is carried, where the finger is (in root
+ * coordinates) and the folder it would land in. Rows register where they are and which folder
+ * a drop on them means: a folder itself, a file's folder.
+ */
+private class ExplorerDrag {
+    var paths by mutableStateOf<List<String>?>(null)
+    var pointer by mutableStateOf(Offset.Zero)
+    var target by mutableStateOf<String?>(null)
+    val rows = mutableMapOf<String, Pair<Rect, String>>()
+
+    fun update() {
+        target = rows.values.firstOrNull { (bounds, _) -> bounds.contains(pointer) }?.second
+    }
+}
+
+@OptIn(ExperimentalComposeUiApi::class)
+@Composable
+fun ExplorerList(controller: WorkbenchController) {
+    val directory = controller.currentDirectory
+    // Changes made in a terminal since the last save or Git action show when Explorer opens.
+    LaunchedEffect(controller.connected) { if (controller.connected && controller.settings.gitDecorations) controller.refreshGitStatus() }
+    when {
+        // A kept folder (G29 b) is listed as of its last sync, as Explorer always does; otherwise the files with copies.
+        controller.offline && !controller.offlineServed -> OfflineFilesList(controller)
+        // The connection's own words (G22): set up, connecting, offline and why.
+        !controller.workspaceAvailable && !controller.offlineServed && controller.roots.isEmpty() -> controller.connection.let { summary ->
+            EmptyState(Icons.Outlined.CloudOff, summary.title, "Open a device folder, a recent workspace, or connect to a host.") {
+                androidx.compose.foundation.layout.Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    androidx.compose.material3.FilledTonalButton(onClick = { controller.showOpenFolder() }) {
+                        Text("Open workspace…")
+                    }
+                    androidx.compose.material3.TextButton(onClick = controller::openConnect) {
+                        Text(if (summary.state == ConnectionState.NotSetUp) "Set up a host" else "Connections")
+                    }
+                }
+            }
+        }
+        directory.isEmpty() -> LazyColumn {
+            item {
+                androidx.compose.material3.FilledTonalButton(
+                    onClick = { controller.showOpenFolder() },
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                ) {
+                    Text("Open workspace…")
+                }
+            }
+            items(controller.roots) { root ->
+                PaneRow(Icons.Outlined.Folder, root.substringAfterLast('/').ifEmpty { root }) { controller.loadDirectory(root) }
+            }
+        }
+        else -> ExplorerTree(controller, directory)
+    }
+}
+
+@OptIn(ExperimentalComposeUiApi::class)
+@Composable
+private fun ExplorerTree(controller: WorkbenchController, directory: String) {
+    val settings = controller.settings
+    val tree = settings.explorerTree
+    val marks = controller.explorerMarks
+    val hidden = { entry: io.github.kinteshi.nookraide.transport.FileEntry -> controller.isExcluded(entry.path) }
+    val rows = if (tree) {
+        explorerRows(controller.entries, controller.expandedFolders.toSet(), controller.folderChildren, compact = settings.compactFolders, hidden = hidden)
+    } else {
+        controller.entries.filterNot(hidden).map { ExplorerRow(it, 0, expanded = false) }
+    }
+    val selection = controller.explorerSelection
+    val selecting = selection.isNotEmpty()
+    val modifiers = LocalWindowInfo.current.keyboardModifiers
+    val drag = remember { ExplorerDrag() }
+    val listState = rememberLazyListState()
+    var listBounds by remember { mutableStateOf(Rect.Zero) }
+    val edge = with(LocalDensity.current) { 48.dp.toPx() }
+    // Near the top or bottom edge, a drag scrolls the list.
+    LaunchedEffect(drag.paths != null) {
+        while (drag.paths != null) {
+            val y = drag.pointer.y
+            val step = when {
+                y < listBounds.top + edge -> -18f
+                y > listBounds.bottom - edge -> 18f
+                else -> 0f
+            }
+            if (step != 0f) {
+                listState.scrollBy(step)
+                drag.update()
+            }
+            delay(16)
+        }
+    }
+    val parent = directory.substringBeforeLast('/', "")
+    // The open workspace is the top, as in VS Code (the daemon may serve folders above it).
+    val atRoot = controller.workspaceRoot?.let { it.trimEnd('/') == directory.trimEnd('/') }
+        ?: controller.roots.any { it.trimEnd('/') == directory.trimEnd('/') }
+    // Files made outside the app (a terminal, the agent) are there when Explorer opens.
+    LaunchedEffect(Unit) { controller.refreshExplorer() }
+    Column(Modifier.fillMaxSize()) {
+        // Its own section above the files, as in VS Code (inside the list, tabs opened later went
+        // above the rows it keeps in view).
+        if (settings.openEditors && controller.documents.isNotEmpty()) {
+            OpenEditorsHeader(controller)
+            VerticalReveal(controller.openEditorsExpanded, settings.animations) {
+                // Six rows, and half of a seventh when there are more to scroll to.
+                Column(Modifier.heightIn(max = 246.dp).verticalScroll(rememberScrollState())) {
+                    controller.documents.toList().forEach { document -> key(document.path) { OpenEditorRow(controller, document) } }
+                }
+            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), modifier = Modifier.padding(top = 4.dp))
+        }
+        if (atRoot) {
+            val colors = MaterialTheme.colorScheme
+            Row(
+                Modifier.fillMaxWidth().padding(start = 12.dp, end = 6.dp, top = 6.dp, bottom = 4.dp).semantics { heading() },
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Icon(Icons.Outlined.FolderOpen, contentDescription = null, modifier = Modifier.size(16.dp), tint = colors.primary)
+                Text(
+                    controller.displayName(directory).uppercase(),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = colors.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                if (tree && rows.any { it.expanded }) {
+                    Tooltip("Collapse folders") {
+                        IconButton(onClick = controller::collapseFolders, modifier = Modifier.size(24.dp)) {
+                            Icon(Icons.Outlined.UnfoldLess, contentDescription = "Collapse folders", modifier = Modifier.size(18.dp))
+                        }
+                    }
+                }
+            }
+        }
+        Box(Modifier.weight(1f).onGloballyPositioned { listBounds = it.boundsInRoot() }) {
+            LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
+                if (!atRoot) {
+                    item(key = "up") {
+                        Box(Modifier.dropTarget(drag, "up", parent.takeIf { it.isNotEmpty() })) {
+                            PaneRow(
+                                Icons.AutoMirrored.Outlined.ArrowBack,
+                                "..",
+                                muted = true,
+                                selected = drag.target != null && drag.target == parent,
+                                contentDescription = if (parent.isNotEmpty()) "Parent folder, ${controller.displayName(parent)}" else "Parent folder",
+                                trailing = if (tree && rows.any { it.expanded }) {
+                                    {
+                                        Tooltip("Collapse folders") { IconButton(onClick = controller::collapseFolders, modifier = Modifier.size(24.dp)) {
+                                            Icon(Icons.Outlined.UnfoldLess, contentDescription = "Collapse folders", modifier = Modifier.size(18.dp))
+                                        } }
+                                    }
+                                } else {
+                                    null
+                                },
+                            ) {
+                                if (parent.isNotEmpty()) controller.loadDirectory(parent)
+                            }
+                        }
+                    }
+                }
+                items(rows, key = { it.entry.path }) { row ->
+                    val entry = row.entry
+                    val mark = marks[entry.path]
+                    val dark = LocalDarkTheme.current
+                    var menu by remember { mutableStateOf(false) }
+                    val dropFolder = if (entry.isDirectory) entry.path else entry.path.substringBeforeLast('/')
+                    val picked = entry.path in selection
+                    val theme = controller.fileIconTheme?.takeIf { !selecting && (!entry.isDirectory || it.hasFolderIcons) }
+                    Box(
+                        Modifier
+                            .then(if (settings.animations) Modifier.animateItem() else Modifier)
+                            .dropTarget(drag, entry.path, dropFolder),
+                    ) {
+                        PaneRow(
+                            when {
+                                selecting -> if (picked) Icons.Outlined.CheckBox else Icons.Outlined.CheckBoxOutlineBlank
+                                // The tree marks folders with VS Code's chevrons (the open folder icon is
+                                // too close to the closed one at this size).
+                                tree && row.expanded -> Icons.Outlined.KeyboardArrowDown
+                                tree && entry.isDirectory -> Icons.AutoMirrored.Outlined.KeyboardArrowRight
+                                entry.isDirectory -> Icons.Outlined.Folder
+                                entry.name.endsWith(".ipynb") -> Icons.Outlined.Code
+                                else -> Icons.AutoMirrored.Outlined.InsertDriveFile
+                            },
+                            row.label,
+                            leading = when {
+                                theme != null -> {
+                                    {
+                                        if (entry.isDirectory) {
+                                            // A theme with folder icons (Material Icon Theme): its folder, after the chevron unless it hides them.
+                                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                                                if (tree && !theme.hidesExplorerArrows) {
+                                                    TreeChevron(expanded = row.expanded, animate = settings.animations, modifier = Modifier.size(16.dp))
+                                                }
+                                                FileIconView(entry.name, theme, dark, Icons.Outlined.Folder, folder = true, expanded = row.expanded)
+                                            }
+                                        } else {
+                                            FileIconView(entry.name, theme, dark, Icons.AutoMirrored.Outlined.InsertDriveFile)
+                                        }
+                                    }
+                                }
+                                tree && entry.isDirectory && !selecting -> {
+                                    { TreeChevron(expanded = row.expanded, animate = settings.animations, modifier = Modifier.size(18.dp)) }
+                                }
+                                else -> null
+                            },
+                            selected = picked || (entry.isDirectory && drag.target == entry.path) || (!selecting && entry.path == controller.activePath),
+                            indent = row.depth,
+                            onLongClick = { menu = true },
+                            longClick = !settings.explorerDragAndDrop,
+                            dragModifier = if (settings.explorerDragAndDrop) {
+                                Modifier.explorerDragSource(controller, drag, entry.path) { menu = true }
+                            } else {
+                                Modifier
+                            },
+                            // A folder kept offline (G29 b) carries a pin, before any Git or problem mark.
+                            trailing = if (entry.isDirectory && controller.isKeptOffline(entry.path)) {
+                                {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Icon(Icons.Outlined.OfflinePin, contentDescription = "Kept offline", modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
+                                        mark?.let { ExplorerMark(it, dark) }
+                                    }
+                                }
+                            } else {
+                                mark?.let { { ExplorerMark(it, dark) } }
+                            },
+                            labelColor = mark?.tone?.color(dark),
+                            contentDescription = explorerRowDescription(
+                                entry = entry,
+                                label = row.label,
+                                expanded = row.expanded,
+                                tree = tree,
+                                selected = picked,
+                                active = !selecting && entry.path == controller.activePath,
+                                keptOffline = entry.isDirectory && controller.isKeptOffline(entry.path),
+                                mark = mark,
+                            ),
+                            stateDescription = if (tree && entry.isDirectory) (if (row.expanded) "Expanded" else "Collapsed") else null,
+                        ) {
+                            when {
+                                modifiers.isShiftPressed -> controller.selectExplorerRange(entry.path, rows.map { it.entry.path })
+                                modifiers.isCtrlPressed || selecting -> controller.toggleExplorerSelection(entry.path)
+                                !entry.isDirectory -> controller.openPath(entry.path, preview = true)
+                                tree -> controller.toggleFolder(entry.path)
+                                else -> controller.loadDirectory(entry.path)
+                            }
+                        }
+                        EntryMenu(controller, entry, tree, expanded = menu) { menu = false }
+                    }
+                }
+            }
+            drag.paths?.let { paths ->
+                val label = if (paths.size == 1) paths.single().substringAfterLast('/') else "${paths.size} items"
+                Surface(
+                    color = MaterialTheme.colorScheme.inverseSurface,
+                    contentColor = MaterialTheme.colorScheme.inverseOnSurface,
+                    shape = MaterialTheme.shapes.small,
+                    shadowElevation = 4.dp,
+                    modifier = Modifier.offset {
+                        IntOffset((drag.pointer.x - listBounds.left + 16).roundToInt(), (drag.pointer.y - listBounds.top - 40).roundToInt())
+                    },
+                ) {
+                    Text(
+                        drag.target?.let { "$label → ${it.substringAfterLast('/')}" } ?: label,
+                        style = MaterialTheme.typography.labelLarge,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                    )
+                }
+            }
+        }
+        // Below the files while something is selected (G24): what applies to all of it.
+        val shownSelection = remember { mutableStateOf(selection.toList()) }
+        if (selecting) shownSelection.value = selection.toList()
+        VerticalReveal(selecting, settings.animations, expandFrom = Alignment.Bottom) {
+            SelectionBar(controller, shownSelection.value)
+        }
+    }
+}
+
+/** Where a row is, so a drag can land on it ([folder]: where a drop moves to; null takes no drops). */
+@Composable
+private fun Modifier.dropTarget(drag: ExplorerDrag, key: String, folder: String?): Modifier {
+    // A row scrolled out of the list is gone; it must not catch drops where another row now is.
+    DisposableEffect(key) { onDispose { drag.rows.remove(key) } }
+    return onGloballyPositioned { coordinates ->
+        if (folder == null) drag.rows.remove(key) else drag.rows[key] = coordinates.boundsInRoot() to folder
+    }
+}
+
+/**
+ * Long press and move to carry the row (or the selection it is in) onto a folder; a long press
+ * that doesn't move opens the row's menu instead.
+ */
+@Composable
+private fun Modifier.explorerDragSource(controller: WorkbenchController, drag: ExplorerDrag, path: String, onMenu: () -> Unit): Modifier {
+    // Read by the gesture, which outlives recompositions.
+    val origin = remember { arrayOf(Offset.Zero) }
+    val menu by rememberUpdatedState(onMenu)
+    return this
+        .onGloballyPositioned { origin[0] = it.positionInRoot() }
+        .pointerInput(path) {
+            var travelled = 0f
+            detectDragGesturesAfterLongPress(
+                onDragStart = { offset ->
+                    travelled = 0f
+                    drag.pointer = origin[0] + offset
+                    drag.paths = if (path in controller.explorerSelection) controller.explorerSelection.toList() else listOf(path)
+                    controller.haptic(HapticFeedbackConstants.LONG_PRESS)
+                },
+                onDrag = { change, amount ->
+                    change.consume()
+                    travelled += amount.getDistance()
+                    drag.pointer += amount
+                    drag.update()
+                },
+                onDragEnd = {
+                    val paths = drag.paths
+                    val target = drag.target
+                    drag.paths = null
+                    drag.target = null
+                    when {
+                        travelled < 24f -> menu()
+                        paths != null && target != null -> controller.moveEntries(paths, target)
+                    }
+                },
+                onDragCancel = {
+                    drag.paths = null
+                    drag.target = null
+                },
+            )
+        }
+}
+
+@Composable
+private fun SelectionBar(controller: WorkbenchController, selection: List<String>) {
+    // Two rows: Explorer is often narrower than six buttons and the count side by side (G24).
+    Surface(color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.fillMaxWidth().padding(6.dp), shape = MaterialTheme.shapes.medium) {
+        Column(Modifier.padding(top = 2.dp, bottom = 2.dp)) {
+            Row(Modifier.padding(start = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("${selection.size} selected", style = MaterialTheme.typography.labelLarge, maxLines = 1, modifier = Modifier.weight(1f))
+                Tooltip("Clear selection") { IconButton(onClick = controller::clearExplorerSelection) {
+                    Icon(Icons.Outlined.Close, contentDescription = "Clear selection")
+                } }
+            }
+            Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
+                Tooltip("Share") { IconButton(onClick = { controller.shareEntries(selection) }) {
+                    Icon(Icons.Outlined.Share, contentDescription = "Share")
+                } }
+                Tooltip("Save to the device") { IconButton(onClick = { controller.beginSaveToDevice(selection) }) {
+                    Icon(Icons.Outlined.Download, contentDescription = "Save to the device")
+                } }
+                Tooltip("Copy paths") { IconButton(onClick = { controller.copyPaths(selection) }) {
+                    Icon(Icons.Outlined.ContentCopy, contentDescription = "Copy paths")
+                } }
+                Tooltip("Move to…") { IconButton(onClick = { controller.beginMoveEntries(selection) }) {
+                    Icon(Icons.AutoMirrored.Outlined.DriveFileMove, contentDescription = "Move to…")
+                } }
+                Tooltip("Delete") { IconButton(onClick = { controller.beginDeleteEntries(selection) }) {
+                    Icon(Icons.Outlined.Delete, contentDescription = "Delete")
+                } }
+            }
+        }
+    }
+}
+
+@Composable
+private fun OpenEditorsHeader(controller: WorkbenchController) {
+    val colors = MaterialTheme.colorScheme
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable { controller.openEditorsExpanded = !controller.openEditorsExpanded }
+            .semantics {
+                heading()
+                stateDescription = if (controller.openEditorsExpanded) "Expanded" else "Collapsed"
+                role = Role.Button
+            }
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Icon(
+            if (controller.openEditorsExpanded) Icons.Outlined.KeyboardArrowDown else Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+            contentDescription = null,
+            modifier = Modifier.size(16.dp),
+            tint = colors.onSurfaceVariant,
+        )
+        Text("OPEN EDITORS", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = colors.onSurfaceVariant, modifier = Modifier.weight(1f))
+        val dirty = controller.documents.count { it.dirty || controller.notebooks[it.path]?.notebook?.dirty == true }
+        if (dirty > 0) Text("$dirty unsaved", style = MaterialTheme.typography.labelSmall, color = colors.primary)
+    }
+}
+
+/** A tab in Explorer's Open Editors: tap to show it, the button closes it (a dot while unsaved). */
+@Composable
+private fun OpenEditorRow(controller: WorkbenchController, document: io.github.kinteshi.nookraide.document.DocumentSession) {
+    val path = document.path
+    val dirty = document.dirty || controller.notebooks[path]?.notebook?.dirty == true
+    val root = controller.workspaceRoot?.trimEnd('/').orEmpty()
+    val parentFolder = path.substringBeforeLast('/', "")
+    // A device folder's file outside the workspace (G29): its folder by name, not its tree URI.
+    val folder = if (io.github.kinteshi.nookraide.document.isTreePath(path) && !path.startsWith("$root/")) {
+        controller.displayPath(parentFolder)
+    } else {
+        parentFolder.removePrefix(root).trim('/')
+    }
+    val fileName = path.removePrefix("scratch:/").substringAfterLast('/')
+    val deleted = path in controller.deletedFiles
+    val active = path == controller.activePath
+    PaneRow(
+        when {
+            path.endsWith(".ipynb") -> Icons.Outlined.Code
+            else -> Icons.AutoMirrored.Outlined.InsertDriveFile
+        },
+        fileName + (if (deleted) " (deleted)" else "") + if (folder.isNotEmpty() && !path.startsWith("scratch:")) "  ·  $folder" else "",
+        labelColor = MaterialTheme.colorScheme.error.takeIf { deleted },
+        leading = controller.fileIconTheme?.let { theme ->
+            { FileIconView(path.substringAfterLast('/'), theme, LocalDarkTheme.current, Icons.AutoMirrored.Outlined.InsertDriveFile) }
+        },
+        selected = active,
+        contentDescription = openEditorRowDescription(fileName, if (path.startsWith("scratch:")) "" else folder, active, dirty, deleted),
+        trailing = {
+            Box(
+                Modifier
+                    .size(24.dp)
+                    .clickable { controller.requestCloseDocument(path) }
+                    .semantics {
+                        contentDescription = editorTabActionDescription(fileName, dirty, pinned = false)
+                        role = Role.Button
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                if (dirty) {
+                    Box(Modifier.size(8.dp).background(MaterialTheme.colorScheme.primary, CircleShape))
+                } else {
+                    Icon(Icons.Outlined.Close, contentDescription = "Close", modifier = Modifier.size(15.dp))
+                }
+            }
+        },
+    ) { controller.selectDocument(path) }
+}
+
+@Composable
+private fun EntryMenu(
+    controller: WorkbenchController,
+    entry: io.github.kinteshi.nookraide.transport.FileEntry,
+    tree: Boolean,
+    expanded: Boolean,
+    onDismiss: () -> Unit,
+) {
+    DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
+        @Composable
+        fun item(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, action: () -> Unit) = DropdownMenuItem(
+            text = { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+            leadingIcon = { Icon(icon, contentDescription = null) },
+            onClick = {
+                onDismiss()
+                action()
+            },
+        )
+        if (entry.isDirectory) {
+            item("New file here", Icons.AutoMirrored.Outlined.NoteAdd) { controller.beginNewEntry(folder = false, parent = entry.path) }
+            if (tree) item("Show only this folder", Icons.Outlined.FolderOpen) { controller.loadDirectory(entry.path) }
+        } else {
+            // The chat agents run in the guest and can't read a device folder's files (G29).
+            if (!io.github.kinteshi.nookraide.document.isTreePath(entry.path)) {
+                item("Add to Copilot chat", Icons.Outlined.AutoAwesome) { controller.attachFileToChat(entry.path) }
+            }
+        }
+        item("Select", Icons.Outlined.CheckBox) { controller.toggleExplorerSelection(entry.path) }
+        item("Share…", Icons.Outlined.Share) { controller.shareEntries(listOf(entry.path)) }
+        item("Save to the device…", Icons.Outlined.Download) { controller.beginSaveToDevice(listOf(entry.path)) }
+        if (entry.isDirectory && io.github.kinteshi.nookraide.document.isGuestPath(entry.path)) {
+            // Its text files on this device too, kept up to date on each connect (G29 b).
+            if (controller.isKeptOffline(entry.path)) {
+                item("Stop keeping offline", Icons.Outlined.CloudOff) { controller.stopKeepingOffline(entry.path) }
+            } else if (controller.connected) {
+                item("Keep available offline", Icons.Outlined.OfflinePin) { controller.keepOffline(entry.path) }
+            }
+        }
+        if (entry.isDirectory) {
+            item("Import files here…", Icons.Outlined.FileUpload) { controller.beginImportFiles(entry.path) }
+            item("Import a folder here…", Icons.Outlined.DriveFolderUpload) { controller.beginImportFolder(entry.path) }
+        }
+        item("Rename", Icons.Outlined.DriveFileRenameOutline) { controller.beginRenameEntry(entry.path) }
+        item("Move to…", Icons.AutoMirrored.Outlined.DriveFileMove) { controller.beginMoveEntries(listOf(entry.path)) }
+        item("Delete", Icons.Outlined.Delete) { controller.beginDeleteEntry(entry.path, entry.isDirectory) }
+    }
+}

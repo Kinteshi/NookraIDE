@@ -235,7 +235,7 @@ def daemon_components():
 # EPL-2.0 asks that those who receive the program in object form are told where its source is.
 TM4E_SOURCE = (
     "The source code of this copy of tm4e, with the changes made to it, is in the app's repository, in "
-    "apps/native-android-ide/tm4e (https://github.com/Kinteshi/QuireCode/tree/main/apps/native-android-ide/tm4e). "
+    "apps/native-android-ide/tm4e (https://github.com/Kinteshi/NookraIDE/tree/main/apps/native-android-ide/tm4e). "
     "Its README says where it comes from and what was changed.\n\n"
 )
 

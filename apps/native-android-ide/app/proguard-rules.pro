@@ -3,7 +3,7 @@
 # The app's own classes: Gson reads and writes its saved state (sessions, settings, offline lists, notebooks' models)
 # by field name, and several are found by reflection. Kept whole: the app is small next to its libraries, which R8
 # still shrinks.
--keep class io.github.kinteshi.quirecode.** { *; }
+-keep class io.github.kinteshi.nookraide.** { *; }
 
 # Aardink's internals, reached by reflection in AardinkGeometry (backlog A19): the command handler, the controller, its
 # view and hover state. Kept whole, so a pinned version's names stay as the release review checked them.

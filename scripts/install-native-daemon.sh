@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# Installs the QuireCode native daemon as a systemd user service.
+# Installs the Nookra IDE native daemon as a systemd user service.
 #
 #   AVF guest (Linux Terminal on the tablet):
-#     bash install-native-daemon.sh [/path/to/quirecode-daemon] [workspace]
+#     bash install-native-daemon.sh [/path/to/nookra-daemon] [workspace]
 #   Linux computer or WSL distro on the network (see docs/HOSTING-THE-DAEMON.md):
-#     bash install-native-daemon.sh --remote [--port 19870] [--address HOST] [/path/to/quirecode-daemon] [workspace]
+#     bash install-native-daemon.sh --remote [--port 19870] [--address HOST] [/path/to/nookra-daemon] [workspace]
 #   Reachable only over your Tailscale network (from anywhere, nothing opened to the internet or the LAN):
-#     bash install-native-daemon.sh --tailscale [--port 19870] [/path/to/quirecode-daemon] [workspace]
+#     bash install-native-daemon.sh --tailscale [--port 19870] [/path/to/nookra-daemon] [workspace]
 #
-# Without a daemon path it uses the quirecode-daemon next to this script, as QuireCode's "Set up
+# Without a daemon path it uses the nookra-daemon next to this script, as Nookra IDE's "Set up
 # guest" places it. It ends by printing a one-time pairing code (guest) or a connection string
-# (remote) for the app. The session token lives in ~/.config/quirecode/env (mode 0600). Safe to
+# (remote) for the app. The session token lives in ~/.config/nookra/env (mode 0600). Safe to
 # rerun, including on a guest reset from Terminal → Settings → Recovery. It replaces a daemon
 # installed before 0.1.0 (avf-native-daemon and its avf-native service), keeping its pairing.
 set -euo pipefail
@@ -23,7 +23,7 @@ declare -A UV_SHA256=(
 )
 
 usage() {
-  echo "usage: $0 [--remote [--port N] [--address HOST] | --tailscale [--port N]] [/path/to/quirecode-daemon] [workspace]" >&2
+  echo "usage: $0 [--remote [--port N] [--address HOST] | --tailscale [--port N]] [/path/to/nookra-daemon] [workspace]" >&2
   exit 2
 }
 
@@ -45,14 +45,14 @@ while (($#)); do
 done
 
 here="$(dirname "$(readlink -f "$0")")"
-default_daemon="$here/quirecode-daemon"
+default_daemon="$here/nookra-daemon"
 daemon_source=${positional[0]:-$default_daemon}
 [[ -f "$daemon_source" ]] || usage
 workspace=${positional[1]:-$HOME/Projects}
-config="$HOME/.config/quirecode"
-unit="$HOME/.config/systemd/user/quirecode.service"
-# Before 0.1.0 the daemon was avf-native-daemon, run by avf-native.service, with its token,
-# pairing code and TLS certificate in ~/.config/avf-native. Moving that folder keeps the pairing.
+config="$HOME/.config/nookra"
+unit="$HOME/.config/systemd/user/nookra.service"
+legacy_config="$HOME/.config/quirecode"
+legacy_unit="$HOME/.config/systemd/user/quirecode.service"
 former_config="$HOME/.config/avf-native"
 former_unit="$HOME/.config/systemd/user/avf-native.service"
 
@@ -87,11 +87,24 @@ fi
 
 # A plain read and write, never cp or install: on Linux Terminal's shared folder (/mnt/shared, where "Set up guest"
 # puts the daemon) their copy_file_range made crosvm's virtio-fs panic and stopped the VM, leaving a 0-byte daemon.
+if [[ ( -e "$config" && ( -d "$legacy_config" || -d "$former_config" ) ) ||
+      ( -d "$legacy_config" && -d "$former_config" ) ]]; then
+  echo "Multiple Nookra or legacy configurations exist. Resolve them before installing; no configuration was changed." >&2
+  exit 1
+fi
+if [[ -f "$legacy_unit" ]]; then
+  systemctl --user disable --now quirecode.service
+fi
+if [[ -f "$former_unit" ]]; then
+  systemctl --user disable --now avf-native.service
+fi
 mkdir -p "$HOME/.local/bin"
-cat "$daemon_source" >"$HOME/.local/bin/quirecode-daemon.new"
-chmod 755 "$HOME/.local/bin/quirecode-daemon.new"
-mv "$HOME/.local/bin/quirecode-daemon.new" "$HOME/.local/bin/quirecode-daemon"
-if [[ ! -e "$config" && -d "$former_config" ]]; then
+cat "$daemon_source" >"$HOME/.local/bin/nookra-daemon.new"
+chmod 755 "$HOME/.local/bin/nookra-daemon.new"
+mv "$HOME/.local/bin/nookra-daemon.new" "$HOME/.local/bin/nookra-daemon"
+if [[ ! -e "$config" && -d "$legacy_config" ]]; then
+  mv "$legacy_config" "$config"
+elif [[ ! -e "$config" && -d "$former_config" ]]; then
   mv "$former_config" "$config"
 fi
 mkdir -p "$config" "$workspace" "$(dirname "$unit")"
@@ -106,14 +119,14 @@ if [[ "$(findmnt -no FSTYPE /tmp 2>/dev/null)" == tmpfs ]]; then
   chmod 700 "$HOME/.cache/tmp"
   printf 'd %%h/.cache/tmp 0700 - - 7d\n' >"$HOME/.config/user-tmpfiles.d/avf-tmp.conf"
   tmp_line="Environment=TMPDIR=%h/.cache/tmp"
-  profile_script='# QuireCode: /tmp is a tmpfs in memory; large installs (pip, conda) need a temp dir on disk.
+  profile_script='# Nookra IDE: /tmp is a tmpfs in memory; large installs (pip, conda) need a temp dir on disk.
 if [ -z "${TMPDIR:-}" ] && [ -n "${HOME:-}" ] && [ "$HOME" != / ] && mkdir -p -m 700 "$HOME/.cache/tmp" 2>/dev/null; then
   export TMPDIR="$HOME/.cache/tmp"
 fi'
   # Only in the AVF guest: on a remote host the daemon's own check is enough, and system files
   # there are the owner's business.
   if ! $remote && ! printf '%s\n' "$profile_script" | sudo -n tee /etc/profile.d/avf-tmpdir.sh >/dev/null 2>&1; then
-    echo "note: /tmp is in memory; for shells outside QuireCode, add 'export TMPDIR=\$HOME/.cache/tmp' to ~/.profile" >&2
+    echo "note: /tmp is in memory; for shells outside Nookra IDE, add 'export TMPDIR=\$HOME/.cache/tmp' to ~/.profile" >&2
   fi
 fi
 if [[ ! -f "$config/env" ]]; then
@@ -122,14 +135,14 @@ fi
 
 cat >"$unit" <<UNIT
 [Unit]
-Description=QuireCode daemon
+Description=Nookra IDE daemon
 $unit_extra
 
 [Service]
 Type=simple
-ExecStart=%h/.local/bin/quirecode-daemon
+ExecStart=%h/.local/bin/nookra-daemon
 WorkingDirectory=$workspace
-EnvironmentFile=%h/.config/quirecode/env
+EnvironmentFile=%h/.config/nookra/env
 Environment=AVF_WORKSPACE_ROOTS=$roots
 Environment=AVF_BIND_ADDR=$bind
 $tls_line
@@ -143,19 +156,12 @@ UMask=0077
 WantedBy=default.target
 UNIT
 
-# The daemon from before 0.1.0 holds the same port: stop it and remove it for good.
-if [[ -f "$former_unit" ]]; then
-  systemctl --user disable --now avf-native.service 2>/dev/null || true
-  rm -f "$former_unit" "$HOME/.local/bin/avf-native-daemon"
-  rm -rf "$HOME/.cache/avf-native/shell-integration"
-  rmdir "$HOME/.cache/avf-native" 2>/dev/null || true
-fi
 systemctl --user daemon-reload
-systemctl --user enable quirecode.service
+systemctl --user enable nookra.service
 # stop/sleep/start, never restart: the Terminal app's port forwarder can lose the port otherwise.
-systemctl --user stop quirecode.service || true
+systemctl --user stop nookra.service || true
 sleep 3
-systemctl --user start quirecode.service
+systemctl --user start nookra.service
 if $remote; then
   # Keep the service running without an open login session (allowed for your own user on most distros).
   loginctl enable-linger "$USER" 2>/dev/null || echo "note: run 'sudo loginctl enable-linger $USER' to keep the daemon running after logout" >&2
@@ -181,7 +187,7 @@ fi
 # wrapper for the tool the forwarder reads; it takes effect at the next guest start (Settings ->
 # Guest tools -> Port forwarding fix shows it and can undo it).
 if ! $remote && [ -x /usr/bin/forwarder_guest_launcher ] && sudo -n true 2>/dev/null; then
-  sudo -n "$HOME/.local/bin/quirecode-daemon" guest fix-port-forwarding ||
+  sudo -n "$HOME/.local/bin/nookra-daemon" guest fix-port-forwarding ||
     echo "warning: the port forwarding fix wasn't installed; apply it from the app's Settings" >&2
 fi
 
@@ -219,17 +225,17 @@ if ! command -v uv >/dev/null; then
   rm -f "$archive"
 fi
 for tool in ty ruff ripgrep jupyter debugpy typescript copilot-language-server copilot; do
-  quirecode-daemon tools install "$tool" || echo "warning: could not install $tool" >&2
+  nookra-daemon tools install "$tool" || echo "warning: could not install $tool" >&2
 done
-quirecode-daemon tools list
+nookra-daemon tools list
 echo
 if $tailscale; then
   name=$(tailscale status --peers=false --json 2>/dev/null | sed -n 's/.*"DNSName": *"\([^"]*\)\.".*/\1/p' | head -1)
   echo "The daemon listens on $address:$port, on your Tailscale network only, over TLS. Install Tailscale on"
   echo "the tablet too and sign in to the same network; then pair with the string below."
   [[ -n "$name" ]] && echo "(This machine is also $name on your tailnet.)"
-  echo "Run 'quirecode-daemon pair --remote $address:$port' again whenever you need a new code."
-  quirecode-daemon pair --remote "$address:$port"
+  echo "Run 'nookra-daemon pair --remote $address:$port' again whenever you need a new code."
+  nookra-daemon pair --remote "$address:$port"
 elif $remote; then
   if [[ -z "$address" ]]; then
     # The address other machines reach this one on (the source address of the default route).
@@ -237,7 +243,7 @@ elif $remote; then
     address=${address:-$(hostname -I 2>/dev/null | awk '{print $1}')}
   fi
   echo "The daemon listens on port $port over TLS. Allow it through the firewall if one is active"
-  echo "(for example: sudo ufw allow $port/tcp). Run 'quirecode-daemon pair --all --port $port'"
+  echo "(for example: sudo ufw allow $port/tcp). Run 'nookra-daemon pair --all --port $port'"
   echo "again whenever you need a new code."
   pair_args=(--remote "${address:?could not detect the address of this machine, pass --address}:$port")
   if command -v tailscale >/dev/null; then
@@ -246,8 +252,8 @@ elif $remote; then
       pair_args+=(--remote "$ts_ip:$port")
     fi
   fi
-  quirecode-daemon pair "${pair_args[@]}"
+  nookra-daemon pair "${pair_args[@]}"
 else
   echo "If Android asks to open port 19870, accept it."
-  quirecode-daemon pair
+  nookra-daemon pair
 fi

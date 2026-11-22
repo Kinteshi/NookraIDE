@@ -118,15 +118,15 @@ mod tests {
     fn connection_strings_bracket_ipv6_hosts() {
         assert_eq!(connection_string("192.168.1.10", 19870, "ab", "K7QM-2XPA"), "avf://192.168.1.10:19870?fp=ab&code=K7QM-2XPA");
         assert_eq!(connection_string("fe80::1", 19870, "ab", "C"), "avf://[fe80::1]:19870?fp=ab&code=C");
-        assert_eq!(public_connection_string("quirecode.example.com", 443, "K7QM-2XPA"), "avf://quirecode.example.com:443?fp=public&code=K7QM-2XPA");
+        assert_eq!(public_connection_string("nookra.example.com", 443, "K7QM-2XPA"), "avf://nookra.example.com:443?fp=public&code=K7QM-2XPA");
         assert_eq!(
             multi_connection_string(
                 &[("192.168.1.10".to_owned(), 19870), ("100.64.0.1".to_owned(), 19870)],
                 Some("ab"),
-                Some(("quirecode.example.com", 443)),
+                Some(("nookra.example.com", 443)),
                 "K7QM-2XPA",
             ),
-            "avf://192.168.1.10:19870?fp=ab&code=K7QM-2XPA&alt=100.64.0.1:19870&tunnel=quirecode.example.com:443",
+            "avf://192.168.1.10:19870?fp=ab&code=K7QM-2XPA&alt=100.64.0.1:19870&tunnel=nookra.example.com:443",
         );
     }
 }

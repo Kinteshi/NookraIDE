@@ -6,10 +6,14 @@ itself (the connection chip → *Add a connection* → *This tablet's Linux gues
 **Windows computer (through WSL2)** on your network, so the tablet works on that machine's files
 with its CPU and memory.
 
+The Nookra installer migrates an existing QuireCode daemon configuration and stops its old service. If both old and
+new configurations exist, it stops without overwriting either. The Android app's new application ID is a separate
+installation: save unsynced work in the old app and pair the new one separately.
+
 ## How the connection is secured
 
 * On a computer the daemon listens on the network only with **TLS**. It creates a self-signed
-  certificate the first time it starts (`~/.config/quirecode/tls/`).
+  certificate the first time it starts (`~/.config/nookra/tls/`).
 * The installer prints a **connection string**:
   `avf://192.168.1.10:19870?fp=<certificate fingerprint>&code=K7QM-2XPA`.
   The app **pins** that fingerprint: it trusts that certificate and nothing else, so another
@@ -18,7 +22,7 @@ with its CPU and memory.
   app trades it for a **token of its own**, which it stores encrypted (Android Keystore). The daemon
   keeps only a digest of each device's token, so one device can be revoked without touching the
   others (see [Paired devices and the connection log](#paired-devices-and-the-connection-log)).
-* The installer's shared token (in `~/.config/quirecode/env`) works **only from the machine itself**
+* The installer's shared token (in `~/.config/nookra/env`) works **only from the machine itself**
   (the tablet's own guest, behind Linux Terminal). From the network, only paired devices connect.
   A connection through a tunnel or reverse proxy on the machine (Cloudflare Tunnel, nginx) counts as
   from the network: it comes from 127.0.0.1, but carries the proxy's headers, and the daemon goes by
@@ -34,7 +38,7 @@ with its CPU and memory.
 Requirements: x86_64 or arm64 Linux with systemd, `curl`, `tar`, and Git for Source Control.
 
 1. Get the daemon and its installer. Either download them from the
-   [release](../../../releases/latest): `quirecode-daemon-<version>-linux-x86_64` (or `-linux-arm64`), checked against
+   [release](../../../releases/latest): `nookra-daemon-<version>-linux-x86_64` (or `-linux-arm64`), checked against
    `SHA256SUMS`, and `install-native-daemon.sh`, both attached to the release; or build the daemon from this repository
    (needs Rust, https://rustup.rs):
 
@@ -45,7 +49,7 @@ Requirements: x86_64 or arm64 Linux with systemd, `curl`, `tar`, and Git for Sou
 2. Install it as a user service, listening on the network (with a downloaded daemon, give its path instead):
 
    ```sh
-   bash scripts/install-native-daemon.sh --remote target/release/quirecode-daemon ~/Projects
+   bash scripts/install-native-daemon.sh --remote target/release/nookra-daemon ~/Projects
    ```
 
    * `~/Projects` is the workspace the app sees; any absolute folder works.
@@ -63,7 +67,7 @@ Requirements: x86_64 or arm64 Linux with systemd, `curl`, `tar`, and Git for Sou
 Need a new code later (another tablet, or a reinstall of the app)?
 
 ```sh
-quirecode-daemon pair --all --port 19870
+nookra-daemon pair --all --port 19870
 ```
 
 `--all` detects both the computer's LAN IP and Tailscale IP (if signed in) and prints one multi-route link and QR code (`--remote HOST:PORT` can also be repeated, and `--tunnel HOST` added alongside). One pairing then covers both routes: Nookra IDE tries the local network at home, Tailscale away, and lets you set a preferred route per connection in **Settings → Guest**.
@@ -91,7 +95,7 @@ the internet does. TLS, the pinned certificate and the device tokens work as abo
 4. In Nookra IDE: the connection chip → **Add a connection → A computer on your network**, paste it.
 
 The tablet reaches the computer whenever Tailscale is on, on any network. A new code later:
-`quirecode-daemon pair --remote 100.x.y.z:19870`.
+`nookra-daemon pair --remote 100.x.y.z:19870`.
 
 On Windows, run Tailscale inside the WSL distro (it needs systemd, as the daemon does) and install
 the daemon there with `--tailscale`; the PowerShell script isn't needed then.
@@ -116,7 +120,7 @@ validated by Android's trusted Root CAs (`fp=public`).
 1. On the computer, install the daemon on loopback (without `--remote`):
 
    ```sh
-   bash scripts/install-native-daemon.sh target/release/quirecode-daemon ~/Projects
+   bash scripts/install-native-daemon.sh target/release/nookra-daemon ~/Projects
    ```
 
 2. Point a Cloudflare Tunnel at `http://127.0.0.1:19870` (for a quick test, `cloudflared tunnel --url http://127.0.0.1:19870`;
@@ -125,15 +129,15 @@ validated by Android's trusted Root CAs (`fp=public`).
 3. Issue a pairing string for the tunnel's hostname:
 
    ```sh
-   quirecode-daemon pair --tunnel quirecode.example.com
+   nookra-daemon pair --tunnel nookra.example.com
    ```
 
-   It prints `avf://quirecode.example.com:443?fp=public&code=XXXX-XXXX` and a QR code. Scan the QR code or paste the string into **Add a
+   It prints `avf://nookra.example.com:443?fp=public&code=XXXX-XXXX` and a QR code. Scan the QR code or paste the string into **Add a
    connection → Guided setup** (or **A computer on your network**) in Nookra IDE.
 
 How the daemon treats tunnel traffic: `cloudflared` connects to the daemon from 127.0.0.1, but adds
 `CF-Connecting-IP` with the real client's address. The daemon goes by that address, so through the
-tunnel the shared token is refused, failed attempts are limited per client, and `quirecode-daemon log`
+tunnel the shared token is refused, failed attempts are limited per client, and `nookra-daemon log`
 shows where each connection came from. This relies on the tunnel being an **HTTP** service as above.
 A raw TCP forward to the loopback port (`cloudflared access tcp`, `ssh -L`, `socat`) adds no headers,
 so its clients look like the machine itself; use those only between machines you control.
@@ -163,21 +167,21 @@ on your home router to the computer running `--remote`:
 3. Issue a pairing string with your public hostname or IP:
 
    ```sh
-   quirecode-daemon pair --remote home.example.com:19870
+   nookra-daemon pair --remote home.example.com:19870
    ```
 
 Because an open router port is reachable by internet scanners, **Tailscale** (`--tailscale`) or
 **Cloudflare Tunnel** (`--tunnel`) is strongly preferred whenever possible. When a port is forwarded,
 the daemon still requires TLS with the pinned certificate fingerprint, rejects the shared loopback
 token from the network, requires a one-time pairing code (10 minutes, 5 attempts), and blocks any
-address after 10 failed attempts within 10 minutes (`quirecode-daemon log`).
+address after 10 failed attempts within 10 minutes (`nookra-daemon log`).
 
 ## Paired devices and the connection log
 
 ```sh
-quirecode-daemon devices               # the devices paired with codes: id, name, when, last seen, from where
-quirecode-daemon devices revoke 3fa9c1 # unpair one (by id, or by its name); it's disconnected within 15 s
-quirecode-daemon log                   # the last 40 connections, pairings and refusals (-n 200 for more)
+nookra-daemon devices               # the devices paired with codes: id, name, when, last seen, from where
+nookra-daemon devices revoke 3fa9c1 # unpair one (by id, or by its name); it's disconnected within 15 s
+nookra-daemon log                   # the last 40 connections, pairings and refusals (-n 200 for more)
 ```
 
 The same list is in the app: the connection chip's **Connections** dialog, while connected, shows the devices paired
@@ -187,7 +191,7 @@ A device's name is what the app sends when it pairs: "Nookra IDE on" and the tab
 app pairs again with a computer it already has a connection to, it sends its old token along, and
 the daemon replaces that earlier pairing (the log says "replacing its earlier pairing"). Pairings are
 never replaced by name: two tablets of one model have the same name, and any app can claim one. A
-pairing whose token the app no longer has (after reinstalling it) stays listed; revoke it. The log is `~/.config/quirecode/connections.log`, kept under 256 KB. A device paired
+pairing whose token the app no longer has (after reinstalling it) stays listed; revoke it. The log is `~/.config/nookra/connections.log`, kept under 256 KB. A device paired
 before these existed has the shared token: from the network it's refused, so pair it again.
 
 ## Windows computer (WSL2)
@@ -231,29 +235,29 @@ exposes it on your network.
 4. Pair from the app as for Linux. A new code later:
 
    ```powershell
-   wsl -d Ubuntu -- ~/.local/bin/quirecode-daemon pair --remote 192.168.1.10:19870
+   wsl -d Ubuntu -- ~/.local/bin/nookra-daemon pair --remote 192.168.1.10:19870
    ```
 
 ## Troubleshooting
 
 | Symptom in the app | Likely cause |
 |---|---|
-| "Can't reach HOST:PORT" | Different network, firewall closed, the daemon isn't running (`systemctl --user status quirecode`), or on Windows the WSL distro stopped (run the logon task: `Start-ScheduledTask "AVF Studio daemon (WSL)"`). |
+| "Can't reach HOST:PORT" | Different network, firewall closed, the daemon isn't running (`systemctl --user status nookra`), or on Windows the WSL distro stopped (run the logon task: `Start-ScheduledTask "AVF Studio daemon (WSL)"`). |
 | "Port 127.0.0.1:19870 is open, but nothing answers through it" | On the tablet, Linux Terminal's port forwarder accepted the socket on `127.0.0.1:19870` but nothing reached the guest daemon (often after turning on a VPN such as Tailscale). Force stop **Terminal** in Android's **App info** and open it again. If it keeps happening with Tailscale on, try excluding **Terminal** in Tailscale's **App Split Tunneling** (untested). |
-| "doesn't match the connection string" | The certificate changed (for example `~/.config/quirecode/tls` was deleted). Run `pair --remote` again and paste the new string. |
+| "doesn't match the connection string" | The certificate changed (for example `~/.config/nookra/tls` was deleted). Run `pair --remote` again and paste the new string. |
 | "No pairing code is active" | The code expired, was used, or ran out of attempts. Run `pair --remote` again. |
 | "The guest rejected the saved token" | The daemon was reinstalled with a new token, the device was revoked, or it was paired before device tokens existed (the shared token works only on the machine itself). Pair again. |
-| "Too many failed attempts from this device" | Ten wrong tokens or codes from this address in 10 minutes. Wait the minutes the app says; `quirecode-daemon log` shows what failed. |
+| "Too many failed attempts from this device" | Ten wrong tokens or codes from this address in 10 minutes. Wait the minutes the app says; `nookra-daemon log` shows what failed. |
 | Can't reach a 100.x.y.z address | Tailscale is off on the tablet or the computer, or they're signed in to different tailnets. |
-| Connected, but Search finds nothing | ripgrep is missing: `quirecode-daemon tools install ripgrep`. |
+| Connected, but Search finds nothing | ripgrep is missing: `nookra-daemon tools install ripgrep`. |
 
 ## Removing it
 
 Linux or WSL distro:
 
 ```sh
-systemctl --user disable --now quirecode.service
-rm -r ~/.config/systemd/user/quirecode.service ~/.config/quirecode ~/.local/bin/quirecode-daemon
+systemctl --user disable --now nookra.service
+rm -r ~/.config/systemd/user/nookra.service ~/.config/nookra ~/.local/bin/nookra-daemon
 ```
 
 Windows, elevated PowerShell:
