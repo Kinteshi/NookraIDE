@@ -3416,7 +3416,9 @@ Request: the user selected Nookra IDE and the Collected fragments concept, then 
   was packaged into the debug APK.
 * **Tablet follow-up (11-22):** Installed the debug APK over the existing dev app without clearing data, opened it on
   `SM-X930`, and visually checked the Nookra IDE name, DEV badge and fragment mark in the offline workbench and taskbar.
-  The previous workspace state remained present; no workspace files were opened. The guest was unreachable.
+  The previous workspace state remained present; no workspace files were opened. Later, with the user's permission,
+  opened Linux Terminal to boot the guest on Android 17, verified the daemon's `/health` response and automatic
+  reconnection, and ran `uname -r` successfully in both Linux Terminal and a temporary Nookra IDE terminal.
 * **Not checked:** The release app, themed launcher icon, pairing and device golden suite were not checked on the tablet.
   Old screenshot goldens may need rebaselining. The name and logo have not received trademark clearance; existing uses
   of Nookra were found during preliminary research.
