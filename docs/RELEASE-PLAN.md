@@ -9,21 +9,22 @@ and the options still open, so they survive a context reset.
 The sanitized `Kinteshi/NookraIDE` repository is public; `Kinteshi/NookraIDE-private-archive` remains private. The
 README correctly says there is not yet a public release. No `v0.1.0` tag or release exists.
 
-CI passed on `e79df28` (run 45078824349). The signed release dry run passed on that commit (run 45078830381); its APK
+CI passed on `a5d7a3b` (run 45079942939). The signed release dry run passed on `e79df28` (run 45078830381); its APK
 matched the established `CN=Kinteshi` certificate fingerprint, and public workflow dispatches no longer upload a
 pre-release APK artifact. An earlier private dry run (45076568266) passed checksum verification; its artifact was
 deleted before the repository became public.
 
 **Still before the release tag:**
 
-1. Revalidate guest migration and pairing. The current tablet guest still runs the old `quirecode.service`; the
-   installer can install missing tools, and explicit permission was unavailable.
-2. Revalidate screenshot goldens without clearing the installed dev app's data. The existing runner calls `pm clear`,
-   so it was not run on the maintainer's device.
-3. Obtain trademark clearance for the name and icon. Preliminary web research is not legal clearance.
-4. Choose branch protection for `main`; it currently has no ruleset or required checks. Private vulnerability reporting
+1. Obtain trademark clearance for the name and icon. Preliminary web research is not legal clearance.
+2. Choose branch protection for `main`; it currently has no ruleset or required checks. Private vulnerability reporting
    is enabled.
-5. Get the maintainer's immediate confirmation before creating and pushing `v0.1.0`.
+3. Get the maintainer's immediate confirmation before creating and pushing `v0.1.0`.
+
+**Device validation (batch 89, 11-22):** the tablet's old guest service/configuration was migrated to `nookra.service`
+and `~/.config/nookra`; the daemon health endpoint passed through Android port 19870 after an approved Terminal
+restart. Nookra IDE Dev paired to the guest, and the five screenshot/accessibility scenarios passed. The golden runner
+cleared the Dev app's data with approval; the app was paired again afterward.
 
 The user-facing install and release notes are in [releases/0.1.0.md](releases/0.1.0.md). A7 (the user's own try of the
 Book Cover and on-screen keyboard) was concluded 11-17; G17's guest-stopped check remains a separate backlog item.

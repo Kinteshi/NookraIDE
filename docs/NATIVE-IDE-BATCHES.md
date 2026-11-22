@@ -3472,6 +3472,29 @@ Request: "Can you do all of that for me? Find improvement opportunities on the w
   need safe revalidation; name/logo trademark clearance is outstanding. The `v0.1.0` tag requires immediate
   maintainer confirmation.
 
+## 89. Validate tablet guest migration, pairing and release goldens (11-22; done)
+
+* **Guest migration:** ran `scripts/install-native-daemon.sh` with the rebuilt ARM64 `nookra-daemon` on `SM-X930`.
+  The installer exited successfully, disabled `quirecode.service`, enabled `nookra.service`, and migrated configuration
+  to `~/.config/nookra`. With the user's approval it refreshed `ty`, `ruff`, `ripgrep`, the Jupyter bridge, `debugpy`,
+  TypeScript, `copilot-language-server` and `copilot`. The guest was not reset; Track A and the system code-server were
+  left intact.
+* **Forwarding and pairing:** the guest `/health` endpoint was healthy locally, but Android initially refused port 19870.
+  Toggling the detected port off/on did not restore forwarding; after the user's approval to force-stop and reopen
+  Linux Terminal, the Android-side probe returned HTTP 200 with protocol version 2. Nookra IDE Dev paired with a fresh
+  one-time code, received notification permission, and opened the empty `~/Projects/b88` workspace. The user approved
+  clearing Dev app data for the golden run; pairing and the test workspace were restored afterward.
+* **G9/G10 device verification:** `python scripts/on-device-tests.py --verify --serial <tablet>` passed all five
+  scenarios on `SM-X930`, with 0 unlabeled clickables:
+  * `welcome_expanded`: mean delta `0.08`, max delta `11`
+  * `workspace_editor_expanded`: mean delta `0.01`, max delta `1`
+  * `command_palette_expanded`: mean delta `0.00`, max delta `1`
+  * `notebook_expanded`: mean delta `0.01`, max delta `1`
+  * `compact_phone_layout`: mean delta `0.04`, max delta `3`
+* **Release status:** latest CI passed on `a5d7a3b` (run 45079942939); the signed dry run passed on `e79df28`
+  (run 45078830381). Guest migration/pairing and goldens are no longer release blockers. Trademark clearance and the
+  `main` branch-protection decision remain open; do not tag `v0.1.0` without the maintainer's immediate confirmation.
+
 ## Backlog
 ### Open backlog (11-08)
 The current lists of what's open, in two: the general backlog, and the Aardink switch's until it's complete. The older
@@ -3576,9 +3599,9 @@ Loose ends: placed in the groups above (11-08).
 #### Release backlog (first release)
 
 **Status (11-22):** The sanitized repository is public and the original archive remains private. The signed dry run and
-CI pass, but there is no `v0.1.0` tag or release. Guest migration/pairing and screenshot-golden revalidation remain
-unchecked; trademark clearance is outstanding; `main` has no branch protection. The maintainer must confirm
-immediately before tagging.
+CI pass, but there is no `v0.1.0` tag or release. Batch 89 verified guest migration/pairing and screenshot goldens;
+trademark clearance is outstanding and `main` has no branch protection. The maintainer must confirm immediately
+before tagging.
 
 Decisions and options are in [RELEASE-PLAN.md](RELEASE-PLAN.md). **The batch before it is done (57)**, but G17's check (A7 concluded 11-17); **next: 0.1.0**, R2 to R11. Registered 11-08, from the user: "let us think about releasing… items in the backlog I don't want to sweep under the rug…
 we have to polish the app for an initial release cycle". Nothing here is started. R1 decides which G and A items the first
