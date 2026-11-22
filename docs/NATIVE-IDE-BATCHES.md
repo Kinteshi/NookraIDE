@@ -1,5 +1,8 @@
 # Native IDE (Track B): work batches
 
+Privacy note: real device and tailnet addresses, device names and private notebook names in historical entries were
+replaced with examples. Commit IDs recorded before the history rewrite refer to the former history.
+
 This is the plan of record for Track B. Each batch ends in one commit on
 `agents/reset-and-implement-native-android-ide`, and this file is updated in that commit.
 Device procedures, build commands and the details of finished work are in

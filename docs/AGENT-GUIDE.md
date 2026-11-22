@@ -139,9 +139,7 @@ real incidents.
   pressure, and unbinding the balloon resets the VM.
 * Start many processes in any app. Android allows 32 phantom processes device-wide, and the VM uses about 6. Going over
   trims Terminal's `virtmgr`.
-* Open, run or edit the maintainer's own files and notebooks. Today these are `main.ipynb`, `private-notebook-1.ipynb`,
-  `private-notebook-*.ipynb` and `private-notebook-2.ipynb` in `~/Projects`. Test in your own throwaway folder
-  (`~/Projects/bNN`).
+* Open, run or edit the maintainer's own files and notebooks. Test in your own throwaway folder (`~/Projects/bNN`).
 * Install packages in the guest without asking.
 * Tap contacts in Android's share sheet.
 * Print or log pairing codes or tokens. Stage them in a file, type them on the device, delete the staged file.
@@ -171,8 +169,8 @@ real incidents.
 
 ## 6. Driving the tablet
 
-The reference device is a Galaxy Tab S11 Ultra (SM-X930) on wireless adb at `192.0.2.66:<port>`. The port changes after
-reboots, so ask for it. Detailed notes are in the handoff's "Reference tablet" section.
+The reference device is a Galaxy Tab S11 Ultra (SM-X930) on wireless adb. Ask the maintainer for its current address
+and port. Detailed notes are in the handoff's "Reference tablet" section.
 
 **Screen:**
 * `adb exec-out screencap -p > shot.png`, then downscale to 1000 px wide to read it.
@@ -211,9 +209,9 @@ reboots, so ask for it. Detailed notes are in the handoff's "Reference tablet" s
 * If the port is open but nothing answers, Linux Terminal's forwarding is stuck. Turning on the tablet's Tailscale VPN did
   this once. The fix is force-stopping Linux Terminal, which restarts the guest and needs the maintainer's OK.
 
-**The development machine as a remote host.** This WSL machine can play "a computer running the daemon". It is on the
-maintainer's tailnet as `example-host` (100.64.0.1); the tablet is 100.64.0.2.
-* Run the built daemon with a throwaway `HOME` and `AVF_BIND_ADDR=100.64.0.1:<port> AVF_TLS=1`.
+**The development machine as a remote host.** A WSL machine can play "a computer running the daemon".
+Ask the maintainer for current Tailscale addresses before using the tailnet.
+* Run the built daemon with a throwaway `HOME`, `AVF_BIND_ADDR` set to the host's address and port, and `AVF_TLS=1`.
 * Pair with `nookra-daemon pair --remote …` (or `quirecode-daemon` on an unmigrated guest) and type the connection
   string on the tablet in chunks.
 * Without Tailscale, use `AVF_BIND_ADDR=127.0.0.1:<port>` plus `adb reverse tcp:<port> tcp:<port>`.
