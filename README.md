@@ -4,8 +4,8 @@
 
 A native code editor for Android tablets, with a Linux machine behind it.
 
-**Early development:** There is no public release yet. Device coverage is limited, and the name and icon have not
-received trademark clearance.
+**First public release:** Nookra IDE v0.1.0 is available. Download the signed APK and Linux/WSL guest daemons from
+[GitHub Releases](https://github.com/Kinteshi/NookraIDE/releases/latest).
 
 Nookra IDE looks and works like VS Code: its keybindings, settings, themes and grammars. It's built for a tablet with a
 keyboard. The editor, Explorer, terminals, notebooks and Git are in the app. Language servers, debuggers, Jupyter
@@ -22,8 +22,9 @@ that the app installs there. The daemon can also run on a Linux or Windows compu
 
 ## Install
 
-No release APK is available yet. To try the current source, build the ARM64 guest daemon and the Android debug app.
-This requires Rust, cargo-zigbuild, Zig, JDK 17 and 21, and an Android SDK; see
+Download the signed APK from the [v0.1.0 release](https://github.com/Kinteshi/NookraIDE/releases/tag/v0.1.0).
+To try the current source instead, build the ARM64 guest daemon and the Android debug app. This requires Rust,
+cargo-zigbuild, Zig, JDK 17 and 21, and an Android SDK; see
 [CONTRIBUTING.md](CONTRIBUTING.md) and [the build instructions](docs/NATIVE-IDE-HANDOFF.md#build-and-test).
 
 ```sh
@@ -32,10 +33,10 @@ This requires Rust, cargo-zigbuild, Zig, JDK 17 and 21, and an Android SDK; see
 ```
 
 The debug APK is `apps/native-android-ide/app/build/outputs/apk/debug/app-debug.apk`. It is a separate development
-installation, not a release-signed build. Once releases are available:
+installation, not a release-signed build. To install and connect:
 
-1. Download `nookra-<version>.apk` from the [latest release](../../releases/latest) and install it. To get updates,
-   watch the releases, or add this repository to [Obtainium](https://github.com/ImranR98/Obtainium).
+1. Install the signed APK downloaded above. To get updates, watch the releases, or add this repository to
+   [Obtainium](https://github.com/ImranR98/Obtainium).
 2. Open **Linux Terminal** once, so the guest is running.
 3. Open Nookra IDE and choose **Set up the guest** (on the welcome page, or from the connection chip at the top right,
    under **Add a connection**):

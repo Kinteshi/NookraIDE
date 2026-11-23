@@ -7,19 +7,22 @@ and the options still open, so they survive a context reset.
 ## Status (11-22)
 
 The sanitized `Kinteshi/NookraIDE` repository is public; `Kinteshi/NookraIDE-private-archive` remains private. The
-README correctly says there is not yet a public release. No `v0.1.0` tag or release exists.
+`v0.1.0` tag and public [Nookra IDE 0.1.0 release](https://github.com/Kinteshi/NookraIDE/releases/tag/v0.1.0) are
+published.
 
-CI passed on `a5d7a3b` (run 45079942939). The signed release dry run passed on `e79df28` (run 45078830381); its APK
-matched the established `CN=Kinteshi` certificate fingerprint, and public workflow dispatches no longer upload a
-pre-release APK artifact. An earlier private dry run (45076568266) passed checksum verification; its artifact was
-deleted before the repository became public.
+CI passed on `96c7950` (run 45084584532). The signed release dry run passed on the same commit (run 45085352367), and
+the tag-triggered release workflow completed successfully (run 45086131354). The APK matched the established
+`CN=Kinteshi` certificate fingerprint. The public release contains the signed APK, Linux ARM64 and x86_64 daemons,
+installer and `SHA256SUMS`. Public workflow dispatches do not upload a pre-release APK artifact. An earlier private dry
+run (45076568266) passed checksum verification; its artifact was deleted before the repository became public.
 
-**Still before the release tag:**
+**Completed release gates (11-22):**
 
-1. Obtain trademark clearance for the name and icon. Preliminary web research is not legal clearance.
-2. Choose branch protection for `main`; it currently has no ruleset or required checks. Private vulnerability reporting
-   is enabled.
-3. Get the maintainer's immediate confirmation before creating and pushing `v0.1.0`.
+1. The maintainer confirmed trademark clearance for the name and icon.
+2. Protected `main`: pull requests and strict `Daemon tests` plus `App tests, debug build, notices` checks are required;
+   conversations must be resolved; admins are included; force-pushes and deletion are blocked. Reviews are optional.
+3. The maintainer authorized the tag, which was pushed after the signed dry run passed; the workflow published the
+   release. Private vulnerability reporting remains enabled.
 
 **Device validation (batch 89, 11-22):** the tablet's old guest service/configuration was migrated to `nookra.service`
 and `~/.config/nookra`; the daemon health endpoint passed through Android port 19870 after an approved Terminal
@@ -59,8 +62,8 @@ A `LICENSE` file at the root, a `NOTICE` file, and a third-party notices screen 
 
 **Update (11-22):** The user chose **Nookra IDE** and the Collected fragments icon, then approved a full rename:
 the new app ID installs separately, the daemon command and configuration are renamed, and the repository is
-`Kinteshi/NookraIDE`. See the migration warning in the README. Trademark clearance remains outstanding; the earlier
-QuireCode decision below is historical.
+`Kinteshi/NookraIDE`. The maintainer confirmed trademark clearance on 11-22; the earlier QuireCode decision below is
+historical.
 
 The name goes to the repository, the app, the app id and the daemon (`<name>d` or `<name>-daemon`). The current icon is pretty
 but common, a default look, so it changes with the name to give the app an identity. Icons must work as Android's themed
@@ -114,7 +117,7 @@ APK uses `CN=Kinteshi` with certificate SHA-256
 `3553139293d0c4514898daa2294db0b05a19960be7479d71fb7902fa49f6db4c`. The release workflow now fails if a different
 certificate signs the APK.
 
-## How releases work (recommended, not yet decided)
+## How releases work (implemented for v0.1.0)
 
 * **One repository** for the app and the daemon: the APK carries the arm64 daemon and installs it, and both share
   `avf-protocol`. Split only if the daemon gains users of its own.
@@ -142,7 +145,9 @@ at the repository's final address:
   **Done 11-08 (with the user's go-ahead):** a backup bundle of every branch (`~/backups/AVFStudio-before-rewrite-2026-11-08.bundle`,
   outside the repository); the 179 commits' author and committer rewritten to `Kinteshi <36821534+Kinteshi@users.noreply.github.com>` (`git filter-branch`;
   the final tree identical, no old address left in any message); this branch force-pushed as `main` (`7c70aae`); the five
-  `agents/*` branches deleted on GitHub and the old ones here. Left: protecting `main` (the user, as admin), the secrets, the tag.
+  `agents/*` branches deleted on GitHub and the old ones here. Release secrets were configured on the renamed
+  repository. On 11-22, `main` protection was enabled and the maintainer confirmed trademark clearance; `v0.1.0` was
+  tagged and released.
 
 Suggested order of the clean-up itself, each destructive step confirmed with the user right before it:
 
@@ -165,4 +170,5 @@ Suggested order of the clean-up itself, each destructive step confirmed with the
    local bundle as a backup.
 4. With R10, clean the tree: Track A's SPEC.md and scripts, `docs/model-guide-arc-b580.md` (unrelated), the aardink-lab
    module, and the untracked `android/` folder (Track A's Android project; ask before deleting it from disk).
-5. Rename the repository to the chosen name, protect `main`, tag `v0.1.0`.
+5. Rename the repository to the chosen name, protect `main`, tag `v0.1.0`. **Completed:** the repository was renamed
+   by the user; branch protection and the `v0.1.0` release were completed on 11-22.

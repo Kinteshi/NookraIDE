@@ -3491,9 +3491,11 @@ Request: "Can you do all of that for me? Find improvement opportunities on the w
   * `command_palette_expanded`: mean delta `0.00`, max delta `1`
   * `notebook_expanded`: mean delta `0.01`, max delta `1`
   * `compact_phone_layout`: mean delta `0.04`, max delta `3`
-* **Release status:** latest CI passed on `a5d7a3b` (run 45079942939); the signed dry run passed on `e79df28`
-  (run 45078830381). Guest migration/pairing and goldens are no longer release blockers. Trademark clearance and the
-  `main` branch-protection decision remain open; do not tag `v0.1.0` without the maintainer's immediate confirmation.
+* **Release status:** CI passed on `96c7950` (run 45084584532), the signed dry run passed on the same commit (run
+  45085352367), and the tag-triggered release workflow passed (run 45086131354). The public
+  [v0.1.0 release](https://github.com/Kinteshi/NookraIDE/releases/tag/v0.1.0) includes the signed APK, both Linux
+  daemons, installer and checksums. The maintainer confirmed trademark clearance; `main` is protected with required
+  pull requests, CI checks and conversation resolution, and force-push/deletion prevention.
 
 ## Backlog
 ### Open backlog (11-08)
@@ -3598,19 +3600,20 @@ Loose ends: placed in the groups above (11-08).
 
 #### Release backlog (first release)
 
-**Status (11-22):** The sanitized repository is public and the original archive remains private. The signed dry run and
-CI pass, but there is no `v0.1.0` tag or release. Batch 89 verified guest migration/pairing and screenshot goldens;
-trademark clearance is outstanding and `main` has no branch protection. The maintainer must confirm immediately
-before tagging.
+**Status (11-22):** The sanitized repository is public and the original archive remains private. `v0.1.0` is tagged and
+the public release is available; CI, the signed dry run and the tag-triggered release workflow passed. Batch 89 verified
+guest migration/pairing and screenshot goldens. Trademark clearance was confirmed by the maintainer, and `main` is
+protected. The remaining general/Aardink backlog, including G17, is separate from the published release.
 
-Decisions and options are in [RELEASE-PLAN.md](RELEASE-PLAN.md). **The batch before it is done (57)**, but G17's check (A7 concluded 11-17); **next: 0.1.0**, R2 to R11. Registered 11-08, from the user: "let us think about releasing… items in the backlog I don't want to sweep under the rug…
-we have to polish the app for an initial release cycle". Nothing here is started. R1 decides which G and A items the first
-release waits for; the rest stay in their lists for later releases.
+Decisions and options are in [RELEASE-PLAN.md](RELEASE-PLAN.md). The user-selected 0.1.0 scope shipped on 11-22.
+R2–R13's release gates are complete; the remaining general and Aardink backlog stays in the lists above for future
+work. The original request, registered 11-08, was: "let us think about releasing… items in the backlog I don't want
+to sweep under the rug… we have to polish the app for an initial release cycle".
 
 | Group | # | Size | Description |
 |---|---|---|---|
 | **1. Decide** | R1 | Decided 11-08; its batch done (57) | 0.1.0 follows batch 57: A5, A6, A7, G20, G6 and the whole of group 2 (G14, G17, G5 and its loose ends) |
-| | R2 | Done (58); rebranded in 86–87 | **Nookra IDE**, app id `io.github.kinteshi.nookraide`, Collected fragments icon; daemon `nookra-daemon` (`nookra.service`, `~/.config/nookra`); repository `Kinteshi/NookraIDE`. Trademark clearance remains outstanding. |
+| | R2 | Done (58); rebranded in 86–87; clearance confirmed 11-22 | **Nookra IDE**, app id `io.github.kinteshi.nookraide`, Collected fragments icon; daemon `nookra-daemon` (`nookra.service`, `~/.config/nookra`); repository `Kinteshi/NookraIDE`. |
 | | R3 | Done (58) | Licence **Apache-2.0**: LICENSE and NOTICE, Cargo changed, notices generated from what ships and shown in Settings > About |
 | **2. Build and ship** | R4 | Done (58) | Release builds: version from the tag, signing from the environment, R8 (25 MB); the user's release key, checked by CI's dry run |
 | | R5 | Done (58) | CI and releases (GitHub Actions): tests, notices check, daemon for the guest and hosts, signed APK, checksums, release from a tag; notes in docs/releases/ |
@@ -3619,9 +3622,9 @@ release waits for; the rest stay in their lists for later releases.
 | | R8 | Done (58) | Material You pass: cards, dialogs and banners consistent (as the large-file banner wasn't), empty states, phone width (the terminal toolbar loose end) |
 | | R9 | Done (58), checked on the tablet | Diagnostics for bug reports: a Copy Diagnostics command (versions, device, guest state, recent errors); no telemetry |
 | | R10 | Done (58) | Out of the release: the aardink-lab module, debug probes, Track A's leftovers (SPEC.md, the untracked `android/`), developer docs kept apart from users' |
-| **4. The repository** | R11 | Done (58) but the tag | This branch becomes the definitive `main`; the other branches and trials (old `main`, the four `agents/*` on GitHub) are scrapped, after a check of the history for secrets; release tags from then on (user, 11-08) |
+| **4. The repository** | R11 | Done (58); protection and release completed 11-22 | This branch became the definitive `main`; the other branches and trials (old `main`, the four `agents/*` on GitHub) were scrapped after a check of the history for secrets; `main` is protected and `v0.1.0` was released |
 | **2. Build and ship** | R12 | Done (88) | Pin the expected release certificate SHA-256; do not upload signed pre-release artifacts from a public dry run |
-| **4. The repository** | R13 | Open | Protect `main` with CI checks and prevent force-push/deletion; decide whether direct pushes or pull requests are the preferred workflow |
+| **4. The repository** | R13 | Done 11-22 | `main` requires pull requests, strict CI checks and resolved conversations; admins are included, force-pushes and deletion are blocked, and approvals are optional |
 
 Why these groups: 1 sets the scope and the name, which everything else is labelled with; 2 is one pipeline, built once; 3 is
 one pass through the app as a new user meets it.
